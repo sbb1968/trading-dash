@@ -101,14 +101,15 @@ class RiskManager:
             reason = (f"Max eksponering overskredet: "
                       f"${self._total_exposure:.0f} + ${estimated_value:.0f} "
                       f"> ${self.config.max_total_exposure:.0f}")
-            silent = (order.strategy_name, order.ticker, reason) in self._rejection_cooldown
-            await self._log_rejection(timestamp, order, reason, silent=silent)
+            # Cooldown bruger en stabil kategori, ikke den fulde reason-streng
+            silent = (order.strategy_name, order.ticker, "max_exposure") in self._rejection_cooldown
+            await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_exposure")
             return False, reason
 
         if len(self._open_tickers) >= self.config.max_total_positions:
             reason = f"Max antal positioner nået ({self.config.max_total_positions})"
-            silent = (order.strategy_name, order.ticker, reason) in self._rejection_cooldown
-            await self._log_rejection(timestamp, order, reason, silent=silent)
+            silent = (order.strategy_name, order.ticker, "max_positions") in self._rejection_cooldown
+            await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_positions")
             return False, reason
 
         if self.config.block_duplicate_tickers and order.action == "BUY":
@@ -116,8 +117,8 @@ class RiskManager:
                 existing = self._open_tickers[order.ticker]
                 if existing != order.strategy_name:
                     reason = f"{order.ticker} er allerede åben i strategi '{existing}'"
-                    silent = (order.strategy_name, order.ticker, reason) in self._rejection_cooldown
-                    await self._log_rejection(timestamp, order, reason, silent=silent)
+                    silent = (order.strategy_name, order.ticker, "duplicate_ticker") in self._rejection_cooldown
+                    await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="duplicate_ticker")
                     return False, reason
 
         if order.action == "BUY":
@@ -280,9 +281,11 @@ class RiskManager:
     # Interne hjælpere
     # -----------------------------------------------------------------------
 
-    async def _log_rejection(self, timestamp: str, order, reason: str, silent: bool = False) -> None:
-        # Tilføj til cooldown så identiske gentagelser kan blokeres stille
-        cd_key = (order.strategy_name, order.ticker, reason)
+    async def _log_rejection(self, timestamp: str, order, reason: str,
+                             silent: bool = False, cooldown_key: str = None) -> None:
+        # Tilføj til cooldown — brug cooldown_key (kategori) hvis angivet,
+        # ellers den fulde reason-streng (bagudkompatibilitet)
+        cd_key = (order.strategy_name, order.ticker, cooldown_key or reason)
         self._rejection_cooldown[cd_key] = datetime.now()
 
         if silent:

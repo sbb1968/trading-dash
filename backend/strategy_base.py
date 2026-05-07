@@ -228,6 +228,9 @@ class BaseStrategy(ABC):
             self.stats.losses_today += 1
 
         if self._risk_manager:
+            # Beregn estimeret position-værdi for at frigive eksponering
+            estimated_value = entry * quantity
+            self._risk_manager.release_exposure(self.name, ticker, estimated_value)
             asyncio.create_task(self._risk_manager.record_pnl(self.name, pnl))
 
         if self._journal:
