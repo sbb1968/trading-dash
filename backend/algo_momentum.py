@@ -86,6 +86,15 @@ class MomentumORB(BaseStrategy):
         # Daglig tilstand
         self.universe:       list[str]        = []
         self.orb_highs:      dict[str, float] = {}
+
+        # State machine per ticker — bestemmer hvor i breakout/retest-cyklus en ticker er
+        # Mulige værdier: "waiting", "breakout_detected", "awaiting_retest", "entered", "done_for_day"
+        self.ticker_state:   dict[str, str]   = {}
+
+        # Hjælpefelter til retest-detektion
+        self.breakout_time:  dict[str, datetime] = {}   # Hvornår blev breakout først set?
+        self.retest_low:     dict[str, float]     = {}   # Lavpunkt under pullback (bruges som stop loss)
+
         self.avg_vols:       dict[str, float] = {}
         self.closes:         dict[str, list]  = defaultdict(list)
         self._position_data: dict[str, dict]  = {}
@@ -247,7 +256,8 @@ class MomentumORB(BaseStrategy):
                 and dtime(9, 30) <= b["datetime"].time() <= dtime(9, 44)
             ]
             if orb_bars:
-                self.orb_highs[ticker] = max(b["high"] for b in orb_bars)
+                self.orb_highs[ticker]   = max(b["high"] for b in orb_bars)
+                self.ticker_state[ticker] = "waiting"
                 self.avg_vols[ticker]  = sum(b["volume"] for b in bars if b["volume"] > 0) / max(len(bars), 1)
                 self.closes[ticker]    = [b["close"] for b in bars]
                 ok_count += 1
@@ -356,10 +366,20 @@ class MomentumORB(BaseStrategy):
     # -----------------------------------------------------------------------
 
     async def _check_ticker(self, ticker: str):
-        # SAFETY GUARD #1 — handler aldrig hvis position_size_pct er 0
+        """
+        Break & Retest entry-logik (state machine).
+
+        Hver ticker bevæger sig én vej igennem disse tilstande:
+          waiting → breakout_detected → awaiting_retest → entered → done_for_day
+
+        Per ticker per dag tager vi MAKSIMALT én entry. Hvis stop loss → done_for_day.
+        Det elimerer spam og matcher pro-traders' tilgang.
+        """
+        # SAFETY GUARD — handler aldrig hvis position_size_pct er 0
         if self._position_size_pct == 0.0:
             return
 
+        # Hent snapshot
         snap = await self.conn.get_snapshot(ticker)
         if not snap:
             return
@@ -368,50 +388,123 @@ class MomentumORB(BaseStrategy):
         volume = snap.get("volume") or 0
         if price <= 0:
             return
-        
+
         # PRIS-FILTER — kun small caps $1-20
         if price < 1.0 or price > 20.0:
             return
 
-        if ticker in self._position_data:
-            pos    = self._position_data[ticker]
-            stop   = pos["entry_price"] * (1 - STOP_PCT)
-            target = pos["entry_price"] * (1 + TARGET_PCT)
-            if price <= stop:
-                await self._close(ticker, price, "stop loss")
-            elif price >= target:
-                await self._close(ticker, price, "take profit")
-            return
-
-        if self.stats.open_positions >= self.config.max_open_positions:
-            return
+        # Skip tickers uden ORB beregnet
         if ticker not in self.orb_highs:
             return
 
+        state    = self.ticker_state.get(ticker, "waiting")
         orb_high = self.orb_highs[ticker]
-        avg_vol  = self.avg_vols.get(ticker, 0)
-        rsi      = self._rsi(self.closes.get(ticker, []))
 
-        if (price > orb_high
-                and volume >= avg_vol * VOL_MULT
-                and rsi < 80
-                and avg_vol > 0):
-            await self._open(ticker, price)
+        # ─────────────────────────────────────────────────────────
+        # STATE: ENTERED — håndtér exit-logik
+        # ─────────────────────────────────────────────────────────
+        if state == "entered":
+            if ticker not in self._position_data:
+                # Position blev lukket eksternt — markér som done
+                self.ticker_state[ticker] = "done_for_day"
+                return
+
+            pos    = self._position_data[ticker]
+            stop   = pos.get("stop_loss", pos["entry_price"] * (1 - STOP_PCT))
+            target = pos["entry_price"] * (1 + TARGET_PCT)
+
+            if price <= stop:
+                await self._close(ticker, price, "stop loss")
+                self.ticker_state[ticker] = "done_for_day"
+            elif price >= target:
+                await self._close(ticker, price, "take profit")
+                self.ticker_state[ticker] = "done_for_day"
+            return
+
+        # ─────────────────────────────────────────────────────────
+        # STATE: DONE_FOR_DAY — gør intet
+        # ─────────────────────────────────────────────────────────
+        if state == "done_for_day":
+            return
+
+        # ─────────────────────────────────────────────────────────
+        # STATE: WAITING — leder efter første breakout
+        # ─────────────────────────────────────────────────────────
+        if state == "waiting":
+            avg_vol = self.avg_vols.get(ticker, 0)
+            rsi     = self._rsi(self.closes.get(ticker, []))
+
+            if (price > orb_high
+                    and volume >= avg_vol * VOL_MULT
+                    and rsi < 80
+                    and avg_vol > 0):
+                # Breakout detekteret — IKKE entry endnu, vent på retest
+                self.ticker_state[ticker]  = "breakout_detected"
+                self.breakout_time[ticker] = datetime.now(ET)
+                await self._log(f"📊 {ticker}: Breakout detekteret @ ${price:.2f} — venter på retest")
+            return
+
+        # ─────────────────────────────────────────────────────────
+        # STATE: BREAKOUT_DETECTED — venter på pullback til ORB-niveau
+        # ─────────────────────────────────────────────────────────
+        if state == "breakout_detected":
+            # Timeout — hvis ingen pullback inden for 5 min, drop dette breakout
+            elapsed = (datetime.now(ET) - self.breakout_time[ticker]).total_seconds()
+            if elapsed > 300:  # 5 minutter
+                self.ticker_state[ticker] = "waiting"
+                await self._log(f"⏱ {ticker}: Ingen pullback inden 5 min — venter på nyt breakout")
+                return
+
+            # Pullback betyder at prisen er TILBAGE PÅ eller UNDER ORB-high
+            # (en lille tolerance på 0.1% for at fange pris præcis ved niveauet)
+            if price <= orb_high * 1.001:
+                self.ticker_state[ticker] = "awaiting_retest"
+                self.retest_low[ticker]   = price   # foreløbig low — opdateres mens vi venter
+                await self._log(f"📉 {ticker}: Pullback til ${price:.2f} — afventer retest-bekræftelse")
+            return
+
+        # ─────────────────────────────────────────────────────────
+        # STATE: AWAITING_RETEST — venter på bounce-bekræftelse
+        # ─────────────────────────────────────────────────────────
+        if state == "awaiting_retest":
+            # Track det laveste punkt under pullback — bruges som stop loss
+            if price < self.retest_low[ticker]:
+                self.retest_low[ticker] = price
+
+            # Bekræftet retest: prisen er bounced TILBAGE OVER ORB-high niveau
+            # Det er pro-tilgangen: vent på at "broken resistance bliver ny support"
+            if price > orb_high:
+                # Stop loss = lige under retest-low (med lille buffer)
+                stop_loss = self.retest_low[ticker] * 0.998
+
+                await self._log(
+                    f"✅ {ticker}: Retest bekræftet @ ${price:.2f} "
+                    f"(low: ${self.retest_low[ticker]:.2f}, stop: ${stop_loss:.2f})"
+                )
+                await self._open(ticker, price, stop_loss=stop_loss)
+                # State sættes til "entered" inde i _open hvis det lykkes
+            return
 
     # -----------------------------------------------------------------------
     # Åbn position
     # -----------------------------------------------------------------------
 
-    async def _open(self, ticker: str, price: float):
-        # SAFETY GUARD #2 — sidste linje før ordre afgives
+    async def _open(self, ticker: str, price: float, stop_loss: float = None):
+        """
+        Åbn long position med dynamisk eller % stop loss.
+
+        Hvis stop_loss er angivet (fra retest-detektion), bruges den.
+        Ellers falder vi tilbage på % stop fra entry (gammel adfærd, brugt af _close_all osv.).
+        """
+        # SAFETY GUARD — sidste linje før ordre afgives
         if self._position_size_pct == 0.0:
             logger.warning(f"BLOKERET: forsøg på at åbne {ticker} med position_size_pct=0")
             return
-        
+
         # Brug max_position_size fra config hvis den findes, ellers default
         capital_per_trade = getattr(self.config, "max_position_size", CAPITAL_PER_TRADE) or CAPITAL_PER_TRADE
         capital           = capital_per_trade * self._position_size_pct
-        shares  = int(capital / price)
+        shares            = int(capital / price)
         if shares <= 0:
             return
 
@@ -422,7 +515,7 @@ class MomentumORB(BaseStrategy):
             quantity=shares,
             order_type="MKT",
             asset_class="equity",
-            reason=f"ORB breakout @ ${price:.2f}",
+            reason=f"Break & Retest entry @ ${price:.2f}",
         )
 
         # Brug request_order kun hvis RiskManager er tilknyttet
@@ -433,12 +526,25 @@ class MomentumORB(BaseStrategy):
         
         result = await self.conn.place_paper_order(ticker, "BUY", shares)
         if result:
+            # Beregn endelig stop loss: brug retest-baseret hvis sat, ellers fallback til %
+            final_stop = stop_loss if stop_loss is not None else price * (1 - STOP_PCT)
+
             self._position_data[ticker] = {
                 "ticker":      ticker,
                 "entry_price": price,
                 "shares":      shares,
                 "entry_time":  datetime.now(ET).strftime("%H:%M:%S"),
+                "stop_loss":   final_stop,
             }
+            self.record_position_opened(ticker, price, shares, "long")
+
+            # Skift state machine til entered
+            self.ticker_state[ticker] = "entered"
+
+            await self._log(
+                f"📈 {ticker}: Position åbnet @ ${price:.2f} "
+                f"(stop: ${final_stop:.2f}, target: ${price * (1 + TARGET_PCT):.2f})"
+            )
             self.record_position_opened(ticker, price, shares, "long")
 
             if self._broadcast_fn:
