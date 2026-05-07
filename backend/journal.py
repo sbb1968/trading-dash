@@ -30,6 +30,8 @@ from typing import Optional
 
 import aiosqlite
 
+from accounts import identity
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).parent / "db_schema.sql"
@@ -72,18 +74,25 @@ class Journal:
 
     async def log_event(
         self,
-        source:     str,
-        event_type: str,
-        payload:    Optional[dict] = None,
-        account:    Optional[str]  = None,
-        symbol:     Optional[str]  = None,
+        source:       str,
+        event_type:   str,
+        payload:      Optional[dict] = None,
+        symbol:       Optional[str]  = None,
+        ibkr_account: Optional[str]  = None,
     ) -> None:
         """
         Skriv ét event til journalen.
 
-        Fejler aldrig kalderen — selv hvis SQLite er nede skal
-        algoritmen fortsætte. Vi vil hellere miste et log-event
-        end at miste en handel.
+        account_id og instance_id sættes AUTOMATISK fra accounts.identity —
+        kalderen kan ikke overstyre eller udelade dem. Det er den arkitektoniske
+        garanti for at hver event entydigt tilhører én skattepligtig identitet.
+
+        ibkr_account er valgfri og refererer til IBKR-kontonummeret for events
+        knyttet til en specifik konto-transaktion (defaulter til instansens
+        konfigurerede ibkr_account hvis ikke angivet).
+
+        Fejler aldrig kalderen — selv hvis SQLite er nede skal handelsflowet
+        fortsætte. Vi vil hellere miste et log-event end at miste en handel.
         """
         if self._db is None:
             logger.warning(f"[Journal] Ikke initialiseret — kasserer event {source}/{event_type}")
@@ -96,15 +105,18 @@ class Journal:
             await self._db.execute(
                 """
                 INSERT INTO events
-                    (ts_utc, ts_local, source, event_type, account, symbol, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (ts_utc, ts_local, account_id, instance_id, source, event_type,
+                     ibkr_account, symbol, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     now_utc.isoformat(),
                     now_local.isoformat(),
+                    identity.account_id,
+                    identity.instance_role,
                     source,
                     event_type,
-                    account,
+                    ibkr_account or identity.ibkr_account,
                     symbol,
                     json.dumps(payload or {}, default=str),
                 ),

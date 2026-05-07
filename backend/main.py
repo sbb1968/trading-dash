@@ -12,6 +12,8 @@ from risk_manager import RiskConfig
 
 from journal          import Journal
 
+from accounts import identity
+
 app = FastAPI()
 
 app.add_middleware(
@@ -212,7 +214,10 @@ async def startup():
 
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
-    print("[Server] Trading Dash backend startet")
+    print(f"[Server] Trading Dash backend startet")
+    print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
+    print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
+    print(f"[Server] IBKR:      {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
 
 
 # ── /ws ───────────────────────────────────────────────────────
@@ -381,4 +386,17 @@ async def health():
         "threshold":        alert_engine.threshold,
         "journal_events":   await journal.count_events(),
         "time":             datetime.now().isoformat(),
+    }
+
+@app.get("/account")
+async def account_info():
+    """Returnerer identiteten for denne backend-instans. Bruges af frontend."""
+    return {
+        "account_id":             identity.account_id,
+        "account_display_name":   identity.account_display_name,
+        "instance_role":          identity.instance_role,
+        "instance_display_name":  identity.instance_display_name,
+        "ibkr_account":           identity.ibkr_account,
+        "paper_trading":          identity.paper_trading,
+        "autostart_strategies":   identity.autostart_strategies,
     }

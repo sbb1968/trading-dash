@@ -12,16 +12,15 @@
 
 CREATE TABLE IF NOT EXISTS events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts_utc       TEXT    NOT NULL,           -- ISO 8601 UTC, fx "2026-05-06T13:45:12.123456+00:00"
-    ts_local     TEXT    NOT NULL,           -- ISO 8601 lokal tid (København)
-    source       TEXT    NOT NULL,           -- "system", "risk_manager", "Momentum ORB", "manual", osv.
-    event_type   TEXT    NOT NULL,           -- "order_request", "order_approved", "order_rejected",
-                                             -- "fill", "exit", "strategy_started", "strategy_stopped",
-                                             -- "emergency_stop", "market_conditions", "config_change",
-                                             -- "account_snapshot", "system_startup", osv.
-    account      TEXT,                       -- "DUNXXXXXXX", "live-konto", eller NULL for system-events
-    symbol       TEXT,                       -- "AAPL", "GME", eller NULL hvis ikke ticker-relateret
-    payload_json TEXT    NOT NULL DEFAULT '{}'  -- Resten — alt strukturen der ikke passer i kolonnerne
+    ts_utc       TEXT    NOT NULL,
+    ts_local     TEXT    NOT NULL,
+    account_id   TEXT    NOT NULL,           -- "soren", "iben" — skattepligtig identitet
+    instance_id  TEXT    NOT NULL,           -- "workstation", "algoserver" — fysisk maskine-rolle
+    source       TEXT    NOT NULL,
+    event_type   TEXT    NOT NULL,
+    ibkr_account TEXT,                       -- IBKR konto-nummer (kan være NULL for system-events)
+    symbol       TEXT,
+    payload_json TEXT    NOT NULL DEFAULT '{}'
 );
 
 -- Indeks der gør de typiske forespørgsler hurtige
@@ -29,3 +28,5 @@ CREATE INDEX IF NOT EXISTS idx_events_ts_utc     ON events(ts_utc);
 CREATE INDEX IF NOT EXISTS idx_events_source     ON events(source);
 CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_symbol     ON events(symbol);
+CREATE INDEX IF NOT EXISTS idx_events_account_id  ON events(account_id);
+CREATE INDEX IF NOT EXISTS idx_events_instance_id ON events(instance_id);
