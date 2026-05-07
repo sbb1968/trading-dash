@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────
+# Trading Dash — Git ignore
+# ─────────────────────────────────────────────────────────────
+# Filer der IKKE skal versioneres:
+#  - Hemmeligheder og maskine-specifik konfiguration
+#  - Data der genereres af systemet (databaser, portfolio, logs)
+#  - Build-output og dependency-mapper
+#  - Editor-indstillinger der er personlige
+# ─────────────────────────────────────────────────────────────
+
+# ── Maskine-specifik konfiguration ──────────────────────────
+# account.yaml er FORSKELLIG på hver installation og må aldrig
+# blive overskrevet af git pull. Hver maskine har sin egen.
+account.yaml
+backend/account.yaml
+
+# ── Data — genereres på den enkelte maskine ─────────────────
+# Databasen indeholder maskinens egen handelshistorik.
+# Den må aldrig deles via git.
+backend/trading_dash.db
+backend/trading_dash.db-wal
+backend/trading_dash.db-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Paper portfolio — maskine-specifik state
+backend/paper_portfolio.json
+
+# Backtest-resultater — genereres lokalt
+backend/data/backtest_results*.csv
+
+# ── Python ──────────────────────────────────────────────────
+# Virtuelle miljøer skal aldrig commits — hver maskine
+# laver sit eget med pip install
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# ── Node / Tauri ────────────────────────────────────────────
+node_modules/
+dist/
+src-tauri/target/
+.tauri/
+
+# ── Editor og OS ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Vite midlertidige filer ─────────────────────────────────
+vite.config.ts.timestamp-*
+
+# ── Codebase-dump (auto-genereret) ──────────────────────────
+codebase.md
+
+# ── Runtime logs ────────────────────────────────────────────
+log_*.txt

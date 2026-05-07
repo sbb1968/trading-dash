@@ -1,0 +1,453 @@
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Layout, WindowId, WINDOW_LABELS } from "./layouts";
+
+type ActiveView = "scanners" | "watchlist" | "charting" | "newsroom" | "konfigurator" | "papertrading";
+
+interface Props {
+  activeView: ActiveView;
+  onViewChange: (view: ActiveView) => void;
+  layouts: Layout[];
+  activeLayoutId: string;
+  onLoadLayout: (id: string) => void;
+  onSaveLayout: (name: string) => void;
+  onDeleteLayout: (id: string) => void;
+  onAutoArrange: () => void;
+  soundEnabled: boolean;
+  onToggleSound: () => void;
+  onAddWindow: (id: WindowId) => void;
+  activeWindowIds: WindowId[];
+}
+
+// ── Chart tidsrammer ──────────────────────────────────────────
+const CHART_TIMEFRAMES: { id: WindowId; label: string }[] = [
+  { id: "chart1min",   label: "1 min"   },
+  { id: "chart2min",   label: "2 min"   },
+  { id: "chart3min",   label: "3 min"   },
+  { id: "chart5min",   label: "5 min"   },
+  { id: "chart10min",  label: "10 min"  },
+  { id: "chart15min",  label: "15 min"  },
+  { id: "chart30min",  label: "30 min"  },
+  { id: "chart1time",  label: "1 time"  },
+  { id: "chart4time",  label: "4 timer" },
+  { id: "chartdaily",  label: "Daily"   },
+  { id: "chartweekly", label: "Weekly"  },
+];
+
+// ── Ikke-chart vinduer med shortcuts ─────────────────────────
+interface WinEntry { id: WindowId; shortcut: string }
+const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
+  {
+    label: "Scannere",
+    items: [
+      { id: "scanner1",     shortcut: "S" },
+      { id: "scanner2",     shortcut: "G" },
+    ],
+  },
+  {
+    label: "Markedsdata",
+    items: [
+      { id: "level2",       shortcut: "L" },
+      { id: "timesales",    shortcut: "M" },
+    ],
+  },
+  {
+    label: "Øvrige",
+    items: [
+      { id: "watchlist",    shortcut: "A" },
+      { id: "newsroom",     shortcut: "N" },
+      { id: "papertrading", shortcut: "P" },
+      { id: "journal",      shortcut: "J" },
+      { id: "algohub",      shortcut: "O" },
+      { id: "marketoverview", shortcut: "R" },
+    ],
+  },
+];
+
+// Flad liste af alle shortcut-entries til brug i keydown-listener
+const ALL_WIN_SHORTCUTS: WinEntry[] = NON_CHART_GROUPS.flatMap(g => g.items);
+
+// ── Temaer ────────────────────────────────────────────────────
+const THEMES: { id: string; label: string; dot: string; group: string }[] = [
+  { id: "original",   label: "Original",       dot: "#555555", group: "Original" },
+  { id: "stealth",    label: "Stealth Dark",   dot: "#3b82f6", group: "Mørke" },
+  { id: "bloomberg",  label: "Bloomberg Blue",  dot: "#0099ff", group: "Mørke" },
+  { id: "amber",      label: "Amber Terminal",  dot: "#ffaa00", group: "Mørke" },
+  { id: "midnight",   label: "Midnight Green",  dot: "#00dd66", group: "Mørke" },
+  { id: "crimson",    label: "Crimson",         dot: "#ff2255", group: "Mørke" },
+  { id: "matrix",     label: "Matrix",          dot: "#00ff41", group: "Mørke" },
+  { id: "dracula",    label: "Dracula",         dot: "#bd93f9", group: "Mørke" },
+  { id: "sunset",     label: "Sunset",          dot: "#ff8833", group: "Mørke" },
+  { id: "rosegold",   label: "Rose Gold",       dot: "#e8829a", group: "Mørke" },
+  { id: "solarized",  label: "Solarized",       dot: "#268bd2", group: "Mørke" },
+  { id: "monochrome", label: "Monochrome",      dot: "#aaaaaa", group: "Mørke" },
+  { id: "arctic",     label: "Arctic",          dot: "#1a6fdd", group: "Lyst"  },
+];
+
+function useTheme() {
+  const [theme, setTheme] = useState<string>(() =>
+    localStorage.getItem("td-theme") ?? "stealth"
+  );
+  useEffect(() => {
+    if (theme === "original") {
+      document.body.removeAttribute("data-theme");
+    } else {
+      document.body.setAttribute("data-theme", theme);
+    }
+    localStorage.setItem("td-theme", theme);
+  }, [theme]);
+  return { theme, setTheme };
+}
+
+// ── Hjælper: understreg shortcut-bogstav ─────────────────────
+function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: string }) {
+  const idx = text.toUpperCase().indexOf(shortcut.toUpperCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <u style={{ textDecorationStyle: "solid" }}>{text[idx]}</u>
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
+// ── DropdownMenu med hover-luk, ALT-shortcut og item-shortcuts ─
+function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
+  label: string;
+  children: React.ReactNode;
+  isActive?: boolean;
+  altKey?: string;
+  // Map fra shortcut-bogstav til callback — aktiveres når dropdown er åben
+  itemShortcuts?: Record<string, () => void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Luk ved klik udenfor
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // Keyboard handler — ALT+bogstav åbner, bare bogstav aktiverer item
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      // ALT + altKey åbner/lukker denne dropdown
+      if (altKey && e.altKey && e.key.toUpperCase() === altKey.toUpperCase()) {
+        e.preventDefault();
+        setOpen(o => !o);
+        return;
+      }
+
+      // Bare bogstav (ingen ALT) aktiverer item-shortcut når dropdown er åben
+      if (open && !e.altKey && !e.ctrlKey && !e.metaKey && itemShortcuts) {
+        const cb = itemShortcuts[e.key.toUpperCase()];
+        if (cb) {
+          e.preventDefault();
+          cb();
+          setOpen(false);
+        }
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [altKey, open, itemShortcuts]);
+
+  return (
+    <div
+      className="menu-item-wrapper"
+      ref={ref}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        className={`menu-btn ${open ? "menu-btn-open" : ""} ${isActive ? "menu-btn-active" : ""}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        {altKey ? <LabelWithShortcut text={label} shortcut={altKey} /> : label}
+        {" "}<span className="menu-arrow">{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="menu-dropdown">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DropdownItem ──────────────────────────────────────────────
+function DropdownItem({ label, shortcut, active, isOpen, onClick }: {
+  label: string;
+  shortcut?: string;
+  active?: boolean;
+  isOpen?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      className={`menu-dropdown-item ${active ? "menu-dropdown-item-active" : ""} ${isOpen ? "menu-window-open" : ""}`}
+      onClick={onClick}
+      title={shortcut ? `Genvej: ${shortcut}` : undefined}
+    >
+      {isOpen
+        ? <span className="menu-check-open">●</span>
+        : <span className="menu-check-empty" />
+      }
+      <span style={{ flex: 1 }}>
+        {shortcut ? <LabelWithShortcut text={label} shortcut={shortcut} /> : label}
+      </span>
+      {isOpen && <span className="menu-layout-badge menu-badge-open">åben</span>}
+    </div>
+  );
+}
+
+// ── Chart submenu ─────────────────────────────────────────────
+function ChartSubmenu({ onAddWindow }: { onAddWindow: (id: WindowId) => void }) {
+  const [selected, setSelected] = useState<WindowId>("chart5min");
+  return (
+    <div style={{ padding: "8px 10px" }} onClick={e => e.stopPropagation()}>
+      <div className="menu-dropdown-section-title" style={{ marginBottom: 6 }}>Charts</div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <select
+          value={selected}
+          onChange={e => setSelected(e.target.value as WindowId)}
+          style={{
+            flex: 1,
+            background:   "var(--bg-elevated)",
+            color:        "var(--text-primary)",
+            border:       "1px solid var(--border-default)",
+            borderRadius: 3,
+            padding:      "3px 6px",
+            fontSize:     "var(--fs-content-menubar, 12px)",
+            cursor:       "pointer",
+          }}
+        >
+          {CHART_TIMEFRAMES.map(tf => (
+            <option key={tf.id} value={tf.id}>{tf.label}</option>
+          ))}
+        </select>
+        <button
+          className="menu-btn"
+          style={{ padding: "3px 10px", fontSize: "var(--fs-content-menubar, 12px)" }}
+          onClick={() => onAddWindow(selected)}
+        >
+          + Tilføj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Tema-sektion inde i Værktøjer ─────────────────────────────
+function ThemeSection({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const current = THEMES.find(t => t.id === theme) ?? THEMES[0];
+  const groups  = Array.from(new Set(THEMES.map(t => t.group)));
+
+  return (
+    <div onClick={e => e.stopPropagation()}>
+      <div className="menu-dropdown-divider" />
+      <div className="menu-dropdown-section-title">Tema</div>
+      <div
+        className="menu-dropdown-item"
+        onClick={() => setExpanded(o => !o)}
+        style={{ justifyContent: "space-between" }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span className="theme-dot" style={{ background: current.dot }} />
+          {current.label}
+        </span>
+        <span className="menu-arrow" style={{ marginLeft: 8 }}>{expanded ? "▲" : "▼"}</span>
+      </div>
+      {expanded && (
+        <div style={{ paddingLeft: 8 }}>
+          {groups.map(group => (
+            <div key={group}>
+              <div className="menu-dropdown-section-title" style={{ paddingLeft: 4 }}>{group}</div>
+              {THEMES.filter(t => t.group === group).map(t => (
+                <div
+                  key={t.id}
+                  className={`menu-dropdown-item menu-theme-item ${t.id === theme ? "menu-dropdown-item-active" : ""}`}
+                  onClick={() => { setTheme(t.id); setExpanded(false); }}
+                >
+                  <span className="theme-dot" style={{ background: t.dot }} />
+                  {t.label}
+                  {t.id === theme && <span className="menu-check menu-theme-check">✓</span>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Menubar ───────────────────────────────────────────────────
+export function Menubar({
+  activeView, onViewChange,
+  layouts, activeLayoutId, onLoadLayout, onSaveLayout, onDeleteLayout,
+  onAutoArrange, soundEnabled, onToggleSound,
+  onAddWindow, activeWindowIds
+}: Props) {
+
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [newLayoutName, setNewLayoutName]   = useState("");
+  const activeLayout = layouts.find(l => l.id === activeLayoutId);
+  const { theme, setTheme } = useTheme();
+
+  function handleSave() {
+    if (!newLayoutName.trim()) return;
+    onSaveLayout(newLayoutName.trim());
+    setNewLayoutName("");
+    setShowSaveDialog(false);
+  }
+
+  async function openScreen2() {
+    try { await invoke("open_screen2"); } catch (err) { console.error("Skærm 2 fejl:", err); }
+  }
+
+  // ALT+A global shortcut til auto-arrange
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.altKey && e.key.toUpperCase() === "A") {
+        e.preventDefault();
+        onAutoArrange();
+      }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onAutoArrange]);
+
+  // Item-shortcuts til "Tilføj vindue" dropdown
+  const tilfoejShortcuts: Record<string, () => void> = {};
+  ALL_WIN_SHORTCUTS.forEach(({ id, shortcut }) => {
+    tilfoejShortcuts[shortcut.toUpperCase()] = () => onAddWindow(id);
+  });
+
+  // Item-shortcuts til "Værktøjer" dropdown
+  const vaerktoejShortcuts: Record<string, () => void> = {
+    "K": () => onViewChange("konfigurator"),
+    "2": () => openScreen2(),
+  };
+
+  return (
+    <div className="menubar">
+
+      {/* ── Tilføj vindue — ALT+T ── */}
+      <DropdownMenu
+        label="Tilføj vindue"
+        altKey="T"
+        itemShortcuts={tilfoejShortcuts}
+      >
+        <ChartSubmenu onAddWindow={onAddWindow} />
+        {NON_CHART_GROUPS.map((group) => (
+          <div key={group.label}>
+            <div className="menu-dropdown-divider" />
+            <div className="menu-dropdown-section-title">{group.label}</div>
+            {group.items.map(({ id, shortcut }) => {
+              const isOpen = activeWindowIds.includes(id);
+              return (
+                <DropdownItem
+                  key={id}
+                  label={WINDOW_LABELS[id]}
+                  shortcut={shortcut}
+                  isOpen={isOpen}
+                  onClick={() => onAddWindow(id)}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </DropdownMenu>
+
+      {/* ── Værktøjer — ALT+V ── */}
+      <DropdownMenu
+        label="Værktøjer"
+        altKey="V"
+        isActive={activeView === "konfigurator"}
+        itemShortcuts={vaerktoejShortcuts}
+      >
+        <DropdownItem
+          label="⚙ Konfigurator"
+          shortcut="K"
+          active={activeView === "konfigurator"}
+          onClick={() => onViewChange("konfigurator")}
+        />
+
+        <div className="menu-dropdown-divider" />
+        <div className="menu-dropdown-section-title">Layout</div>
+
+        {layouts.map(layout => (
+          <div key={layout.id} className="menu-layout-row">
+            <div
+              className={`menu-dropdown-item menu-layout-name ${layout.id === activeLayoutId ? "menu-dropdown-item-active" : ""}`}
+              onClick={() => onLoadLayout(layout.id)}
+            >
+              {layout.id === activeLayoutId ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
+              {layout.name}
+            </div>
+            {!layout.isDefault && (
+              <button
+                className="menu-layout-delete"
+                onClick={e => { e.stopPropagation(); onDeleteLayout(layout.id); }}
+                title="Slet layout"
+              >✕</button>
+            )}
+          </div>
+        ))}
+
+        <div className="menu-dropdown-item" onClick={() => onSaveLayout("__overwrite__" + activeLayoutId)}>
+          💾 Opdater "{activeLayout?.name}"
+        </div>
+        {!showSaveDialog && (
+          <div className="menu-dropdown-item" onClick={e => { e.stopPropagation(); setShowSaveDialog(true); }}>
+            💾 Gem som nyt layout...
+          </div>
+        )}
+        {showSaveDialog && (
+          <div className="menu-save-dialog" onClick={e => e.stopPropagation()}>
+            <input
+              className="menu-save-input"
+              type="text"
+              placeholder="Navn på layout..."
+              value={newLayoutName}
+              onChange={e => setNewLayoutName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setShowSaveDialog(false); }}
+              autoFocus
+            />
+            <div className="menu-save-buttons">
+              <button className="menu-save-confirm" onClick={handleSave}>Gem</button>
+              <button className="menu-save-cancel" onClick={() => setShowSaveDialog(false)}>Annuller</button>
+            </div>
+          </div>
+        )}
+
+        <ThemeSection theme={theme} setTheme={setTheme} />
+
+        <div className="menu-dropdown-divider" />
+        <DropdownItem label="🖥 Åbn Skærm 2" shortcut="2" onClick={openScreen2} />
+
+      </DropdownMenu>
+
+      {/* ── Auto-arrange — ALT+A ── */}
+      <button className="menu-btn" onClick={onAutoArrange} title="Auto-arrange (ALT+A)">
+        ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
+      </button>
+
+      {/* ── Lyd ── */}
+      <button
+        className={`menu-sound-btn ${soundEnabled ? "sound-on" : "sound-off"}`}
+        onClick={onToggleSound}
+        title={soundEnabled ? "Slå lyd fra" : "Slå lyd til"}
+      >
+        {soundEnabled ? "🔔" : "🔕"}
+      </button>
+
+    </div>
+  );
+}
