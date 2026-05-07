@@ -15,14 +15,13 @@ account.yaml
 backend/account.yaml
 
 # ── Data — genereres på den enkelte maskine ─────────────────
-# Databasen indeholder maskinens egen handelshistorik.
-# Den må aldrig deles via git.
-backend/trading_dash.db
-backend/trading_dash.db-wal
-backend/trading_dash.db-shm
+# Database og alle dens varianter (WAL, SHM, backups, arkiver)
 *.db
 *.db-wal
 *.db-shm
+*.db.backup_*
+*.db.archive_*
+backend/trading_dash.db*
 
 # Paper portfolio — maskine-specifik state
 backend/paper_portfolio.json
