@@ -2,7 +2,7 @@
 strategy_base.py — Abstrakt BaseStrategy klasse
 Alle trading strategier arver fra denne klasse.
 
-Placering: C:\\Projects\trading-dash\backend\strategy_base.py
+Placering: C:\\Projects\\Trading_Dash\\backend\\strategy_base.py
 """
 
 from abc import ABC, abstractmethod

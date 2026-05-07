@@ -270,12 +270,14 @@ async def websocket_endpoint(websocket: WebSocket):
                 await broadcast({"type": "portfolio", "data": summary})
 
     except WebSocketDisconnect:
-        connected_clients.remove(websocket)
-        print(f"[Server] Klient afbrudt — {len(connected_clients)} aktive")
+        pass  # Normal frakobling
     except Exception as e:
         print(f"[Server] Fejl: {e}")
+    finally:
+        # Sikker cleanup uanset hvordan vi forlader try-blokken
         if websocket in connected_clients:
             connected_clients.remove(websocket)
+            print(f"[Server] Klient afbrudt — {len(connected_clients)} aktive")
 
 
 # ── /ws/algo ──────────────────────────────────────────────────
@@ -328,11 +330,13 @@ async def websocket_algo(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
     except WebSocketDisconnect:
-        algo_clients.remove(websocket)
-        print(f"[Algo] Klient afbrudt — {len(algo_clients)} aktive")
+        pass
     except Exception as e:
+        print(f"[Algo] Fejl: {e}")
+    finally:
         if websocket in algo_clients:
             algo_clients.remove(websocket)
+            print(f"[Algo] Klient afbrudt — {len(algo_clients)} aktive")
 
 
 # ── /ws/strategy ──────────────────────────────────────────────
@@ -350,8 +354,10 @@ async def websocket_strategy(websocket: WebSocket):
             await websocket.send_text(json.dumps(response))
 
     except WebSocketDisconnect:
-        strategy_clients.remove(websocket)
+        pass
     except Exception as e:
+        print(f"[Strategy] Fejl: {e}")
+    finally:
         if websocket in strategy_clients:
             strategy_clients.remove(websocket)
 
