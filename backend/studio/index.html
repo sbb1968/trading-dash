@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Dash Studio</title>
     <style>
+        * { box-sizing: border-box; }
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -22,15 +23,8 @@
             justify-content: space-between;
             align-items: center;
         }
-        header h1 {
-            margin: 0;
-            font-size: 18px;
-            font-weight: 600;
-        }
-        .identity {
-            font-size: 13px;
-            color: #aaa;
-        }
+        header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+        .identity { font-size: 13px; color: #aaa; }
         nav {
             background: #252525;
             padding: 0 24px;
@@ -51,22 +45,100 @@
             color: #fff;
             border-bottom-color: #4a9eff;
         }
-        main {
-            flex: 1;
-            padding: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .placeholder {
-            text-align: center;
+        main { flex: 1; padding: 32px; max-width: 1200px; width: 100%; margin: 0 auto; }
+        .section-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
             color: #888;
-            max-width: 500px;
+            margin-bottom: 12px;
         }
-        .placeholder h2 {
-            color: #ccc;
-            font-weight: 400;
+        .card {
+            background: #232323;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 24px;
+            margin-bottom: 24px;
         }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 24px;
+        }
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 6px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+        .stat-value.positive { color: #4ade80; }
+        .stat-value.negative { color: #f87171; }
+        .stat-value.muted    { color: #888; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+        }
+        th {
+            color: #888;
+            font-weight: 500;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        td.positive { color: #4ade80; }
+        td.negative { color: #f87171; }
+
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #333;
+            font-size: 13px;
+            color: #888;
+        }
+        .controls button {
+            background: #333;
+            border: 1px solid #555;
+            color: #ddd;
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .controls button:hover { background: #3a3a3a; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+        }
+        .badge.paper { background: #4a5568; color: #fff; }
+        .badge.live  { background: #c05621; color: #fff; }
+        .error {
+            background: #4a1a1a;
+            border: 1px solid #7a2a2a;
+            color: #fca5a5;
+            padding: 16px;
+            border-radius: 6px;
+        }
+        .empty { color: #666; font-style: italic; padding: 24px; text-align: center; }
         code {
             background: #2a2a2a;
             padding: 2px 6px;
@@ -83,32 +155,173 @@
 
     <nav>
         <button class="active">Konto</button>
-        <button>Strategier</button>
-        <button>Analyse</button>
-        <button>Backtest</button>
-        <button>Log</button>
+        <button onclick="alert('Ikke bygget endnu')">Strategier</button>
+        <button onclick="alert('Ikke bygget endnu')">Analyse</button>
+        <button onclick="alert('Ikke bygget endnu')">Backtest</button>
+        <button onclick="alert('Ikke bygget endnu')">Log</button>
     </nav>
 
     <main>
-        <div class="placeholder">
-            <h2>👋 Studio er sat op</h2>
-            <p>Det her er et placeholder-fundament. Indhold bygges side-for-side når vi har behov for dem.</p>
-            <p>Backend-endpoint: <code>GET /studio</code></p>
-            <p>Backend-data tilgang: alle eksisterende endpoints (<code>/health</code>, <code>/account</code>, osv.)</p>
+        <div id="content">
+            <div class="card"><div class="empty">Indlæser konto-data...</div></div>
         </div>
     </main>
 
     <script>
-        // Hent identitet fra backend og vis i header
-        fetch('/account')
+        const REFRESH_INTERVAL_MS = 10_000;
+        let refreshTimer = null;
+
+        // ── Formatering ──────────────────────────────────────
+        const fmtMoney = v => {
+            if (v === null || v === undefined) return "—";
+            const sign = v < 0 ? "-" : "";
+            return sign + "$" + Math.abs(v).toLocaleString("da-DK", {
+                minimumFractionDigits: 2, maximumFractionDigits: 2
+            });
+        };
+        const fmtMoneySigned = v => {
+            if (v === null || v === undefined) return "—";
+            const sign = v >= 0 ? "+" : "-";
+            return sign + "$" + Math.abs(v).toLocaleString("da-DK", {
+                minimumFractionDigits: 2, maximumFractionDigits: 2
+            });
+        };
+        const fmtPct = v => {
+            if (v === null || v === undefined) return "—";
+            const sign = v >= 0 ? "+" : "";
+            return sign + v.toFixed(2) + "%";
+        };
+        const fmtTime = iso => {
+            if (!iso) return "—";
+            return new Date(iso).toLocaleTimeString("da-DK");
+        };
+        const cls = v => {
+            if (v === null || v === undefined || v === 0) return "muted";
+            return v > 0 ? "positive" : "negative";
+        };
+
+        // ── Hent identitet (én gang) ─────────────────────────
+        fetch("/account")
             .then(r => r.json())
             .then(data => {
-                document.getElementById('identity').textContent =
+                document.getElementById("identity").textContent =
                     `${data.account_display_name} — ${data.instance_display_name}`;
             })
             .catch(() => {
-                document.getElementById('identity').textContent = 'Identitet ikke tilgængelig';
+                document.getElementById("identity").textContent = "Identitet ikke tilgængelig";
             });
+
+        // ── Hent og render snapshot ─────────────────────────
+        async function loadSnapshot(forceJournal = false) {
+            const url = "/account/snapshot" + (forceJournal ? "?force_journal=true" : "");
+            try {
+                const res  = await fetch(url);
+                const data = await res.json();
+
+                if (!data.ok) {
+                    renderError(data.error || "Ukendt fejl");
+                    return;
+                }
+                renderSnapshot(data);
+            } catch (e) {
+                renderError("Backend ikke tilgængelig: " + e.message);
+            }
+        }
+
+        function renderError(msg) {
+            document.getElementById("content").innerHTML = `
+                <div class="card">
+                    <div class="error">
+                        <strong>Fejl:</strong> ${msg}
+                    </div>
+                    <div class="controls">
+                        <span></span>
+                        <button onclick="loadSnapshot(true)">↻ Prøv igen</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSnapshot(data) {
+            const badge = data.paper_trading
+                ? '<span class="badge paper">Paper</span>'
+                : '<span class="badge live">LIVE</span>';
+
+            const totalPnl = (data.unrealized_pnl || 0) + (data.realized_pnl || 0);
+
+            const positionRows = data.positions.length === 0
+                ? `<tr><td colspan="6" class="empty">Ingen åbne positioner</td></tr>`
+                : data.positions.map(p => {
+                    const side = p.position > 0 ? "Long" : (p.position < 0 ? "Short" : "—");
+                    const qty  = Math.abs(p.position);
+                    return `
+                        <tr>
+                            <td><strong>${p.ticker}</strong></td>
+                            <td>${side}</td>
+                            <td class="num">${qty}</td>
+                            <td class="num">${fmtMoney(p.avg_cost)}</td>
+                            <td class="num">${fmtMoney(p.last_price)}</td>
+                            <td class="num ${cls(p.pnl)}">
+                                ${fmtMoneySigned(p.pnl)}
+                                ${p.pnl_pct !== null ? `(${fmtPct(p.pnl_pct)})` : ""}
+                            </td>
+                        </tr>
+                    `;
+                }).join("");
+
+            document.getElementById("content").innerHTML = `
+                <div class="section-title">Konto ${badge}</div>
+                <div class="card">
+                    <div style="font-size: 14px; color: #888; margin-bottom: 20px;">
+                        IBKR konto: <code>${data.ibkr_account}</code>
+                    </div>
+                    <div class="stats-grid">
+                        <div>
+                            <div class="stat-label">Net Liquidation Value</div>
+                            <div class="stat-value">${fmtMoney(data.net_liquidation)}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Cash</div>
+                            <div class="stat-value">${fmtMoney(data.cash_balance)}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Urealiseret P&L</div>
+                            <div class="stat-value ${cls(data.unrealized_pnl)}">${fmtMoneySigned(data.unrealized_pnl)}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Realiseret P&L</div>
+                            <div class="stat-value ${cls(data.realized_pnl)}">${fmtMoneySigned(data.realized_pnl)}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">Åbne positioner (${data.positions.length})</div>
+                <div class="card" style="padding: 0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th style="text-align: right;">Stk</th>
+                                <th style="text-align: right;">Entry</th>
+                                <th style="text-align: right;">Nu</th>
+                                <th style="text-align: right;">P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>${positionRows}</tbody>
+                    </table>
+                </div>
+
+                <div class="controls">
+                    <span>Sidst opdateret: ${fmtTime(data.checked_at)} (auto-refresh hver 10s)</span>
+                    <button onclick="loadSnapshot(true)">↻ Opdater nu</button>
+                </div>
+            `;
+        }
+
+        // ── Start ───────────────────────────────────────────
+        loadSnapshot();
+        refreshTimer = setInterval(() => loadSnapshot(false), REFRESH_INTERVAL_MS);
     </script>
 </body>
 </html>
