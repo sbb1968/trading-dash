@@ -463,12 +463,20 @@ async def account_snapshot(force_journal: bool = False):
             except (ValueError, TypeError):
                 return None
 
+        # Hent alle priser parallelt med 2-sek timeout per ticker
+        async def fetch_price(ticker):
+            try:
+                snap = await asyncio.wait_for(conn.get_snapshot(ticker), timeout=2.0)
+                return safe_float(snap.get("last")) if snap else None
+            except (asyncio.TimeoutError, Exception):
+                return None
+
+        prices = await asyncio.gather(*[fetch_price(p["ticker"]) for p in positions])
+
         enriched = []
-        for p in positions:
-            snap   = await conn.get_snapshot(p["ticker"])
-            price  = safe_float(snap.get("last")) if snap else None
-            cost   = safe_float(p["avg_cost"])
-            qty    = p["position"]
+        for p, price in zip(positions, prices):
+            cost = safe_float(p["avg_cost"])
+            qty  = p["position"]
 
             if price is not None and cost is not None and cost != 0:
                 pnl     = round((price - cost) * qty, 2)
