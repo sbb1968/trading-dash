@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Layout, WindowId, WINDOW_LABELS } from "./layouts";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 type ActiveView = "scanners" | "watchlist" | "charting" | "newsroom" | "konfigurator" | "papertrading";
 
@@ -437,6 +438,15 @@ export function Menubar({
       {/* ── Auto-arrange — ALT+A ── */}
       <button className="menu-btn" onClick={onAutoArrange} title="Auto-arrange (ALT+A)">
         ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
+      </button>
+      
+      {/* ── Studio — åbner browser-baseret admin/analyse-app ── */}
+      <button
+        className="menu-btn"
+        onClick={() => openUrl("http://127.0.0.1:8000/studio")}
+        title="Åbn Studio (admin og analyse i browser)"
+      >
+        🎛 Studio
       </button>
 
       {/* ── Lyd ── */}

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Dash Studio</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #2a2a2a;
+            padding: 16px 24px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .identity {
+            font-size: 13px;
+            color: #aaa;
+        }
+        nav {
+            background: #252525;
+            padding: 0 24px;
+            display: flex;
+            gap: 4px;
+            border-bottom: 1px solid #444;
+        }
+        nav button {
+            background: none;
+            border: none;
+            color: #aaa;
+            padding: 12px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        nav button.active {
+            color: #fff;
+            border-bottom-color: #4a9eff;
+        }
+        main {
+            flex: 1;
+            padding: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .placeholder {
+            text-align: center;
+            color: #888;
+            max-width: 500px;
+        }
+        .placeholder h2 {
+            color: #ccc;
+            font-weight: 400;
+        }
+        code {
+            background: #2a2a2a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Trading Dash Studio</h1>
+        <div class="identity" id="identity">Indlæser identitet...</div>
+    </header>
+
+    <nav>
+        <button class="active">Konto</button>
+        <button>Strategier</button>
+        <button>Analyse</button>
+        <button>Backtest</button>
+        <button>Log</button>
+    </nav>
+
+    <main>
+        <div class="placeholder">
+            <h2>👋 Studio er sat op</h2>
+            <p>Det her er et placeholder-fundament. Indhold bygges side-for-side når vi har behov for dem.</p>
+            <p>Backend-endpoint: <code>GET /studio</code></p>
+            <p>Backend-data tilgang: alle eksisterende endpoints (<code>/health</code>, <code>/account</code>, osv.)</p>
+        </div>
+    </main>
+
+    <script>
+        // Hent identitet fra backend og vis i header
+        fetch('/account')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('identity').textContent =
+                    `${data.account_display_name} — ${data.instance_display_name}`;
+            })
+            .catch(() => {
+                document.getElementById('identity').textContent = 'Identitet ikke tilgængelig';
+            });
+    </script>
+</body>
+</html>

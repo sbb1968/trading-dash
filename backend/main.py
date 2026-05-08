@@ -14,6 +14,9 @@ from journal          import Journal
 
 from accounts import identity
 
+from fastapi.responses import FileResponse
+from pathlib import Path
+
 app = FastAPI()
 
 app.add_middleware(
@@ -406,3 +409,12 @@ async def account_info():
         "paper_trading":          identity.paper_trading,
         "autostart_strategies":   identity.autostart_strategies,
     }
+
+@app.get("/studio")
+async def studio_index():
+    """Servér Studio's index.html. Studio er en separat browser-baseret app
+    til konfiguration, analyse og administration. Kører i samme backend."""
+    studio_path = Path(__file__).parent / "studio" / "index.html"
+    if not studio_path.exists():
+        return {"error": "Studio findes ikke — placeholder mangler i backend/studio/"}
+    return FileResponse(studio_path)
