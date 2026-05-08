@@ -14,7 +14,6 @@ import {
   DEFAULT_WATCHLIST_COLUMNS, DEFAULT_LEVEL2_COLUMNS, DEFAULT_TIMESALES_COLUMNS,
 } from "./layouts";
 import { TradeJournal } from "./TradeJournal";
-import { AlgoDemo } from "./AlgoDemo";
 import { LiveAlgo } from "./LiveAlgo";
 import { AlertsPanel } from "./Alertspanel";
 import { AlgoHub } from "./AlgoHub"; 
@@ -51,7 +50,6 @@ const FONT_WINDOW_TYPES = [
   { id: "timesales", label: "Time & Sales" },
   { id: "paper",     label: "Paper Trading" },
   { id: "journal",   label: "Trade Journal" },
-  { id: "algodemo",  label: "Algotrading Demo" },
   { id: "livealgo",  label: "Live Algo" },
   { id: "alerts",    label: "Pris/Nyheds Alerts" },
   { id: "algohub", label: "Algo Hub" },
@@ -560,38 +558,50 @@ function Level2Panel({ ticker }: { ticker: string }) {
     setStatus("connecting");
     setErrorMsg("");
 
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/level2/${ticker}`);
-    wsRef.current = ws;
+    let reconnectTimer: number | null = null;
+    let isUnmounted = false;
 
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (data.type === "ready") {
-          setStatus("ready");
-        } else if (data.type === "depth") {
-          // Filtrer tomme niveauer fra
-          setBids(data.bids.filter((b: any) => b.price > 0));
-          setAsks(data.asks.filter((a: any) => a.price > 0));
-        } else if (data.type === "error") {
-          setStatus("error");
-          setErrorMsg(data.msg || "Ukendt fejl");
+    function connect() {
+      if (isUnmounted) return;
+
+      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/level2/${ticker}`);
+      wsRef.current = ws;
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === "ready") {
+            setStatus("ready");
+          } else if (data.type === "depth") {
+            setBids(data.bids.filter((b: any) => b.price > 0));
+            setAsks(data.asks.filter((a: any) => a.price > 0));
+          } else if (data.type === "error") {
+            setStatus("error");
+            setErrorMsg(data.msg || "Ukendt fejl");
+          }
+        } catch (e) {
+          // Ignorer corrupted
         }
-      } catch (e) {
-        // Ignorer corrupted messages
-      }
-    };
+      };
 
-    ws.onerror = () => {
-      setStatus("error");
-      setErrorMsg("Forbindelsesfejl — er backend kørende?");
-    };
+      ws.onerror = () => {
+        // onclose følger efter
+      };
 
-    ws.onclose = () => {
-      setStatus(prev => prev === "error" ? prev : "closed");
-    };
+      ws.onclose = () => {
+        if (isUnmounted) return;
+        setStatus("connecting");
+        setErrorMsg("Genforbinder...");
+        reconnectTimer = window.setTimeout(connect, 3000);
+      };
+    }
+
+    connect();
 
     return () => {
-      ws.close();
+      isUnmounted = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      wsRef.current?.close();
       wsRef.current = null;
     };
   }, [ticker]);
@@ -612,38 +622,80 @@ function Level2Panel({ ticker }: { ticker: string }) {
   if (status === "connecting") {
     return (
       <div className="level2-panel">
-        <div className="level2-header">Level 2 — {ticker}</div>
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
-          Forbinder til {ticker}...
+          {errorMsg || `Forbinder til ${ticker}...`}
         </div>
       </div>
     );
   }
 
-  // Beregn spread og total stk per side
+  // Beregn metrikker
   const bestBid = bids.length > 0 ? bids[0].price : 0;
   const bestAsk = asks.length > 0 ? asks[0].price : 0;
   const spread  = bestAsk - bestBid;
+
   const totalBidSize = bids.reduce((s, b) => s + b.size, 0);
   const totalAskSize = asks.reduce((s, a) => s + a.size, 0);
+  const totalSize    = totalBidSize + totalAskSize;
+  const bidPct       = totalSize > 0 ? (totalBidSize / totalSize) * 100 : 50;
+  const askPct       = 100 - bidPct;
 
   return (
     <div className="level2-panel">
       <div className="level2-header">
         Level 2 — {ticker}
         {bestBid > 0 && bestAsk > 0 && (
-          <span style={{ float: "right", fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+          <span style={{ float: "right", fontSize: 12, color: "var(--text-primary)", fontWeight: 600 }}>
             Spread: ${spread.toFixed(2)}
           </span>
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8 }}>
-        {/* BIDS — venstre kolonne (grøn = købere) */}
-        <div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
-            BIDS — total: {totalBidSize.toLocaleString("da-DK")}
+      {/* ── Bid/Ask balance-søjle ─────────────────────── */}
+      {totalSize > 0 && (
+        <div style={{
+          padding: "8px 12px",
+          background: "var(--bg-elevated)",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 11,
+            color: "var(--text-secondary)",
+            marginBottom: 4,
+          }}>
+            <span style={{ color: "var(--bull)" }}>
+              {totalBidSize.toLocaleString("da-DK")} bids ({bidPct.toFixed(0)}%)
+            </span>
+            <span style={{ color: "var(--bear)" }}>
+              ({askPct.toFixed(0)}%) {totalAskSize.toLocaleString("da-DK")} asks
+            </span>
           </div>
+          <div style={{
+            display: "flex",
+            height: 6,
+            borderRadius: 3,
+            overflow: "hidden",
+            background: "var(--bg-base)",
+          }}>
+            <div style={{
+              width: `${bidPct}%`,
+              background: "var(--bull)",
+              transition: "width 200ms ease-out",
+            }} />
+            <div style={{
+              width: `${askPct}%`,
+              background: "var(--bear)",
+              transition: "width 200ms ease-out",
+            }} />
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8 }}>
+        {/* BIDS */}
+        <div>
           <table className="level2-table">
             <thead>
               <tr>
@@ -668,11 +720,8 @@ function Level2Panel({ ticker }: { ticker: string }) {
           </table>
         </div>
 
-        {/* ASKS — højre kolonne (rød = sælgere) */}
+        {/* ASKS */}
         <div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
-            ASKS — total: {totalAskSize.toLocaleString("da-DK")}
-          </div>
           <table className="level2-table">
             <thead>
               <tr>
@@ -705,6 +754,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
 function TimeSalesPanel({ ticker }: { ticker: string }) {
   const [ticks, setTicks] = useState<Array<{
     time: string;
+    timeMs: number;
     price: number;
     size: number;
     direction: "up" | "down" | "neutral";
@@ -712,6 +762,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
   }>>([]);
   const [status, setStatus] = useState<"connecting" | "ready" | "error" | "closed">("connecting");
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [now, setNow] = useState(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
   const tickIdRef = useRef(0);
 
@@ -722,51 +773,86 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
     setStatus("connecting");
     setErrorMsg("");
 
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/timesales/${ticker}`);
-    wsRef.current = ws;
+    let reconnectTimer: number | null = null;
+    let isUnmounted = false;
 
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
+    function connect() {
+      if (isUnmounted) return;
 
-        if (data.type === "ready") {
-          setStatus("ready");
-        } else if (data.type === "tick") {
-          const id = tickIdRef.current++;
-          setTicks(prev => {
-            const next = [{
-              id,
-              time: data.time?.slice(11, 19) ?? "—",
-              price: data.price,
-              size: data.size,
-              direction: data.direction,
-            }, ...prev];
-            // Behold kun de seneste 200 ticks for performance
-            return next.slice(0, 200);
-          });
-        } else if (data.type === "error") {
-          setStatus("error");
-          setErrorMsg(data.msg || "Ukendt fejl");
+      const ws = new WebSocket(`ws://127.0.0.1:8000/ws/timesales/${ticker}`);
+      wsRef.current = ws;
+
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === "ready") {
+            setStatus("ready");
+          } else if (data.type === "tick") {
+            const id = tickIdRef.current++;
+            setTicks(prev => {
+              const next = [{
+                id,
+                time: data.time?.slice(11, 19) ?? "—",
+                timeMs: Date.now(),
+                price: data.price,
+                size: data.size,
+                direction: data.direction,
+              }, ...prev];
+              return next.slice(0, 200);
+            });
+          } else if (data.type === "error") {
+            setStatus("error");
+            setErrorMsg(data.msg || "Ukendt fejl");
+          }
+        } catch (e) {
+          // Ignorer corrupted messages
         }
-      } catch (e) {
-        // Ignorer corrupted messages
-      }
-    };
+      };
 
-    ws.onerror = () => {
-      setStatus("error");
-      setErrorMsg("Forbindelsesfejl — er backend kørende?");
-    };
+      ws.onerror = () => {
+        // onclose følger efter — håndter reconnect der
+      };
 
-    ws.onclose = () => {
-      setStatus(prev => prev === "error" ? prev : "closed");
-    };
+      ws.onclose = () => {
+        if (isUnmounted) return;
+        setStatus("connecting");  // Vis "Genforbinder..." i stedet for "Lukket"
+        setErrorMsg("Genforbinder...");
+        reconnectTimer = window.setTimeout(connect, 3000);
+      };
+    }
+
+    connect();
 
     return () => {
-      ws.close();
+      isUnmounted = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      wsRef.current?.close();
       wsRef.current = null;
     };
   }, [ticker]);
+
+  // Tick "now" hvert sekund så 60-sek vinduet ruller
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Beregn statistik for sidste 60 sekunder ──────────────
+  const cutoff      = now - 60_000;
+  const recentTicks = ticks.filter(t => t.timeMs >= cutoff);
+  const upTicks     = recentTicks.filter(t => t.direction === "up");
+  const downTicks   = recentTicks.filter(t => t.direction === "down");
+  const neutralTicks = recentTicks.filter(t => t.direction === "neutral");
+
+  const upPct      = recentTicks.length ? Math.round(upTicks.length / recentTicks.length * 100) : 0;
+  const downPct    = recentTicks.length ? Math.round(downTicks.length / recentTicks.length * 100) : 0;
+  const neutralPct = Math.max(0, 100 - upPct - downPct);
+
+  const buyFlow  = upTicks.reduce((s, t) => s + t.price * t.size, 0);
+  const sellFlow = downTicks.reduce((s, t) => s + t.price * t.size, 0);
+  const fmtFlow  = (v: number) => v >= 1000
+    ? `$${(v/1000).toFixed(1)}k`
+    : `$${Math.round(v)}`;
 
   // ── Render ────────────────────────────────────────────
   if (status === "error") {
@@ -784,9 +870,8 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
   if (status === "connecting") {
     return (
       <div className="timesales-panel">
-        <div className="timesales-header">Time & Sales — {ticker}</div>
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
-          Forbinder til {ticker}...
+          {errorMsg || `Forbinder til ${ticker}...`}
         </div>
       </div>
     );
@@ -794,12 +879,37 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
 
   return (
     <div className="timesales-panel">
-      <div className="timesales-header">
-        Time & Sales — {ticker}
-        <span style={{ float: "right", fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
-          {ticks.length} ticks
+      
+      {/* ── Statusbjælke (sidste 60 sek) ───────────────── */}
+      <div style={{
+        padding: "8px 12px",
+        background: "var(--bg-elevated)",
+        borderBottom: "1px solid var(--border-subtle)",
+        fontSize: 11,
+        color: "var(--text-secondary)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 12
+      }}>
+        <span>
+          <strong style={{ color: "var(--text-primary)" }}>{ticks.length}</strong> ticks · sidste 60s: <strong style={{ color: "var(--text-primary)" }}>{recentTicks.length}</strong>
+        </span>
+        <span>
+          <span style={{ color: "var(--bull)" }}>▲ {upPct}%</span>
+          {" / "}
+          <span style={{ color: "var(--bear)" }}>▼ {downPct}%</span>
+          {" / "}
+          <span style={{ color: "var(--text-muted)" }}>─ {neutralPct}%</span>
+        </span>
+        <span>
+          <span style={{ color: "var(--bull)" }}>+{fmtFlow(buyFlow)}</span>
+          {" / "}
+          <span style={{ color: "var(--bear)" }}>−{fmtFlow(sellFlow)}</span>
         </span>
       </div>
+
       <div className="timesales-scroll">
         <table className="timesales-table">
           <thead>
@@ -834,7 +944,6 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
     </div>
   );
 }
-
 // ── Window Renderer ───────────────────────────────────────────
 function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
@@ -861,7 +970,6 @@ function renderWindowContent(id: WindowId, props: {
     case "level2":      return <Level2Panel ticker={props.selectedTicker} />;
     case "timesales":   return <TimeSalesPanel ticker={props.selectedTicker} />;
     case "journal":     return <TradeJournal />;
-    case "algodemo":    return <AlgoDemo />;
     case "livealgo":    return <LiveAlgo />;
     case "algohub":
       return (

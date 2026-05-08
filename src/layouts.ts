@@ -5,7 +5,7 @@ export type WindowId =
   | "chart15min" | "chart30min"
   | "chart1time" | "chart4time"
   | "chartdaily" | "chartweekly"
-  | "level2" | "timesales" | "journal" | "algodemo"  | "livealgo"
+  | "level2" | "timesales" | "journal" | "livealgo"
   | "alerts"
   | "algohub" | "strategymanager" | "algoperformance" | "algojournal"
   | "marketoverview";
@@ -31,7 +31,6 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   level2:       "Level 2",
   timesales:    "Time & Sales",
   journal:      "Trade Journal",
-  algodemo:     "Algotrading Demo",
   livealgo:     "Live Algo",
   alerts:       "Nyheds Alerts",
   algohub:         "Algo Hub",
@@ -152,6 +151,13 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
       windows: [
         { id: "papertrading", x: 0,                   y: 0, width: Math.floor(aw*0.35), height: ah, minimized:false, maximized:false, closed:false },
         { id: "chart1min",    x: Math.floor(aw*0.35), y: 0, width: Math.floor(aw*0.65), height: ah, minimized:false, maximized:false, closed:false },
+      ],
+      screen2Windows: [],
+    },
+    {
+      id: "algotrading", name: "Algotrading", isDefault: true,
+      windows: [
+        { id: "livealgo",  x: 0, y: 0, width: aw, height: ah, minimized:false, maximized:false, closed:false },
       ],
       screen2Windows: [],
     },

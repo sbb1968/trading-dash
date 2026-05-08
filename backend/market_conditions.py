@@ -310,7 +310,7 @@ class MarketConditionChecker:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "rolig", 0.0, False
         elif mc.score >= 60:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "aktiv", 1.0, True
-        elif mc.score >= 40:
+        elif mc.score >= 10:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "moderat", 0.5, True
         else:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "rolig", 0.0, False

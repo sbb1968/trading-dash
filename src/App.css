@@ -921,12 +921,6 @@ button {
   font-weight: 700           !important;
 }
 
- :root {
-   --fs-title-algodemo:   14px;
-   --fs-header-algodemo:  11px;
-   --fs-content-algodemo: 13px;
-  }
-
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.3; }
