@@ -410,6 +410,114 @@ async def account_info():
         "autostart_strategies":   identity.autostart_strategies,
     }
 
+# Tracker hvornår sidste account_snapshot blev skrevet til journal —
+# så vi ikke logger ved hver auto-refresh, kun én gang i timen.
+_last_snapshot_journaled_at: datetime | None = None
+
+
+@app.get("/account/snapshot")
+async def account_snapshot(force_journal: bool = False):
+    """
+    Returner et live snapshot af IBKR-kontoen.
+
+    Inkluderer NLV, cash, P&L og åbne positioner. Bruges af Studio's
+    konto-side til auto-refresh og manuel refresh.
+
+    Logger til journal højst én gang i timen — eller når force_journal=true
+    sættes (manuel refresh fra UI).
+    """
+    global _last_snapshot_journaled_at
+
+    conn = strategy_manager.get_ibkr()
+    if conn is None:
+        return {
+            "ok":    False,
+            "error": "IBKR ikke forbundet",
+        }
+
+    try:
+        summary   = conn.get_account_summary()
+        positions = conn.get_positions()
+
+        # Berig positioner med live pris og estimeret P&L
+        import math
+
+        def safe_float(v):
+            """Konverter til float — eller None hvis NaN/Inf/falsy."""
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                if math.isnan(f) or math.isinf(f):
+                    return None
+                return f
+            except (ValueError, TypeError):
+                return None
+
+        enriched = []
+        for p in positions:
+            snap   = await conn.get_snapshot(p["ticker"])
+            price  = safe_float(snap.get("last")) if snap else None
+            cost   = safe_float(p["avg_cost"])
+            qty    = p["position"]
+
+            if price is not None and cost is not None and cost != 0:
+                pnl     = round((price - cost) * qty, 2)
+                pnl_pct = round((price - cost) / cost * 100, 2)
+            else:
+                pnl     = None
+                pnl_pct = None
+
+            enriched.append({
+                "ticker":     p["ticker"],
+                "position":   qty,
+                "avg_cost":   cost,
+                "last_price": price,
+                "pnl":        pnl,
+                "pnl_pct":    pnl_pct,
+            })
+
+        result = {
+            "ok":              True,
+            "ibkr_account":    identity.ibkr_account,
+            "paper_trading":   identity.paper_trading,
+            "net_liquidation": summary["net_liquidation"],
+            "cash_balance":    summary["cash_balance"],
+            "unrealized_pnl":  summary["unrealized_pnl"],
+            "realized_pnl":    summary["realized_pnl"],
+            "positions":       enriched,
+            "checked_at":      datetime.now().isoformat(),
+        }
+
+        # Journal: én gang per time som baseline + når force_journal er sat
+        now = datetime.now()
+        should_journal = force_journal or (
+            _last_snapshot_journaled_at is None or
+            (now - _last_snapshot_journaled_at).total_seconds() >= 3600
+        )
+        if should_journal:
+            await journal.log_event(
+                source     = "system",
+                event_type = "account_snapshot",
+                payload    = {
+                    "net_liquidation": result["net_liquidation"],
+                    "cash_balance":    result["cash_balance"],
+                    "unrealized_pnl":  result["unrealized_pnl"],
+                    "realized_pnl":    result["realized_pnl"],
+                    "open_positions":  len(enriched),
+                    "force":           force_journal,
+                },
+            )
+            _last_snapshot_journaled_at = now
+
+        return result
+
+    except Exception as e:
+        return {
+            "ok":    False,
+            "error": f"Fejl ved hentning: {str(e)}",
+        }
+
 @app.get("/studio")
 async def studio_index():
     """Servér Studio's index.html. Studio er en separat browser-baseret app
