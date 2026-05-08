@@ -546,20 +546,155 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
 
 // ── Level 2 Panel ─────────────────────────────────────────────
 function Level2Panel({ ticker }: { ticker: string }) {
+  const [bids, setBids] = useState<Array<{ price: number; size: number; marketMaker: string }>>([]);
+  const [asks, setAsks] = useState<Array<{ price: number; size: number; marketMaker: string }>>([]);
+  const [status, setStatus] = useState<"connecting" | "ready" | "error" | "closed">("connecting");
+  const [errorMsg, setErrorMsg] = useState<string>("");
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!ticker) return;
+
+    setBids([]);
+    setAsks([]);
+    setStatus("connecting");
+    setErrorMsg("");
+
+    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/level2/${ticker}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data.type === "ready") {
+          setStatus("ready");
+        } else if (data.type === "depth") {
+          // Filtrer tomme niveauer fra
+          setBids(data.bids.filter((b: any) => b.price > 0));
+          setAsks(data.asks.filter((a: any) => a.price > 0));
+        } else if (data.type === "error") {
+          setStatus("error");
+          setErrorMsg(data.msg || "Ukendt fejl");
+        }
+      } catch (e) {
+        // Ignorer corrupted messages
+      }
+    };
+
+    ws.onerror = () => {
+      setStatus("error");
+      setErrorMsg("Forbindelsesfejl — er backend kørende?");
+    };
+
+    ws.onclose = () => {
+      setStatus(prev => prev === "error" ? prev : "closed");
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [ticker]);
+
+  // ── Render ────────────────────────────────────────────
+  if (status === "error") {
+    return (
+      <div className="level2-panel">
+        <div className="level2-header">Level 2 — {ticker}</div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 13 }}>{errorMsg}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "connecting") {
+    return (
+      <div className="level2-panel">
+        <div className="level2-header">Level 2 — {ticker}</div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
+          Forbinder til {ticker}...
+        </div>
+      </div>
+    );
+  }
+
+  // Beregn spread og total stk per side
+  const bestBid = bids.length > 0 ? bids[0].price : 0;
+  const bestAsk = asks.length > 0 ? asks[0].price : 0;
+  const spread  = bestAsk - bestBid;
+  const totalBidSize = bids.reduce((s, b) => s + b.size, 0);
+  const totalAskSize = asks.reduce((s, a) => s + a.size, 0);
+
   return (
     <div className="level2-panel">
-      <div className="level2-header">Level 2 — {ticker}</div>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, padding: 24 }}>
-        <div style={{ fontSize: 32 }}>📊</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", textAlign: "center" }}>
-          Level 2 kræver IBKR Level 2 abonnement
+      <div className="level2-header">
+        Level 2 — {ticker}
+        {bestBid > 0 && bestAsk > 0 && (
+          <span style={{ float: "right", fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+            Spread: ${spread.toFixed(2)}
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 8 }}>
+        {/* BIDS — venstre kolonne (grøn = købere) */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
+            BIDS — total: {totalBidSize.toLocaleString("da-DK")}
+          </div>
+          <table className="level2-table">
+            <thead>
+              <tr>
+                <th>MM</th>
+                <th>Pris</th>
+                <th>Stk</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bids.length === 0 ? (
+                <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text-muted)", fontStyle: "italic", padding: 8 }}>—</td></tr>
+              ) : (
+                bids.map((b, i) => (
+                  <tr key={`bid-${i}`} style={{ background: i === 0 ? "rgba(74, 222, 128, 0.08)" : undefined }}>
+                    <td style={{ color: "var(--text-secondary)" }}>{b.marketMaker}</td>
+                    <td style={{ color: "var(--bull)" }}>${b.price.toFixed(2)}</td>
+                    <td>{b.size.toLocaleString("da-DK")}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
-          Level 2 data viser ordrebogen med bud og udbud fra alle market makers i realtid.
-          Dette kræver et aktivt Level 2 / NASDAQ TotalView abonnement i IBKR.
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", marginTop: 8, padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
-          Aktivér via IBKR: Account Management → Market Data Subscriptions
+
+        {/* ASKS — højre kolonne (rød = sælgere) */}
+        <div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
+            ASKS — total: {totalAskSize.toLocaleString("da-DK")}
+          </div>
+          <table className="level2-table">
+            <thead>
+              <tr>
+                <th>MM</th>
+                <th>Pris</th>
+                <th>Stk</th>
+              </tr>
+            </thead>
+            <tbody>
+              {asks.length === 0 ? (
+                <tr><td colSpan={3} style={{ textAlign: "center", color: "var(--text-muted)", fontStyle: "italic", padding: 8 }}>—</td></tr>
+              ) : (
+                asks.map((a, i) => (
+                  <tr key={`ask-${i}`} style={{ background: i === 0 ? "rgba(248, 113, 113, 0.08)" : undefined }}>
+                    <td style={{ color: "var(--text-secondary)" }}>{a.marketMaker}</td>
+                    <td style={{ color: "var(--bear)" }}>${a.price.toFixed(2)}</td>
+                    <td>{a.size.toLocaleString("da-DK")}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

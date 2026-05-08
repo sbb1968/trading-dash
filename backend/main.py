@@ -457,6 +457,126 @@ async def _safe_send(websocket: WebSocket, payload: dict):
     except Exception:
         pass
 
+# ── /ws/level2/{ticker} ───────────────────────────────────────
+# Live market depth (Level 2) fra IBKR. Bruges af Level 2-vinduet
+# i Trading Dash. Kræver subscription — IBKR fortæller os om det
+# ikke virker.
+
+@app.websocket("/ws/level2/{ticker}")
+async def websocket_level2(websocket: WebSocket, ticker: str):
+    await websocket.accept()
+    ticker = ticker.upper()
+
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        await websocket.send_text(json.dumps({
+            "type":  "error",
+            "error": "ibkr_not_connected",
+            "msg":   "IBKR ikke forbundet — start TWS og prøv igen",
+        }))
+        await websocket.close()
+        return
+
+    from ib_async import Stock
+
+    contract = Stock(ticker, "SMART", "USD")
+    ib = conn.ib
+
+    try:
+        await ib.qualifyContractsAsync(contract)
+    except Exception as e:
+        await websocket.send_text(json.dumps({
+            "type":  "error",
+            "error": "qualify_failed",
+            "msg":   f"Kan ikke kvalificere {ticker}: {e}",
+        }))
+        await websocket.close()
+        return
+
+    # Vi tracker subscription-fejl så vi kan formidle dem til frontend
+    subscription_error = {"failed": False, "msg": ""}
+
+    def on_error(reqId, errorCode, errorString, contract):
+        # Error 309: Market depth requires subscription
+        # Error 354: Requested market data is not subscribed
+        # Error 10089/10090: Market depth subscription level not granted
+        if errorCode in (309, 354, 10089, 10090):
+            subscription_error["failed"] = True
+            subscription_error["msg"]    = f"IBKR fejl {errorCode}: {errorString}"
+            asyncio.create_task(_safe_send(websocket, {
+                "type":  "error",
+                "error": "subscription_required",
+                "msg":   subscription_error["msg"],
+            }))
+
+    ib.errorEvent += on_error
+
+    # Start market depth — numRows=10 giver 10 niveauer på hver side
+    # isSmartDepth=True bruger SMART routing (aggregeret data)
+    try:
+        depth_ticker = ib.reqMktDepth(contract, numRows=10, isSmartDepth=True)
+    except Exception as e:
+        await websocket.send_text(json.dumps({
+            "type":  "error",
+            "error": "depth_request_failed",
+            "msg":   f"Kunne ikke starte market depth: {e}",
+        }))
+        ib.errorEvent -= on_error
+        await websocket.close()
+        return
+
+    def on_depth_update(t):
+        """Kaldes når orderbogen opdateres."""
+        if subscription_error["failed"]:
+            return
+
+        # Bid/ask sider hver indeholder DOMLevel-objekter
+        bids = [
+            {
+                "level":      i,
+                "price":      float(d.price) if d.price else 0,
+                "size":       int(d.size) if d.size else 0,
+                "marketMaker": d.marketMaker or "",
+            }
+            for i, d in enumerate(t.domBids)
+        ]
+        asks = [
+            {
+                "level":       i,
+                "price":       float(d.price) if d.price else 0,
+                "size":        int(d.size) if d.size else 0,
+                "marketMaker": d.marketMaker or "",
+            }
+            for i, d in enumerate(t.domAsks)
+        ]
+
+        asyncio.create_task(_safe_send(websocket, {
+            "type":   "depth",
+            "ticker": ticker,
+            "bids":   bids,
+            "asks":   asks,
+        }))
+
+    depth_ticker.updateEvent += on_depth_update
+
+    await websocket.send_text(json.dumps({
+        "type":   "ready",
+        "ticker": ticker,
+    }))
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            depth_ticker.updateEvent -= on_depth_update
+            ib.errorEvent -= on_error
+            ib.cancelMktDepth(contract, isSmartDepth=True)
+        except Exception:
+            pass
+
 # ── /market-conditions ────────────────────────────────────────
 @app.get("/market-conditions")
 async def market_conditions_endpoint():
