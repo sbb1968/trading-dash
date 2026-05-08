@@ -439,6 +439,15 @@ async def account_snapshot(force_journal: bool = False):
         summary   = conn.get_account_summary()
         positions = conn.get_positions()
 
+        # Saniter NaN/Inf fra summary (IBKR returnerer dem en gang imellem)
+        import math
+        for k, v in summary.items():
+            try:
+                if math.isnan(float(v)) or math.isinf(float(v)):
+                    summary[k] = 0.0
+            except (ValueError, TypeError):
+                summary[k] = 0.0
+
         # Berig positioner med live pris og estimeret P&L
         import math
 
@@ -526,3 +535,11 @@ async def studio_index():
     if not studio_path.exists():
         return {"error": "Studio findes ikke — placeholder mangler i backend/studio/"}
     return FileResponse(studio_path)
+
+# ── Analyse-side endpoint ──────────────────────────
+@app.get("/analysis/summary")
+async def analysis_summary(period: str = "all"):
+    from analysis import build_summary
+    if period not in ("today", "7d", "30d", "all"):
+        return {"error": f"Ugyldig periode: {period}"}
+    return build_summary(period)
