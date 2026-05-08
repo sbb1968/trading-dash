@@ -568,21 +568,133 @@ function Level2Panel({ ticker }: { ticker: string }) {
 
 // ── Time & Sales Panel ────────────────────────────────────────
 function TimeSalesPanel({ ticker }: { ticker: string }) {
+  const [ticks, setTicks] = useState<Array<{
+    time: string;
+    price: number;
+    size: number;
+    direction: "up" | "down" | "neutral";
+    id: number;
+  }>>([]);
+  const [status, setStatus] = useState<"connecting" | "ready" | "error" | "closed">("connecting");
+  const [errorMsg, setErrorMsg] = useState<string>("");
+  const wsRef = useRef<WebSocket | null>(null);
+  const tickIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!ticker) return;
+
+    setTicks([]);
+    setStatus("connecting");
+    setErrorMsg("");
+
+    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/timesales/${ticker}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+
+        if (data.type === "ready") {
+          setStatus("ready");
+        } else if (data.type === "tick") {
+          const id = tickIdRef.current++;
+          setTicks(prev => {
+            const next = [{
+              id,
+              time: data.time?.slice(11, 19) ?? "—",
+              price: data.price,
+              size: data.size,
+              direction: data.direction,
+            }, ...prev];
+            // Behold kun de seneste 200 ticks for performance
+            return next.slice(0, 200);
+          });
+        } else if (data.type === "error") {
+          setStatus("error");
+          setErrorMsg(data.msg || "Ukendt fejl");
+        }
+      } catch (e) {
+        // Ignorer corrupted messages
+      }
+    };
+
+    ws.onerror = () => {
+      setStatus("error");
+      setErrorMsg("Forbindelsesfejl — er backend kørende?");
+    };
+
+    ws.onclose = () => {
+      setStatus(prev => prev === "error" ? prev : "closed");
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [ticker]);
+
+  // ── Render ────────────────────────────────────────────
+  if (status === "error") {
+    return (
+      <div className="timesales-panel">
+        <div className="timesales-header">Time & Sales — {ticker}</div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 13 }}>{errorMsg}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "connecting") {
+    return (
+      <div className="timesales-panel">
+        <div className="timesales-header">Time & Sales — {ticker}</div>
+        <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
+          Forbinder til {ticker}...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="timesales-panel">
-      <div className="timesales-header">Time & Sales — {ticker}</div>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, padding: 24 }}>
-        <div style={{ fontSize: 32 }}>🕐</div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", textAlign: "center" }}>
-          Time & Sales — under udvikling
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
-          Time & Sales viser alle handler i realtid med pris, størrelse og retning.
-          Kræver live handelstid — data er ikke tilgængeligt uden for markedstid.
-        </div>
-        <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", marginTop: 8, padding: "8px 12px", background: "var(--bg-elevated)", borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
-          Aktiveres automatisk ved næste handelsdag
-        </div>
+      <div className="timesales-header">
+        Time & Sales — {ticker}
+        <span style={{ float: "right", fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>
+          {ticks.length} ticks
+        </span>
+      </div>
+      <div className="timesales-scroll">
+        <table className="timesales-table">
+          <thead>
+            <tr>
+              <th>Tid</th>
+              <th style={{ textAlign: "right" }}>Pris</th>
+              <th style={{ textAlign: "right" }}>Stk</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ticks.length === 0 ? (
+              <tr>
+                <td colSpan={3} style={{ textAlign: "center", color: "var(--text-muted)", padding: 16, fontStyle: "italic" }}>
+                  Venter på ticks...
+                </td>
+              </tr>
+            ) : (
+              ticks.map(t => (
+                <tr key={t.id} className={
+                  t.direction === "up"   ? "row-up"   :
+                  t.direction === "down" ? "row-down" : ""
+                }>
+                  <td>{t.time}</td>
+                  <td style={{ textAlign: "right" }}>${t.price.toFixed(2)}</td>
+                  <td style={{ textAlign: "right" }}>{t.size.toLocaleString("da-DK")}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

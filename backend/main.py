@@ -364,6 +364,98 @@ async def websocket_strategy(websocket: WebSocket):
         if websocket in strategy_clients:
             strategy_clients.remove(websocket)
 
+# ── /ws/timesales/{ticker} ────────────────────────────────────
+# Live tick-stream fra IBKR for et givent symbol. Bruges af
+# Time & Sales-vinduet i Trading Dash.
+
+@app.websocket("/ws/timesales/{ticker}")
+async def websocket_timesales(websocket: WebSocket, ticker: str):
+    await websocket.accept()
+    ticker = ticker.upper()
+
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        await websocket.send_text(json.dumps({
+            "type":  "error",
+            "error": "ibkr_not_connected",
+            "msg":   "IBKR ikke forbundet — start TWS og prøv igen",
+        }))
+        await websocket.close()
+        return
+
+    # Importer ib_async typer her så vi ikke crasher hvis libben mangler ved opstart
+    from ib_async import Stock, Ticker
+
+    contract = Stock(ticker, "SMART", "USD")
+    ib = conn.ib
+
+    try:
+        await ib.qualifyContractsAsync(contract)
+    except Exception as e:
+        await websocket.send_text(json.dumps({
+            "type":  "error",
+            "error": "qualify_failed",
+            "msg":   f"Kan ikke kvalificere {ticker}: {e}",
+        }))
+        await websocket.close()
+        return
+
+    # Start tick-by-tick streamen — AllLast = alle handler (ikke bare bid/ask)
+    tick_data = ib.reqTickByTickData(contract, "AllLast", numberOfTicks=0, ignoreSize=False)
+
+    def on_tick_update(ticker_obj: Ticker):
+        """Kaldes hver gang IBKR pusher en ny tick."""
+        # ticker_obj.tickByTicks indeholder nye ticks siden sidste update
+        for t in ticker_obj.tickByTicks:
+            # Bestem retning: pris ved eller over ask = køber initieret (op),
+            # pris ved eller under bid = sælger initieret (ned)
+            bid = ticker_obj.bid
+            ask = ticker_obj.ask
+            direction = "neutral"
+            if ask and t.price >= ask:
+                direction = "up"
+            elif bid and t.price <= bid:
+                direction = "down"
+
+            payload = {
+                "type":      "tick",
+                "ticker":    ticker,
+                "time":      t.time.isoformat() if t.time else None,
+                "price":     float(t.price),
+                "size":      int(t.size),
+                "direction": direction,
+            }
+            asyncio.create_task(_safe_send(websocket, payload))
+
+    tick_data.updateEvent += on_tick_update
+
+    # Send "klar"-besked
+    await websocket.send_text(json.dumps({
+        "type":   "ready",
+        "ticker": ticker,
+    }))
+
+    try:
+        # Hold socket åben — venter på client disconnect
+        while True:
+            await websocket.receive_text()  # Bruges ikke, men holder forbindelsen
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Ryd op: fjern event-handler og cancel stream
+        try:
+            tick_data.updateEvent -= on_tick_update
+            ib.cancelTickByTickData(contract, "AllLast")
+        except Exception:
+            pass
+
+
+async def _safe_send(websocket: WebSocket, payload: dict):
+    """Send JSON via websocket; ignorer hvis socket er lukket."""
+    try:
+        await websocket.send_text(json.dumps(payload))
+    except Exception:
+        pass
 
 # ── /market-conditions ────────────────────────────────────────
 @app.get("/market-conditions")
