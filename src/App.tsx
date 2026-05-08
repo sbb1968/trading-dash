@@ -1015,6 +1015,7 @@ function App() {
     const saved = localStorage.getItem("nav_width");
     return saved ? parseInt(saved) : 280;
   });
+  const [layoutToast, setLayoutToast] = useState<string>("");
   useEffect(() => {
     localStorage.setItem("nav_width", String(navWidth));
   }, [navWidth]);
@@ -1044,11 +1045,17 @@ function App() {
     if (name.startsWith("__overwrite__")) {
       const id = name.replace("__overwrite__", "");
       const updated = layouts.map(l => l.id !== id ? l : { ...l, windows: activeLayout?.windows || l.windows });
-      setLayouts(updated); saveLayouts(updated); return;
+      setLayouts(updated); saveLayouts(updated);
+      const layoutName = layouts.find(l => l.id === id)?.name || "Layout";
+      setLayoutToast(`✓ "${layoutName}" opdateret`);
+      setTimeout(() => setLayoutToast(""), 2000);
+      return;
     }
     const newLayout = saveCurrentAsLayout(name, activeLayout?.windows || [], window.innerWidth, window.innerHeight);
     setLayouts(loadLayouts(window.innerWidth, window.innerHeight));
     handleLoadLayout(newLayout.id);
+    setLayoutToast(`✓ "${name}" gemt`);
+    setTimeout(() => setLayoutToast(""), 2000);
   }
 
   function handleDeleteLayout(id: string) {
@@ -1113,7 +1120,26 @@ function App() {
           <Clock />
         </div>
       </div>
-
+      {layoutToast && (
+        <div style={{
+          position: "fixed",
+          top: 70,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "var(--bg-elevated, #2a2a2a)",
+          border: "1px solid var(--border-subtle, #444)",
+          color: "var(--bull, #4ade80)",
+          padding: "10px 24px",
+          borderRadius: 6,
+          fontSize: 14,
+          fontWeight: 600,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          zIndex: 10000,
+          pointerEvents: "none",
+        }}>
+          {layoutToast}
+        </div>
+      )}
       <Menubar
         activeView={activeView} onViewChange={setActiveView}
         layouts={layouts} activeLayoutId={activeLayoutId}
