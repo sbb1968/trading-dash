@@ -271,7 +271,11 @@ export function AlertsPanel({
               </thead>
               <tbody>
                 {filteredAlerts.map(alert => (
-                  <AlertRow key={alert.id} alert={alert} isNew={newAlertIds.has(alert.id)} />
+                  <AlertRow
+                    key={`${alert.id}-${alert.timestamp || alert.ticker}`}
+                    alert={alert}
+                    isNew={newAlertIds.has(alert.id)}
+                  />
                 ))}
               </tbody>
             </table>
