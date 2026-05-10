@@ -36,6 +36,7 @@ class AccountIdentity:
     ibkr_account:         str       # IBKR-kontonummer fx "DUNXXXXXXX"
     paper_trading:        bool
     autostart_strategies: list[str]
+    studio_password:      str       # Password til Studio (login fra browser/mobil)
 
 
 def _fail(msg: str) -> None:
@@ -80,6 +81,7 @@ def load_identity() -> AccountIdentity:
     try:
         account  = data["account"]
         instance = data["instance"]
+        auth     = data.get("auth", {}) or {}
 
         identity = AccountIdentity(
             account_id            = str(account["id"]),
@@ -89,6 +91,7 @@ def load_identity() -> AccountIdentity:
             ibkr_account          = str(instance["ibkr_account"]),
             paper_trading         = bool(instance["paper_trading"]),
             autostart_strategies  = list(instance.get("autostart_strategies", [])),
+            studio_password       = str(auth.get("studio_password", "")),
         )
     except (KeyError, TypeError) as e:
         _fail(f"Manglende eller forkert felt i account.yaml: {e}")
@@ -101,6 +104,14 @@ def load_identity() -> AccountIdentity:
     if not identity.account_id or " " in identity.account_id:
         _fail(f"account.id skal være ét ord uden mellemrum, "
               f"ikke '{identity.account_id}'")
+
+    if not identity.studio_password:
+        _fail(
+            "auth.studio_password er ikke sat i account.yaml.\n"
+            "Tilføj følgende til account.yaml:\n"
+            "  auth:\n"
+            "    studio_password: <dit-password>"
+        )
 
     return identity
 

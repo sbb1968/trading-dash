@@ -17,6 +17,12 @@ from accounts import identity
 from fastapi.responses import FileResponse
 from pathlib import Path
 
+import secrets
+from fastapi import HTTPException, Header
+
+from fastapi import Depends
+from pydantic import BaseModel
+
 app = FastAPI()
 
 app.add_middleware(
@@ -29,6 +35,31 @@ app.add_middleware(
 
 # ── Global state ──────────────────────────────────────────────
 alert_engine      = AlertEngine(threshold=0.5)
+# ── Studio auth ───────────────────────────────────────────────
+# Simpel in-memory token store. Tokens forsvinder ved backend-genstart,
+# så brugeren skal logge ind igen efter restart. Det er fint for vores
+# brug.
+_studio_tokens: set[str] = set()
+
+
+def _create_studio_token() -> str:
+    """Generer en ny session-token og gem den."""
+    token = secrets.token_urlsafe(32)
+    _studio_tokens.add(token)
+    return token
+
+
+def require_studio_auth(authorization: str = Header(None)) -> None:
+    """
+    FastAPI dependency: kræver gyldig Studio-token i Authorization header.
+    Brug som: dependencies=[Depends(require_studio_auth)] på protected endpoints.
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Ikke logget ind")
+    token = authorization[7:]  # Strip "Bearer "
+    if token not in _studio_tokens:
+        raise HTTPException(status_code=401, detail="Ugyldig session")
+    
 paper_trading     = PaperTrading()
 connected_clients: list[WebSocket] = []
 current_prices:   dict[str, float] = {}
@@ -578,7 +609,7 @@ async def websocket_level2(websocket: WebSocket, ticker: str):
             pass
 
 # ── /market-conditions ────────────────────────────────────────
-@app.get("/market-conditions")
+@app.get("/market-conditions", dependencies=[Depends(require_studio_auth)])
 async def market_conditions_endpoint():
     try:
         from market_conditions import MarketConditionChecker
@@ -609,7 +640,40 @@ async def health():
         "time":             datetime.now().isoformat(),
     }
 
-@app.get("/account")
+# ── /auth/login ───────────────────────────────────────────────
+# Login til Studio. Returnerer en session-token der bruges i
+# Authorization-headeren på efterfølgende requests.
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/auth/login")
+async def auth_login(req: LoginRequest):
+    if req.password != identity.studio_password:
+        # Lille delay for at gøre brute-force mere besværligt
+        await asyncio.sleep(0.5)
+        raise HTTPException(status_code=401, detail="Forkert password")
+
+    token = _create_studio_token()
+    return {"token": token, "expires": "indtil backend genstartes"}
+
+
+@app.post("/auth/logout")
+async def auth_logout(authorization: str = Header(None)):
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        _studio_tokens.discard(token)
+    return {"ok": True}
+
+
+@app.get("/auth/check")
+async def auth_check(_=Depends(require_studio_auth)):
+    """Tjek om token stadig er gyldig. Bruges af frontend til at vide
+    om brugeren skal redirectes til login."""
+    return {"ok": True}
+
+@app.get("/account", dependencies=[Depends(require_studio_auth)])
 async def account_info():
     """Returnerer identiteten for denne backend-instans. Bruges af frontend."""
     return {
@@ -627,7 +691,7 @@ async def account_info():
 _last_snapshot_journaled_at: datetime | None = None
 
 
-@app.get("/account/snapshot")
+@app.get("/account/snapshot", dependencies=[Depends(require_studio_auth)])
 async def account_snapshot(force_journal: bool = False):
     """
     Returner et live snapshot af IBKR-kontoen.
@@ -757,7 +821,7 @@ async def studio_index():
     return FileResponse(studio_path)
 
 # ── Analyse-side endpoint ──────────────────────────
-@app.get("/analysis/summary")
+@app.get("/analysis/summary", dependencies=[Depends(require_studio_auth)])
 async def analysis_summary(period: str = "all"):
     from analysis import build_summary
     if period not in ("today", "7d", "30d", "all"):

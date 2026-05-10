@@ -180,9 +180,76 @@
             text-align: center;
             padding: 48px 24px;
         }
+
+        /* Login overlay */
+        #login-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #1a1a1a;
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #login-overlay.hidden { display: none; }
+        .login-box {
+            background: #232323;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 32px;
+            width: 100%;
+            max-width: 360px;
+            text-align: center;
+        }
+        .login-box h2 {
+            margin: 0 0 24px;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .login-box input {
+            width: 100%;
+            padding: 12px 14px;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #e0e0e0;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        .login-box input:focus {
+            outline: none;
+            border-color: #4a9eff;
+        }
+        .login-box button {
+            width: 100%;
+            padding: 12px;
+            background: #4a9eff;
+            border: none;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .login-box button:hover { background: #5aabff; }
+        .login-box button:disabled { background: #555; cursor: wait; }
+        .login-error {
+            color: #f87171;
+            font-size: 13px;
+            margin-top: 12px;
+            min-height: 18px;
+        }
     </style>
 </head>
 <body>
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2>Trading Dash Studio</h2>
+            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" />
+            <button id="login-button">Log ind</button>
+            <div class="login-error" id="login-error"></div>
+        </div>
+    </div>
     <header>
         <h1>Trading Dash Studio</h1>
         <div class="identity" id="identity">Indlæser identitet...</div>
@@ -203,6 +270,122 @@
     </main>
 
     <script>
+        // ─────────────────────────────────────────────────────
+        // Auth — login-overlay og token-lagring
+        // ─────────────────────────────────────────────────────
+        const TOKEN_KEY = "tdstudio_token";
+
+        function getToken() {
+            return localStorage.getItem(TOKEN_KEY);
+        }
+
+        function setToken(token) {
+            localStorage.setItem(TOKEN_KEY, token);
+        }
+
+        function clearToken() {
+            localStorage.removeItem(TOKEN_KEY);
+        }
+
+        async function authFetch(url, options = {}) {
+            const token = getToken();
+            const headers = {
+                ...(options.headers || {}),
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            };
+            const res = await fetch(url, { ...options, headers });
+
+            // Hvis 401, token er udløbet (backend genstartet) — vis login igen
+            if (res.status === 401) {
+                clearToken();
+                showLogin();
+                throw new Error("Session udløbet");
+            }
+            return res;
+        }
+
+        function showLogin() {
+            document.getElementById("login-overlay").classList.remove("hidden");
+            document.getElementById("login-error").textContent = "";
+            document.getElementById("login-password").value = "";
+            setTimeout(() => document.getElementById("login-password").focus(), 100);
+        }
+
+        function hideLogin() {
+            document.getElementById("login-overlay").classList.add("hidden");
+        }
+
+        async function attemptLogin() {
+            const passwordInput = document.getElementById("login-password");
+            const button        = document.getElementById("login-button");
+            const errorDiv      = document.getElementById("login-error");
+
+            const password = passwordInput.value;
+            if (!password) {
+                errorDiv.textContent = "Indtast password";
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = "Logger ind...";
+            errorDiv.textContent = "";
+
+            try {
+                const res = await fetch("/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password }),
+                });
+
+                if (!res.ok) {
+                    errorDiv.textContent = "Forkert password";
+                    return;
+                }
+
+                const data = await res.json();
+                setToken(data.token);
+                hideLogin();
+                // Trigger initial side-load nu hvor vi er logget ind
+                loadIdentity();
+                switchPage(currentPage || "account");
+            } catch (e) {
+                errorDiv.textContent = "Backend ikke tilgængelig";
+            } finally {
+                button.disabled = false;
+                button.textContent = "Log ind";
+            }
+        }
+
+        document.getElementById("login-button").addEventListener("click", attemptLogin);
+        document.getElementById("login-password").addEventListener("keypress", e => {
+            if (e.key === "Enter") attemptLogin();
+        });
+
+        async function checkAuthAndStart() {
+            const token = getToken();
+            if (!token) {
+                showLogin();
+                return;
+            }
+
+            // Verificer at token stadig er gyldig
+            try {
+                const res = await fetch("/auth/check", {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (!res.ok) {
+                    clearToken();
+                    showLogin();
+                    return;
+                }
+                // Token er gyldig — hent identitet og vis appen
+                hideLogin();
+                loadIdentity();
+                switchPage("account");
+            } catch (e) {
+                showLogin();
+            }
+        }
         // ─────────────────────────────────────────────────────
         // Formatering
         // ─────────────────────────────────────────────────────
@@ -235,15 +418,19 @@
         // ─────────────────────────────────────────────────────
         // Identitet (én gang)
         // ─────────────────────────────────────────────────────
-        fetch("/account")
-            .then(r => r.json())
-            .then(data => {
+        // ─────────────────────────────────────────────────────
+        // Identitet — hentes efter login er bekræftet
+        // ─────────────────────────────────────────────────────
+        async function loadIdentity() {
+            try {
+                const res = await authFetch("/account");
+                const data = await res.json();
                 document.getElementById("identity").textContent =
                     `${data.account_display_name} — ${data.instance_display_name}`;
-            })
-            .catch(() => {
+            } catch (e) {
                 document.getElementById("identity").textContent = "Identitet ikke tilgængelig";
-            });
+            }
+        }
 
         // ─────────────────────────────────────────────────────
         // Router — håndterer side-skift
@@ -307,7 +494,7 @@
         async function loadSnapshot(forceJournal = false) {
             const url = "/account/snapshot" + (forceJournal ? "?force_journal=true" : "");
             try {
-                const res  = await fetch(url);
+                const res  = await authFetch(url);
                 const data = await res.json();
                 if (!data.ok) {
                     renderAccountError(data.error || "Ukendt fejl");
@@ -415,7 +602,7 @@
 
         async function loadAnalysis() {
             try {
-                const res  = await fetch(`/analysis/summary?period=${analysisPeriod}`);
+                const res  = await authFetch(`/analysis/summary?period=${analysisPeriod}`);
                 const data = await res.json();
                 if (data.error) {
                     renderAnalysisError(data.error);
@@ -578,9 +765,9 @@
         }
 
         // ─────────────────────────────────────────────────────
-        // Start på Konto-siden
+        // Start — tjek auth først
         // ─────────────────────────────────────────────────────
-        switchPage("account");
+        checkAuthAndStart();
     </script>
 </body>
 </html>
