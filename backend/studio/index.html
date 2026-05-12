@@ -455,19 +455,20 @@
 
             // Stop alle timers — ny side starter sine egne hvis nødvendigt
             if (accountTimer) { clearInterval(accountTimer); accountTimer = null; }
+            if (strategiesTimer) { clearInterval(strategiesTimer); strategiesTimer = null; }
 
             // Render
             const content = document.getElementById("content");
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
 
-            if      (page === "account")  showAccount();
-            else if (page === "analysis") showAnalysis();
-            else                          showPlaceholder(page);
+            if      (page === "account")    showAccount();
+            else if (page === "analysis")   showAnalysis();
+            else if (page === "strategies") showStrategies();
+            else                            showPlaceholder(page);
         }
 
         function showPlaceholder(page) {
             const labels = {
-                strategies: "Strategi-konfiguration",
                 backtest:   "Backtest",
                 log:        "Event-log",
             };
@@ -589,6 +590,115 @@
                     <button onclick="loadSnapshot(true)">↻ Opdater nu</button>
                 </div>
             `;
+        }
+
+        // ─────────────────────────────────────────────────────
+        // STRATEGIER-SIDE
+        // ─────────────────────────────────────────────────────
+        let strategiesTimer = null;
+
+        async function showStrategies() {
+            await loadStrategiesStatus();
+            // Poll status hvert 2. sek (algo-start tager ~10-30 sek)
+            strategiesTimer = setInterval(() => {
+                if (currentPage === "strategies") loadStrategiesStatus();
+            }, 2000);
+        }
+
+        async function loadStrategiesStatus() {
+            try {
+                const res  = await authFetch("/algo/status");
+                const data = await res.json();
+                renderStrategies(data);
+            } catch (e) {
+                renderStrategiesError("Backend ikke tilgængelig: " + e.message);
+            }
+        }
+
+        function renderStrategiesError(msg) {
+            document.getElementById("content").innerHTML = `
+                <div class="card">
+                    <div class="error"><strong>Fejl:</strong> ${msg}</div>
+                </div>
+            `;
+        }
+
+        function renderStrategies(data) {
+            const statusBadge = data.running
+                ? '<span class="badge" style="background:#4ade80;color:#000;">KØRER</span>'
+                : '<span class="badge" style="background:#444;color:#aaa;">STOPPET</span>';
+
+            const ibkrBadge = data.ibkr_connected
+                ? '<span style="color:#4ade80;">● IBKR forbundet</span>'
+                : '<span style="color:#f87171;">● IBKR ikke forbundet</span>';
+
+            const stats = data.stats || {};
+            const statsHtml = data.running ? `
+                <div class="stats-grid" style="margin-top:24px;">
+                    <div>
+                        <div class="stat-label">Dagens P&L</div>
+                        <div class="stat-value ${cls(stats.pnl_today)}">${fmtMoneySigned(stats.pnl_today)}</div>
+                    </div>
+                    <div>
+                        <div class="stat-label">Handler i dag</div>
+                        <div class="stat-value">${stats.trades_today || 0}</div>
+                    </div>
+                    <div>
+                        <div class="stat-label">Åbne positioner</div>
+                        <div class="stat-value">${stats.open_positions || 0}</div>
+                    </div>
+                </div>
+            ` : "";
+
+            const startDisabled = data.running ? "disabled" : "";
+            const stopDisabled  = !data.running ? "disabled" : "";
+
+            document.getElementById("content").innerHTML = `
+                <div class="section-title">Momentum ORB ${statusBadge}</div>
+                <div class="card">
+                    <div style="font-size:14px;color:#aaa;margin-bottom:16px;">
+                        ${ibkrBadge}
+                        <span style="margin:0 12px;color:#444;">·</span>
+                        Instans: <code>${data.instance || "ukendt"}</code>
+                    </div>
+                    <div style="display:flex;gap:12px;">
+                        <button id="btn-start" onclick="startAlgo()" ${startDisabled}
+                                style="flex:1;padding:14px;background:${data.running ? '#444' : '#4ade80'};
+                                       color:${data.running ? '#666' : '#000'};border:none;border-radius:6px;
+                                       font-size:14px;font-weight:600;cursor:${data.running ? 'not-allowed' : 'pointer'};">
+                            ▶ Start algoritme
+                        </button>
+                        <button id="btn-stop" onclick="stopAlgo()" ${stopDisabled}
+                                style="flex:1;padding:14px;background:${!data.running ? '#444' : '#f87171'};
+                                       color:${!data.running ? '#666' : '#000'};border:none;border-radius:6px;
+                                       font-size:14px;font-weight:600;cursor:${!data.running ? 'not-allowed' : 'pointer'};">
+                            ■ Stop algoritme
+                        </button>
+                    </div>
+                    ${statsHtml}
+                </div>
+            `;
+        }
+
+        async function startAlgo() {
+            try {
+                const res  = await authFetch("/algo/start", { method: "POST" });
+                const data = await res.json();
+                console.log("Start:", data);
+                // Status polles automatisk hvert 2. sek og opdaterer UI
+            } catch (e) {
+                renderStrategiesError("Kunne ikke starte: " + e.message);
+            }
+        }
+
+        async function stopAlgo() {
+            try {
+                const res  = await authFetch("/algo/stop", { method: "POST" });
+                const data = await res.json();
+                console.log("Stop:", data);
+            } catch (e) {
+                renderStrategiesError("Kunne ikke stoppe: " + e.message);
+            }
         }
 
         // ─────────────────────────────────────────────────────

@@ -673,6 +673,65 @@ async def auth_check(_=Depends(require_studio_auth)):
     om brugeren skal redirectes til login."""
     return {"ok": True}
 
+# ── /algo — Studio kontrol af algoritmen ──────────────────────
+# Disse endpoints styrer algoritmen via REST i stedet for WebSocket.
+# Bruges af Studio's "Strategier"-side for nem fjernstart/stop.
+# Bruger strategy_manager (samme tilgang som /health og /ws/algo).
+
+@app.get("/algo/status", dependencies=[Depends(require_studio_auth)])
+async def algo_status():
+    """Returnér status om algoritmen kører."""
+    momentum = strategy_manager._strategies.get("Momentum ORB")
+    running  = momentum is not None and momentum.status == StrategyStatus.RUNNING
+
+    ibkr_connected = False
+    ibkr = strategy_manager.get_ibkr()
+    if ibkr is not None:
+        ibkr_connected = ibkr.connected
+
+    stats = {}
+    if running:
+        stats = {
+            "pnl_today":      momentum.stats.pnl_today,
+            "trades_today":   momentum.stats.trades_today,
+            "open_positions": momentum.stats.open_positions,
+        }
+
+    return {
+        "running":        running,
+        "ibkr_connected": ibkr_connected,
+        "instance":       identity.instance_display_name,
+        "stats":          stats,
+    }
+
+
+@app.post("/algo/start", dependencies=[Depends(require_studio_auth)])
+async def algo_start_endpoint():
+    """Start algoritmen. Idempotent — gør intet hvis allerede kører."""
+    momentum = strategy_manager._strategies.get("Momentum ORB")
+    if momentum is not None and momentum.status == StrategyStatus.RUNNING:
+        return {"ok": True, "already_running": True, "message": "Algoritmen kører allerede"}
+
+    asyncio.create_task(start_algo())
+    return {"ok": True, "already_running": False, "message": "Algoritmen startes"}
+
+
+@app.post("/algo/stop", dependencies=[Depends(require_studio_auth)])
+async def algo_stop_endpoint():
+    """Stop algoritmen. Idempotent — gør intet hvis ikke kører."""
+    momentum = strategy_manager._strategies.get("Momentum ORB")
+    if momentum is None or momentum.status != StrategyStatus.RUNNING:
+        return {"ok": True, "was_running": False, "message": "Algoritmen kørte ikke"}
+
+    await stop_algo()
+    await broadcast_algo({
+        "type": "algo_status", "status": "stopped",
+        "message": "Algoritme stoppet via Studio",
+        "total_pnl": 0, "positions": 0, "trades": 0,
+        "time": datetime.now().strftime("%H:%M:%S"),
+    })
+    return {"ok": True, "was_running": True, "message": "Algoritmen stoppet"}
+
 @app.get("/account", dependencies=[Depends(require_studio_auth)])
 async def account_info():
     """Returnerer identiteten for denne backend-instans. Bruges af frontend."""
