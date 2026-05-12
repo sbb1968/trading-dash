@@ -67,3 +67,15 @@ codebase.md
 
 # ── Runtime logs ────────────────────────────────────────────
 log_*.txt
+
+# ── Hemmeligheder (defensivt) ────────────────────────────
+# .env-filer, certifikater, nøgler og credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+credentials.json
+secrets.json
+config.local.*
