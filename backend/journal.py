@@ -8,7 +8,7 @@ Brugsmønster:
     await journal.log_event(
         source="Momentum ORB",
         event_type="order_request",
-        account="DUNXXXXXXX",
+        ibkr_account="DUxxxxxxx",
         symbol="GME",
         payload={"action": "BUY", "quantity": 100, "limit_price": 12.34, "reason": "ORB breakout"},
     )
