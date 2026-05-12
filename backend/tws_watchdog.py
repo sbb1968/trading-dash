@@ -31,6 +31,8 @@ CHECK_INTERVAL_SEC    = 30
 FAILS_BEFORE_ALERT    = 3       # 3 × 30s = 90s downtime før vi pinger
 SOCKET_TIMEOUT_SEC    = 3.0
 QUIET_HOURS_ET        = (22, 6) # send ikke beskeder mellem 22:00 og 06:00 ET
+MAX_OFFLINE_ALERTS    = 2       # send max 2 push'er per offline-periode (ingen spam)
+REMINDER_DELAY_MIN    = 5       # minutter mellem alert #1 og alert #2
 
 
 class TWSWatchdog:
@@ -39,12 +41,13 @@ class TWSWatchdog:
     """
 
     def __init__(self, on_status_change: Optional[Callable] = None):
-        self._running        = False
-        self._task           = None
-        self._was_online     = None      # None = uvist, True/False = sidste kendte
-        self._fail_count     = 0
-        self._on_status      = on_status_change   # callback (online: bool) → broadcastes til UI
-        self._last_alert_at  = None
+        self._running         = False
+        self._task            = None
+        self._was_online      = None     # None = uvist, True/False = sidste kendte
+        self._fail_count      = 0
+        self._on_status       = on_status_change   # callback (online: bool) → broadcastes til UI
+        self._last_alert_at   = None
+        self._alerts_sent     = 0        # tæller offline-alerts i denne offline-periode
 
     # ─────────────────────────────────────────────────────────
     # Start / Stop
@@ -129,22 +132,38 @@ class TWSWatchdog:
                         priority = 3,
                         tags     = "white_check_mark",
                     )
-                self._fail_count = 0
+                self._fail_count  = 0
+                self._alerts_sent = 0       # reset så næste offline-periode får sine 2 push'er
             self._was_online = True
         else:
             # ── TWS er offline ────────────────────────────────
             self._fail_count += 1
-            if self._fail_count == FAILS_BEFORE_ALERT:
-                logger.warning(f"[Watchdog] TWS offline i {FAILS_BEFORE_ALERT} tjek — pinger Iben")
+
+            # Alert #1: ved 3. fejl i træk (90 sek downtime)
+            if self._fail_count == FAILS_BEFORE_ALERT and self._alerts_sent == 0:
+                logger.warning(f"[Watchdog] TWS offline i {FAILS_BEFORE_ALERT} tjek — pinger Iben (alert 1/{MAX_OFFLINE_ALERTS})")
                 if self._in_active_hours():
                     await notifier.alert_tws_offline()
                     self._last_alert_at = datetime.now()
-            elif self._fail_count > FAILS_BEFORE_ALERT:
-                # Re-ping hver 10. minut hvis stadig nede
-                if self._last_alert_at and (datetime.now() - self._last_alert_at) > timedelta(minutes=10):
+                    self._alerts_sent  += 1
+
+            # Alert #2 (sidste): 5 min efter alert #1
+            elif self._fail_count > FAILS_BEFORE_ALERT and self._alerts_sent < MAX_OFFLINE_ALERTS:
+                if self._last_alert_at and (datetime.now() - self._last_alert_at) > timedelta(minutes=REMINDER_DELAY_MIN):
                     if self._in_active_hours():
-                        await notifier.alert_tws_offline()
+                        logger.warning(f"[Watchdog] Reminder — TWS stadig offline (alert {self._alerts_sent + 1}/{MAX_OFFLINE_ALERTS})")
+                        await notifier.send(
+                            message  = "TWS er stadig ikke logget ind. Dette er sidste påmindelse — jeg holder op med at sende beskeder indtil TWS kommer online.",
+                            title    = "⏰ Sidste TWS-påmindelse",
+                            priority = 5,
+                            tags     = "alarm_clock,key",
+                        )
                         self._last_alert_at = datetime.now()
+                        self._alerts_sent  += 1
+
+            # Efter MAX_OFFLINE_ALERTS er nået: hold helt op med at sende
+            # Stille periode indtil TWS kommer online igen
+
             self._was_online = False
 
         if self._on_status:
