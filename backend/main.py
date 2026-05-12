@@ -10,6 +10,10 @@ from strategy_manager import StrategyManager
 from strategy_base    import StrategyStatus
 from risk_manager import RiskConfig
 
+import notifier
+from tws_watchdog import TWSWatchdog
+from scheduler    import AlgoScheduler
+
 from journal          import Journal
 
 from accounts import identity
@@ -74,6 +78,9 @@ live_feed      = None
 live_feed_task = None
 ibkr_connected = False
 journal = Journal("trading_dash.db")
+# ── Autonom drift: watchdog + scheduler ───────────────────────
+tws_watchdog: TWSWatchdog | None     = None
+algo_scheduler: AlgoScheduler | None = None
 
 
 # ── Broadcast ─────────────────────────────────────────────────
@@ -252,7 +259,95 @@ async def startup():
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
     print(f"[Server] IBKR:      {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    # ── Start TWS watchdog ────────────────────────────────────
+    global tws_watchdog, algo_scheduler
 
+    tws_watchdog = TWSWatchdog()
+    await tws_watchdog.start()
+    print("[Server] TWS watchdog startet — tjekker port 7497 hvert 30. sek")
+
+    # ── Start autonom scheduler ───────────────────────────────
+    # Scheduler hooker ind i StrategyManager via callbacks.
+    # Den kender ikke til strategy_manager direkte — kun til funktioner.
+
+    def get_daily_summary() -> dict:
+        """Saml dagens stats fra MomentumORB til daily summary push."""
+        momentum = strategy_manager._strategies.get("Momentum ORB")
+        if not momentum:
+            return {"trades": 0, "wins": 0, "total_pnl": 0.0}
+        return {
+            "trades":    momentum.stats.trades_today,
+            "wins":      momentum.stats.wins_today,
+            "total_pnl": momentum.stats.pnl_today,
+        }
+
+    def tws_is_online() -> bool:
+        return tws_watchdog.is_online if tws_watchdog else False
+
+    async def reset_daily_counters():
+        """Nulstil alle daglige tællere ved midnat ET."""
+        await strategy_manager.reset_for_new_day()
+
+    algo_scheduler = AlgoScheduler(
+        start_algo_fn    = start_algo,
+        stop_algo_fn     = stop_algo,
+        get_summary_fn   = get_daily_summary,
+        tws_is_online_fn = tws_is_online,
+        reset_daily_fn   = reset_daily_counters,
+    )
+    await algo_scheduler.start()
+    print("[Server] Algo-scheduler startet — autonom dagsplan aktiv")
+
+    # Notificer Iben at backend er oppe og kører
+    await notifier.send(
+        message  = f"Backend startet på {identity.instance_display_name}. Autonom drift aktiv.",
+        title    = "🟢 Trading Dash backend startet",
+        priority = 2,
+        tags     = "robot,green_circle",
+    )
+
+# ── Shutdown ──────────────────────────────────────────────────
+@app.on_event("shutdown")
+async def shutdown():
+    """Ryd op pænt — stop scheduler, watchdog, algo og luk IBKR."""
+    print("[Server] Shutting down...")
+
+    # 1. Stop scheduler først så ingen nye jobs starter
+    if algo_scheduler:
+        await algo_scheduler.stop()
+        print("[Server] Scheduler stoppet")
+
+    # 2. Stop watchdog så vi ikke får falske offline-alerts
+    if tws_watchdog:
+        await tws_watchdog.stop()
+        print("[Server] Watchdog stoppet")
+
+    # 3. Stop kørende strategi pænt (lukker åbne positioner via on_stop)
+    momentum = strategy_manager._strategies.get("Momentum ORB")
+    if momentum and momentum.status == StrategyStatus.RUNNING:
+        await strategy_manager.stop_strategy("Momentum ORB", reason="Backend shutdown")
+        print("[Server] MomentumORB stoppet pænt")
+
+    # 4. Luk IBKR-forbindelse
+    try:
+        ibkr = strategy_manager.get_ibkr()
+        if ibkr and ibkr.connected:
+            ibkr.disconnect()
+            print("[Server] IBKR forbindelse lukket")
+    except Exception as e:
+        print(f"[Server] Fejl ved IBKR-disconnect: {e}")
+
+    # 5. Journal shutdown event (best effort)
+    try:
+        await journal.log_event(
+            source     = "system",
+            event_type = "system_shutdown",
+            payload    = {"message": "Trading Dash backend stoppet"},
+        )
+    except Exception:
+        pass
+
+    print("[Server] Shutdown færdig")
 
 # ── /ws ───────────────────────────────────────────────────────
 @app.websocket("/ws")
@@ -638,6 +733,71 @@ async def health():
         "threshold":        alert_engine.threshold,
         "journal_events":   await journal.count_events(),
         "time":             datetime.now().isoformat(),
+    }
+
+# ── /status — Komplet system-snapshot for autonom drift ───────
+@app.get("/status")
+async def status():
+    """
+    Returnerer komplet system-status for monitorering og fejlfinding.
+
+    Bruges af:
+      - Studio's dashboard til at se om alt kører
+      - Manuel debugging (curl http://localhost:8000/status)
+      - Eventuel ekstern uptime-monitor
+
+    Ingen auth-krav — viser kun read-only health-data, ingen handlinger.
+    """
+    # Algoritme-status
+    momentum = strategy_manager._strategies.get("Momentum ORB")
+    algo_running = (momentum is not None and
+                    momentum.status == StrategyStatus.RUNNING)
+
+    algo_stats = None
+    if momentum:
+        algo_stats = {
+            "status":         momentum.status,
+            "trades_today":   momentum.stats.trades_today,
+            "wins_today":     momentum.stats.wins_today,
+            "losses_today":   momentum.stats.losses_today,
+            "pnl_today":      round(momentum.stats.pnl_today, 2),
+            "open_positions": momentum.stats.open_positions,
+            "last_trade":     momentum.stats.last_trade_time,
+        }
+
+    return {
+        "ok":   True,
+        "time": datetime.now().isoformat(),
+
+        "identity": {
+            "account":  identity.account_display_name,
+            "instance": identity.instance_display_name,
+            "role":     identity.instance_role,
+            "ibkr":     identity.ibkr_account,
+            "paper":    identity.paper_trading,
+        },
+
+        "backend": {
+            "clients":          len(connected_clients),
+            "algo_clients":     len(algo_clients),
+            "strategy_clients": len(strategy_clients),
+            "journal_events":   await journal.count_events(),
+        },
+
+        "ibkr": {
+            "connected": ibkr_connected,
+        },
+
+        "tws_watchdog": tws_watchdog.status_dict if tws_watchdog else {"running": False},
+
+        "scheduler": algo_scheduler.status_dict if algo_scheduler else {"running": False},
+
+        "algo": {
+            "running": algo_running,
+            "stats":   algo_stats,
+        },
+
+        "risk": strategy_manager.risk_manager.get_status_dict(),
     }
 
 # ── /auth/login ───────────────────────────────────────────────
