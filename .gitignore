@@ -79,3 +79,14 @@ log_*.txt
 credentials.json
 secrets.json
 config.local.*
+
+# -- Backtest og analyse-output (genereres lokalt) ----------
+backend/data/backtest_*.csv
+backend/data/universe_filter_*.csv
+backend/data/exploration_results_*.csv
+
+# -- Lokale backup-filer ------------------------------------
+*.bak
+*_backup.py
+*.before_*
+

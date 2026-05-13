@@ -1,23 +1,21 @@
 """
 algo_momentum.py
 ────────────────
-Momentum ORB Breakout Strategi — arver fra BaseStrategy
+Live Trading Wrapper for MomentumORB-strategien.
 
-Strategi:
-  - ORB breakout over første 15 minutters høj (09:30–09:44 ET)
-  - Volumen mindst 1.5x gennemsnit
-  - RSI(14) < 80
-  - Handelsvindue: 09:45–10:30 ET
-  - Stop loss: -2%  /  Take profit: +4%
+Denne fil indeholder INGEN strategi-logik længere — al entry- og exit-
+beslutning sker via strategies/momentum_orb/. Denne fil er ansvarlig for:
 
-Markedsbetingelser:
-  - VIX < 15        → Ingen handel (for roligt)
-  - VIX 15-40       → Normal handel (100% position size)
-  - VIX > 40        → Reduceret handel (50% position size)
-  - A/D ratio < 0.3 → Ingen handel (blodrød dag)
-  - A/D ratio < 0.5 → 50% position size
-  - SPY gap < -1.5% → Ingen handel
-  - SPY volumen < 70% af 20d snit → Ingen handel (tynd dag)
+  - IBKR-forbindelse og market data
+  - Universe-scanning og dagens kontekst
+  - Position-management (ordrer, fills, kapital)
+  - State-broadcast til LiveAlgo.tsx
+  - Markedsforhold-tjek (VIX, A/D ratio, SPY)
+  - Genforbinding og fejlhåndtering
+
+Når en ny strategi tilføjes (mean reversion, etc.) kan denne fil parameteriseres
+til at køre den i stedet — eller vi kan oprette algo_<name>.py som en separat
+tynd wrapper.
 
 Placering: C:\\Projects\\trading-dash\\backend\\algo_momentum.py
 """
@@ -32,19 +30,19 @@ import pytz
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
 
+# Ny: strategi-arkitektur
+from strategies.momentum_orb import MomentumORBStrategy, VARIANTS, LIVE_VARIANT_KEY
+from strategies.momentum_orb.strategy import TRADE_START
+from strategies.momentum_orb.exit import TRADE_END_TIME as TRADE_END
+from strategies.base import Bar
+
 logger = logging.getLogger(__name__)
 
-# ── Strategi-konstanter ───────────────────────────────────────
-STOP_PCT          = 0.02
-TARGET_PCT        = 0.04
-VOL_MULT          = 1.5
-ORB_END           = dtime(9, 44)
-TRADE_START       = dtime(9, 45)
-TRADE_END         = dtime(10, 30)
+# ── Konfiguration ────────────────────────────────────────────
 CAPITAL_PER_TRADE = 2_500
 ET                = pytz.timezone("America/New_York")
 
-# Markedsbetingelser
+# Markedsbetingelser — bevaret uændret
 VIX_MIN           = 15.0
 VIX_REDUCED       = 40.0
 AD_RATIO_MIN      = 0.3
@@ -52,7 +50,6 @@ AD_RATIO_REDUCED  = 0.5
 SPY_GAP_MIN       = -1.5
 SPY_VOL_MIN_PCT   = 0.70
 
-# Retry
 MAX_CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 10
 MIN_UNIVERSE_SIZE   = 3
@@ -65,56 +62,53 @@ FALLBACK_UNIVERSE = [
 
 class MomentumORB(BaseStrategy):
     """
-    Momentum ORB Breakout Strategi.
+    Live trading-wrapper for MomentumORB-strategien.
 
-    Entry-kriterier:
-      1. Pris bryder ORB High (første 15 min: 09:30-09:44 ET)
-      2. Volumen >= 1.5x gennemsnitlig volumen
-      3. RSI(14) < 80
-      4. Handelsvindue: 09:45-10:30 ET
+    Denne klasses ansvar:
+      - Asynkron loop hvert 30. sekund (IBKR snapshot pr. ticker)
+      - Univers-scanning og ORB-beregning
+      - Markedsforhold-tjek
+      - Position-management (køb/salg ordrer via IBKR)
+      - Status-broadcast til frontend
 
-    Exit (hvad end kommer først):
-      - Stop loss:   -2% fra entry
-      - Take profit: +4% fra entry
-      - Tidsbaseret: lukker alle positioner kl. 10:30 ET
+    Selve handelslogikken er DELEGERET til strategies/momentum_orb/.
     """
 
     def __init__(self, conn: IBKRConnection, config: Optional[StrategyConfig] = None):
         super().__init__(config)
         self.conn = conn
 
-        # Daglig tilstand
-        self.universe:       list[str]        = []
-        self.orb_highs:      dict[str, float] = {}
+        # ── Strategi-instans — al beslutningslogik bor her ────
+        self._strategy = MomentumORBStrategy()
+        self._variant_key = LIVE_VARIANT_KEY
 
-        # State machine per ticker — bestemmer hvor i breakout/retest-cyklus en ticker er
-        # Mulige værdier: "waiting", "breakout_detected", "awaiting_retest", "entered", "done_for_day"
-        self.ticker_state:   dict[str, str]   = {}
+        # Universe og dagens kontekst pr. ticker
+        self.universe:        list[str]        = []
+        self._day_contexts:   dict[str, dict]  = {}     # ticker → day context
 
-        # Hjælpefelter til retest-detektion
-        self.breakout_time:  dict[str, datetime] = {}   # Hvornår blev breakout først set?
-        self.retest_low:     dict[str, float]     = {}   # Lavpunkt under pullback (bruges som stop loss)
+        # Position-tracking — bruger strategy.exit's Position-objekter
+        from strategies.base import Position
+        self._positions:      dict[str, Position] = {}
 
-        self.avg_vols:       dict[str, float] = {}
-        self.closes:         dict[str, list]  = defaultdict(list)
-        self._position_data: dict[str, dict]  = {}
-        self.trades:         list[dict]       = []
-        self.total_pnl:      float            = 0.0
+        # Legacy-felter UI/journal forventer
+        self._position_data:  dict[str, dict]  = {}     # ticker → dict (UI-kompat)
+        self.trades:          list[dict]       = []
+        self.total_pnl:       float            = 0.0
 
         self._position_size_pct: float = 1.0
         self._loop_task: Optional[asyncio.Task] = None
 
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
     # BaseStrategy interface
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
 
     @property
     def name(self) -> str:
-        return "Momentum ORB"
+        return self._strategy.name
 
     @property
     def description(self) -> str:
-        return "Opening Range Breakout på US small caps. Kører 09:45-10:30 ET."
+        return self._strategy.description
 
     @property
     def asset_class(self) -> str:
@@ -157,7 +151,6 @@ class MomentumORB(BaseStrategy):
         conditions = await checker.check()
         self._position_size_pct = conditions.position_size_pct
 
-        # Broadcast detaljeret overblik til frontend
         if self._broadcast_fn:
             self._broadcast_fn(checker.format_detailed(conditions))
 
@@ -169,7 +162,7 @@ class MomentumORB(BaseStrategy):
             self._status("orb_ready",
                          f"Pre-flight OK: {summary}\n"
                          f"🔴 Ingen handel i dag — {status_msg}")
-            return True, summary  # Returnerer True men skal_handle=False håndteres i _trading_loop
+            return True, summary
 
         summary = " | ".join([f"✅ {c}" for c in checks])
         self._status("orb_ready", f"Pre-flight OK: {summary}")
@@ -177,12 +170,13 @@ class MomentumORB(BaseStrategy):
         return True, summary
 
     async def on_start(self) -> None:
-        # SAFETY GUARD #4 — undgå dobbelt-start
         if self._loop_task and not self._loop_task.done():
             logger.warning(f"_trading_loop kører allerede — afbryder ny start")
             return
 
-        self._status("started", "Algoritme starter — udfører pre-flight tjek")
+        variant = VARIANTS[self._variant_key]
+        self._status("started",
+                     f"Algoritme starter — variant: {variant.name}")
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
 
@@ -192,12 +186,12 @@ class MomentumORB(BaseStrategy):
     async def on_stop(self) -> None:
         if self._loop_task and not self._loop_task.done():
             self._loop_task.cancel()
-        if self._position_data:
+        if self._positions:
             await self._close_all("strategi stoppet")
 
-    # -----------------------------------------------------------------------
-    # Status broadcast — kompatibel med LiveAlgo.tsx
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
+    # Status broadcast
+    # -------------------------------------------------------------
 
     def _status(self, status: str, message: str):
         msg = {
@@ -213,9 +207,9 @@ class MomentumORB(BaseStrategy):
             self._broadcast_fn(msg)
         logger.info(f"[{status}] {message}")
 
-    # -----------------------------------------------------------------------
-    # Universe og ORB
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
+    # Universe og dagskontekst — delegerer til strategien
+    # -------------------------------------------------------------
 
     async def _prepare_universe(self):
         self._status("scanning", "Scanner markedet efter dagens kandidater...")
@@ -225,7 +219,8 @@ class MomentumORB(BaseStrategy):
             if len(self.universe) >= MIN_UNIVERSE_SIZE:
                 break
             if attempt < 2:
-                self._status("scanning", f"Scanner returnerede få resultater — prøver igen ({attempt}/2)...")
+                self._status("scanning",
+                             f"Scanner returnerede få resultater — prøver igen ({attempt}/2)...")
                 await asyncio.sleep(5)
 
         if len(self.universe) < MIN_UNIVERSE_SIZE:
@@ -238,45 +233,66 @@ class MomentumORB(BaseStrategy):
 
         await asyncio.sleep(1)
 
-        self._status("loading_orb", f"Henter historiske bars og beregner ORB for {len(self.universe)} aktier...")
-        ok_count     = 0
+        # Hent historiske bars og lad strategien bygge sin dagskontekst
+        self._status("loading_orb",
+                     f"Henter historiske bars og beregner kontekst for {len(self.universe)} aktier...")
+
+        ok_count = 0
         fail_tickers = []
+        today = datetime.now(ET).date()
 
         for ticker in self.universe:
-            bars = await self.conn.get_historical_bars(
+            raw_bars = await self.conn.get_historical_bars(
                 ticker, duration="1 D", bar_size="5 mins", what_to_show="TRADES"
             )
-            if not bars:
+            if not raw_bars:
                 fail_tickers.append(ticker)
                 continue
 
-            orb_bars = [
-                b for b in bars
+            # Konvertér IBKR-bars til vores Bar-objekter
+            bars = [
+                Bar(
+                    timestamp=b["datetime"] if hasattr(b["datetime"], "tzinfo") and b["datetime"].tzinfo
+                              else ET.localize(b["datetime"]),
+                    open=float(b["open"]),
+                    high=float(b["high"]),
+                    low=float(b["low"]),
+                    close=float(b["close"]),
+                    volume=float(b["volume"]),
+                )
+                for b in raw_bars
                 if hasattr(b["datetime"], "time")
-                and dtime(9, 30) <= b["datetime"].time() <= dtime(9, 44)
             ]
-            if orb_bars:
-                self.orb_highs[ticker]   = max(b["high"] for b in orb_bars)
-                self.ticker_state[ticker] = "waiting"
-                self.avg_vols[ticker]  = sum(b["volume"] for b in bars if b["volume"] > 0) / max(len(bars), 1)
-                self.closes[ticker]    = [b["close"] for b in bars]
-                ok_count += 1
-                logger.info(f"  {ticker}: ORB={self.orb_highs[ticker]:.2f}  AvgVol={self.avg_vols[ticker]:.0f}")
 
-        msg = f"ORB klar for {ok_count}/{len(self.universe)} aktier"
+            # Send aktiv variant-config med så ORB-vindue mm. matcher
+            active_config = VARIANTS[self._variant_key]
+            context = self._strategy.build_day_context(ticker, bars, config=active_config)
+            if context is None:
+                fail_tickers.append(ticker)
+                continue
+
+            self._day_contexts[ticker] = context
+            self._strategy.entry.reset_for_day(today, context)
+            ok_count += 1
+            logger.info(
+                f"  {ticker}: ORB H={context['orb_high']:.2f} "
+                f"L={context['orb_low']:.2f}  AvgVol={context['avg_vol']:.0f}"
+            )
+
+        msg = f"Kontekst klar for {ok_count}/{len(self.universe)} aktier"
         if fail_tickers:
             msg += f" (ingen data: {', '.join(fail_tickers[:3])})"
-        self._status("orb_ready", f"✅ {msg} — Klar til handel kl. 09:45 ET (15:45 DK)")
+        self._status("orb_ready",
+                     f"✅ {msg} — Klar til handel kl. 09:45 ET (15:45 DK)")
 
-    # -----------------------------------------------------------------------
-    # Handels-loop
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
+    # Trading loop
+    # -------------------------------------------------------------
 
     async def _trading_loop(self):
         self._status("trading", "Overvåger markedet — venter på breakouts...")
         consecutive_errors = 0
 
-        self._status("trading", "Overvåger markedet — venter på breakouts...")
         while self.status == StrategyStatus.RUNNING:
             now_et = datetime.now(ET)
             t      = now_et.time()
@@ -287,9 +303,9 @@ class MomentumORB(BaseStrategy):
                 continue
 
             if t >= TRADE_END:
-                if self._position_data:
+                if self._positions:
                     self._status("trading", "Handelsdagens slut — lukker alle positioner")
-                    await self._close_all("tidsbaseret exit 10:30")
+                    await self._close_all("force_close 10:30")
                 wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
                 losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
                 self._status("done",
@@ -299,25 +315,28 @@ class MomentumORB(BaseStrategy):
                 self.status = StrategyStatus.STOPPED
                 break
 
-            self._status("trading", f"Overvåger {len(self.universe)} aktier — {datetime.now(ET).strftime('%H:%M:%S')} ET")
+            self._status("trading",
+                         f"Overvåger {len(self.universe)} aktier — "
+                         f"{datetime.now(ET).strftime('%H:%M:%S')} ET")
 
             if self._position_size_pct == 0.0:
-                self._status("orb_ready", "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
+                self._status("orb_ready",
+                             "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
                 await asyncio.sleep(60)
                 continue
+
             try:
                 for ticker in self.universe:
                     if self.status != StrategyStatus.RUNNING:
                         break
                     await self._check_ticker(ticker)
                 consecutive_errors = 0
-
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(f"Fejl i handels-loop: {e}")
-
                 if consecutive_errors >= 3:
-                    self._status("trading", f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
+                    self._status("trading",
+                                 f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
                     reconnected = await self._reconnect()
                     if reconnected:
                         consecutive_errors = 0
@@ -328,10 +347,6 @@ class MomentumORB(BaseStrategy):
                         break
 
             await asyncio.sleep(30)
-
-    # -----------------------------------------------------------------------
-    # Genforbinding
-    # -----------------------------------------------------------------------
 
     async def _reconnect(self) -> bool:
         for attempt in range(1, MAX_CONNECT_RETRIES + 1):
@@ -347,39 +362,19 @@ class MomentumORB(BaseStrategy):
                 await asyncio.sleep(CONNECT_RETRY_DELAY)
         return False
 
-    # -----------------------------------------------------------------------
-    # RSI
-    # -----------------------------------------------------------------------
-
-    def _rsi(self, closes: list[float], period: int = 14) -> float:
-        if len(closes) < period + 1:
-            return 50.0
-        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-        gains  = sum(d for d in deltas[-period:] if d > 0) / period
-        losses = sum(-d for d in deltas[-period:] if d < 0) / period
-        if losses == 0:
-            return 100.0
-        return 100 - (100 / (1 + gains / losses))
-
-    # -----------------------------------------------------------------------
-    # Ticker tjek
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
+    # Ticker check — delegerer til strategiens entry og exit
+    # -------------------------------------------------------------
 
     async def _check_ticker(self, ticker: str):
         """
-        Break & Retest entry-logik (state machine).
-
-        Hver ticker bevæger sig én vej igennem disse tilstande:
-          waiting → breakout_detected → awaiting_retest → entered → done_for_day
-
-        Per ticker per dag tager vi MAKSIMALT én entry. Hvis stop loss → done_for_day.
-        Det elimerer spam og matcher pro-traders' tilgang.
+        Tjek én ticker:
+          - Hvis vi har position: opdatér exit-state og tjek exit
+          - Ellers: byg en Bar fra snapshot og kald strategy.entry
         """
-        # SAFETY GUARD — handler aldrig hvis position_size_pct er 0
         if self._position_size_pct == 0.0:
             return
 
-        # Hent snapshot
         snap = await self.conn.get_snapshot(ticker)
         if not snap:
             return
@@ -389,187 +384,121 @@ class MomentumORB(BaseStrategy):
         if price <= 0:
             return
 
-        # PRIS-FILTER — kun small caps $1-20
+        # Pris-filter — kun small caps $1-20
         if price < 1.0 or price > 20.0:
             return
 
-        # Skip tickers uden ORB beregnet
-        if ticker not in self.orb_highs:
+        context = self._day_contexts.get(ticker)
+        if context is None:
             return
 
-        state    = self.ticker_state.get(ticker, "waiting")
-        orb_high = self.orb_highs[ticker]
+        now_et = datetime.now(ET)
 
-        # ─────────────────────────────────────────────────────────
-        # STATE: ENTERED — håndtér exit-logik
-        # ─────────────────────────────────────────────────────────
-        if state == "entered":
-            if ticker not in self._position_data:
-                # Position blev lukket eksternt — markér som done
-                self.ticker_state[ticker] = "done_for_day"
-                return
+        # ── Har vi en åben position? ───────────────────────────
+        if ticker in self._positions:
+            position = self._positions[ticker]
+            # Opdatér state med ny pris (high_seen = price for snapshot)
+            self._strategy.exit.update(position, price, self._variant_key)
 
-            pos    = self._position_data[ticker]
-            stop   = pos.get("stop_loss", pos["entry_price"] * (1 - STOP_PCT))
-            target = pos["entry_price"] * (1 + TARGET_PCT)
-
-            if price <= stop:
-                await self._close(ticker, price, "stop loss")
-                self.ticker_state[ticker] = "done_for_day"
-            elif price >= target:
-                await self._close(ticker, price, "take profit")
-                self.ticker_state[ticker] = "done_for_day"
+            # Tjek exit
+            exit_decision = self._strategy.exit.check_exit_live(
+                position, price, now_et.time(), self._variant_key
+            )
+            if exit_decision is not None:
+                await self._close(ticker, exit_decision.exit_price, exit_decision.reason)
             return
 
-        # ─────────────────────────────────────────────────────────
-        # STATE: DONE_FOR_DAY — gør intet
-        # ─────────────────────────────────────────────────────────
-        if state == "done_for_day":
-            return
+        # ── Ingen position: konvertér snapshot til Bar og kald entry ──
+        # Vi laver en "pseudo-bar" baseret på snapshot — strategien forventer
+        # OHLC, men i live har vi kun last price. high=low=close=open=price.
+        # Entry-engine bruger primært close og volume.
+        pseudo_bar = Bar(
+            timestamp=now_et,
+            open=price, high=price, low=price, close=price,
+            volume=volume,
+        )
 
-        # ─────────────────────────────────────────────────────────
-        # STATE: WAITING — leder efter første breakout
-        # ─────────────────────────────────────────────────────────
-        if state == "waiting":
-            avg_vol = self.avg_vols.get(ticker, 0)
-            rsi     = self._rsi(self.closes.get(ticker, []))
+        signal = self._strategy.entry.check_entry(ticker, pseudo_bar, context)
+        if signal is not None:
+            await self._open(signal)
 
-            if (price > orb_high
-                    and volume >= avg_vol * VOL_MULT
-                    and rsi < 80
-                    and avg_vol > 0):
-                # Breakout detekteret — IKKE entry endnu, vent på retest
-                self.ticker_state[ticker]  = "breakout_detected"
-                self.breakout_time[ticker] = datetime.now(ET)
-                await self._log(f"📊 {ticker}: Breakout detekteret @ ${price:.2f} — venter på retest")
-            return
+    # -------------------------------------------------------------
+    # Position open/close — delegerer til strategy.exit
+    # -------------------------------------------------------------
 
-        # ─────────────────────────────────────────────────────────
-        # STATE: BREAKOUT_DETECTED — venter på pullback til ORB-niveau
-        # ─────────────────────────────────────────────────────────
-        if state == "breakout_detected":
-            # Timeout — hvis ingen pullback inden for 5 min, drop dette breakout
-            elapsed = (datetime.now(ET) - self.breakout_time[ticker]).total_seconds()
-            if elapsed > 300:  # 5 minutter
-                self.ticker_state[ticker] = "waiting"
-                await self._log(f"⏱ {ticker}: Ingen pullback inden 5 min — venter på nyt breakout")
-                return
-
-            # Pullback betyder at prisen er TILBAGE PÅ eller UNDER ORB-high
-            # (en lille tolerance på 0.1% for at fange pris præcis ved niveauet)
-            if price <= orb_high * 1.001:
-                self.ticker_state[ticker] = "awaiting_retest"
-                self.retest_low[ticker]   = price   # foreløbig low — opdateres mens vi venter
-                await self._log(f"📉 {ticker}: Pullback til ${price:.2f} — afventer retest-bekræftelse")
-            return
-
-        # ─────────────────────────────────────────────────────────
-        # STATE: AWAITING_RETEST — venter på bounce-bekræftelse
-        # ─────────────────────────────────────────────────────────
-        if state == "awaiting_retest":
-            # Track det laveste punkt under pullback — bruges som stop loss
-            if price < self.retest_low[ticker]:
-                self.retest_low[ticker] = price
-
-            # Bekræftet retest: prisen er bounced TILBAGE OVER ORB-high niveau
-            # Det er pro-tilgangen: vent på at "broken resistance bliver ny support"
-            if price > orb_high:
-                # Stop loss = lige under retest-low (med lille buffer)
-                stop_loss = self.retest_low[ticker] * 0.998
-
-                await self._log(
-                    f"✅ {ticker}: Retest bekræftet @ ${price:.2f} "
-                    f"(low: ${self.retest_low[ticker]:.2f}, stop: ${stop_loss:.2f})"
-                )
-                await self._open(ticker, price, stop_loss=stop_loss)
-                # State sættes til "entered" inde i _open hvis det lykkes
-            return
-
-    # -----------------------------------------------------------------------
-    # Åbn position
-    # -----------------------------------------------------------------------
-
-    async def _open(self, ticker: str, price: float, stop_loss: float = None):
-        """
-        Åbn long position med dynamisk eller % stop loss.
-
-        Hvis stop_loss er angivet (fra retest-detektion), bruges den.
-        Ellers falder vi tilbage på % stop fra entry (gammel adfærd, brugt af _close_all osv.).
-        """
-        # SAFETY GUARD — sidste linje før ordre afgives
+    async def _open(self, signal):
+        """Åbn position baseret på EntrySignal fra strategy.entry."""
         if self._position_size_pct == 0.0:
-            logger.warning(f"BLOKERET: forsøg på at åbne {ticker} med position_size_pct=0")
+            logger.warning(f"BLOKERET: forsøg på at åbne {signal.ticker} med position_size_pct=0")
             return
 
-        # Brug max_position_size fra config hvis den findes, ellers default
         capital_per_trade = getattr(self.config, "max_position_size", CAPITAL_PER_TRADE) or CAPITAL_PER_TRADE
-        capital           = capital_per_trade * self._position_size_pct
-        shares            = int(capital / price)
+        capital  = capital_per_trade * self._position_size_pct
+        shares   = int(capital / signal.entry_price)
         if shares <= 0:
             return
 
         order = OrderRequest(
             strategy_name=self.name,
-            ticker=ticker,
+            ticker=signal.ticker,
             action="BUY",
             quantity=shares,
             order_type="MKT",
             asset_class="equity",
-            reason=f"Break & Retest entry @ ${price:.2f}",
+            reason=f"Break & Retest entry @ ${signal.entry_price:.2f}",
         )
-
-        # Brug request_order kun hvis RiskManager er tilknyttet
         if self._risk_manager:
             approved = await self.request_order(order)
             if not approved:
                 return
-        
-        result = await self.conn.place_paper_order(ticker, "BUY", shares)
-        if result:
-            # Beregn endelig stop loss: brug retest-baseret hvis sat, ellers fallback til %
-            final_stop = stop_loss if stop_loss is not None else price * (1 - STOP_PCT)
 
-            self._position_data[ticker] = {
-                "ticker":      ticker,
-                "entry_price": price,
-                "shares":      shares,
-                "entry_time":  datetime.now(ET).strftime("%H:%M:%S"),
-                "stop_loss":   final_stop,
-            }
-            self.record_position_opened(ticker, price, shares, "long")
-
-            # Skift state machine til entered
-            self.ticker_state[ticker] = "entered"
-
-            await self._log(
-                f"📈 {ticker}: Position åbnet @ ${price:.2f} "
-                f"(stop: ${final_stop:.2f}, target: ${price * (1 + TARGET_PCT):.2f})"
-            )
-            self.record_position_opened(ticker, price, shares, "long")
-
-            if self._broadcast_fn:
-                await self._broadcast_fn({
-                    "type":   "algo_trade",
-                    "action": "buy",
-                    "ticker": ticker,
-                    "price":  price,
-                    "shares": shares,
-                    "time":   datetime.now(ET).strftime("%H:%M:%S"),
-                })
-            self._status("trading",
-                         f"📈 Købt {shares} {ticker} @ ${price:.2f} | "
-                         f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
-
-    # -----------------------------------------------------------------------
-    # Luk position
-    # -----------------------------------------------------------------------
-
-    async def _close(self, ticker: str, price: float, reason: str):
-        if ticker not in self._position_data:
+        result = await self.conn.place_paper_order(signal.ticker, "BUY", shares)
+        if not result:
             return
 
-        pos    = self._position_data.pop(ticker)
-        shares = pos["shares"]
+        # Lad strategien skabe Position med dens egen exit-state
+        position = self._strategy.exit.open_position(signal, shares, self._variant_key)
+        self._positions[signal.ticker] = position
+
+        # UI-kompatibel struktur (LiveAlgo.tsx forventer dette)
+        self._position_data[signal.ticker] = {
+            "ticker":      signal.ticker,
+            "entry_price": signal.entry_price,
+            "shares":      shares,
+            "entry_time":  signal.entry_time.strftime("%H:%M:%S"),
+            "stop_loss":   position.state.stop,
+        }
+        self.record_position_opened(signal.ticker, signal.entry_price, shares, "long")
+
+        variant = VARIANTS[self._variant_key]
+        await self._log(
+            f"📈 {signal.ticker}: Position åbnet @ ${signal.entry_price:.2f} "
+            f"(stop: ${position.state.stop:.2f}, target: ${position.state.target:.2f}, "
+            f"variant: {variant.name})"
+        )
+
+        if self._broadcast_fn:
+            await self._broadcast_fn({
+                "type":   "algo_trade",
+                "action": "buy",
+                "ticker": signal.ticker,
+                "price":  signal.entry_price,
+                "shares": shares,
+                "time":   signal.entry_time.strftime("%H:%M:%S"),
+            })
+        self._status("trading",
+                     f"📈 Købt {shares} {signal.ticker} @ ${signal.entry_price:.2f} | "
+                     f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
+
+    async def _close(self, ticker: str, price: float, reason: str):
+        """Luk position og bogfør trade."""
+        if ticker not in self._positions:
+            return
+
+        position = self._positions.pop(ticker)
+        pos_data = self._position_data.pop(ticker, None)
+
+        shares = position.shares
         pnl    = self.record_position_closed(ticker, price)
         self.total_pnl += pnl
 
@@ -577,13 +506,13 @@ class MomentumORB(BaseStrategy):
 
         trade = {
             "ticker":      ticker,
-            "entry_price": pos["entry_price"],
+            "entry_price": position.entry_price,
             "exit_price":  price,
             "shares":      shares,
             "pnl":         round(pnl, 2),
-            "pnl_pct":     round((price - pos["entry_price"]) / pos["entry_price"] * 100, 2),
+            "pnl_pct":     round((price - position.entry_price) / position.entry_price * 100, 2),
             "reason":      reason,
-            "entry_time":  pos["entry_time"],
+            "entry_time":  position.entry_time.strftime("%H:%M:%S"),
             "exit_time":   datetime.now(ET).strftime("%H:%M:%S"),
         }
         self.trades.append(trade)
@@ -598,17 +527,37 @@ class MomentumORB(BaseStrategy):
                      f"P&L: ${self.total_pnl:+,.2f}")
 
     async def _close_all(self, reason: str):
-        for ticker in list(self._position_data.keys()):
+        for ticker in list(self._positions.keys()):
             snap  = await self.conn.get_snapshot(ticker)
             price = snap["last"] if snap and snap.get("last") \
-                    else self._position_data[ticker]["entry_price"]
+                    else self._positions[ticker].entry_price
             await self._close(ticker, price, reason)
 
-    # -----------------------------------------------------------------------
-    # Strategy Card
-    # -----------------------------------------------------------------------
+    # -------------------------------------------------------------
+    # Strategy Card — bevaret for UI
+    # -------------------------------------------------------------
 
     def get_strategy_card(self) -> dict:
+        v = VARIANTS[self._variant_key]
+        exit_lines = [
+            f"Variant aktiv: {v.name}",
+            f"Stop mode:    {v.stop_mode}" + (f" ({v.fixed_stop_pct*100:.0f}%)"
+                                              if v.stop_mode == 'fixed_pct' else ""),
+        ]
+        if v.breakeven_enabled:
+            exit_lines.append(f"Break-even:   ved +{v.breakeven_trigger_pct*100:.0f}%")
+        else:
+            exit_lines.append("Break-even:   deaktiveret")
+        if v.trail_enabled:
+            exit_lines.append(f"Trail:        aktiveres ved +{v.trail_activate_pct*100:.0f}%, "
+                              f"{v.trail_distance_pct*100:.1f}% under highest_high")
+        else:
+            exit_lines.append("Trail:        deaktiveret")
+        exit_lines.append(f"Target:       +{v.target_pct*100:.0f}% (fjernes i stage 3)")
+        exit_lines.append(f"Force-close:  {TRADE_END.strftime('%H:%M')} ET")
+
+        from strategies.momentum_orb.config import VOL_MULT, RSI_MAX
+
         return {
             "name":        self.name,
             "description": self.description,
@@ -618,14 +567,11 @@ class MomentumORB(BaseStrategy):
             "entry": [
                 "Pris bryder ORB High (første 15 min: 09:30-09:44 ET)",
                 f"Volumen >= {VOL_MULT}x gennemsnit",
-                "RSI(14) < 80",
+                f"RSI(14) < {RSI_MAX}",
+                "Break & retest bekræftelse",
                 f"Handelsvindue: {TRADE_START.strftime('%H:%M')}-{TRADE_END.strftime('%H:%M')} ET",
             ],
-            "exit": [
-                f"Stop loss:    -{STOP_PCT*100:.0f}% fra entry",
-                f"Take profit:  +{TARGET_PCT*100:.0f}% fra entry",
-                f"Tidsbaseret:  {TRADE_END.strftime('%H:%M')} ET (market order)",
-            ],
+            "exit": exit_lines,
             "market_conditions": [
                 f"VIX < {VIX_MIN}          → Ingen handel",
                 f"VIX {VIX_MIN}-{VIX_REDUCED}      → Normal (100% position size)",
@@ -645,14 +591,15 @@ class MomentumORB(BaseStrategy):
 
 # ── Kør direkte fra terminal ──────────────────────────────────
 async def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
 
+    variant = VARIANTS[LIVE_VARIANT_KEY]
     print("\n🤖 Momentum ORB — Paper Trading")
     print("══════════════════════════════════════")
-    print(f"Stop Loss:    -{STOP_PCT*100:.0f}%")
-    print(f"Take Profit:  +{TARGET_PCT*100:.0f}%")
-    print(f"Volumen:      {VOL_MULT}x gennemsnit")
-    print(f"Tidsvindue:   {TRADE_START.strftime('%H:%M')}-{TRADE_END.strftime('%H:%M')} ET")
+    print(f"Aktiv variant: {variant.name}")
+    print(f"Stop mode:     {variant.stop_mode}")
+    print(f"Tidsvindue:    {TRADE_START.strftime('%H:%M')}-{TRADE_END.strftime('%H:%M')} ET")
     print("══════════════════════════════════════\n")
 
     conn = IBKRConnection(paper_trading=True)
@@ -695,6 +642,7 @@ async def main():
     print(f"\nTotal P&L: ${algo.total_pnl:+,.2f}")
     print(f"Handler:   {len(algo.trades)}")
     conn.disconnect()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
