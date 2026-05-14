@@ -905,6 +905,24 @@ async def account_info():
         "autostart_strategies":   identity.autostart_strategies,
     }
 
+@app.get("/peers")
+async def get_peers():
+    """Returnér listen af kendte maskiner i Trading Dash-netværket.
+    
+    Frontend bruger denne til at vide hvilke backends den skal kalde.
+    Ingen auth-krav — det er kun maskinnavn/IP, intet hemmeligt.
+    """
+    import json
+    peers_path = Path(__file__).parent / "peers.json"
+    if not peers_path.exists():
+        return {"peers": []}
+    try:
+        with open(peers_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        return {"peers": [], "error": str(e)}
+
 # Tracker hvornår sidste account_snapshot blev skrevet til journal —
 # så vi ikke logger ved hver auto-refresh, kun én gang i timen.
 _last_snapshot_journaled_at: datetime | None = None
@@ -1038,6 +1056,24 @@ async def studio_index():
     if not studio_path.exists():
         return {"error": "Studio findes ikke — placeholder mangler i backend/studio/"}
     return FileResponse(studio_path)
+
+@app.get("/studio/{filename}")
+async def studio_static(filename: str):
+    """Servér statiske filer fra studio/-mappen (fx dev_config.js).
+    
+    Begrænset til kendte filtyper for sikkerhed — vi vil ikke risikere
+    at servere fx account.yaml hvis nogen gætter stien.
+    """
+    # Whitelist af tilladte filer
+    allowed = {"dev_config.js"}
+    if filename not in allowed:
+        return {"error": "File not found"}, 404
+    
+    file_path = Path(__file__).parent / "studio" / filename
+    if not file_path.exists():
+        return {"error": "File not found"}, 404
+    
+    return FileResponse(file_path)
 
 # ── Analyse-side endpoint ──────────────────────────
 @app.get("/analysis/summary", dependencies=[Depends(require_studio_auth)])

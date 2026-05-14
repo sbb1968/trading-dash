@@ -90,3 +90,5 @@ backend/data/exploration_results_*.csv
 *_backup.py
 *.before_*
 
+
+backend/studio/dev_config.js

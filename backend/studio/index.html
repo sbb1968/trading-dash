@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="da">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Dash Studio</title>
     <style>
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -15,6 +19,7 @@
             display: flex;
             flex-direction: column;
         }
+
         header {
             background: #2a2a2a;
             padding: 16px 24px;
@@ -23,8 +28,17 @@
             justify-content: space-between;
             align-items: center;
         }
-        header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-        .identity { font-size: 13px; color: #aaa; }
+
+        header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .identity {
+            font-size: 13px;
+            color: #aaa;
+        }
 
         nav {
             background: #252525;
@@ -33,6 +47,7 @@
             gap: 4px;
             border-bottom: 1px solid #444;
         }
+
         nav button {
             background: none;
             border: none;
@@ -42,13 +57,23 @@
             cursor: pointer;
             border-bottom: 2px solid transparent;
         }
+
         nav button.active {
             color: #fff;
             border-bottom-color: #4a9eff;
         }
-        nav button:hover:not(.active) { color: #ddd; }
 
-        main { flex: 1; padding: 32px; max-width: 1200px; width: 100%; margin: 0 auto; }
+        nav button:hover:not(.active) {
+            color: #ddd;
+        }
+
+        main {
+            flex: 1;
+            padding: 32px;
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+        }
 
         .section-title {
             font-size: 13px;
@@ -57,6 +82,7 @@
             color: #888;
             margin-bottom: 12px;
         }
+
         .card {
             background: #232323;
             border: 1px solid #333;
@@ -70,6 +96,7 @@
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 24px;
         }
+
         .stat-label {
             font-size: 12px;
             text-transform: uppercase;
@@ -77,22 +104,38 @@
             color: #888;
             margin-bottom: 6px;
         }
+
         .stat-value {
             font-size: 24px;
             font-weight: 600;
             font-variant-numeric: tabular-nums;
         }
-        .stat-value.positive { color: #4ade80; }
-        .stat-value.negative { color: #f87171; }
-        .stat-value.muted    { color: #888; }
 
-        table { width: 100%; border-collapse: collapse; }
-        th, td {
+        .stat-value.positive {
+            color: #4ade80;
+        }
+
+        .stat-value.negative {
+            color: #f87171;
+        }
+
+        .stat-value.muted {
+            color: #888;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
             text-align: left;
             padding: 10px 12px;
             border-bottom: 1px solid #333;
             font-size: 14px;
         }
+
         th {
             color: #888;
             font-weight: 500;
@@ -100,9 +143,19 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        td.num { text-align: right; font-variant-numeric: tabular-nums; }
-        td.positive { color: #4ade80; }
-        td.negative { color: #f87171; }
+
+        td.num {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        td.positive {
+            color: #4ade80;
+        }
+
+        td.negative {
+            color: #f87171;
+        }
 
         .controls {
             display: flex;
@@ -114,6 +167,7 @@
             font-size: 13px;
             color: #888;
         }
+
         .controls button {
             background: #333;
             border: 1px solid #555;
@@ -123,7 +177,10 @@
             cursor: pointer;
             font-size: 13px;
         }
-        .controls button:hover { background: #3a3a3a; }
+
+        .controls button:hover {
+            background: #3a3a3a;
+        }
 
         .badge {
             display: inline-block;
@@ -135,8 +192,16 @@
             letter-spacing: 0.5px;
             margin-left: 8px;
         }
-        .badge.paper { background: #4a5568; color: #fff; }
-        .badge.live  { background: #c05621; color: #fff; }
+
+        .badge.paper {
+            background: #4a5568;
+            color: #fff;
+        }
+
+        .badge.live {
+            background: #c05621;
+            color: #fff;
+        }
 
         .error {
             background: #4a1a1a;
@@ -145,7 +210,13 @@
             padding: 16px;
             border-radius: 6px;
         }
-        .empty { color: #666; font-style: italic; padding: 24px; text-align: center; }
+
+        .empty {
+            color: #666;
+            font-style: italic;
+            padding: 24px;
+            text-align: center;
+        }
 
         code {
             background: #2a2a2a;
@@ -159,6 +230,7 @@
             gap: 4px;
             margin-bottom: 24px;
         }
+
         .period-tabs button {
             background: #2a2a2a;
             border: 1px solid #3a3a3a;
@@ -168,12 +240,16 @@
             cursor: pointer;
             font-size: 13px;
         }
+
         .period-tabs button.active {
             background: #1a4a8a;
             border-color: #4a9eff;
             color: #fff;
         }
-        .period-tabs button:hover:not(.active) { background: #333; }
+
+        .period-tabs button:hover:not(.active) {
+            background: #333;
+        }
 
         .placeholder-text {
             color: #888;
@@ -184,14 +260,21 @@
         /* Login overlay */
         #login-overlay {
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             background: #1a1a1a;
             z-index: 1000;
             display: flex;
             justify-content: center;
             align-items: center;
         }
-        #login-overlay.hidden { display: none; }
+
+        #login-overlay.hidden {
+            display: none;
+        }
+
         .login-box {
             background: #232323;
             border: 1px solid #333;
@@ -201,11 +284,13 @@
             max-width: 360px;
             text-align: center;
         }
+
         .login-box h2 {
             margin: 0 0 24px;
             font-size: 18px;
             font-weight: 600;
         }
+
         .login-box input {
             width: 100%;
             padding: 12px 14px;
@@ -216,10 +301,12 @@
             font-size: 14px;
             margin-bottom: 12px;
         }
+
         .login-box input:focus {
             outline: none;
             border-color: #4a9eff;
         }
+
         .login-box button {
             width: 100%;
             padding: 12px;
@@ -231,16 +318,40 @@
             font-weight: 600;
             cursor: pointer;
         }
-        .login-box button:hover { background: #5aabff; }
-        .login-box button:disabled { background: #555; cursor: wait; }
+
+        .login-box button:hover {
+            background: #5aabff;
+        }
+
+        .login-box button:disabled {
+            background: #555;
+            cursor: wait;
+        }
+
         .login-error {
             color: #f87171;
             font-size: 13px;
             margin-top: 12px;
             min-height: 18px;
         }
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .status-dot.online  { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.6); }
+        .status-dot.offline { background: #666; }
+
+        table th { color: #aaa; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        table td { padding: 12px 8px; border-bottom: 1px solid #2a2a2a; font-size: 14px; }
+        table tr:last-child td { border-bottom: none; }
     </style>
+    <script src="/studio/dev_config.js" onerror="console.log('[DEV] Ingen dev_config.js — prod mode aktiv')"></script>
 </head>
+
 <body>
     <div id="login-overlay">
         <div class="login-box">
@@ -256,7 +367,7 @@
     </header>
 
     <nav id="nav">
-        <button data-page="account"  class="active">Konto</button>
+        <button data-page="account" class="active">Konto</button>
         <button data-page="strategies">Strategier</button>
         <button data-page="analysis">Analyse</button>
         <button data-page="backtest">Backtest</button>
@@ -265,7 +376,9 @@
 
     <main>
         <div id="content">
-            <div class="card"><div class="empty">Indlæser...</div></div>
+            <div class="card">
+                <div class="empty">Indlæser...</div>
+            </div>
         </div>
     </main>
 
@@ -317,8 +430,8 @@
 
         async function attemptLogin() {
             const passwordInput = document.getElementById("login-password");
-            const button        = document.getElementById("login-button");
-            const errorDiv      = document.getElementById("login-error");
+            const button = document.getElementById("login-button");
+            const errorDiv = document.getElementById("login-error");
 
             const password = passwordInput.value;
             if (!password) {
@@ -362,13 +475,38 @@
         });
 
         async function checkAuthAndStart() {
+            // DEV MODE — kun aktivt hvis dev_config.js er loaded
+            const devMode = window.DEV_CONFIG?.DEV_MODE === true;
+            if (devMode) {
+                if (!getToken()) {
+                    try {
+                        const res = await fetch("/auth/login", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ password: window.DEV_CONFIG.DEV_PASSWORD }),
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            setToken(data.token);
+                        } else {
+                            console.error("[DEV] Auto-login fejlede — tjek password");
+                        }
+                    } catch (e) {
+                        console.error("[DEV] Auto-login fejl:", e);
+                    }
+                }
+                hideLogin();
+                loadIdentity();
+                switchPage("account");
+                return;
+            }
+
+            // PROD MODE — original auth-flow
             const token = getToken();
             if (!token) {
                 showLogin();
                 return;
             }
-
-            // Verificer at token stadig er gyldig
             try {
                 const res = await fetch("/auth/check", {
                     headers: { Authorization: `Bearer ${token}` }
@@ -378,7 +516,6 @@
                     showLogin();
                     return;
                 }
-                // Token er gyldig — hent identitet og vis appen
                 hideLogin();
                 loadIdentity();
                 switchPage("account");
@@ -461,16 +598,16 @@
             const content = document.getElementById("content");
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
 
-            if      (page === "account")    showAccount();
-            else if (page === "analysis")   showAnalysis();
+            if (page === "account") showAccount();
+            else if (page === "analysis") showAnalysis();
             else if (page === "strategies") showStrategies();
-            else                            showPlaceholder(page);
+            else showPlaceholder(page);
         }
 
         function showPlaceholder(page) {
             const labels = {
-                backtest:   "Backtest",
-                log:        "Event-log",
+                backtest: "Backtest",
+                log: "Event-log",
             };
             document.getElementById("content").innerHTML = `
                 <div class="card">
@@ -495,7 +632,7 @@
         async function loadSnapshot(forceJournal = false) {
             const url = "/account/snapshot" + (forceJournal ? "?force_journal=true" : "");
             try {
-                const res  = await authFetch(url);
+                const res = await authFetch(url);
                 const data = await res.json();
                 if (!data.ok) {
                     renderAccountError(data.error || "Ukendt fejl");
@@ -607,7 +744,7 @@
 
         async function loadStrategiesStatus() {
             try {
-                const res  = await authFetch("/algo/status");
+                const res = await authFetch("/algo/status");
                 const data = await res.json();
                 renderStrategies(data);
             } catch (e) {
@@ -651,7 +788,7 @@
             ` : "";
 
             const startDisabled = data.running ? "disabled" : "";
-            const stopDisabled  = !data.running ? "disabled" : "";
+            const stopDisabled = !data.running ? "disabled" : "";
 
             document.getElementById("content").innerHTML = `
                 <div class="section-title">Momentum ORB ${statusBadge}</div>
@@ -682,7 +819,7 @@
 
         async function startAlgo() {
             try {
-                const res  = await authFetch("/algo/start", { method: "POST" });
+                const res = await authFetch("/algo/start", { method: "POST" });
                 const data = await res.json();
                 console.log("Start:", data);
                 // Status polles automatisk hvert 2. sek og opdaterer UI
@@ -693,7 +830,7 @@
 
         async function stopAlgo() {
             try {
-                const res  = await authFetch("/algo/stop", { method: "POST" });
+                const res = await authFetch("/algo/stop", { method: "POST" });
                 const data = await res.json();
                 console.log("Stop:", data);
             } catch (e) {
@@ -706,13 +843,158 @@
         // ─────────────────────────────────────────────────────
         let analysisPeriod = "all";
 
+        // ─────────────────────────────────────────────────────
+        // Analyse — multi-maskine overblik
+        // ─────────────────────────────────────────────────────
+        let analysisPeers = null;  // cache peers efter første hent
+
         async function showAnalysis() {
-            await loadAnalysis();
+            const content = document.getElementById("content");
+            content.innerHTML = `
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h2 style="margin:0; font-size:18px;">Analyse — alle maskiner</h2>
+                        <button id="analysis-refresh" style="background:#1a4a8a; border:1px solid #4a9eff; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:13px;">
+                            ↻ Opdater
+                        </button>
+                    </div>
+                    <div id="analysis-body">
+                        <div class="empty">Henter data...</div>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById("analysis-refresh").addEventListener("click", loadAnalysisData);
+            await loadAnalysisData();
+        }
+
+        async function loadAnalysisData() {
+            const body = document.getElementById("analysis-body");
+            if (!body) return;
+
+            // Hent peers-listen (lokalt — kender ikke andre maskiner endnu)
+            if (!analysisPeers) {
+                try {
+                    const res = await fetch("/peers");
+                    const data = await res.json();
+                    analysisPeers = (data.peers || []).filter(p => p.enabled);
+                } catch (e) {
+                    body.innerHTML = `<div class="error">Kunne ikke hente peers: ${e.message}</div>`;
+                    return;
+                }
+            }
+
+            if (analysisPeers.length === 0) {
+                body.innerHTML = `<div class="empty">Ingen aktive maskiner i peers.json</div>`;
+                return;
+            }
+
+            // Vis loading-tilstand med peers-navne
+            body.innerHTML = `
+                <div class="empty">
+                    Kontakter ${analysisPeers.length} maskiner...<br>
+                    <span style="font-size:11px; color:#666;">${analysisPeers.map(p => p.name).join(" · ")}</span>
+                </div>
+            `;
+
+            // Kald alle peers parallelt — 4 sek timeout per maskine
+            const results = await Promise.all(
+                analysisPeers.map(p => fetchPeerData(p))
+            );
+
+            renderAnalysisTable(results);
+        }
+
+        async function fetchPeerData(peer) {
+            const result = {
+                peer: peer,
+                online: false,
+                health: null,
+                account: null,
+                error: null,
+            };
+
+            // Hent /health (ingen auth nødvendig)
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const res = await fetch(`${peer.url}/health`, { signal: controller.signal });
+                clearTimeout(timeoutId);
+
+                if (res.ok) {
+                    result.health = await res.json();
+                    result.online = true;
+                } else {
+                    result.error = `HTTP ${res.status}`;
+                }
+            } catch (e) {
+                result.error = e.name === "AbortError" ? "Timeout" : "Offline";
+                return result;
+            }
+
+            // Hent /account/snapshot (kræver auth — kun hvis online og IBKR forbundet)
+            // Note: vi har ikke token til REMOTE backends endnu — det kommer senere
+            // For nu viser vi kun de data /health giver os
+            return result;
+        }
+
+        function renderAnalysisTable(results) {
+            const body = document.getElementById("analysis-body");
+
+            const rows = results.map(r => {
+                if (!r.online) {
+                    return `
+                        <tr>
+                            <td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host || "—"}</span></td>
+                            <td><span class="status-dot offline"></span> ${r.error || "Offline"}</td>
+                            <td colspan="5" class="muted">—</td>
+                        </tr>
+                    `;
+                }
+
+                const h = r.health;
+                const ibkr = h.ibkr_connected ? "✓" : "—";
+                const algo = h.algo_running ? "▶ Kører" : "—";
+
+                return `
+                    <tr>
+                        <td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host}</span></td>
+                        <td><span class="status-dot online"></span> Online</td>
+                        <td>${ibkr}</td>
+                        <td>${algo}</td>
+                        <td>${h.clients ?? "—"}</td>
+                        <td>${h.journal_events ?? "—"}</td>
+                        <td style="font-size:11px; color:#888;">${h.time ? new Date(h.time).toLocaleTimeString("da-DK") : "—"}</td>
+                    </tr>
+                `;
+            }).join("");
+
+            body.innerHTML = `
+                <table style="width:100%; border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #333; text-align:left;">
+                            <th style="padding:10px 8px;">Maskine</th>
+                            <th style="padding:10px 8px;">Status</th>
+                            <th style="padding:10px 8px;">IBKR</th>
+                            <th style="padding:10px 8px;">Algo</th>
+                            <th style="padding:10px 8px;">Clients</th>
+                            <th style="padding:10px 8px;">Journal</th>
+                            <th style="padding:10px 8px;">Sidst kontaktet</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+                <div style="margin-top:16px; font-size:12px; color:#666;">
+                    Auth bliver tilføjet senere — viser kun offentlige /health-data for nu.
+                </div>
+            `;
         }
 
         async function loadAnalysis() {
             try {
-                const res  = await authFetch(`/analysis/summary?period=${analysisPeriod}`);
+                const res = await authFetch(`/analysis/summary?period=${analysisPeriod}`);
                 const data = await res.json();
                 if (data.error) {
                     renderAnalysisError(data.error);
@@ -735,9 +1017,9 @@
         function renderAnalysis(data) {
             const periodLabels = {
                 today: "I dag",
-                "7d":  "Sidste 7 dage",
+                "7d": "Sidste 7 dage",
                 "30d": "Sidste 30 dage",
-                all:   "Alt",
+                all: "Alt",
             };
 
             const periodTabs = ["today", "7d", "30d", "all"].map(p => `
@@ -880,4 +1162,5 @@
         checkAuthAndStart();
     </script>
 </body>
+
 </html>
