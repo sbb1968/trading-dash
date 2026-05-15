@@ -8,8 +8,8 @@ export type WindowId =
   | "level2" | "timesales" | "journal" | "livealgo"
   | "alerts"
   | "algohub" | "strategymanager" | "algoperformance" | "algojournal"
-  | "marketoverview";
-;
+  | "marketoverview"
+  | "account";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   scanner1:     "Small Cap Scanner",
@@ -38,6 +38,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   algoperformance: "Algo Performance",
   algojournal:     "Algo Journal",
   marketoverview:  "marketoverview",
+  account:         "Konto",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────

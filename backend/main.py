@@ -16,6 +16,8 @@ from scheduler    import AlgoScheduler
 
 from journal          import Journal
 
+from finnhub_news import FinnhubNewsFeed
+
 from accounts import identity
 
 from fastapi.responses import FileResponse
@@ -77,6 +79,8 @@ ibkr_conn      = None
 live_feed      = None
 live_feed_task = None
 ibkr_connected = False
+finnhub_feed:      FinnhubNewsFeed | None = None
+finnhub_feed_task                          = None
 journal = Journal("trading_dash.db")
 # ── Autonom drift: watchdog + scheduler ───────────────────────
 tws_watchdog: TWSWatchdog | None     = None
@@ -255,6 +259,7 @@ async def startup():
 
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
+    asyncio.create_task(start_finnhub_feed())
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
@@ -305,6 +310,17 @@ async def startup():
         priority = 2,
         tags     = "robot,green_circle",
     )
+
+async def start_finnhub_feed():
+    """Start Finnhub news polling i baggrunden."""
+    global finnhub_feed, finnhub_feed_task
+
+    try:
+        finnhub_feed      = FinnhubNewsFeed(broadcast)
+        finnhub_feed_task = asyncio.create_task(finnhub_feed.start())
+        print("[FinnhubNews] Feed startet — poller hver 5. minut")
+    except Exception as e:
+        print(f"[FinnhubNews] Kunne ikke starte: {e}")
 
 # ── Shutdown ──────────────────────────────────────────────────
 @app.on_event("shutdown")
@@ -1047,6 +1063,107 @@ async def account_snapshot(force_journal: bool = False):
             "ok":    False,
             "error": f"Fejl ved hentning: {str(e)}",
         }
+    
+# ── /account/dash-snapshot — Trading Dash konto-data ──────────
+# Samme data som /account/snapshot men uden auth-krav.
+# Trading Dash kører kun lokalt på 127.0.0.1 og har ikke login.
+@app.get("/account/dash-snapshot")
+async def account_dash_snapshot():
+    """
+    Open snapshot endpoint til Trading Dash (lokal frontend).
+    Returnerer NLV, cash, P&L og åbne positioner beriget med live priser.
+    """
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        return {
+            "ok":    False,
+            "error": "IBKR ikke forbundet",
+        }
+
+    try:
+        import math
+
+        summary   = conn.get_account_summary()
+        positions = conn.get_positions()
+
+        # Saniter NaN/Inf fra summary
+        for k, v in summary.items():
+            try:
+                if math.isnan(float(v)) or math.isinf(float(v)):
+                    summary[k] = 0.0
+            except (ValueError, TypeError):
+                summary[k] = 0.0
+
+        def safe_float(v):
+            if v is None:
+                return None
+            try:
+                f = float(v)
+                if math.isnan(f) or math.isinf(f):
+                    return None
+                return f
+            except (ValueError, TypeError):
+                return None
+
+        # Hent alle priser parallelt med 2-sek timeout per ticker
+        async def fetch_price(ticker):
+            try:
+                snap = await asyncio.wait_for(conn.get_snapshot(ticker), timeout=2.0)
+                return safe_float(snap.get("last")) if snap else None
+            except (asyncio.TimeoutError, Exception):
+                return None
+
+        # Wrap hele gather i timeout — hvis markedet er lukket og IBKR
+        # ikke svarer, returnerer vi uden live priser i stedet for at hænge.
+        try:
+            prices = await asyncio.wait_for(
+                asyncio.gather(*[fetch_price(p["ticker"]) for p in positions]),
+                timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            print("[DashSnapshot] Timeout — markedet er lukket, returnerer uden live priser")
+            prices = [None] * len(positions)
+
+        enriched = []
+        for p, price in zip(positions, prices):
+            cost = safe_float(p["avg_cost"])
+            qty  = p["position"]
+
+            if price is not None and cost is not None and cost != 0:
+                pnl     = round((price - cost) * qty, 2)
+                pnl_pct = round((price - cost) / cost * 100, 2)
+            else:
+                pnl     = None
+                pnl_pct = None
+
+            enriched.append({
+                "ticker":     p["ticker"],
+                "position":   qty,
+                "avg_cost":   cost,
+                "last_price": price,
+                "pnl":        pnl,
+                "pnl_pct":    pnl_pct,
+            })
+
+        return {
+            "ok":              True,
+            "ibkr_account":    identity.ibkr_account,
+            "paper_trading":   identity.paper_trading,
+            "net_liquidation": summary["net_liquidation"],
+            "cash_balance":    summary["cash_balance"],
+            "unrealized_pnl":  summary["unrealized_pnl"],
+            "realized_pnl":    summary["realized_pnl"],
+            "positions":       enriched,
+            "checked_at":      datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        return {
+            "ok":    False,
+            "error": f"Fejl ved hentning: {str(e)}",
+        }
+
+
 
 @app.get("/studio")
 async def studio_index():

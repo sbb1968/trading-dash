@@ -92,3 +92,7 @@ backend/data/exploration_results_*.csv
 
 
 backend/studio/dev_config.js
+# Codebase-generator (lokalt værktøj)
+update_knowledge.py
+backend/update_knowledge.py
+codebase.md

@@ -18,6 +18,7 @@ import { LiveAlgo } from "./LiveAlgo";
 import { AlertsPanel } from "./Alertspanel";
 import { AlgoHub } from "./AlgoHub"; 
 import { MarketOverview } from "./MarketOverview";
+import { AccountPanel } from "./AccountPanel";
 
 
 // ── Konstanter ────────────────────────────────────────────────
@@ -54,6 +55,7 @@ const FONT_WINDOW_TYPES = [
   { id: "alerts",    label: "Pris/Nyheds Alerts" },
   { id: "algohub", label: "Algo Hub" },
   { id: "marketoverview", label: "Markedsoverblik" },
+  { id: "account",   label: "Konto" },
 ];
 
 const FONT_DEFAULTS = { title: 14, header: 11, content: 13 };
@@ -87,6 +89,7 @@ function getWindowType(id: WindowId): string {
   if (id === "alerts")       return "alerts";
   if (id === "algohub")      return "algohub";
   if (id === "marketoverview") return "marketoverview";
+  if (id === "account") return "account";
   return "scanner";
 }
 
@@ -211,9 +214,60 @@ function ScannerTable({ stocks, sortBy, selectedTicker, onSelectTicker, scannerI
       default:          return <td key={colId}>—</td>;
     }
   }
-
+  const [isMarketClosed, setIsMarketClosed] = useState(false);
+  useEffect(() => {
+    function update() {
+      const now = new Date();
+      const day = now.getDay();
+      const et  = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const mins = et.getHours() * 60 + et.getMinutes();
+      if (day === 0 || day === 6) { setIsMarketClosed(true); return; }
+      if (mins < 240 || mins >= 1200) { setIsMarketClosed(true); return; }
+      setIsMarketClosed(false);
+    }
+    update();
+    const interval = setInterval(update, 30000);
+    return () => clearInterval(interval);
+  }, []);
   return (
-    <div className="scanner-panel">
+    <div className="scanner-panel" style={{ position: "relative" }}>
+      {isMarketClosed && (
+        <div style={{
+          position: "absolute",
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.75)",
+          zIndex: 10,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+          padding: 20,
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            fontSize: 16,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: 6,
+          }}>
+            🌙 Marked lukket
+          </div>
+          <div style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+          }}>
+            Scanner aktiveres når NYSE/NASDAQ åbner
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+            marginTop: 4,
+          }}>
+            (15:30 dansk tid på hverdage)
+          </div>
+        </div>
+      )}
       <div className="scanner-scroll scanner-scroll-both">
         <table className="scanner-table">
           <thead>
@@ -265,7 +319,19 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     onAddTicker(t); setInput(""); setError("");
   }
 
-  const watchedStocks = stocks.filter(s => watchlist.includes(s.ticker));
+    // Vis alle watchlist-tickers, også dem uden live data
+    const watchedStocks = watchlist.map(ticker => {
+      const live = stocks.find(s => s.ticker === ticker);
+      return live ?? {
+        ticker,
+        price: 0,
+        change_percent: 0,
+        volume: 0,
+        float: "—",
+        rel_vol_daily: 0,
+        gap_percent: 0,
+      };
+    });
 
   function renderCell(stock: any, colId: string) {
     switch(colId) {
@@ -282,10 +348,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   return (
     <div className="watchlist-container">
       <div className="watchlist-add">
-        <input className="watchlist-input" type="text" placeholder="Tilføj ticker" value={input}
+        <input className="watchlist-input" type="text" placeholder="Tilføj ticker (tryk Enter)" value={input}
           onChange={e => { setInput(e.target.value.toUpperCase()); setError(""); }}
-          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} />
-        <button className="watchlist-btn" onClick={handleAdd}>+ Tilføj</button>
+          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} /> 
       </div>
       {error && <div className="watchlist-error">{error}</div>}
       <div className="watchlist-scroll">
@@ -327,8 +392,33 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
     ? watchlist.map(ticker => ({ ticker, items: filtered.filter(n => n.ticker === ticker) })).filter(g => g.items.length > 0)
     : null;
 
+  // Tjek om der findes nogen forsinkede nyheder — hvis ja vis advarsel
+  const hasDelayed = filtered.some(n => (n as any).delayed);
+
   return (
     <div className="newsroom-container">
+      {/* ── Forsinket-data advarsel ── */}
+      {hasDelayed && (
+        <div style={{
+          padding: "6px 10px",
+          background: "rgba(245, 158, 11, 0.15)",
+          borderBottom: "1px solid rgba(245, 158, 11, 0.5)",
+          color: "#f59e0b",
+          fontSize: 11,
+          fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 13 }}>⚠</span>
+          <span>
+            FORSINKET DATA — Finnhub gratis tier · nyheder er typisk 15-30 min gamle ·
+            ikke egnet til live momentum trading
+          </span>
+        </div>
+      )}
+
       <div className="newsroom-toolbar">
         <div className="newsroom-filters">
           <button className={`news-filter-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>Alle</button>
@@ -349,7 +439,10 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
                   <tbody>
                     {group.items.map(item => (
                       <tr key={item.id} className={[`news-row-${item.sentiment}`, item.isNew ? "news-row-new" : ""].join(" ")} onClick={() => onSelectTicker(item.ticker)}>
-                        <td className="news-time" style={{ width: "60px" }}>{item.time}</td>
+                        <td className="news-time" style={{ width: "60px" }}>
+                          {item.time}
+                          {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
+                        </td>
                         <td className="news-headline">{item.headline}</td>
                         <td className="news-source" style={{ width: "100px" }}>{item.source}</td>
                       </tr>
@@ -372,7 +465,10 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
                   className={[`news-row-${item.sentiment}`, item.ticker === selectedTicker ? "row-selected" : "", item.isNew ? "news-row-new" : ""].join(" ")}
                   onClick={() => onSelectTicker(item.ticker)}
                 >
-                  <td className="news-time">{item.time}</td>
+                  <td className="news-time">
+                    {item.time}
+                    {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
+                  </td>
                   <td className="news-headline">{item.headline}</td>
                   <td className="news-ticker-cell"><span className={`news-sentiment-dot sentiment-${item.sentiment}`}>●</span>{item.ticker}</td>
                   <td className="news-source">{item.source}</td>
@@ -949,6 +1045,7 @@ function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
   news: any[]; portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
+  onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
 }) {
   switch(id) {
     case "scanner1":    return <ScannerTable stocks={props.stocks} sortBy="momentum" selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} scannerId="scanner1" />;
@@ -979,6 +1076,7 @@ function renderWindowContent(id: WindowId, props: {
         />
       );
     case "marketoverview": return <MarketOverview />;
+    case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }

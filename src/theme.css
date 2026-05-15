@@ -17,12 +17,12 @@
   --bg-overlay:     #1c2230;
   --bg-input:       #232d3f;
   --border-subtle:  #1e2736;
-  --border-default: #2a3448;
+  --border-default: #e2e8f0;
   --border-strong:  #3a4a66;
   --border-accent:  #1d4ed8;
   --text-primary:   #e2e8f0;
-  --text-secondary: #8fa3bf;
-  --text-muted:     #4a6080;
+  --text-secondary: #e2e8f0;
+  --text-muted:     #e2e8f0;
   --accent:         #3b82f6;
   --accent-hover:   #2563eb;
   --accent-bg:      rgba(59,130,246,0.12);
