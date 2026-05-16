@@ -8,14 +8,15 @@ async fn open_screen2(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // Ellers opret et nyt vindue
+    // Ellers opret et nyt vindue — start maksimeret så hele skærmen bruges
     WebviewWindowBuilder::new(
         &app,
         "screen2",
         WebviewUrl::App("index.html?screen=2".into()),
     )
     .title("Ibens Trading Dash — Skærm 2")
-    .inner_size(1920.0, 1080.0)
+    .inner_size(1920.0, 1080.0)   // Fallback hvis maximized fejler
+    .maximized(true)
     .build()
     .map_err(|e| e.to_string())?;
 
