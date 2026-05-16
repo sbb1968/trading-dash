@@ -57,11 +57,13 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
     items: [
       { id: "watchlist",    shortcut: "A" },
       { id: "newsroom",     shortcut: "N" },
+      { id: "alerts",       shortcut: "I" },
       { id: "account",      shortcut: "U" },
       { id: "papertrading", shortcut: "P" },
       { id: "journal",      shortcut: "J" },
-      { id: "algohub",      shortcut: "O" },
+      { id: "livealgo",     shortcut: "O" },
       { id: "marketoverview", shortcut: "R" },
+      { id: "orders",       shortcut: "D" },
     ],
   },
 ];

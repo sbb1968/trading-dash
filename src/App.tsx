@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import { useMarketData } from "./useMarketData";
 import type { NewsData } from "./useMarketData";
@@ -15,10 +16,11 @@ import {
 } from "./layouts";
 import { TradeJournal } from "./TradeJournal";
 import { LiveAlgo } from "./LiveAlgo";
-import { AlertsPanel } from "./Alertspanel";
-import { AlgoHub } from "./AlgoHub"; 
+import { AlertsWindow } from "./Alertspanel";
 import { MarketOverview } from "./MarketOverview";
 import { AccountPanel } from "./AccountPanel";
+import { OrdersWindow } from "./OrdersWindow";
+import { useTickerName } from "./useTickerName";
 
 
 // ── Konstanter ────────────────────────────────────────────────
@@ -164,6 +166,28 @@ function ConnectionStatus({ status }: { status: string }) {
   return <div className={`status-item ${label.cls}`}>{label.text}</div>;
 }
 
+// ── TickerCell — viser ticker + firma-navn nedenunder ─────────
+function TickerCell({ ticker }: { ticker: string }) {
+  const name = useTickerName(ticker);
+  return (
+    <td className="sym-cell">
+      <div style={{ fontWeight: 700 }}>{ticker}</div>
+      <div style={{
+        fontSize: "calc(var(--fs-content-scanner, 13px) * 0.78)",
+        color: "var(--text-muted)",
+        fontWeight: 400,
+        marginTop: 1,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        maxWidth: "180px",
+      }}>
+        {name || "\u00A0"}
+      </div>
+    </td>
+  );
+}
+
 // ── Scanner Table ─────────────────────────────────────────────
 function ScannerTable({ stocks, sortBy, selectedTicker, onSelectTicker, scannerId }: {
   stocks: any[]; sortBy: "momentum" | "gainers"; selectedTicker: string;
@@ -282,7 +306,7 @@ function ScannerTable({ stocks, sortBy, selectedTicker, onSelectTicker, scannerI
                 className={[stock.change_percent >= 0 ? "row-up" : "row-down", stock.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
                 onClick={() => onSelectTicker(stock.ticker)}
               >
-                <td className="sym-cell">{stock.ticker}</td>
+                <TickerCell ticker={stock.ticker} />
                 {visibleCols.map(colId => renderCell(stock, colId))}
               </tr>
             ))}
@@ -294,10 +318,42 @@ function ScannerTable({ stocks, sortBy, selectedTicker, onSelectTicker, scannerI
 }
 
 // ── Watchlist Panel ───────────────────────────────────────────
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker }: {
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
+  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
+  // Mængde pr. ticker — default 100 (Ross Cameron standard)
+  const [orderShares, setOrderShares] = useState<Record<string, string>>({});
+
+  function getShares(ticker: string): string {
+    return orderShares[ticker] ?? "100";
+  }
+
+  function setShares(ticker: string, value: string) {
+    // Tillad kun cifre (max 6 = op til 999.999)
+    const clean = value.replace(/\D/g, "").slice(0, 6);
+    setOrderShares(prev => ({ ...prev, [ticker]: clean }));
+  }
+
+  function handleOrder(action: "BUY" | "SELL", stock: any) {
+    const shares = parseInt(getShares(stock.ticker), 10);
+    if (!shares || shares <= 0) {
+      alert(`Angiv en gyldig mængde for ${stock.ticker}`);
+      return;
+    }
+    if (!stock.price || stock.price <= 0) {
+      alert(
+        `Ingen live pris for ${stock.ticker} — kan ikke sende ordre.\n\n` +
+        `Mulige årsager:\n` +
+        `• Markedet er lukket (priser opdateres når NYSE/NASDAQ åbner)\n` +
+        `• Tickeren findes ikke eller er forkert stavet\n` +
+        `• IBKR-feedet er ikke aktivt for denne aktie`
+      );
+      return;
+    }
+    onRequestOrder(action, stock.ticker, shares, stock.price);
+  }
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [visibleCols, setVisibleCols] = useState<string[]>(() => {
@@ -359,11 +415,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             <tr>
               <th>Symbol</th>
               {visibleCols.map(colId => { const col = WATCHLIST_COLUMNS.find(c => c.id === colId); return <th key={colId}>{col?.label}</th>; })}
+              <th style={{ textAlign: "center", width: 60 }}>Stk</th>
+              <th style={{ textAlign: "center", width: 130 }}>Handel</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {watchedStocks.length === 0 && <tr><td colSpan={visibleCols.length + 2} className="watchlist-empty">Ingen aktier endnu</td></tr>}
+            {watchedStocks.length === 0 && <tr><td colSpan={visibleCols.length + 4} className="watchlist-empty">Ingen aktier endnu</td></tr>}
             {watchedStocks.map(stock => (
               <tr key={stock.ticker}
                 className={[stock.change_percent >= 0 ? "row-up" : "row-down", stock.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
@@ -371,6 +429,62 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               >
                 <td className="sym-cell">{stock.ticker}</td>
                 {visibleCols.map(colId => renderCell(stock, colId))}
+                <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={getShares(stock.ticker)}
+                    onChange={e => setShares(stock.ticker, e.target.value)}
+                    onClick={e => e.stopPropagation()}
+                    style={{
+                      width: 50,
+                      background: "var(--bg-input)",
+                      border: "1px solid var(--border-default)",
+                      borderRadius: 3,
+                      color: "var(--text-primary)",
+                      fontSize: 12,
+                      padding: "3px 6px",
+                      textAlign: "right",
+                      fontFamily: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                </td>
+                <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
+                    title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                    style={{
+                      background: "var(--bull-muted)",
+                      border: "1px solid var(--bull)",
+                      color: "var(--bull)",
+                      borderRadius: 3,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "3px 10px",
+                      marginRight: 4,
+                      cursor: "pointer",
+                    }}
+                  >
+                    KØB
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
+                    title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                    style={{
+                      background: "var(--bear-muted)",
+                      border: "1px solid var(--bear)",
+                      color: "var(--bear)",
+                      borderRadius: 3,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "3px 10px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    SÆLG
+                  </button>
+                </td>
                 <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); onRemoveTicker(stock.ticker); }}>✕</button></td>
               </tr>
             ))}
@@ -378,6 +492,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
         </table>
       </div>
     </div>
+  );
+}
+
+function NewsTickerName({ ticker }: { ticker: string }) {
+  const name = useTickerName(ticker);
+  return (
+    <span>
+      <strong>{ticker}</strong>
+      {name && <span style={{ marginLeft: 4, color: "var(--text-muted)", fontSize: 10 }}>· {name}</span>}
+    </span>
   );
 }
 
@@ -394,6 +518,16 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
 
   // Tjek om der findes nogen forsinkede nyheder — hvis ja vis advarsel
   const hasDelayed = filtered.some(n => (n as any).delayed);
+
+  function handleNewsClick(item: any) {
+    if (item.url) {
+      openUrl(item.url);
+    } else {
+      // Fallback — søgning hvis ingen direkte URL
+      const query = encodeURIComponent(`${item.ticker} ${item.headline}`);
+      openUrl(`https://www.google.com/search?q=${query}+stock+news`);
+    }
+  }
 
   return (
     <div className="newsroom-container">
@@ -438,7 +572,13 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
                 <table className="newsroom-table">
                   <tbody>
                     {group.items.map(item => (
-                      <tr key={item.id} className={[`news-row-${item.sentiment}`, item.isNew ? "news-row-new" : ""].join(" ")} onClick={() => onSelectTicker(item.ticker)}>
+                      <tr 
+                        key={item.id} 
+                        className={[`news-row-${item.sentiment}`, item.isNew ? "news-row-new" : ""].join(" ")} 
+                        onClick={() => onSelectTicker(item.ticker)}
+                        onDoubleClick={() => handleNewsClick(item)}
+                        style={{ cursor: "pointer" }}
+                      >
                         <td className="news-time" style={{ width: "60px" }}>
                           {item.time}
                           {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
@@ -461,16 +601,22 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
             <tbody>
               {filtered.length === 0 && <tr><td colSpan={4} className="watchlist-empty">Ingen nyheder</td></tr>}
               {filtered.map(item => (
-                <tr key={item.id}
+                <tr
+                  key={item.id}
                   className={[`news-row-${item.sentiment}`, item.ticker === selectedTicker ? "row-selected" : "", item.isNew ? "news-row-new" : ""].join(" ")}
                   onClick={() => onSelectTicker(item.ticker)}
+                  onDoubleClick={() => handleNewsClick(item)}
+                  style={{ cursor: "pointer" }}
                 >
                   <td className="news-time">
                     {item.time}
                     {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
                   </td>
                   <td className="news-headline">{item.headline}</td>
-                  <td className="news-ticker-cell"><span className={`news-sentiment-dot sentiment-${item.sentiment}`}>●</span>{item.ticker}</td>
+                  <td className="news-ticker-cell">
+                    <span className={`news-sentiment-dot sentiment-${item.sentiment}`}>●</span>
+                    <NewsTickerName ticker={item.ticker} />
+                  </td>
                   <td className="news-source">{item.source}</td>
                 </tr>
               ))}
@@ -640,6 +786,8 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
 
 // ── Level 2 Panel ─────────────────────────────────────────────
 function Level2Panel({ ticker }: { ticker: string }) {
+  const tickerName = useTickerName(ticker);
+  const displayTicker = tickerName ? `${ticker} · ${tickerName}` : ticker;
   const [bids, setBids] = useState<Array<{ price: number; size: number; marketMaker: string }>>([]);
   const [asks, setAsks] = useState<Array<{ price: number; size: number; marketMaker: string }>>([]);
   const [status, setStatus] = useState<"connecting" | "ready" | "error" | "closed">("connecting");
@@ -700,13 +848,13 @@ function Level2Panel({ ticker }: { ticker: string }) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [ticker]);
+  }, [displayTicker]);
 
   // ── Render ────────────────────────────────────────────
   if (status === "error") {
     return (
       <div className="level2-panel">
-        <div className="level2-header">Level 2 — {ticker}</div>
+        <div className="level2-header">Level 2 — {displayTicker}</div>
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 13 }}>{errorMsg}</div>
@@ -719,7 +867,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
     return (
       <div className="level2-panel">
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
-          {errorMsg || `Forbinder til ${ticker}...`}
+          {errorMsg || `Forbinder til ${displayTicker}...`}
         </div>
       </div>
     );
@@ -739,7 +887,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
   return (
     <div className="level2-panel">
       <div className="level2-header">
-        Level 2 — {ticker}
+        Level 2 — {displayTicker}
         {bestBid > 0 && bestAsk > 0 && (
           <span style={{ float: "right", fontSize: 12, color: "var(--text-primary)", fontWeight: 600 }}>
             Spread: ${spread.toFixed(2)}
@@ -848,6 +996,8 @@ function Level2Panel({ ticker }: { ticker: string }) {
 
 // ── Time & Sales Panel ────────────────────────────────────────
 function TimeSalesPanel({ ticker }: { ticker: string }) {
+  const tickerName = useTickerName(ticker);
+  const displayTicker = tickerName ? `${ticker} · ${tickerName}` : ticker;
   const [ticks, setTicks] = useState<Array<{
     time: string;
     timeMs: number;
@@ -863,7 +1013,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
   const tickIdRef = useRef(0);
 
   useEffect(() => {
-    if (!ticker) return;
+    if (!displayTicker) return;
 
     setTicks([]);
     setStatus("connecting");
@@ -925,7 +1075,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [ticker]);
+  }, [displayTicker]);
 
   // Tick "now" hvert sekund så 60-sek vinduet ruller
   useEffect(() => {
@@ -954,7 +1104,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
   if (status === "error") {
     return (
       <div className="timesales-panel">
-        <div className="timesales-header">Time & Sales — {ticker}</div>
+        <div className="timesales-header">Time & Sales — {displayTicker}</div>
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-secondary)" }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 13 }}>{errorMsg}</div>
@@ -967,7 +1117,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
     return (
       <div className="timesales-panel">
         <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)" }}>
-          {errorMsg || `Forbinder til ${ticker}...`}
+          {errorMsg || `Forbinder til ${displayTicker}...`}
         </div>
       </div>
     );
@@ -1045,12 +1195,14 @@ function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
   news: any[]; portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
+  alerts: any[]; alertThreshold: number; onThresholdChange: (v: number) => void;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
+  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
   switch(id) {
     case "scanner1":    return <ScannerTable stocks={props.stocks} sortBy="momentum" selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} scannerId="scanner1" />;
     case "scanner2":    return <ScannerTable stocks={props.stocks} sortBy="gainers"  selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} scannerId="scanner2" />;
-    case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} />;
+    case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
     case "newsroom":    return <NewsRoom news={props.news} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} />;
     case "papertrading":return <PaperTradingPanel portfolio={props.portfolio} selectedTicker={props.selectedTicker} currentPrice={props.currentPrice} onBuy={props.buyStock} onSell={props.sellStock} onReset={props.resetPortfolio} onSelectTicker={props.onSelectTicker} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
@@ -1068,39 +1220,43 @@ function renderWindowContent(id: WindowId, props: {
     case "timesales":   return <TimeSalesPanel ticker={props.selectedTicker} />;
     case "journal":     return <TradeJournal />;
     case "livealgo":    return <LiveAlgo />;
-    case "algohub":
-      return (
-        <AlgoHub
-          onOpen={(id) => props.onAddWindow(id as WindowId)}
-          onClose={() => props.onCloseWindow("algohub" as WindowId)}
-        />
-      );
     case "marketoverview": return <MarketOverview />;
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
+    case "orders":  return <OrdersWindow />;
+    case "alerts":
+      return <AlertsWindow
+        alerts={props.alerts ?? []}
+        selectedTicker={props.selectedTicker}
+        onSelectTicker={props.onSelectTicker}
+        watchlist={props.watchlist ?? []}
+        alertThreshold={props.alertThreshold ?? 0.5}
+        onThresholdChange={props.onThresholdChange}
+      />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }
 
-function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[]): string {
+function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[], tickerName?: string): string {
   const isHistorical = stocks && stocks.length > 0 && stocks[0]?.source === "historical";
   const scannerSuffix = isHistorical ? " ⚠ Hist." : "";
+  const withName = tickerName ? `${selectedTicker} · ${tickerName}` : selectedTicker;
 
   const t: Partial<Record<WindowId, string>> = {
     scanner1:    `Small Cap Scanner${scannerSuffix}`,
     scanner2:    `Top Gainers${scannerSuffix}`,
-    chart1min:   `${selectedTicker} — 1 min`,
-    chart2min:   `${selectedTicker} — 2 min`,
-    chart3min:   `${selectedTicker} — 3 min`,
-    chart5min:   `${selectedTicker} — 5 min`,
-    chart10min:  `${selectedTicker} — 10 min`,
-    chart15min:  `${selectedTicker} — 15 min`,
-    chart30min:  `${selectedTicker} — 30 min`,
-    chart1time:  `${selectedTicker} — 1 time`,
-    chart4time:  `${selectedTicker} — 4 time`,
-    chartdaily:  `${selectedTicker} — Daily`,
-    chartweekly: `${selectedTicker} — Weekly`,
-    level2:      `Level 2 — ${selectedTicker}`,
-    timesales:   `Time & Sales — ${selectedTicker}`,
+    chart1min:   `${withName} — 1 min`,
+    chart2min:   `${withName} — 2 min`,
+    chart3min:   `${withName} — 3 min`,
+    chart5min:   `${withName} — 5 min`,
+    chart10min:  `${withName} — 10 min`,
+    chart15min:  `${withName} — 15 min`,
+    chart30min:  `${withName} — 30 min`,
+    chart1time:  `${withName} — 1 time`,
+    chart4time:  `${withName} — 4 time`,
+    chartdaily:  `${withName} — Daily`,
+    chartweekly: `${withName} — Weekly`,
+    level2:      `Level 2 — ${withName}`,
+    timesales:   `Time & Sales — ${withName}`,
   };
   return t[id] ?? WINDOW_LABELS[id];
 }
@@ -1109,14 +1265,7 @@ function isChartWindow(id: WindowId): boolean { return id.startsWith("chart"); }
 
 // ── Main App ──────────────────────────────────────────────────
 function App() {
-  const [navWidth, setNavWidth] = useState<number>(() => {
-    const saved = localStorage.getItem("nav_width");
-    return saved ? parseInt(saved) : 280;
-  });
   const [layoutToast, setLayoutToast] = useState<string>("");
-  useEffect(() => {
-    localStorage.setItem("nav_width", String(navWidth));
-  }, [navWidth]);
   const [activeView, setActiveView]         = useState<ActiveView>("scanners");
   const [selectedTicker, setSelectedTicker] = useState<string>(() => localStorage.getItem("selectedTicker") || "NVDA");
   const [alertThreshold, setAlertThreshold] = useState<number>(() => { const s = localStorage.getItem("alertThreshold"); return s ? parseFloat(s) : ALERT_THRESHOLD_DEFAULT; });
@@ -1133,10 +1282,20 @@ function App() {
   // Indlæs gemte fontstørrelser ved opstart
   useEffect(() => { applyAllFonts(); }, []);
 
-  const { stocksArray, alerts, news, portfolio, status, buyStock, sellStock, resetPortfolio } = useMarketData(alertThreshold, soundEnabled);
+  const {
+    stocksArray, alerts, news, portfolio, status,
+    buyStock, sellStock, resetPortfolio,
+    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
+  } = useMarketData(alertThreshold, soundEnabled);
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
   const activeLayout = layouts.find(l => l.id === activeLayoutId);
 
+  // ── Bekræftelses-dialog state for manuelle IBKR-ordrer ──────
+  const [orderConfirm, setOrderConfirm] = useState<{
+    action: "BUY" | "SELL"; ticker: string; shares: number; price: number;
+  } | null>(null); 
+  const selectedTickerName = useTickerName(selectedTicker);
+  
   function handleLoadLayout(id: string) { setActiveLayoutId(id); setActiveLayoutIdState(id); }
 
   function handleSaveLayout(name: string) {
@@ -1164,8 +1323,8 @@ function App() {
 
   function autoArrange() {
     if (!activeLayout) return;
-    const gap = 6, navW = navWidth, topH = 62;
-    const w = window.innerWidth - navW, h = window.innerHeight - topH;
+    const gap = 6, topH = 62;
+    const w = window.innerWidth, h = window.innerHeight - topH;
     const open = activeLayout.windows.filter(win => !win.closed);
     if (open.length === 0) return;
     const cols = Math.ceil(Math.sqrt(open.length));
@@ -1203,8 +1362,12 @@ function App() {
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
     news, portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
+    alerts, alertThreshold, onThresholdChange: setAlertThreshold,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
+    onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
+      setOrderConfirm({ action, ticker, shares, price });
+    },
   };
 
   return (
@@ -1248,35 +1411,6 @@ function App() {
       />
 
       <div className="workspace">
-        <nav className="left-nav" style={{ width: navWidth }}>
-          <AlertsPanel
-            alerts={alerts}
-            news={news}
-            selectedTicker={selectedTicker}
-            onSelectTicker={setSelectedTicker}
-            watchlist={watchlist}
-            alertThreshold={alertThreshold}
-            onThresholdChange={setAlertThreshold}
-          />
-          <div
-            className="left-nav-resizer"
-            onMouseDown={e => {
-              e.preventDefault();
-              const startX = e.clientX;
-              const startW = navWidth;
-              const onMove = (ev: MouseEvent) => {
-                const newW = Math.max(160, Math.min(600, startW + ev.clientX - startX));
-                setNavWidth(newW);
-              };
-              const onUp = () => {
-                window.removeEventListener("mousemove", onMove);
-                window.removeEventListener("mouseup", onUp);
-                };
-              window.addEventListener("mousemove", onMove);
-              window.addEventListener("mouseup", onUp);
-            }}
-          />
-        </nav>
         <div className="desktop-area">
           {activeView === "konfigurator" ? (
             <Konfigurator onClose={() => setActiveView("scanners")} />
@@ -1285,7 +1419,7 @@ function App() {
               {activeLayout?.windows.filter(w => !w.closed).map(win => (
                 <FloatingWindow
                   key={win.id} id={win.id}
-                  title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray)}
+                  title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray, selectedTickerName)}
                   defaultState={win}
                   onClose={() => updateWindowState(win.id as WindowId, { closed: true })}
                   tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
@@ -1299,6 +1433,106 @@ function App() {
           )}
         </div>
       </div>
+
+      {/* ── Bekræftelses-dialog for manuelle IBKR-ordrer ── */}
+      {orderConfirm && (
+        <div style={{
+          position: "fixed",
+          top: 70,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "var(--bg-elevated)",
+          border: `2px solid ${orderConfirm.action === "BUY" ? "var(--bull)" : "var(--bear)"}`,
+          borderRadius: 6,
+          padding: "14px 24px",
+          fontSize: 14,
+          fontWeight: 600,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          zIndex: 10001,
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+        }}>
+          <span style={{ color: "var(--text-primary)" }}>
+            Bekræft <span style={{ color: orderConfirm.action === "BUY" ? "var(--bull)" : "var(--bear)" }}>
+              {orderConfirm.action === "BUY" ? "KØB" : "SÆLG"}
+            </span> {orderConfirm.shares} {orderConfirm.ticker} @ ${orderConfirm.price.toFixed(2)}
+          </span>
+          <button
+            onClick={() => {
+              if (orderConfirm.action === "BUY") ibkrBuy(orderConfirm.ticker, orderConfirm.shares);
+              else                                ibkrSell(orderConfirm.ticker, orderConfirm.shares);
+              setOrderConfirm(null);
+            }}
+            style={{
+              background: orderConfirm.action === "BUY" ? "var(--bull)" : "var(--bear)",
+              color: "#000",
+              border: "none",
+              padding: "6px 16px",
+              borderRadius: 3,
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Bekræft
+          </button>
+          <button
+            onClick={() => setOrderConfirm(null)}
+            style={{
+              background: "var(--bg-input)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-default)",
+              padding: "6px 16px",
+              borderRadius: 3,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            Annuller
+          </button>
+        </div>
+      )}
+
+      {/* ── Resultat-toast efter ordre ── */}
+      {lastOrderResult && (
+        <OrderResultToast result={lastOrderResult} onClose={clearLastOrderResult} />
+      )}
+    </div>
+  );
+}
+
+// ── Toast der viser resultatet af en IBKR-ordre — auto-dismiss efter 4 sek
+function OrderResultToast({ result, onClose }: { result: any; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 4000);
+    return () => clearTimeout(t);
+  }, [result, onClose]);
+
+  const success = result.success;
+  const color = success ? "var(--bull)" : "var(--bear)";
+  const text = success
+    ? `✓ ${result.action} ${result.shares} ${result.ticker} — ${result.status}${result.filled ? ` (fyldt: ${result.filled} @ $${result.avg_fill?.toFixed(2)})` : ""}`
+    : `✗ ${result.action} ${result.ticker} fejlede: ${result.error}`;
+
+  return (
+    <div style={{
+      position: "fixed",
+      bottom: 30,
+      left: "50%",
+      transform: "translateX(-50%)",
+      background: "var(--bg-elevated)",
+      border: `1px solid ${color}`,
+      color: color,
+      padding: "10px 20px",
+      borderRadius: 4,
+      fontSize: 13,
+      fontWeight: 600,
+      boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+      zIndex: 10000,
+      maxWidth: "80%",
+    }}>
+      {text}
     </div>
   );
 }

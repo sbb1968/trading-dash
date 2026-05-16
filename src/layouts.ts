@@ -7,9 +7,9 @@ export type WindowId =
   | "chartdaily" | "chartweekly"
   | "level2" | "timesales" | "journal" | "livealgo"
   | "alerts"
-  | "algohub" | "strategymanager" | "algoperformance" | "algojournal"
   | "marketoverview"
-  | "account";
+  | "account"
+  | "orders";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   scanner1:     "Small Cap Scanner",
@@ -33,12 +33,9 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   journal:      "Trade Journal",
   livealgo:     "Live Algo",
   alerts:       "Nyheds Alerts",
-  algohub:         "Algo Hub",
-  strategymanager: "Strategy Manager",
-  algoperformance: "Algo Performance",
-  algojournal:     "Algo Journal",
   marketoverview:  "marketoverview",
   account:         "Konto",
+  orders:          "Ordrer",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────
@@ -178,7 +175,14 @@ export function loadLayouts(W: number, H: number): Layout[] {
     // Bevar screen2Windows fra gemte layouts
     const mergedDefaults = defaults.map(def => {
       const saved = parsed.find(p => p.id === def.id);
-      return saved ? { ...def, screen2Windows: saved.screen2Windows ?? [] } : def;
+      if (!saved) return def;
+      // Bevar gemte ændringer (vinduer + screen2) — men hvis arrayet er tomt
+      // efter en buggy save, så fald tilbage til defaults
+      return {
+        ...def,
+        windows: saved.windows && saved.windows.length > 0 ? saved.windows : def.windows,
+        screen2Windows: saved.screen2Windows ?? [],
+      };
     });
     const customs = parsed.filter(l => !defaultIds.includes(l.id));
     return [...mergedDefaults, ...customs];

@@ -116,7 +116,7 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
       setPreMaxState(null);
     } else {
       setPreMaxState({ ...state });
-      setState(prev => ({ ...prev, maximized: true, x: 0, y: 0, width: window.innerWidth - 200, height: window.innerHeight - 34 }));
+      setState(prev => ({ ...prev, maximized: true, x: 0, y: 0, width: window.innerWidth, height: window.innerHeight - 34 }));
     }
     bringToFront();
   }
@@ -145,7 +145,7 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
   const style: React.CSSProperties = {
     zIndex,
     ...(state.maximized
-      ? { left: 0, top: 0, width: window.innerWidth - 200, height: window.innerHeight - 34 }
+      ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight - 34 }
       : { left: state.x, top: state.y, width: state.width, height: state.minimized ? "auto" : state.height }
     ),
   };

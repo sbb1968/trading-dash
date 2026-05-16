@@ -167,6 +167,102 @@ function NewsRow({ item }: { item: NewsItem }) {
   );
 }
 
+// ── AlertsWindow — Den rene alert-version til flydende vindue ─────
+// News-sektionen er fjernet siden vi har News Room-vinduet
+export function AlertsWindow({
+  alerts, selectedTicker, onSelectTicker, watchlist,
+  alertThreshold, onThresholdChange,
+}: {
+  alerts:            PriceAlert[];
+  selectedTicker:    string;
+  onSelectTicker:    (ticker: string) => void;
+  watchlist:         string[];
+  alertThreshold:    number;
+  onThresholdChange: (v: number) => void;
+}) {
+  const [alertFilter, setAlertFilter] = useState<"all" | "watchlist">("all");
+  const [newAlertIds, setNewAlertIds] = useState<Set<number>>(new Set());
+  const prevAlertCount = useRef(alerts.length);
+  const alertsRef      = useRef<HTMLDivElement>(null);
+
+  const fsh = "var(--fs-header-alerts, 11px)";
+
+  useEffect(() => {
+    if (alerts.length > prevAlertCount.current) {
+      const newIds = new Set(
+        alerts.slice(0, alerts.length - prevAlertCount.current).map(a => a.id)
+      );
+      setNewAlertIds(newIds);
+      setTimeout(() => setNewAlertIds(new Set()), 1500);
+      if (alertsRef.current && alertsRef.current.scrollTop < 60) {
+        alertsRef.current.scrollTop = 0;
+      }
+    }
+    prevAlertCount.current = alerts.length;
+  }, [alerts.length]);
+
+  const filteredAlerts = (alertFilter === "watchlist"
+    ? alerts.filter(a => watchlist.includes(a.ticker))
+    : alerts
+  ).slice(0, 100);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--bg-base)" }}>
+      <SectionHeader
+        emoji="🔔" title="Pris Alerts" count={filteredAlerts.length}
+        filter={alertFilter} setFilter={setAlertFilter}
+        accentColor="var(--bull)" fsh={fsh}
+      />
+
+      {/* Tærskel-slider */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "4px 10px", borderBottom: "1px solid var(--border-subtle)",
+        flexShrink: 0, background: "var(--bg-elevated)",
+      }}>
+        <span style={{ fontSize: 10, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>Tærskel</span>
+        <input
+          type="range" min={0.1} max={5} step={0.1}
+          value={alertThreshold}
+          onChange={e => onThresholdChange(parseFloat(e.target.value))}
+          style={{ flex: 1, accentColor: "var(--accent)", height: 3, cursor: "pointer" }}
+        />
+        <span style={{ fontSize: 10, color: "var(--text-primary)", fontWeight: 700, whiteSpace: "nowrap", minWidth: 28, textAlign: "right" }}>
+          {alertThreshold.toFixed(1)}%
+        </span>
+      </div>
+
+      <div ref={alertsRef} style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {filteredAlerts.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-secondary)", fontSize: fsh, fontStyle: "italic", padding: "16px 10px", textAlign: "center" }}>
+            {alertFilter === "watchlist" ? "Ingen alerts for watchlist-aktier" : "Overvåger markedet..."}
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+            <thead style={{ position: "sticky", top: 0, background: "var(--bg-elevated)", zIndex: 1 }}>
+              <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                <th style={{ padding: "3px 6px", textAlign: "left",  width: "58px", fontSize: fsh, fontWeight: 700, color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Tid</th>
+                <th style={{ padding: "3px 6px", textAlign: "left",  width: "50px", fontSize: fsh, fontWeight: 700, color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Ticker</th>
+                <th style={{ padding: "3px 6px", textAlign: "right", width: "68px", fontSize: fsh, fontWeight: 700, color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Pris</th>
+                <th style={{ padding: "3px 6px", textAlign: "right",               fontSize: fsh, fontWeight: 700, color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Ændring</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredAlerts.map(alert => (
+                <AlertRow
+                  key={`${alert.id}-${alert.timestamp || alert.ticker}`}
+                  alert={alert}
+                  isNew={newAlertIds.has(alert.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Hoved-komponent ───────────────────────────────────────────
 export function AlertsPanel({
   alerts, news, selectedTicker, onSelectTicker, watchlist,
