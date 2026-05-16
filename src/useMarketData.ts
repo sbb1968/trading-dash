@@ -132,6 +132,19 @@ function playAlertSound(direction: "up" | "down", ticker: string) {
   } catch {}
 }
 
+// ── IBKR ordre-resultat (fra manuel watchlist-handel) ─────────
+export interface IbkrOrderResult {
+  type:     "ibkr_order_result";
+  success:  boolean;
+  ticker:   string;
+  action:   "BUY" | "SELL";
+  shares:   number;
+  status?:  string;
+  filled?:  number;
+  avg_fill?: number;
+  error?:   string;
+}
+
 // ── Hook ──────────────────────────────────────────────────────
 export function useMarketData(alertThreshold: number, soundEnabled: boolean = true) {
   const [stocks,    setStocks]    = useState<Map<string, StockData>>(new Map());
@@ -139,6 +152,7 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
   const [news,      setNews]      = useState<NewsData[]>([]);
   const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
   const [status,    setStatus]    = useState<ConnectionStatus>("connecting");
+  const [lastOrderResult, setLastOrderResult] = useState<IbkrOrderResult | null>(null);
 
   const wsRef         = useRef<ReconnectingWebSocket | null>(null);
   const thresholdRef  = useRef(alertThreshold);
@@ -201,6 +215,10 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
 
         } else if (message.type === "portfolio") {
           setPortfolio(message.data as Portfolio);
+
+        } else if (message.type === "ibkr_order_result") {
+          // Manuel watchlist-ordre — gem resultat så UI kan vise toast
+          setLastOrderResult(message as IbkrOrderResult);
         }
 
       } catch (e) {
@@ -237,6 +255,25 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
     }
   }, []);
 
+  // ── IBKR direkte ordrer (fra watchlist-rækker) ──────────────
+  const ibkrBuy = useCallback((ticker: string, shares: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "ibkr_buy", ticker, shares }));
+    }
+  }, []);
+
+  const ibkrSell = useCallback((ticker: string, shares: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "ibkr_sell", ticker, shares }));
+    }
+  }, []);
+
+  const clearLastOrderResult = useCallback(() => setLastOrderResult(null), []);
+
   const stocksArray = Array.from(stocks.values());
-  return { stocksArray, alerts, news, portfolio, status, sendMessage, buyStock, sellStock, resetPortfolio };
+  return {
+    stocksArray, alerts, news, portfolio, status, sendMessage,
+    buyStock, sellStock, resetPortfolio,
+    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
+  };
 }

@@ -15,6 +15,7 @@ from tws_watchdog import TWSWatchdog
 from scheduler    import AlgoScheduler
 
 from journal          import Journal
+from orders_tracker   import get_tracker
 
 from finnhub_news import FinnhubNewsFeed
 
@@ -409,6 +410,114 @@ async def websocket_endpoint(websocket: WebSocket):
                     summary = paper_trading.get_summary(current_prices)
                     await broadcast({"type": "portfolio", "data": summary})
 
+            elif message["type"] in ("ibkr_buy", "ibkr_sell"):
+                # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR
+                # paper trading kontoen (ikke den lokale mock-portfolio).
+                action = "BUY" if message["type"] == "ibkr_buy" else "SELL"
+                ticker = str(message.get("ticker", "")).upper().strip()
+                try:
+                    shares = int(message.get("shares", 0))
+                except (TypeError, ValueError):
+                    shares = 0
+
+                if not ticker or shares <= 0:
+                    await websocket.send_text(json.dumps({
+                        "type":    "ibkr_order_result",
+                        "success": False,
+                        "ticker":  ticker,
+                        "action":  action,
+                        "shares":  shares,
+                        "error":   "Ugyldig ticker eller mængde",
+                    }))
+                    continue
+
+                ibkr = strategy_manager.get_ibkr()
+                if ibkr is None or not ibkr.connected:
+                    await websocket.send_text(json.dumps({
+                        "type":    "ibkr_order_result",
+                        "success": False,
+                        "ticker":  ticker,
+                        "action":  action,
+                        "shares":  shares,
+                        "error":   "IBKR ikke forbundet — start TWS",
+                    }))
+                    continue
+
+                try:
+                    result = await ibkr.place_paper_order(
+                        ticker=ticker,
+                        action=action,
+                        quantity=shares,
+                        order_type="MKT",
+                    )
+                except Exception as e:
+                    await websocket.send_text(json.dumps({
+                        "type":    "ibkr_order_result",
+                        "success": False,
+                        "ticker":  ticker,
+                        "action":  action,
+                        "shares":  shares,
+                        "error":   f"Ordre-fejl: {e}",
+                    }))
+                    # Journaliser fejlen så vi kan se den senere
+                    await journal.log_event(
+                        source     = "manual_watchlist",
+                        event_type = "ibkr_order_error",
+                        symbol     = ticker,
+                        payload    = {"action": action, "shares": shares, "error": str(e)},
+                    )
+                    continue
+
+                if result is None:
+                    await websocket.send_text(json.dumps({
+                        "type":    "ibkr_order_result",
+                        "success": False,
+                        "ticker":  ticker,
+                        "action":  action,
+                        "shares":  shares,
+                        "error":   "Ordre returnerede tom — tjek TWS",
+                    }))
+                    continue
+
+                # Succes — send resultat tilbage til frontend
+                await websocket.send_text(json.dumps({
+                    "type":    "ibkr_order_result",
+                    "success": True,
+                    "ticker":  ticker,
+                    "action":  action,
+                    "shares":  shares,
+                    "status":  result.get("status"),
+                    "filled":  result.get("filled"),
+                    "avg_fill": result.get("avg_fill"),
+                }))
+
+                # Registrer i orders tracker så ordrer-vinduet kan vise den
+                order_id = result.get("order_id")
+                if order_id:
+                    get_tracker().record_placed(
+                        order_id=order_id,
+                        source="manual_watchlist",
+                        ticker=ticker,
+                        action=action,
+                        shares=shares,
+                        order_type="MKT",
+                    )
+
+                # Journaliser manuel ordre
+                await journal.log_event(
+                    source     = "manual_watchlist",
+                    event_type = "ibkr_order_placed",
+                    symbol     = ticker,
+                    payload    = {
+                        "action":   action,
+                        "shares":   shares,
+                        "order_id": order_id,
+                        "status":   result.get("status"),
+                        "filled":   result.get("filled"),
+                        "avg_fill": result.get("avg_fill"),
+                    },
+                )
+
             elif message["type"] == "reset_portfolio":
                 paper_trading.reset()
                 summary = paper_trading.get_summary(current_prices)
@@ -483,6 +592,93 @@ async def websocket_algo(websocket: WebSocket):
             algo_clients.remove(websocket)
             print(f"[Algo] Klient afbrudt — {len(algo_clients)} aktive")
 
+# ── Orders endpoints ──────────────────────────────────────────
+# Bruges af Ordrer-vinduet i Trading Dash til at vise og annullere ordrer
+
+class CancelOrderRequest(BaseModel):
+    order_id: int
+
+
+@app.get("/orders/list")
+async def get_orders_list(period_hours: int = 24):
+    """Returnér alle Trading Dash-ordrer i de seneste N timer med live status."""
+    ibkr = strategy_manager.get_ibkr()
+    orders = await get_tracker().get_all_orders(ibkr, period_hours=period_hours)
+    return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
+
+
+@app.post("/orders/cancel")
+async def cancel_order(req: CancelOrderRequest):
+    """Annullér en åben ordre via IBKR."""
+    ibkr = strategy_manager.get_ibkr()
+    result = await get_tracker().cancel(ibkr, req.order_id)
+    return result
+
+# ── Strategi-dokumentation ────────────────────────────────────
+# Bruges af Live Algo og Studio til at vise strategi-info via UI-knap
+
+@app.get("/strategies/{strategy_name}/docs/{version}")
+async def get_strategy_docs(strategy_name: str, version: str):
+    """
+    Returnér markdown-dokumentation for en strategi.
+
+    Argumenter:
+        strategy_name: fx "momentum_orb"
+        version: "iben" (almindelig) eller "teknisk"
+    """
+    # Whitelist gyldige versions for at undgå path traversal
+    if version not in ("iben", "teknisk"):
+        raise HTTPException(status_code=400, detail="Ugyldig version — brug 'iben' eller 'teknisk'")
+
+    # Whitelist strategi-navne ud fra eksisterende mapper
+    strategies_dir = Path(__file__).parent / "strategies"
+    if not (strategies_dir / strategy_name).is_dir():
+        raise HTTPException(status_code=404, detail=f"Strategi '{strategy_name}' findes ikke")
+
+    # Konstruér filnavn — formatet er STRATEGI_<NAVN>_<version>.md
+    upper_name = strategy_name.upper()
+    doc_file = strategies_dir / strategy_name / f"STRATEGI_{upper_name}_{version}.md"
+
+    if not doc_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Dokumentation findes ikke: {doc_file.name}"
+        )
+
+    try:
+        content = doc_file.read_text(encoding="utf-8")
+        return {
+            "strategy": strategy_name,
+            "version":  version,
+            "filename": doc_file.name,
+            "content":  content,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Kunne ikke læse fil: {e}")
+
+
+@app.get("/strategies/{strategy_name}/docs")
+async def list_strategy_docs(strategy_name: str):
+    """Returnér hvilke dokumentations-versioner der findes for en strategi."""
+    strategies_dir = Path(__file__).parent / "strategies"
+    if not (strategies_dir / strategy_name).is_dir():
+        raise HTTPException(status_code=404, detail=f"Strategi '{strategy_name}' findes ikke")
+
+    upper_name = strategy_name.upper()
+    versions_available = []
+    for version in ("iben", "teknisk"):
+        doc_file = strategies_dir / strategy_name / f"STRATEGI_{upper_name}_{version}.md"
+        if doc_file.exists():
+            versions_available.append({
+                "version":  version,
+                "filename": doc_file.name,
+                "size":     doc_file.stat().st_size,
+            })
+
+    return {
+        "strategy": strategy_name,
+        "versions": versions_available,
+    }
 
 # ── /ws/strategy ──────────────────────────────────────────────
 @app.websocket("/ws/strategy")
@@ -545,19 +741,35 @@ async def websocket_timesales(websocket: WebSocket, ticker: str):
     # Start tick-by-tick streamen — AllLast = alle handler (ikke bare bid/ask)
     tick_data = ib.reqTickByTickData(contract, "AllLast", numberOfTicks=0, ignoreSize=False)
 
+    # Holder forrige tick-pris til tick test fallback
+    last_tick_price = None
+
     def on_tick_update(ticker_obj: Ticker):
         """Kaldes hver gang IBKR pusher en ny tick."""
+        nonlocal last_tick_price
+
         # ticker_obj.tickByTicks indeholder nye ticks siden sidste update
         for t in ticker_obj.tickByTicks:
-            # Bestem retning: pris ved eller over ask = køber initieret (op),
-            # pris ved eller under bid = sælger initieret (ned)
+            # Direction-logik:
+            # 1. Foretrukket: sammenlign mod bid/ask (præcis)
+            # 2. Fallback: tick test (sammenlign mod forrige pris)
+            #    Vigtigt: i pre-market og lavt-volumen er bid/ask ofte tomme
             bid = ticker_obj.bid
             ask = ticker_obj.ask
             direction = "neutral"
+
             if ask and t.price >= ask:
                 direction = "up"
             elif bid and t.price <= bid:
                 direction = "down"
+            elif last_tick_price is not None:
+                # Fallback når bid/ask mangler
+                if t.price > last_tick_price:
+                    direction = "up"
+                elif t.price < last_tick_price:
+                    direction = "down"
+
+            last_tick_price = t.price
 
             payload = {
                 "type":      "tick",
@@ -1163,7 +1375,16 @@ async def account_dash_snapshot():
             "error": f"Fejl ved hentning: {str(e)}",
         }
 
-
+# ── /ticker/info — slå firmanavn op for én ticker ─────────────
+@app.get("/ticker/info")
+async def get_ticker_info(ticker: str):
+    """
+    Returnér det smart-forkortede firmanavn for en ticker.
+    Tom string hvis ikke fundet — frontend viser så "(ukendt)".
+    """
+    from ticker_info import get_ticker_name
+    name = await get_ticker_name(ticker)
+    return {"ticker": ticker.upper(), "name": name}
 
 @app.get("/studio")
 async def studio_index():

@@ -211,6 +211,7 @@ class IBKRConnection:
                 "ticker":   ticker,
                 "action":   action,
                 "quantity": quantity,
+                "order_id": trade.order.orderId,
                 "status":   trade.orderStatus.status,
                 "filled":   trade.orderStatus.filled,
                 "avg_fill": trade.orderStatus.avgFillPrice,
