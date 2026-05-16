@@ -103,14 +103,21 @@ VARIANTS: dict[str, VariantConfig] = {
     # ── Parameter exploration vinder (2026-05-13) ──────────────
     # Bevist out-of-sample: train +$97 / OOS +$56 mod 11-ticker univers.
     # Strategien: smal target + meget stramt vol-filter.
-    # Forventet i live: få trades pr. uge (5x vol_mult er restriktivt).
+    # Forventet i live: få trades pr. uge (3x vol_mult er restriktivt).
+    #
+    # OPDATERING 2026-05-16: Trail tilføjet for at lade vindere løbe.
+    # +1% bliver nu break-even-trigger i stedet for hard exit.
+    # Trail aktiveres ved +1.5% med stram 0.5% afstand fra highest_high.
     "all_winner": VariantConfig(
-        name="All-winner: +1% target, vol 5x, ORB Mid stop",
+        name="All-winner: +1% BE, vol 3x, ORB Mid stop, trail 0.5%",
         stop_mode="orb_mid",
-        target_pct=0.01,                 # +1% target (lavt og realistisk)
-        vol_mult=5.0,                    # KRAFTIGT breakout-filter
-        breakeven_enabled=False,         # ingen BE — målet er hurtig profit
-        trail_enabled=False,             # ingen trail — target eller force-close
+        target_pct=0.04,                 # +4% — bliver fjernet når trail aktiveres
+        vol_mult=3.0,                    # KRAFTIGT breakout-filter
+        breakeven_enabled=True,          # BE aktiveres ved +1%
+        breakeven_trigger_pct=0.01,      # +1% gevinst → flyt stop til entry
+        trail_enabled=True,              # trail tager over efter BE
+        trail_activate_pct=0.015,        # +1.5% gevinst → aktivér trail
+        trail_distance_pct=0.005,        # 0.5% under highest_high — meget stramt
     ),
 }
 

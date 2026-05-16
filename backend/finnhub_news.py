@@ -85,28 +85,21 @@ class FinnhubNewsFeed:
         """Start polling-loop. Kører indtil .stop() kaldes."""
         self._running = True
         logger.info("[FinnhubNews] Starter — poller hver %d sek", POLL_INTERVAL_SEC)
-        print(f"[FinnhubNews-DEBUG] start() kaldt, _running={self._running}")
 
         # Lille initial-delay så vi ikke spammer ved opstart
         await asyncio.sleep(5)
-        print("[FinnhubNews-DEBUG] Initial-delay færdig, starter første poll...")
 
         # Kør første poll med det samme så News Room ikke står tomt i 5 min
         try:
             await self._poll_all()
-            print("[FinnhubNews-DEBUG] Første poll fuldført")
         except Exception as e:
-            print(f"[FinnhubNews-DEBUG] EXCEPTION i initial poll: {type(e).__name__}: {e}")
             logger.exception(f"[FinnhubNews] Initial poll-fejl: {e}")
 
         while self._running:
             await asyncio.sleep(POLL_INTERVAL_SEC)
-            print("[FinnhubNews-DEBUG] Periodisk poll starter...")
             try:
                 await self._poll_all()
-                print("[FinnhubNews-DEBUG] Periodisk poll fuldført")
             except Exception as e:
-                print(f"[FinnhubNews-DEBUG] EXCEPTION i periodisk poll: {type(e).__name__}: {e}")
                 logger.exception(f"[FinnhubNews] Poll-fejl: {e}")
 
     async def stop(self):
@@ -135,22 +128,17 @@ class FinnhubNewsFeed:
         url = f"{FINNHUB_BASE}/news"
         params = {"category": "general", "token": FINNHUB_API_KEY}
 
-        print(f"[FinnhubNews-DEBUG] _poll_general: kalder {url}")
         try:
             # Forlænget timeout fra 10 til 30 sek
             async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                print(f"[FinnhubNews-DEBUG] _poll_general: HTTP {resp.status}")
                 if resp.status != 200:
                     logger.warning(f"[FinnhubNews] General HTTP {resp.status}")
                     return 0
                 items = await resp.json()
-                print(f"[FinnhubNews-DEBUG] _poll_general: modtog {len(items) if isinstance(items, list) else 'ikke-liste'} items")
         except asyncio.TimeoutError:
-            print("[FinnhubNews-DEBUG] _poll_general: TIMEOUT efter 30 sek")
             logger.warning("[FinnhubNews] General timeout")
             return 0
         except Exception as e:
-            print(f"[FinnhubNews-DEBUG] _poll_general: EXCEPTION {type(e).__name__}: {e}")
             logger.warning(f"[FinnhubNews] General request-fejl: {e}")
             return 0
 
@@ -179,11 +167,10 @@ class FinnhubNewsFeed:
                 self._seen_ids.add(finnhub_id)
                 continue
 
-            self._seen_ids.add(finnhub_id)
+            sself._seen_ids.add(finnhub_id)
             await self._broadcast_news(item, tickers[0])
             new_count += 1
 
-        print(f"[FinnhubNews-DEBUG] _poll_general: {new_count} accepteret, {len(items) - new_count} filtreret bort")
         return new_count
 
     async def _poll_company_news(self, session: aiohttp.ClientSession) -> int:
@@ -191,8 +178,6 @@ class FinnhubNewsFeed:
         # Hent nyheder fra de seneste 2 dage
         to_date   = datetime.now().date()
         from_date = to_date - timedelta(days=2)
-
-        print(f"[FinnhubNews-DEBUG] _poll_company_news: starter, {len(COMPANY_TICKERS)} tickers, {from_date} til {to_date}")
 
         total_new = 0
 
@@ -208,23 +193,20 @@ class FinnhubNewsFeed:
             try:
                 async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
-                        print(f"[FinnhubNews-DEBUG] {ticker}: HTTP {resp.status}")
+                        logger.debug(f"[FinnhubNews] {ticker}: HTTP {resp.status}")
                         continue
                     items = await resp.json()
             except asyncio.TimeoutError:
-                print(f"[FinnhubNews-DEBUG] {ticker}: TIMEOUT")
+                logger.debug(f"[FinnhubNews] {ticker}: timeout")
                 continue
             except Exception as e:
-                print(f"[FinnhubNews-DEBUG] {ticker}: {type(e).__name__}: {e}")
+                logger.debug(f"[FinnhubNews] {ticker}: {type(e).__name__}: {e}")
                 continue
 
             if not isinstance(items, list):
-                print(f"[FinnhubNews-DEBUG] {ticker}: ikke-liste svar")
                 continue
 
             cutoff = datetime.now().timestamp() - (MAX_NEWS_AGE_HOURS * 3600)
-            ticker_new = 0
-            total_items = len(items)
 
             for item in items:
                 finnhub_id = item.get("id")
@@ -237,14 +219,10 @@ class FinnhubNewsFeed:
                 self._seen_ids.add(finnhub_id)
                 await self._broadcast_news(item, ticker)
                 total_new += 1
-                ticker_new += 1
-
-            print(f"[FinnhubNews-DEBUG] {ticker}: {total_items} items, {ticker_new} nye")
 
             # Lille pause mellem requests så vi ikke rammer rate-limit
             await asyncio.sleep(1.1)
 
-        print(f"[FinnhubNews-DEBUG] _poll_company_news: færdig, total_new={total_new}")
         return total_new
 
     async def _broadcast_news(self, item: dict, ticker: str):
@@ -270,6 +248,7 @@ class FinnhubNewsFeed:
             "sentiment": _guess_sentiment(headline),
             "timestamp": datetime.now().isoformat(),
             "delayed":   True,
+            "url":       item.get("url", "") or "",
         }
         self._next_news_id += 1
 

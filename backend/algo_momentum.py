@@ -36,6 +36,20 @@ from strategies.momentum_orb.strategy import TRADE_START
 from strategies.momentum_orb.exit import TRADE_END_TIME as TRADE_END
 from strategies.base import Bar
 
+# Cut-off for NYE entries — efter denne tid handler vi ikke længere på breakouts.
+# Eksisterende positioner fortsætter dog indtil TRADE_END (15:55 ET force-close)
+# eller indtil stop/target/trail udløses.
+ENTRY_END = dtime(11, 0)
+
+# Trade Forensics — logger indikatorer, tape og L2 ved hver entry/exit
+from tape_buffer import TapeBuffer
+from trade_forensics import build_entry_snapshot, build_exit_snapshot
+
+# Markedet lukker kl. 16:00 ET — vi lukker positioner 5 min før så
+# vi undgår closing auction-volatilitet
+MARKET_CLOSE = dtime(15, 55)
+
+
 logger = logging.getLogger(__name__)
 
 # ── Konfiguration ────────────────────────────────────────────
@@ -82,7 +96,15 @@ class MomentumORB(BaseStrategy):
         self._strategy = MomentumORBStrategy()
         self._variant_key = LIVE_VARIANT_KEY
 
-        # Universe og dagens kontekst pr. ticker
+        # ── Trade Forensics ──────────────────────────────────
+        # TapeBuffer holder 180 sek tape + depth pr. ticker.
+        # Bar-history gemmer historiske 5-min bars pr. ticker for indikatorer.
+        # Begge initialiseres lazily ved første brug — kan være None hvis
+        # forensics fejler ved opstart.
+        self._tape_buffer: Optional[TapeBuffer] = None
+        self._bar_history: dict[str, list[Bar]] = {}
+
+        # Universe og dagens kontekst pr.
         self.universe:        list[str]        = []
         self._day_contexts:   dict[str, dict]  = {}     # ticker → day context
 
@@ -273,6 +295,8 @@ class MomentumORB(BaseStrategy):
 
             self._day_contexts[ticker] = context
             self._strategy.entry.reset_for_day(today, context)
+            # Gem bar-history så forensics kan beregne indikatorer ved entry/exit
+            self._bar_history[ticker] = list(bars)
             ok_count += 1
             logger.info(
                 f"  {ticker}: ORB H={context['orb_high']:.2f} "
@@ -284,6 +308,40 @@ class MomentumORB(BaseStrategy):
             msg += f" (ingen data: {', '.join(fail_tickers[:3])})"
         self._status("orb_ready",
                      f"✅ {msg} — Klar til handel kl. 09:45 ET (15:45 DK)")
+
+        # ── Trade Forensics: start tape/depth subscriptions ───────────
+        # Vi tape-subscriber alle tickers og forsøger depth på alle.
+        # Depth fejler typisk for de fleste pga. IBKR's 3-samtidige-grænse —
+        # det er accepteret og vi fortsætter uden L2 for dem.
+        try:
+            self._tape_buffer = TapeBuffer(self.conn)
+            await self._tape_buffer.start()
+
+            self._status("orb_ready",
+                         f"Forensics: subscriber tape + L2 for {len(self.universe)} aktier...")
+
+            tape_ok = depth_ok = depth_failed_count = 0
+            for ticker in self.universe:
+                result = await self._tape_buffer.subscribe(ticker)
+                if result["tape_ok"]:
+                    tape_ok += 1
+                if result["depth_ok"]:
+                    depth_ok += 1
+                else:
+                    depth_failed_count += 1
+                # Lille pause for at undgå IBKR-rate-limits ved mange samtidige subs
+                await asyncio.sleep(0.1)
+
+            self._status("orb_ready",
+                         f"✅ Forensics klar — Tape: {tape_ok}/{len(self.universe)}  "
+                         f"L2: {depth_ok}/{len(self.universe)} "
+                         f"({depth_failed_count} fejlede pga. IBKR-grænse)")
+        except Exception as e:
+            # Forensics-fejl må ALDRIG nedlægge handelsflowet
+            logger.exception(f"Forensics setup fejlede — fortsætter uden: {e}")
+            self._tape_buffer = None
+            self._status("orb_ready",
+                         f"⚠ Forensics-setup fejlede ({e}) — algoritmen kører videre uden")
 
     # -------------------------------------------------------------
     # Trading loop
@@ -302,10 +360,16 @@ class MomentumORB(BaseStrategy):
                 await asyncio.sleep(15)
                 continue
 
-            if t >= TRADE_END:
+            # Efter ENTRY_END (11:00 ET): stop nye entries, men lad
+            # eksisterende positioner køre videre til exit-regler triggrer
+            # eller markedet lukker (15:55 ET).
+            entries_allowed = t < ENTRY_END
+
+            # Markedsluk — luk alle positioner som backup
+            if t >= MARKET_CLOSE:
                 if self._positions:
-                    self._status("trading", "Handelsdagens slut — lukker alle positioner")
-                    await self._close_all("force_close 10:30")
+                    self._status("trading", "Markedet lukker — lukker alle positioner")
+                    await self._close_all("market_close 15:55")
                 wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
                 losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
                 self._status("done",
@@ -329,7 +393,7 @@ class MomentumORB(BaseStrategy):
                 for ticker in self.universe:
                     if self.status != StrategyStatus.RUNNING:
                         break
-                    await self._check_ticker(ticker)
+                    await self._check_ticker(ticker, entries_allowed)
                 consecutive_errors = 0
             except Exception as e:
                 consecutive_errors += 1
@@ -366,11 +430,12 @@ class MomentumORB(BaseStrategy):
     # Ticker check — delegerer til strategiens entry og exit
     # -------------------------------------------------------------
 
-    async def _check_ticker(self, ticker: str):
+    async def _check_ticker(self, ticker: str, entries_allowed: bool = True):
         """
         Tjek én ticker:
           - Hvis vi har position: opdatér exit-state og tjek exit
           - Ellers: byg en Bar fra snapshot og kald strategy.entry
+            (kun hvis entries_allowed=True — dvs. før 10:30 ET)
         """
         if self._position_size_pct == 0.0:
             return
@@ -418,6 +483,11 @@ class MomentumORB(BaseStrategy):
             volume=volume,
         )
 
+        # Efter 10:30 ET er nye entries deaktiveret — kun eksisterende
+        # positioner får lov at fortsætte til exit-reglerne triggrer
+        if not entries_allowed:
+            return
+
         signal = self._strategy.entry.check_entry(ticker, pseudo_bar, context)
         if signal is not None:
             await self._open(signal)
@@ -456,6 +526,22 @@ class MomentumORB(BaseStrategy):
         if not result:
             return
 
+        # Registrer hos OrdersTracker så Ordrer-vinduet viser algoens handler
+        try:
+            from orders_tracker import get_tracker
+            order_id = result.get("order_id")
+            if order_id:
+                get_tracker().record_placed(
+                    order_id=order_id,
+                    source=self.name,
+                    ticker=signal.ticker,
+                    action="BUY",
+                    shares=shares,
+                    order_type="MKT",
+                )
+        except Exception as e:
+            logger.warning(f"Kunne ikke registrere ordre hos tracker: {e}")
+
         # Lad strategien skabe Position med dens egen exit-state
         position = self._strategy.exit.open_position(signal, shares, self._variant_key)
         self._positions[signal.ticker] = position
@@ -490,6 +576,30 @@ class MomentumORB(BaseStrategy):
                      f"📈 Købt {shares} {signal.ticker} @ ${signal.entry_price:.2f} | "
                      f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
 
+        # ── Trade Forensics: log indikatorer, tape og L2 ──────────────
+        try:
+            bars = self._bar_history.get(signal.ticker, [])
+            ctx = self._day_contexts.get(signal.ticker, {})
+            snapshot = build_entry_snapshot(
+                ticker=signal.ticker,
+                entry_price=signal.entry_price,
+                entry_time=signal.entry_time,
+                shares=shares,
+                bars=bars,
+                context=ctx,
+                tape_buffer=self._tape_buffer,
+                variant_name=variant.name,
+            )
+            if self._journal:
+                await self._journal.log_event(
+                    source=self.name,
+                    event_type="trade_forensics",
+                    symbol=signal.ticker,
+                    payload=snapshot,
+                )
+        except Exception as e:
+            logger.exception(f"Forensics (entry) for {signal.ticker} fejlede: {e}")
+
     async def _close(self, ticker: str, price: float, reason: str):
         """Luk position og bogfør trade."""
         if ticker not in self._positions:
@@ -502,7 +612,23 @@ class MomentumORB(BaseStrategy):
         pnl    = self.record_position_closed(ticker, price)
         self.total_pnl += pnl
 
-        await self.conn.place_paper_order(ticker, "SELL", shares)
+        sell_result = await self.conn.place_paper_order(ticker, "SELL", shares)
+
+        # Registrer salget hos OrdersTracker
+        try:
+            from orders_tracker import get_tracker
+            sell_order_id = sell_result.get("order_id") if sell_result else None
+            if sell_order_id:
+                get_tracker().record_placed(
+                    order_id=sell_order_id,
+                    source=self.name,
+                    ticker=ticker,
+                    action="SELL",
+                    shares=shares,
+                    order_type="MKT",
+                )
+        except Exception as e:
+            logger.warning(f"Kunne ikke registrere SELL hos tracker: {e}")
 
         trade = {
             "ticker":      ticker,
@@ -525,6 +651,35 @@ class MomentumORB(BaseStrategy):
                      f"{emoji} Solgt {shares} {ticker} @ ${price:.2f} "
                      f"${pnl:+.2f} ({reason}) | "
                      f"P&L: ${self.total_pnl:+,.2f}")
+
+        # ── Trade Forensics: log exit-snapshot ─────────────────────────
+        try:
+            bars = self._bar_history.get(ticker, [])
+            ctx = self._day_contexts.get(ticker, {})
+            variant = VARIANTS[self._variant_key]
+            snapshot = build_exit_snapshot(
+                ticker=ticker,
+                entry_price=position.entry_price,
+                exit_price=price,
+                entry_time=position.entry_time,
+                exit_time=datetime.now(ET),
+                shares=shares,
+                pnl=pnl,
+                reason=reason,
+                bars=bars,
+                context=ctx,
+                tape_buffer=self._tape_buffer,
+                variant_name=variant.name,
+            )
+            if self._journal:
+                await self._journal.log_event(
+                    source=self.name,
+                    event_type="trade_forensics",
+                    symbol=ticker,
+                    payload=snapshot,
+                )
+        except Exception as e:
+            logger.exception(f"Forensics (exit) for {ticker} fejlede: {e}")
 
     async def _close_all(self, reason: str):
         for ticker in list(self._positions.keys()):
@@ -554,7 +709,7 @@ class MomentumORB(BaseStrategy):
         else:
             exit_lines.append("Trail:        deaktiveret")
         exit_lines.append(f"Target:       +{v.target_pct*100:.0f}% (fjernes i stage 3)")
-        exit_lines.append(f"Force-close:  {TRADE_END.strftime('%H:%M')} ET")
+        exit_lines.append(f"Force-close:  {MARKET_CLOSE.strftime('%H:%M')} ET (markedsluk)")
 
         from strategies.momentum_orb.config import VOL_MULT, RSI_MAX
 
@@ -563,13 +718,13 @@ class MomentumORB(BaseStrategy):
             "description": self.description,
             "asset_class": self.asset_class,
             "instrument":  "US Equities (STK.US.MAJOR)",
-            "timeframe":   "Intradag — lukker senest 10:30 ET",
+            "timeframe":   f"Intradag — entries 09:45-{ENTRY_END.strftime('%H:%M')} ET, lukker senest {MARKET_CLOSE.strftime('%H:%M')} ET",
             "entry": [
                 "Pris bryder ORB High (første 15 min: 09:30-09:44 ET)",
                 f"Volumen >= {VOL_MULT}x gennemsnit",
                 f"RSI(14) < {RSI_MAX}",
                 "Break & retest bekræftelse",
-                f"Handelsvindue: {TRADE_START.strftime('%H:%M')}-{TRADE_END.strftime('%H:%M')} ET",
+                f"Entry-vindue: {TRADE_START.strftime('%H:%M')}-{ENTRY_END.strftime('%H:%M')} ET",
             ],
             "exit": exit_lines,
             "market_conditions": [
@@ -599,7 +754,8 @@ async def main():
     print("══════════════════════════════════════")
     print(f"Aktiv variant: {variant.name}")
     print(f"Stop mode:     {variant.stop_mode}")
-    print(f"Tidsvindue:    {TRADE_START.strftime('%H:%M')}-{TRADE_END.strftime('%H:%M')} ET")
+    print(f"Entry-vindue:  {TRADE_START.strftime('%H:%M')}-{ENTRY_END.strftime('%H:%M')} ET")
+    print(f"Markedsluk:    {MARKET_CLOSE.strftime('%H:%M')} ET")
     print("══════════════════════════════════════\n")
 
     conn = IBKRConnection(paper_trading=True)

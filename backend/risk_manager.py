@@ -17,7 +17,7 @@ class RiskConfig:
     daily_loss_limit:        float = 300.0     # $300 kombineret daglig grænse
     max_total_exposure:      float = 20000.0   # Max $ samlet i markedet
     max_total_positions:     int   = 6         # Max positioner på tværs
-    nlv_emergency_threshold: float = 16000.0   # Nødstop hvis NLV falder hertil
+    nlv_emergency_threshold: float = 5000.0    # Nødstop hvis NLV falder hertil
     block_duplicate_tickers: bool  = True      # Forhindre samme ticker i 2 strategier
 
 

@@ -33,9 +33,10 @@ from strategies.base import Bar, EntrySignal, ExitDecision, Position
 from strategies.momentum_orb.config import VariantConfig, VARIANTS
 
 
-# Force-close-tid — fælles for alle MomentumORB-varianter
-TRADE_END_TIME = dtime(10, 30)
-
+# Absolut force-close-tid — alle åbne positioner SKAL lukkes inden markedet
+# lukker kl. 16:00 ET. Vi giver 5 min buffer for at undgå last-second slippage.
+# Indtil 15:55 styres positioner kun af stop, target og trail.
+TRADE_END_TIME = dtime(15, 55)
 # Stage-konstanter
 STAGE_INITIAL    = 1
 STAGE_BREAKEVEN  = 2
@@ -212,8 +213,10 @@ class MomentumORBExit:
         """
         state: ExitState = position.state
 
-        if current_time_et >= TRADE_END_TIME:
-            return ExitDecision(exit_price=current_price, reason=REASON_FORCE_CLOSE)
+        # NB: force-close kl. 10:30 er fjernet for live algoritmen.
+        # Live algoritmen håndterer market close (15:55 ET) separat
+        # i hovedloopet i algo_momentum.py. Positioner får lov at
+        # udvikle sig efter deres egne exit-regler (stop, target, trail).
 
         if current_price <= state.stop:
             reason = REASON_TRAIL if state.stage == STAGE_TRAILING else REASON_STOP
