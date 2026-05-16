@@ -105,6 +105,43 @@
             margin-bottom: 6px;
         }
 
+        /* Markdown-styling for strategi-dokumentation */
+        .markdown-body h1 {
+            font-size: 22px; color: #4a9eff;
+            margin: 8px 0 14px; border-bottom: 2px solid #333; padding-bottom: 8px;
+        }
+        .markdown-body h2 {
+            font-size: 18px; color: #e0e0e0;
+            margin: 24px 0 10px; border-bottom: 1px solid #333; padding-bottom: 6px;
+        }
+        .markdown-body h3 {
+            font-size: 15px; color: #e0e0e0; margin: 16px 0 8px; font-weight: 700;
+        }
+        .markdown-body p { margin: 8px 0; }
+        .markdown-body strong { color: #4a9eff; font-weight: 700; }
+        .markdown-body code {
+            background: #2a2a2a; color: #4ade80; padding: 2px 6px;
+            border-radius: 3px; font-size: 12px; font-family: 'Courier New', monospace;
+        }
+        .markdown-body pre {
+            background: #2a2a2a; border: 1px solid #333; border-radius: 4px;
+            padding: 10px 14px; overflow-x: auto; margin: 10px 0;
+        }
+        .markdown-body pre code { background: transparent; color: #e0e0e0; padding: 0; }
+        .markdown-body ul, .markdown-body ol { margin: 8px 0; padding-left: 24px; }
+        .markdown-body li { margin: 4px 0; }
+        .markdown-body table {
+            border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #333; padding: 6px 10px; text-align: left;
+        }
+        .markdown-body th { background: #2a2a2a; color: #4a9eff; font-weight: 700; }
+        .markdown-body hr { border: none; border-top: 1px solid #333; margin: 20px 0; }
+        .markdown-body blockquote {
+            border-left: 3px solid #4a9eff; padding-left: 12px; color: #aaa; margin: 10px 0;
+        }
+
         .stat-value {
             font-size: 24px;
             font-weight: 600;
@@ -348,7 +385,9 @@
         table th { color: #aaa; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
         table td { padding: 12px 8px; border-bottom: 1px solid #2a2a2a; font-size: 14px; }
         table tr:last-child td { border-bottom: none; }
+        
     </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
     <script src="/studio/dev_config.js" onerror="console.log('[DEV] Ingen dev_config.js — prod mode aktiv')"></script>
 </head>
 
@@ -812,6 +851,20 @@
                             ■ Stop algoritme
                         </button>
                     </div>
+                    <div style="display:flex;gap:12px;margin-top:12px;">
+                        <button onclick="showStrategyDocs('momentum_orb', 'iben')"
+                                style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
+                                       border:1px solid #4a9eff;border-radius:6px;
+                                       font-size:13px;font-weight:600;cursor:pointer;">
+                            📖 Forklaring
+                        </button>
+                        <button onclick="showStrategyDocs('momentum_orb', 'teknisk')"
+                                style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
+                                       border:1px solid #4a9eff;border-radius:6px;
+                                       font-size:13px;font-weight:600;cursor:pointer;">
+                            🔬 Teknisk reference
+                        </button>
+                    </div>
                     ${statsHtml}
                 </div>
             `;
@@ -836,6 +889,77 @@
             } catch (e) {
                 renderStrategiesError("Kunne ikke stoppe: " + e.message);
             }
+        }
+
+        // ─────────────────────────────────────────────────────
+        // STRATEGI-DOKUMENTATION (modal popup)
+        // ─────────────────────────────────────────────────────
+        async function showStrategyDocs(strategy, version) {
+            // Opret overlay
+            const overlay = document.createElement("div");
+            overlay.id = "docs-overlay";
+            overlay.style.cssText = `
+                position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+                z-index: 9999; display: flex; align-items: center;
+                justify-content: center; padding: 40px;
+            `;
+            overlay.onclick = (e) => { if (e.target === overlay) closeStrategyDocs(); };
+
+            const title = version === "iben"
+                ? "📖 Strategi — almindelig forklaring"
+                : "🔬 Strategi — teknisk reference";
+
+            overlay.innerHTML = `
+                <div style="background:#1a1a1a; border:1px solid #444; border-radius:8px;
+                            width:min(900px, 90vw); max-height:90vh; display:flex;
+                            flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+                    <div style="display:flex; align-items:center; justify-content:space-between;
+                                padding:14px 20px; border-bottom:1px solid #333; flex-shrink:0;">
+                        <div style="font-size:16px; font-weight:700; color:#4a9eff;">${title}</div>
+                        <button onclick="closeStrategyDocs()"
+                                style="background:transparent; border:1px solid #444; color:#aaa;
+                                       border-radius:4px; padding:4px 10px; cursor:pointer; font-size:13px;"
+                                title="Luk (ESC)">✕ Luk</button>
+                    </div>
+                    <div id="docs-body" style="flex:1; overflow:auto; padding:20px 28px;
+                                                font-size:14px; line-height:1.6; color:#e0e0e0;">
+                        <div style="text-align:center; padding:40px; color:#888; font-style:italic;">
+                            Indlæser dokumentation...
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            // ESC for at lukke
+            document.addEventListener("keydown", handleDocsKeydown);
+
+            // Hent indhold
+            try {
+                const res = await authFetch(`/strategies/${strategy}/docs/${version}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const html = marked.parse(data.content || "");
+                document.getElementById("docs-body").innerHTML =
+                    `<div class="markdown-body">${html}</div>`;
+            } catch (e) {
+                document.getElementById("docs-body").innerHTML = `
+                    <div style="padding:12px 16px; background:rgba(248,113,113,0.1);
+                                border:1px solid #f87171; border-radius:4px; color:#f87171;">
+                        ⚠ Kunne ikke hente dokumentation: ${e.message}
+                    </div>
+                `;
+            }
+        }
+
+        function closeStrategyDocs() {
+            const overlay = document.getElementById("docs-overlay");
+            if (overlay) overlay.remove();
+            document.removeEventListener("keydown", handleDocsKeydown);
+        }
+
+        function handleDocsKeydown(e) {
+            if (e.key === "Escape") closeStrategyDocs();
         }
 
         // ─────────────────────────────────────────────────────
