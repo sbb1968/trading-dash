@@ -304,13 +304,13 @@ async def startup():
     await algo_scheduler.start()
     print("[Server] Algo-scheduler startet — autonom dagsplan aktiv")
 
-    # Notificer Iben at backend er oppe og kører
-    await notifier.send(
-        message  = f"Backend startet på {identity.instance_display_name}. Autonom drift aktiv.",
-        title    = "🟢 Trading Dash backend startet",
-        priority = 2,
-        tags     = "robot,green_circle",
-    )
+    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+    # await notifier.send(
+    #     message  = f"Backend startet på {identity.instance_display_name}. Autonom drift aktiv.",
+    #     title    = "🟢 Trading Dash backend startet",
+    #     priority = 2,
+    #     tags     = "robot,green_circle",
+    # )
 
 async def start_finnhub_feed():
     """Start Finnhub news polling i baggrunden."""

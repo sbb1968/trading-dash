@@ -126,12 +126,14 @@ class TWSWatchdog:
             if not self._was_online:
                 logger.info("[Watchdog] ✅ TWS er tilbage online")
                 if self._fail_count >= FAILS_BEFORE_ALERT and self._in_active_hours():
-                    await notifier.send(
-                        message  = "TWS er tilbage online — algoritmen kan handle igen.",
-                        title    = "✅ TWS forbundet",
-                        priority = 3,
-                        tags     = "white_check_mark",
-                    )
+                    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+                    # await notifier.send(
+                    #     message  = "TWS er tilbage online — algoritmen kan handle igen.",
+                    #     title    = "✅ TWS forbundet",
+                    #     priority = 3,
+                    #     tags     = "white_check_mark",
+                    # )
+                    pass
                 self._fail_count  = 0
                 self._alerts_sent = 0       # reset så næste offline-periode får sine 2 push'er
             self._was_online = True
@@ -152,12 +154,14 @@ class TWSWatchdog:
                 if self._last_alert_at and (datetime.now() - self._last_alert_at) > timedelta(minutes=REMINDER_DELAY_MIN):
                     if self._in_active_hours():
                         logger.warning(f"[Watchdog] Reminder — TWS stadig offline (alert {self._alerts_sent + 1}/{MAX_OFFLINE_ALERTS})")
-                        await notifier.send(
-                            message  = "TWS er stadig ikke logget ind. Dette er sidste påmindelse — jeg holder op med at sende beskeder indtil TWS kommer online.",
-                            title    = "⏰ Sidste TWS-påmindelse",
-                            priority = 5,
-                            tags     = "alarm_clock,key",
-                        )
+                        # DEAKTIVERET 2026-05-17 — Iben vil kun se den primære TWS-offline besked,
+                        # ikke sidste-påmindelse-varianten.
+                        # await notifier.send(
+                        #     message  = "TWS er stadig ikke logget ind. Dette er sidste påmindelse — jeg holder op med at sende beskeder indtil TWS kommer online.",
+                        #     title    = "⏰ Sidste TWS-påmindelse",
+                        #     priority = 5,
+                        #     tags     = "alarm_clock,key",
+                        # )
                         self._last_alert_at = datetime.now()
                         self._alerts_sent  += 1
 

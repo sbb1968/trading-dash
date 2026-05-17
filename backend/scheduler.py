@@ -199,25 +199,27 @@ class AlgoScheduler:
             logger.info("[Scheduler] Pre-flight: TWS er online ✅")
             return
         # TWS er ikke online — ping Iben med ekstra urgency
-        await notifier.send(
-            message  = "Algoritmen starter om 14 minutter (09:44 ET / 15:44 DK) men TWS er ikke logget ind. Log ind nu.",
-            title    = "⏰ Log ind på TWS",
-            priority = 5,
-            tags     = "alarm_clock,key",
-        )
+        # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+        # await notifier.send(
+        #     message  = "Algoritmen starter om 14 minutter (09:44 ET / 15:44 DK) men TWS er ikke logget ind. Log ind nu.",
+        #     title    = "⏰ Log ind på TWS",
+        #     priority = 5,
+        #     tags     = "alarm_clock,key",
+        # )
 
     async def _job_start_algo(self):
         if not self._tws_is_online():
             logger.warning("[Scheduler] Kan ikke starte algoritme — TWS er offline")
-            await notifier.send(
-                message  = "Algoritmen blev IKKE startet — TWS er ikke logget ind. Du går glip af dagens handel.",
-                title    = "🔴 Algo ikke startet",
-                priority = 5,
-                tags     = "x,key",
-            )
+            # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+            # await notifier.send(
+            #     message  = "Algoritmen blev IKKE startet — TWS er ikke logget ind. Du går glip af dagens handel.",
+            #     title    = "🔴 Algo ikke startet",
+            #     priority = 5,
+            #     tags     = "x,key",
+            # )
             return
         await self._start_algo()
-        await notifier.alert_algo_started()
+        await notifier.alert_algo_started()   # no-op (deaktiveret i notifier.py)
 
     async def _job_daily_summary(self):
         """Efter algoritmen har lukket alle positioner — send opsummering."""
@@ -230,13 +232,15 @@ class AlgoScheduler:
             pnl     = summary.get("total_pnl", 0.0)
             if trades > 0:
                 await notifier.alert_daily_summary(trades, wins, pnl)
-            else:
-                await notifier.send(
-                    message  = "Ingen handler i dag (markedsbetingelser eller ingen breakouts).",
-                    title    = "📊 Dagens algo-resultat",
-                    priority = 2,
-                    tags     = "bar_chart",
-                )
+            # DEAKTIVERET 2026-05-17 — "Ingen handler"-varianten sendes ikke længere;
+            # Iben vil kun se dagens resultat når der ER handler.
+            # else:
+            #     await notifier.send(
+            #         message  = "Ingen handler i dag (markedsbetingelser eller ingen breakouts).",
+            #         title    = "📊 Dagens algo-resultat",
+            #         priority = 2,
+            #         tags     = "bar_chart",
+            #     )
         except Exception as e:
             logger.exception(f"[Scheduler] Summary fejl: {e}")
 

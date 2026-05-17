@@ -89,18 +89,28 @@ async def send(
 
 # ── Convenience wrappers ──────────────────────────────────────
 
+# ── AKTIVE notifikationer (2026-05-17) ────────────────────────
+# Kun to push-beskeder må sendes til Iben:
+#   1. TWS er ikke logget ind  (alert_tws_offline)
+#   2. Dagens algo-resultat    (alert_daily_summary)
+# Alle øvrige wrappers er DEAKTIVERET via early return — koden er
+# bevaret så de let kan reaktiveres senere ved at fjerne return-linjen.
+# Begge aktive beskeder kører på priority 3 (normal).
+
 async def alert_tws_offline():
-    """TWS er ikke logget ind — kritisk, vækker telefonen."""
+    """TWS er ikke logget ind."""
     await send(
         message   = "TWS er ikke logget ind. Log venligst ind på TWS Paper Trading (port 7497) — algoritmen kan ikke handle.",
         title     = "⚠ TWS skal logges ind",
-        priority  = 5,
+        priority  = 3,
         tags      = "warning,key",
         dedup_key = "tws_offline",
     )
 
 
 async def alert_algo_started():
+    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+    return
     await send(
         message  = "Momentum ORB er startet og venter på handelsvinduet (09:45 ET).",
         title    = "🤖 Algoritme startet",
@@ -111,6 +121,8 @@ async def alert_algo_started():
 
 async def alert_algo_trade(action: str, ticker: str, shares: int, price: float, pnl: Optional[float] = None):
     """action = 'KØB' eller 'SALG'"""
+    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+    return
     if action.upper().startswith("K"):
         msg   = f"KØB {shares} {ticker} @ ${price:.2f}"
         tags  = "chart_with_upwards_trend"
@@ -133,6 +145,8 @@ async def alert_daily_summary(trades: int, wins: int, total_pnl: float):
 
 
 async def alert_emergency_stop(reason: str):
+    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+    return
     await send(
         message   = f"Nødstop aktiveret: {reason}",
         title     = "🚨 NØDSTOP",
@@ -143,6 +157,8 @@ async def alert_emergency_stop(reason: str):
 
 
 async def alert_backend_error(error: str):
+    # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
+    return
     await send(
         message   = f"Backend-fejl: {error}",
         title     = "⚠ Backend fejl",
