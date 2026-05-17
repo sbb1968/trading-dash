@@ -6,50 +6,68 @@ Det her er hvordan algoritmen tænker og handler på din vegne. Læs det igennem
 
 ## Aktuelle indstillinger
 
-Sidste opdatering: 16. maj 2026
+Sidste opdatering: 17. maj 2026
 
 - **Aktiv variant**: "all_winner" — smal target med trail-mulighed
+- **Retning**: Både LONG (køb) og SHORT (sælg-først) — spejlvendt logik
 - **+1% gevinst**: Bliver til break-even-beskyttelse (stop flyttes til entry)
 - **+1.5% gevinst**: Trailing stop aktiveres
-- **Trail-afstand**: 0.5% under højeste pris
-- **Stop loss**: ORB Mid eller -1% (det højeste — typisk -1% til -2%)
-- **Target**: +4% (sikkerhedsnet hvis trail aldrig aktiveres)
+- **Trail-afstand**: 0.5% fra bedste pris (under for long, over for short)
+- **Stop loss**: ORB Mid eller maks 1% risiko (typisk -1% til -2%)
+- **Target**: +4% / -4% (sikkerhedsnet hvis trail aldrig aktiveres)
 - **Volumen-krav**: 3× gennemsnit
-- **RSI-loft**: < 80
+- **RSI-filter**: < 80 for long, > 20 for short
 - **Entry-vindue**: 09:45-11:00 ET (15:45-17:00 dansk sommer)
 - **Force-close**: 15:55 ET (21:55 dansk sommer) — alle positioner lukkes
 - **Per handel**: $2.500 (eller $1.250 ved moderate markedsbetingelser)
-- **Max positioner**: 3 samtidige
+- **Max positioner**: 3 samtidige (long og short tæller sammen)
 - **Daglig tab-grænse**: $300
 
 ---
 
 ## Den korte version (30 sekunder)
 
-Algoritmen leder efter aktier der bryder ud af den første kvarters handelsrange (US tid 09:30–09:44), kommer **tilbage** for at teste niveauet, og så **springer op igen**. Når den ser det mønster, køber den. Bagefter holder den positionen indtil:
+Algoritmen leder efter aktier der bryder UD af den første kvarters handelsrange (US tid 09:30–09:44), kommer **tilbage** for at teste niveauet, og så **fortsætter i samme retning igen**. Når den ser det mønster, slår den til:
+
+- **Bryder op** over ORB High → algoritmen **køber** (long)
+- **Bryder ned** under ORB Low → algoritmen **shorter** (sælger først, køber tilbage senere)
+
+Bagefter holder den positionen indtil:
 
 - Stop loss bliver ramt → tab på 1-2%
-- +1% nået → stop flyttes til entry (vi kan ikke længere tabe)
-- +1.5% nået → trailing stop aktiveres (vi følger prisen op)
+- +1% i favør nået → stop flyttes til entry (vi kan ikke længere tabe)
+- +1.5% i favør nået → trailing stop aktiveres (vi følger prisen)
 - 15:55 ET → alle positioner lukkes (markedet lukker snart)
 
-Det er en **forsigtig** version af en momentum-strategi: små sikre gevinster med åbning for store når prisen virkelig løber.
+Det er en **forsigtig** version af en momentum-strategi: små sikre gevinster med åbning for store når prisen virkelig løber — uanset om det er op eller ned.
 
 ---
 
 ## Hvad algoritmen prøver at fange
 
-Forestil dig en aktie der har handlet i sin egen lille range i et kvarter efter børsen åbner — for eksempel mellem $10.00 og $10.30. Det "loft" på $10.30 kalder vi **ORB High** (Opening Range Breakout High).
+Forestil dig en aktie der har handlet i sin egen lille range i et kvarter efter børsen åbner — for eksempel mellem $10.00 og $10.30. Det "loft" på $10.30 kalder vi **ORB High** (Opening Range Breakout High), og "gulvet" på $10.00 kalder vi **ORB Low**.
 
-På ægte momentum-dage sker noget bestemt:
+På ægte momentum-dage sker en af to ting:
+
+### Op-scenariet (LONG)
 
 1. **Kursen bryder op** over $10.30 med stor volumen — købere er sultne
 2. **Kursen falder lidt tilbage** ned mod $10.30 — sælgere prøver at slå tilbage
-3. **Køberne vinder kampen** og kursen springer op igen — det er DET øjeblik vi venter på
+3. **Køberne vinder kampen** og kursen springer op igen — DET øjeblik køber vi
 
-Det her mønster kaldes **break-and-retest**, og det er en af de mest pålidelige måder at bekræfte at et breakout er ægte og ikke bare en kortvarig falsk bevægelse.
+### Ned-scenariet (SHORT)
+
+1. **Kursen bryder ned** under $10.00 med stor volumen — sælgere er panikket
+2. **Kursen rebounder lidt** op mod $10.00 — købere prøver at fange en bund
+3. **Sælgerne vinder igen** og kursen falder under $10.00 igen — DET øjeblik shorter vi
+
+Det her mønster kaldes **break-and-retest**, og det er en af de mest pålidelige måder at bekræfte at et breakout er ægte og ikke bare en kortvarig falsk bevægelse. Det gælder symmetrisk i begge retninger.
 
 Når algoritmen ser hele mønsteret udspille sig, slår den til.
+
+### Hvad er en SHORT?
+
+Når vi shorter en aktie, sælger vi den uden at eje den (vi låner den af mægleren). Vi tjener penge hvis kursen FALDER — vi køber den tilbage billigere og leverer den retur. Det er spejlbilledet af et normalt køb: hvor long tjener på stigninger, tjener short på fald. Risikoen og potentialet er det samme — bare omvendt.
 
 ---
 
@@ -99,98 +117,118 @@ Mellem 09:45 og 11:00 kigger algoritmen efter sit mønster på alle de aktier de
 
 ## Hvordan algoritmen vælger en handel — 4 krav
 
-Når en aktie skal købes, **skal alle fire krav være opfyldt samtidig**:
+Når en aktie skal handles, **skal alle fire krav være opfyldt samtidig**. Kravene gælder symmetrisk for både long og short — kun retningen vendes.
 
-### Krav 1: Pris bryder ORB High
+### Krav 1: Pris bryder ORB-niveau
 
-Aktien skal handle højere end den højeste pris i ORB-vinduet (09:30-09:44).
+- **Long**: aktien skal handle højere end ORB High (toppen af det første kvarter)
+- **Short**: aktien skal handle lavere end ORB Low (bunden af det første kvarter)
 
-Hvis ORB High er $10.30, skal aktien handle over $10.30 før algoritmen overhovedet kigger på den.
+Hvis ORB High er $10.30 og ORB Low er $10.00, kigger algoritmen først på aktien når den enten bryder over $10.30 eller under $10.00.
 
 ### Krav 2: Volumen-eksplosion
 
-Volumen i breakout-baren skal være mindst **3 gange** højere end den gennemsnitlige volumen den dag.
+Volumen i breakout-baren skal være mindst **3 gange** højere end den gennemsnitlige volumen den dag — samme krav for både long og short.
 
 Det her er den **vigtigste** filter. Almindelige breakouts har 1.5-2× volumen — men ægte momentum-breakouts har 3×+. Vi venter på de **ægte**.
 
 Det er derfor algoritmen sjældent handler — i live trading forventer vi få handler om ugen, ikke flere om dagen.
 
-### Krav 3: RSI under 80
+### Krav 3: RSI-filter (modsat retning for short)
 
-RSI er en indikator der måler om en aktie er "overophedet". Hvis RSI er over 80 betyder det at aktien allerede er steget meget de seneste 14 perioder.
+RSI er en indikator der måler om en aktie er "overophedet" eller "overudsalgt".
 
-Vi vil ikke købe noget der er ved at toppe ud. Hvis RSI er over 80 → algoritmen springer over.
+- **Long**: RSI skal være **under 80** (vi vil ikke købe noget der allerede topper ud)
+- **Short**: RSI skal være **over 20** (vi vil ikke shorte noget der allerede har ramt bunden)
+
+Begge filtre beskytter mod at handle bevægelser der er ved at vende. Hvis RSI er imod os, springer algoritmen over.
 
 ### Krav 4: Break-and-retest bekræftet
 
-Det her er det mønster jeg beskrev i starten. Det skal udspilles i tre faser:
+Mønsteret skal udspilles i tre faser (i den relevante retning):
 
-**Fase A — Breakout opdaget**
-Prisen bryder over ORB High med stor volumen og lavt RSI.
+**Fase A — Breakout/breakdown opdaget**
+Prisen bryder ud af ORB-rangen med stor volumen og OK RSI.
 
 **Fase B — Pullback (op til 5 minutter)**
-Prisen falder tilbage og **rør** ORB High igen (eller kommer meget tæt på). Hvis pullback'en ikke sker inden 5 minutter, glemmer algoritmen breakout'et og venter på et nyt.
+- Long: prisen falder tilbage og **rører** ORB High igen (eller kommer meget tæt på)
+- Short: prisen rebounder op og **rører** ORB Low igen (eller kommer meget tæt på)
+
+Hvis pullback'en ikke sker inden 5 minutter, glemmer algoritmen breakout'et og venter på et nyt.
 
 **Fase C — Bounce (entry)**
-Prisen springer tilbage **over** ORB High. NU køber algoritmen.
+- Long: prisen springer tilbage **over** ORB High → algoritmen **køber**
+- Short: prisen falder tilbage **under** ORB Low → algoritmen **shorter**
 
-Hele mønsteret bekræfter at breakout'et er ægte: køberne var stærke nok til at presse prisen op, og stærke nok igen til at forsvare niveauet da sælgere prøvede at slå tilbage.
+Hele mønsteret bekræfter at breakout'et er ægte: vinderne (købere eller sælgere) var stærke nok til at presse prisen igennem niveauet, og stærke nok igen til at forsvare det da modparten prøvede at slå tilbage.
 
 ---
 
 ## Når en handel åbnes
 
-Algoritmen køber aktier for cirka **$2.500 per position** (eller halvdelen hvis markedet er moderat, eller nul hvis markedet er roligt).
+Algoritmen handler aktier for cirka **$2.500 per position** (eller halvdelen hvis markedet er moderat, eller nul hvis markedet er roligt).
 
-Maksimalt **3 positioner samtidig** — den vil aldrig være over-eksponeret.
+Maksimalt **3 positioner samtidig** — long og short tæller i samme bunke. Algoritmen vil aldrig være over-eksponeret.
 
 Når en position er åbnet, sættes to ting med det samme:
 
-**Stop loss**: prisniveau hvor algoritmen taber positionen hvis den falder. Med vores nuværende variant er stop sat ved ORB Mid (midten mellem ORB High og ORB Low) eller -1% under entry — det højeste af de to. Det er typisk omkring 1-2% under entry-prisen.
+**Stop loss** — prisniveau hvor algoritmen lukker positionen med tab:
+- **Long**: stop ligger UNDER entry, typisk 1-2% lavere (ved ORB Mid eller maks 1% under entry)
+- **Short**: stop ligger OVER entry, typisk 1-2% højere (spejlvendt)
 
-**Target**: prisniveau hvor algoritmen sælger positionen med gevinst. Sat til **+4%** over entry-prisen som sikkerhedsnet — men i praksis tager break-even og trailing stop over først.
+I begge tilfælde er den maksimale risiko per handel **1% af entry-prisen** — det er det vigtige tal at huske.
+
+**Target** — prisniveau hvor algoritmen tager gevinst:
+- **Long**: +4% over entry (sikkerhedsnet)
+- **Short**: -4% under entry (sikkerhedsnet)
+
+I praksis tager break-even og trailing stop over først — target udløses sjældent.
 
 ---
 
 ## Hvordan en position lukkes — 3 stadier
 
-Det her er den nye smarte del. Algoritmen styrer ikke bare positioner med ét stop og ét target — den ændrer regler undervejs som du tjener mere.
+Det her er den smarte del. Algoritmen styrer ikke positioner med ét stop og ét target — den ændrer regler undervejs som du tjener mere. Logikken er **identisk for long og short** — kun retningen vendes.
 
-### Stadie 1: Initial (entry til +1%)
+Når jeg skriver "i favør" herunder mener jeg: pris stiger for long, pris falder for short.
 
-Vi har lige købt. Algoritmen overvåger:
+### Stadie 1: Initial (entry til +1% i favør)
 
-- **Hvis prisen falder til stop** → SÆLG med tab (1-2%)
-- **Hvis prisen stiger 1%** → gå til Stadie 2
+Vi har lige åbnet position. Algoritmen overvåger:
+
+- **Hvis prisen rammer stop** → luk position med tab (1-2%)
+- **Hvis prisen bevæger sig 1% i favør** → gå til Stadie 2
 
 Det er det farlige stadie — vi kan stadig tabe.
 
-### Stadie 2: Break-even (+1% til +1.5%)
+### Stadie 2: Break-even (+1% til +1.5% i favør)
 
-Vi har +1% i gevinst nu. Algoritmen flytter **stop op til entry-prisen**. Det betyder:
+Vi har 1% i favør nu. Algoritmen flytter **stop op (long) / ned (short) til entry-prisen**. Det betyder:
 
-- Hvis kursen retracerer ned til entry → vi sælger ved 0% (ingen gevinst men heller ingen tab)
-- Hvis kursen stiger til +1.5% → gå til Stadie 3
-- Hvis kursen stiger til +4% (sikkerhedsnettet) → SÆLG med gevinst
+- Hvis kursen retracerer tilbage til entry → vi lukker ved 0% (ingen gevinst men heller ingen tab)
+- Hvis kursen fortsætter til 1.5% i favør → gå til Stadie 3
+- Hvis kursen springer direkte til 4% i favør (sikkerhedsnettet) → luk med gevinst
 
 Det er det "sikre" stadie — vi kan ikke længere tabe på handlen.
 
-### Stadie 3: Trailing (+1.5% og opad)
+### Stadie 3: Trailing (1.5% i favør og videre)
 
 Nu kører vi for alvor. Algoritmen:
 
-- **Fjerner target** (+4%-grænsen) — vi vil lade prisen løbe
-- **Følger højeste pris med trailing stop** — stop sættes 0.5% under den højeste pris vi nogensinde har set
+- **Fjerner target** (4%-grænsen) — vi vil lade prisen løbe
+- **Følger bedste pris med trailing stop**:
+  - **Long**: stop sættes 0.5% under den HØJESTE pris vi har set
+  - **Short**: stop sættes 0.5% over den LAVESTE pris vi har set
 
-Hvis prisen stiger til +3%, flytter stop sig op til +2.5%.
-Hvis prisen stiger til +5%, flytter stop sig op til +4.5%.
-Hvis prisen så falder 0.5% fra sit højeste → SÆLG.
+**Long-eksempel**: Hvis prisen stiger til +3%, flytter stop sig op til +2.5%. Stiger den til +5%, flytter stop sig op til +4.5%. Falder den så 0.5% fra sit højeste → SÆLG.
 
-Det er det "lad-vindere-løbe" stadie. Vi forlader aldrig mere end 0.5% af gevinsten tilbage på bordet.
+**Short-eksempel**: Hvis prisen falder til -3% (i favør), flytter stop sig ned til -2.5%. Falder den til -5%, flytter stop sig ned til -4.5%. Stiger den så 0.5% fra sit laveste → COVER (køb tilbage).
+
+Det er "lad-vindere-løbe"-stadiet. Vi forlader aldrig mere end 0.5% af gevinsten tilbage på bordet.
 
 ### Sikkerhedsnet: 15:55 ET
 
-Hvis hverken stop eller trail har lukket en position kl. 15:55 ET → algoritmen SÆLGER uanset hvad. Det er fordi markedet lukker kl. 16:00 og vi vil ikke have positioner natten over.
+Hvis hverken stop eller trail har lukket en position kl. 15:55 ET → algoritmen lukker uanset hvad. Det er fordi markedet lukker kl. 16:00 og vi vil ikke have positioner natten over — hverken long eller short.
 
 ---
 
@@ -225,6 +263,12 @@ Når algoritmen kører, kigger du på:
 - **Stop ikke algoritmen mid-trade** med mindre noget er rigtigt galt. Den er bygget til at klare sig selv.
 - **Tag ikke positioner manuelt** på samme aktier som algoritmen handler. Det forstyrrer dens regnskab.
 - **Sammenlign ikke dagens resultat** med backtest-tal. Backtest er gennemsnit over hundredevis af dage. Én dag betyder ingenting.
+
+## Særligt om shorts
+
+Shorts kræver at aktien kan **lånes** af mægleren. Ikke alle aktier kan shortes — især small caps under $5 er ofte "hard-to-borrow" eller helt utilgængelige. Algoritmen forsøger at sende SHORT-ordren til IBKR uanset, og hvis aktien ikke kan shortes vil ordren fejle stille i loggen. Det er ikke en bug — det er bare en konsekvens af at vi handler small caps.
+
+På paper trading har vi ofte adgang til at shorte tickers som normalt ikke ville være tilgængelige live. Vær opmærksom på det hvis vi senere går live: short-flowet kan blive markant mindre på en rigtig konto.
 
 ---
 

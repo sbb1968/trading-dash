@@ -508,21 +508,25 @@ class MomentumORB(BaseStrategy):
         if shares <= 0:
             return
 
+        # Long → BUY (køb først). Short → SELL (sælg uden at eje = short på IBKR)
+        side   = signal.side
+        action = "BUY" if side == "long" else "SELL"
+
         order = OrderRequest(
             strategy_name=self.name,
             ticker=signal.ticker,
-            action="BUY",
+            action=action,
             quantity=shares,
             order_type="MKT",
             asset_class="equity",
-            reason=f"Break & Retest entry @ ${signal.entry_price:.2f}",
+            reason=f"Break & Retest {side.upper()} entry @ ${signal.entry_price:.2f}",
         )
         if self._risk_manager:
             approved = await self.request_order(order)
             if not approved:
                 return
 
-        result = await self.conn.place_paper_order(signal.ticker, "BUY", shares)
+        result = await self.conn.place_paper_order(signal.ticker, action, shares)
         if not result:
             return
 
@@ -535,7 +539,7 @@ class MomentumORB(BaseStrategy):
                     order_id=order_id,
                     source=self.name,
                     ticker=signal.ticker,
-                    action="BUY",
+                    action=action,
                     shares=shares,
                     order_type="MKT",
                 )
@@ -551,29 +555,36 @@ class MomentumORB(BaseStrategy):
             "ticker":      signal.ticker,
             "entry_price": signal.entry_price,
             "shares":      shares,
+            "side":        side,
             "entry_time":  signal.entry_time.strftime("%H:%M:%S"),
             "stop_loss":   position.state.stop,
         }
-        self.record_position_opened(signal.ticker, signal.entry_price, shares, "long")
+        self.record_position_opened(signal.ticker, signal.entry_price, shares, side)
 
         variant = VARIANTS[self._variant_key]
+        # Long: ▲ entry op-emoji, target over. Short: ▼ entry ned-emoji, target under.
+        side_emoji = "📈" if side == "long" else "📉"
+        side_label = "LONG" if side == "long" else "SHORT"
+        target_str = f"${position.state.target:.2f}" if position.state.target is not None else "—"
         await self._log(
-            f"📈 {signal.ticker}: Position åbnet @ ${signal.entry_price:.2f} "
-            f"(stop: ${position.state.stop:.2f}, target: ${position.state.target:.2f}, "
+            f"{side_emoji} {signal.ticker} ({side_label}): åbnet @ ${signal.entry_price:.2f} "
+            f"(stop: ${position.state.stop:.2f}, target: {target_str}, "
             f"variant: {variant.name})"
         )
 
         if self._broadcast_fn:
             await self._broadcast_fn({
                 "type":   "algo_trade",
-                "action": "buy",
+                "action": "buy" if side == "long" else "sell_short",
+                "side":   side,
                 "ticker": signal.ticker,
                 "price":  signal.entry_price,
                 "shares": shares,
                 "time":   signal.entry_time.strftime("%H:%M:%S"),
             })
+        verb = "Købt" if side == "long" else "Shortet"
         self._status("trading",
-                     f"📈 Købt {shares} {signal.ticker} @ ${signal.entry_price:.2f} | "
+                     f"{side_emoji} {verb} {shares} {signal.ticker} @ ${signal.entry_price:.2f} | "
                      f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
 
         # ── Trade Forensics: log indikatorer, tape og L2 ──────────────
@@ -601,7 +612,7 @@ class MomentumORB(BaseStrategy):
             logger.exception(f"Forensics (entry) for {signal.ticker} fejlede: {e}")
 
     async def _close(self, ticker: str, price: float, reason: str):
-        """Luk position og bogfør trade."""
+        """Luk position og bogfør trade. Long lukkes med SELL, short med BUY-to-cover."""
         if ticker not in self._positions:
             return
 
@@ -609,34 +620,44 @@ class MomentumORB(BaseStrategy):
         pos_data = self._position_data.pop(ticker, None)
 
         shares = position.shares
+        side   = position.side
         pnl    = self.record_position_closed(ticker, price)
         self.total_pnl += pnl
 
-        sell_result = await self.conn.place_paper_order(ticker, "SELL", shares)
+        # Long lukkes med SELL. Short lukkes med BUY (buy-to-cover).
+        close_action = "SELL" if side == "long" else "BUY"
+        close_result = await self.conn.place_paper_order(ticker, close_action, shares)
 
-        # Registrer salget hos OrdersTracker
+        # Registrer luknings-ordren hos OrdersTracker
         try:
             from orders_tracker import get_tracker
-            sell_order_id = sell_result.get("order_id") if sell_result else None
-            if sell_order_id:
+            close_order_id = close_result.get("order_id") if close_result else None
+            if close_order_id:
                 get_tracker().record_placed(
-                    order_id=sell_order_id,
+                    order_id=close_order_id,
                     source=self.name,
                     ticker=ticker,
-                    action="SELL",
+                    action=close_action,
                     shares=shares,
                     order_type="MKT",
                 )
         except Exception as e:
-            logger.warning(f"Kunne ikke registrere SELL hos tracker: {e}")
+            logger.warning(f"Kunne ikke registrere {close_action} hos tracker: {e}")
+
+        # PnL % spejlvendes for short: gevinst hvis exit_price < entry_price
+        if side == "long":
+            pnl_pct = (price - position.entry_price) / position.entry_price * 100
+        else:
+            pnl_pct = (position.entry_price - price) / position.entry_price * 100
 
         trade = {
             "ticker":      ticker,
+            "side":        side,
             "entry_price": position.entry_price,
             "exit_price":  price,
             "shares":      shares,
             "pnl":         round(pnl, 2),
-            "pnl_pct":     round((price - position.entry_price) / position.entry_price * 100, 2),
+            "pnl_pct":     round(pnl_pct, 2),
             "reason":      reason,
             "entry_time":  position.entry_time.strftime("%H:%M:%S"),
             "exit_time":   datetime.now(ET).strftime("%H:%M:%S"),
@@ -644,11 +665,14 @@ class MomentumORB(BaseStrategy):
         self.trades.append(trade)
 
         if self._broadcast_fn:
-            await self._broadcast_fn({"type": "algo_trade", "action": "sell", **trade})
+            # action="sell" for long-close (bagudkompat med UI), "buy_cover" for short-close
+            close_event = "sell" if side == "long" else "buy_cover"
+            await self._broadcast_fn({"type": "algo_trade", "action": close_event, **trade})
 
         emoji = "✅" if pnl > 0 else "❌"
+        verb = "Solgt" if side == "long" else "Covered"
         self._status("trading",
-                     f"{emoji} Solgt {shares} {ticker} @ ${price:.2f} "
+                     f"{emoji} {verb} {shares} {ticker} @ ${price:.2f} "
                      f"${pnl:+.2f} ({reason}) | "
                      f"P&L: ${self.total_pnl:+,.2f}")
 
@@ -713,19 +737,26 @@ class MomentumORB(BaseStrategy):
 
         from strategies.momentum_orb.config import VOL_MULT, RSI_MAX
 
+        entry_lines = [
+            "LONG: pris bryder ORB High (første 15 min: 09:30-09:44 ET)",
+        ]
+        if v.enable_shorts:
+            entry_lines.append("SHORT: pris bryder ORB Low (spejlvendt af long)")
+        entry_lines.extend([
+            f"Volumen >= {v.vol_mult}x gennemsnit",
+            f"RSI(14) < {v.rsi_max} (long) / > {100 - v.rsi_max:.0f} (short)" if v.enable_shorts
+                else f"RSI(14) < {v.rsi_max}",
+            "Break & retest bekræftelse",
+            f"Entry-vindue: {TRADE_START.strftime('%H:%M')}-{ENTRY_END.strftime('%H:%M')} ET",
+        ])
+
         return {
             "name":        self.name,
             "description": self.description,
             "asset_class": self.asset_class,
             "instrument":  "US Equities (STK.US.MAJOR)",
             "timeframe":   f"Intradag — entries 09:45-{ENTRY_END.strftime('%H:%M')} ET, lukker senest {MARKET_CLOSE.strftime('%H:%M')} ET",
-            "entry": [
-                "Pris bryder ORB High (første 15 min: 09:30-09:44 ET)",
-                f"Volumen >= {VOL_MULT}x gennemsnit",
-                f"RSI(14) < {RSI_MAX}",
-                "Break & retest bekræftelse",
-                f"Entry-vindue: {TRADE_START.strftime('%H:%M')}-{ENTRY_END.strftime('%H:%M')} ET",
-            ],
+            "entry":       entry_lines,
             "exit": exit_lines,
             "market_conditions": [
                 f"VIX < {VIX_MIN}          → Ingen handel",
@@ -778,11 +809,15 @@ async def main():
         if msg["type"] == "algo_status":
             print(f"\n[{msg['status'].upper()}] {msg['message']}")
         elif msg["type"] == "algo_trade":
-            if msg["action"] == "buy":
-                print(f"  📈 KØB  {msg['shares']} {msg['ticker']} @ ${msg['price']:.2f}")
-            else:
-                pnl = msg.get("pnl", 0)
-                print(f"  📉 SÆLG {msg['shares']} {msg['ticker']} @ "
+            action = msg["action"]
+            if action == "buy":
+                print(f"  📈 KØB    {msg['shares']} {msg['ticker']} @ ${msg['price']:.2f}")
+            elif action == "sell_short":
+                print(f"  📉 SHORT  {msg['shares']} {msg['ticker']} @ ${msg['price']:.2f}")
+            elif action in ("sell", "buy_cover"):
+                pnl  = msg.get("pnl", 0)
+                verb = "SÆLG " if action == "sell" else "COVER"
+                print(f"  📉 {verb} {msg['shares']} {msg['ticker']} @ "
                       f"${msg['exit_price']:.2f}  "
                       f"{'✅' if pnl >= 0 else '❌'} ${pnl:+.2f}  ({msg['reason']})")
 

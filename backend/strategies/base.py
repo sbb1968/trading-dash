@@ -62,6 +62,8 @@ class EntrySignal:
 
     Returneres af EntryEngine.check_entry() når strategien vil åbne en position.
 
+    side:     "long" (køb) eller "short" (sælg-først). Default "long" så
+              eksisterende strategier ikke skal opdateres.
     metadata: strategi-specifikke felter der skal følge positionen indtil exit.
               MomentumORB lægger fx orb_high, orb_low, retest_low her.
               Mean reversion ville lægge mean_price, std_dev osv. her.
@@ -69,6 +71,7 @@ class EntrySignal:
     ticker: str
     entry_price: float
     entry_time: datetime
+    side: str = "long"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,6 +103,7 @@ class Position:
     entry_time: datetime
     shares: int
     state: Any                          # strategi-specifik state
+    side: str = "long"                  # "long" eller "short"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

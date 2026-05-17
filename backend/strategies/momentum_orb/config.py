@@ -61,6 +61,13 @@ class VariantConfig:
     orb_end_minutes: int = 14        # ORB-vindue: 09:30 til 09:30 + N minutter
     retest_timeout_sec: int = 300    # max ventetid for pullback efter breakout
 
+    # ── Long/short ────────────────────────────────────────────
+    # Hvis enable_shorts=True åbner entry-engine ogsa shorts ved breakdown
+    # under ORB Low (spejlvendt af long-breakout). Stop og target spejlvendes
+    # symmetrisk i exit-engine. Default False sa eksisterende varianter er
+    # uændrede long-only.
+    enable_shorts: bool = False
+
 
 # De 5 oprindelige varianter fra opdraget — låst design
 # Entry-parametre arver fra default-værdier (vol=1.5, rsi=80, orb=14min, timeout=5min)
@@ -118,6 +125,7 @@ VARIANTS: dict[str, VariantConfig] = {
         trail_enabled=True,              # trail tager over efter BE
         trail_activate_pct=0.015,        # +1.5% gevinst → aktivér trail
         trail_distance_pct=0.005,        # 0.5% under highest_high — meget stramt
+        enable_shorts=True,              # 2026-05-17: ogsa shorts ved ORB Low break
     ),
 }
 

@@ -136,14 +136,24 @@ def backtest_ticker_variant(
         for bar in bars:
             # Åben position → tjek exit
             if position is not None:
-                strategy.exit.update(position, bar.high, variant_key)
+                # Send bade bar.high og bar.low sa shorts kan opdatere lowest_low
+                strategy.exit.update(position, bar.high, variant_key, low_seen=bar.low)
                 exit_decision = strategy.exit.check_exit_bar(position, bar, variant_key)
                 if exit_decision is not None:
-                    pnl_pct = (exit_decision.exit_price - position.entry_price) / position.entry_price
+                    # PnL spejlvendes for short (gevinst hvis exit < entry)
+                    if position.side == "long":
+                        pnl_pct = (exit_decision.exit_price - position.entry_price) / position.entry_price
+                        max_gain_pct = (position.state.highest_high - position.entry_price) / position.entry_price * 100
+                        extremum     = position.state.highest_high
+                    else:  # short
+                        pnl_pct = (position.entry_price - exit_decision.exit_price) / position.entry_price
+                        max_gain_pct = (position.entry_price - position.state.lowest_low) / position.entry_price * 100
+                        extremum     = position.state.lowest_low
                     trades.append({
                         "ticker":       ticker,
                         "date":         str(date),
                         "variant":      variant_key,
+                        "side":         position.side,
                         "entry_time":   position.entry_time.strftime("%H:%M"),
                         "exit_time":    bar.timestamp.strftime("%H:%M"),
                         "entry_price":  round(position.entry_price, 4),
@@ -151,8 +161,8 @@ def backtest_ticker_variant(
                         "exit_reason":  exit_decision.reason,
                         "orb_high":     round(position.metadata.get("orb_high", 0), 4),
                         "orb_low":      round(position.metadata.get("orb_low",  0), 4),
-                        "highest_high": round(position.state.highest_high, 4),
-                        "max_gain_pct": round((position.state.highest_high - position.entry_price) / position.entry_price * 100, 2),
+                        "highest_high": round(extremum, 4),   # long: highest_high, short: lowest_low
+                        "max_gain_pct": round(max_gain_pct, 2),
                         "pnl_pct":      round(pnl_pct * 100, 2),
                         "pnl_usd":      round(capital * pnl_pct, 2),
                         "duration_min": max(1, int((bar.timestamp - position.entry_time).total_seconds() / 60)),

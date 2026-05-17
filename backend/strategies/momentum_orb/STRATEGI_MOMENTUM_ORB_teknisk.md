@@ -4,7 +4,7 @@ Komplet specifikation af MomentumORB-strategien. Sammenfletter logik fra `entry.
 
 Læses sammen med koden — alle filreferencer er i `backend/strategies/momentum_orb/` med mindre andet er angivet.
 
-Sidste opdatering: 16. maj 2026.
+Sidste opdatering: 17. maj 2026 (long/short support tilføjet).
 
 ---
 
@@ -28,7 +28,7 @@ Det er det væsentligste designvalg: backtest og live deler entry/exit-kode 1:1.
 
 ---
 
-## 2. Aktiv variant: `all_winner` (med trail)
+## 2. Aktiv variant: `all_winner` (long + short med trail)
 
 Defineret i `config.py`:
 
@@ -36,20 +36,22 @@ Defineret i `config.py`:
 "all_winner": VariantConfig(
     name="All-winner: +1% BE, vol 3x, ORB Mid stop, trail 0.5%",
     stop_mode="orb_mid",
-    target_pct=0.04,                 # +4% — bliver fjernet når trail aktiveres
+    target_pct=0.04,                 # +4% / -4% — fjernes når trail aktiveres
     vol_mult=3.0,                    # 3× snit-volumen
     breakeven_enabled=True,
-    breakeven_trigger_pct=0.01,      # +1% → flyt stop til entry
+    breakeven_trigger_pct=0.01,      # +/-1% → flyt stop til entry
     trail_enabled=True,
-    trail_activate_pct=0.015,        # +1.5% → aktiver trail
-    trail_distance_pct=0.005,        # 0.5% under highest_high
+    trail_activate_pct=0.015,        # +/-1.5% → aktiver trail
+    trail_distance_pct=0.005,        # 0.5% fra bedste pris
+    enable_shorts=True,              # 2026-05-17: shorts ved ORB Low break
 )
 ```
 
 Default-værdier arvet fra `VariantConfig`:
-- `rsi_max = 80.0`
+- `rsi_max = 80.0` (long: rsi < 80; short: rsi > 100-80 = 20)
 - `orb_end_minutes = 14` (ORB-vindue 09:30-09:44)
 - `retest_timeout_sec = 300` (5 min)
+- `enable_shorts = False` (default — kun `all_winner` har shorts aktiveret)
 
 ### Backtest-resultat (16. maj 2026)
 
@@ -84,40 +86,53 @@ Der er nu **to forskellige tider** der adskiller "stop med nye entries" fra "luk
 
 ## 4. Entry-logik (entry.py)
 
-### State machine per (ticker, dag)
+### State machine per (ticker, dag) — long og short symmetrisk
 
 ```
               [WAITING]
-                 │
-                 │ breakout-betingelser opfyldt
-                 ▼
+              │      │
+       long   │      │   short (kun hvis enable_shorts)
+   close>OH   │      │   close<OL
+              ▼      ▼
        [BREAKOUT_DETECTED] ──── timeout 300s ───▶ [WAITING]
+            (side låst: "long" | "short")
                  │
-                 │ bar.low ≤ orb_high × 1.001
+                 │ pullback i retning af entry
                  ▼
        [AWAITING_RETEST]
                  │
-                 │ bar.close > orb_high (bounce)
+                 │ bounce i retning af entry
                  ▼
-         EntrySignal → [DONE_FOR_DAY]
+         EntrySignal(side=...) → [DONE_FOR_DAY]
 ```
 
-State holdes på `MomentumORBEntry`-instansen i `_ticker_state[ticker]`. `reset_for_day(date, context)` nulstiller alt for én ticker.
+State holdes på `MomentumORBEntry` i to dicts: `_ticker_state[ticker]` (WAITING/BREAKOUT_DETECTED/...) og `_ticker_side[ticker]` ("long"/"short"/None). `reset_for_day(date, context)` nulstiller begge for én ticker.
 
-### Breakout-betingelser (alle skal være sande)
+**Side-låsning**: Når et breakout detekteres lases siden indtil DONE_FOR_DAY eller timeout. Hvis breakout timeout'er reset'es både state og side. Long checkes først i WAITING — så hvis samme bar både opfylder long og short kriterier (umulig i praksis: kræver close > orb_high OG close < orb_low), vinder long.
+
+### Breakout-betingelser
 
 I `check_entry()` når state == `WAITING`:
 
+**Long-betingelser:**
 ```python
 bar.close > orb_high
 AND bar.volume >= avg_vol * vol_mult     # 3.0 for all_winner
 AND rsi(closes) < rsi_max                # 80
-AND avg_vol > 0                           # sanity check
+AND avg_vol > 0
 ```
 
-`rsi()` bruger Wilder's smoothing med periode 14 (samme formel som standard RSI). Returnerer 50.0 hvis < 15 closes, 100.0 hvis ingen tab (undgår div-by-zero).
+**Short-betingelser** (kun hvis `config.enable_shorts`):
+```python
+bar.close < orb_low
+AND bar.volume >= avg_vol * vol_mult     # 3.0 for all_winner
+AND rsi(closes) > (100 - rsi_max)        # rsi > 20 (undgår oversold-bounces)
+AND avg_vol > 0
+```
 
-`closes`-listen akkumuleres bar for bar i `_closes[ticker]` — opdateres altid uanset state.
+`rsi()` bruger Wilder's smoothing med periode 14. Returnerer 50.0 hvis < 15 closes, 100.0 hvis ingen tab.
+
+`closes`-listen akkumuleres bar for bar i `_closes[ticker]` — opdateres altid uanset state og side.
 
 ### Pullback-detektion
 
@@ -126,29 +141,41 @@ I state `BREAKOUT_DETECTED`:
 ```python
 elapsed = (bar.timestamp - self._breakout_time[ticker]).total_seconds()
 if elapsed > retest_timeout_sec:    # 300 sek = 5 min
-    return to WAITING
+    return to WAITING (side nulstilles ogsa)
 
-if bar.low <= orb_high * 1.001:     # RETEST_TOLERANCE
-    transition to AWAITING_RETEST
-    self._retest_low[ticker] = bar.low
+# Side-specifik pullback:
+if side == "long":
+    if bar.low <= orb_high * 1.001:           # RETEST_TOLERANCE
+        transition to AWAITING_RETEST
+        self._retest_extremum[ticker] = bar.low
+else:  # short
+    if bar.high >= orb_low * (2 - 1.001):     # = orb_low * 0.999
+        transition to AWAITING_RETEST
+        self._retest_extremum[ticker] = bar.high
 ```
 
-Timeout-logik: hvis pullback aldrig sker, drop forsøget og vent på næste breakout. Det betyder samme ticker kan have flere breakout-forsøg på samme dag indtil den lykkes med break-and-retest.
+`_retest_extremum` indeholder laveste pullback for long og højeste pullback for short — samme dict, side-aware semantik.
 
 ### Bounce-detektion (entry-trigger)
 
 I state `AWAITING_RETEST`:
 
 ```python
-if bar.low < self._retest_low[ticker]:
-    self._retest_low[ticker] = bar.low    # track laveste pullback
-
-if bar.close > orb_high:
-    return EntrySignal(...)               # ENTRY!
-    transition to DONE_FOR_DAY
+if side == "long":
+    if bar.low < self._retest_extremum[ticker]:
+        self._retest_extremum[ticker] = bar.low
+    if bar.close > orb_high:
+        return EntrySignal(..., side="long", metadata={"orb_high":..., "orb_low":..., "retest_low":...})
+        transition to DONE_FOR_DAY
+else:  # short
+    if bar.high > self._retest_extremum[ticker]:
+        self._retest_extremum[ticker] = bar.high
+    if bar.close < orb_low:
+        return EntrySignal(..., side="short", metadata={"orb_high":..., "orb_low":..., "retest_high":...})
+        transition to DONE_FOR_DAY
 ```
 
-`DONE_FOR_DAY` betyder: ingen flere entry-forsøg for denne ticker i dag. Selv hvis position lukkes igen efter 2 minutter, prøver vi ikke et nyt breakout på samme ticker. Det er en designbeslutning — ikke en teknisk begrænsning.
+`DONE_FOR_DAY` betyder: ingen flere entry-forsøg for denne ticker i dag — uanset side. Selv hvis position lukkes efter 2 minutter, prøver vi ikke et nyt breakout på samme ticker (hverken long eller short). Designbeslutning, ikke teknisk begrænsning.
 
 ### Entry-vindue cut-off (algo_momentum.py)
 
@@ -162,7 +189,7 @@ if not entries_allowed:
     return
 ```
 
-Eksisterende positioner berøres ikke — kun nye entry-tjek springes over.
+Eksisterende positioner (long som short) berøres ikke — kun nye entry-tjek springes over.
 
 ### EntrySignal metadata
 
@@ -171,23 +198,25 @@ EntrySignal(
     ticker=...,
     entry_price=bar.close,
     entry_time=bar.timestamp,
+    side="long" | "short",
     metadata={
-        "orb_high":   ...,    # bruges af exit til ORB Mid-stop
-        "orb_low":    ...,
-        "retest_low": ...,    # kun bogføring
+        "orb_high":    ...,    # bruges af exit til ORB Mid-stop
+        "orb_low":     ...,
+        "retest_low":  ...,    # long: laveste pullback (bogføring)
+        "retest_high": ...,    # short: højeste pullback (bogføring)
     },
 )
 ```
 
-`metadata["orb_high"]` og `metadata["orb_low"]` er **påkrævet** af `MomentumORBExit.open_position()`.
+`metadata["orb_high"]` og `metadata["orb_low"]` er **påkrævet** af `MomentumORBExit.open_position()`. `side` defaulter til `"long"` på `EntrySignal`-dataklassen så bagudkompatibilitet bevares for strategier der ikke handler shorts.
 
 ---
 
-## 5. Exit-logik (exit.py) — 3-stadie hybrid AKTIV
+## 5. Exit-logik (exit.py) — 3-stadie hybrid AKTIV (long + short spejlvendt)
 
 ### ExitState per position
 
-Gemmes på `Position.state`:
+Gemmes på `Position.state`. Tracker bruger `highest_high` for long og `lowest_low` for short — begge felter eksisterer altid, men kun den relevante for siden opdateres.
 
 ```python
 @dataclass
@@ -197,7 +226,8 @@ class ExitState:
     orb_mid: float                       # (high + low) / 2
     stop: float
     target: Optional[float]              # None i stage 3
-    highest_high: float                  # følges af update()
+    highest_high: float                  # long: følges af update(high_seen)
+    lowest_low: float                    # short: følges af update(low_seen)
     trail_stop: Optional[float] = None
     stage: int = STAGE_INITIAL           # 1 → 2 → 3
 ```
@@ -205,69 +235,114 @@ class ExitState:
 ### Initial setup ved `open_position(signal, shares, variant_key)`
 
 ```python
-stop = _initial_stop(entry_price, orb_high, orb_low, config)
-target = entry_price * (1 + target_pct)
+side = signal.side
+if side == "long":
+    stop   = _initial_stop_long(entry_price, orb_high, orb_low, config)
+    target = entry_price * (1 + target_pct)
+elif side == "short":
+    stop   = _initial_stop_short(entry_price, orb_high, orb_low, config)
+    target = entry_price * (1 - target_pct)
 ```
 
-`_initial_stop()` afhænger af `config.stop_mode`:
+**Long stop** (`_initial_stop_long`) — afhænger af `config.stop_mode`:
 
-| stop_mode | Formel |
-|-----------|--------|
-| `fixed_pct` | `entry × (1 - fixed_stop_pct)` |
-| `orb_mid` | `max(orb_mid, entry × 0.99)` |
-| `orb_low` | `max(orb_low, entry × 0.99)` |
+| stop_mode | Formel | Bemærk |
+|-----------|--------|--------|
+| `fixed_pct` | `entry × (1 - fixed_stop_pct)` | Intet gulv |
+| `orb_mid` | `max(orb_mid, entry × 0.99)` | 1% gulv kapper risiko |
+| `orb_low` | `max(orb_low, entry × 0.99)` | 1% gulv kapper risiko |
 
-**1% gulv**: stop er ALDRIG tættere end 1% under entry. Selv hvis ORB Mid ligger meget tæt på entry-prisen, falder vi tilbage på `entry × 0.99`. Det forhindrer absurd snævre stops på tickers med tæt ORB.
+**Short stop** (`_initial_stop_short`) — spejlvendt:
 
-For aktiv variant `all_winner`:
-- `stop_mode = "orb_mid"` → stop = max(ORB Mid, entry × 0.99)
-- `target = entry × 1.04` → +4% sikkerhedsnet
+| stop_mode | Formel | Bemærk |
+|-----------|--------|--------|
+| `fixed_pct` | `entry × (1 + fixed_stop_pct)` | Intet loft |
+| `orb_mid` | `min(orb_mid, entry × 1.01)` | 1% loft kapper risiko |
+| `orb_low` | `min(orb_high, entry × 1.01)` | Spejlet til orb_high for shorts |
+
+**Max risiko 1%**: For long er stop aldrig højere end `entry × 0.99` (gulv). For short er stop aldrig lavere end `entry × 1.01` (loft). I praksis: hvis entry sker tæt på ORB-niveau er stop ofte cap'et til 1% — ikke ORB-niveauet.
+
+For aktiv variant `all_winner` (begge sider):
+- `stop_mode = "orb_mid"` → long: max(orb_mid, entry × 0.99). short: min(orb_mid, entry × 1.01).
+- `target = entry × 1.04` (long) / `entry × 0.96` (short) → 4% sikkerhedsnet
 
 ### 3-stadie hybrid — AKTIV i all_winner
 
+Logikken er identisk i begge retninger. Erstat "highest_high" med "lowest_low", "stop kan kun gå op" med "stop kan kun gå ned" osv.
+
 #### Stadie 1 → 2: Break-even
 
-Trigger: `highest_high >= entry × (1 + breakeven_trigger_pct)` (0.01 for all_winner = +1%)
+**Long trigger**: `highest_high >= entry × (1 + breakeven_trigger_pct)` (+1% for all_winner)
+**Short trigger**: `lowest_low <= entry × (1 - breakeven_trigger_pct)` (-1% for all_winner)
 
-Effekt: `stop = max(stop, entry)` og `stage = 2`. Stop kan kun gå op, aldrig ned.
+**Long effekt**: `stop = max(stop, entry)` (kan kun gå op)
+**Short effekt**: `stop = min(stop, entry)` (kan kun gå ned)
+
+I begge tilfælde: `stage = 2`.
 
 #### Stadie 2 → 3: Trailing aktiveret
 
-Trigger: `highest_high >= entry × (1 + trail_activate_pct)` (0.015 for all_winner = +1.5%)
+**Long trigger**: `highest_high >= entry × (1 + trail_activate_pct)` (+1.5% for all_winner)
+**Short trigger**: `lowest_low <= entry × (1 - trail_activate_pct)` (-1.5% for all_winner)
 
-Effekt:
+Effekt (begge sider):
 - `target = None` (target fjernes — kun trail eller force-close lukker)
-- `trail_stop = highest_high × (1 - trail_distance_pct)` (0.005 for all_winner = 0.5%)
-- Hvis `trail_stop > stop`, opdater stop. **Stop ratcheter aldrig nedad.**
+- **Long**: `trail_stop = highest_high × (1 - trail_distance_pct)` (0.005 = 0.5% under top)
+- **Short**: `trail_stop = lowest_low × (1 + trail_distance_pct)` (0.5% over bund)
+- Long: hvis `trail_stop > stop`, opdater. **Ratcheter kun opad.**
+- Short: hvis `trail_stop < stop`, opdater. **Ratcheter kun nedad.**
 - `stage = 3`
 
 #### Stadie 3 vedligehold
 
-Hver `update()` der ser ny `highest_high`:
+Hver `update()` med ny ekstremum:
+
 ```python
-new_trail = highest_high * (1 - trail_distance_pct)
-if new_trail > trail_stop:
-    trail_stop = new_trail
-if trail_stop > stop:
-    stop = trail_stop
+if side == "long":
+    new_trail = highest_high * (1 - trail_distance_pct)
+    if new_trail > trail_stop:
+        trail_stop = new_trail
+    if trail_stop > stop:
+        stop = trail_stop
+else:  # short
+    new_trail = lowest_low * (1 + trail_distance_pct)
+    if new_trail < trail_stop:
+        trail_stop = new_trail
+    if trail_stop < stop:
+        stop = trail_stop
 ```
 
-Stop trækkes opad i hælene på prisen, men aldrig hurtigere end `trail_distance_pct` afstand.
+### update()-signatur (vigtig for backtest)
+
+```python
+update(position, high_seen, variant_key, low_seen: Optional[float] = None)
+```
+
+- **Live (snapshot)**: kald med kun `high_seen = snapshot-prisen`. `low_seen` defaulter til `high_seen` — én pris-observation pr. tick.
+- **Backtest (bar)**: kald med `update(pos, bar.high, key, low_seen=bar.low)`. Long bruger `bar.high`, short bruger `bar.low`.
 
 ### Exit-tjek (rækkefølge er vigtig)
 
-Både `check_exit_live(price, time)` og `check_exit_bar(bar)` følger samme rækkefølge:
+Både `check_exit_live(price, time)` og `check_exit_bar(bar)` følger samme rækkefølge — men retningen vendes for shorts:
 
+**Long:**
 ```
 1. Force-close (15:55 ET)        → exit @ current_price / bar.close
-2. Stop loss (price <= stop)     → exit @ stop
-3. Target  (price >= target)     → exit @ target (kun stage 1-2)
+2. Stop (price/bar.low <= stop)  → exit @ stop
+3. Target (price/bar.high >= tg) → exit @ target (kun stage 1-2)
 ```
 
-**Konfliktregel for backtest**: hvis én OHLC-bar både rammer stop OG target (kursen svinger gennem begge i samme periode), fyrer **stop først**. Konservativ konvention — antager worst case.
+**Short:**
+```
+1. Force-close (15:55 ET)        → exit @ current_price / bar.close
+2. Stop (price/bar.high >= stop) → exit @ stop
+3. Target (price/bar.low <= tg)  → exit @ target (kun stage 1-2)
+```
+
+**Konfliktregel for backtest** (begge sider): hvis én OHLC-bar både rammer stop OG target i samme periode, fyrer **stop først**. Konservativ konvention.
 
 Exit-reasons:
-- `REASON_STOP` — almindelig stop loss
+- `REASON_STOP` — almindelig stop loss (long: pris faldt til stop / short: pris steg til stop)
 - `REASON_TARGET` — target hit
 - `REASON_TRAIL` — stop loss men `stage == 3` (kosmetisk distinktion til journal)
 - `REASON_FORCE_CLOSE` — 15:55 ET timeout
@@ -310,16 +385,31 @@ På handelsdagen:
    ├─ Hvis IKKE position OG entries_allowed:
    │  ├─ entry.check_entry(ticker, pseudo_bar, context)
    │  └─ Hvis signal:
+   │     ├─ action = "BUY" if signal.side == "long" else "SELL"
    │     ├─ risk_manager.approve_order(...)
-   │     ├─ conn.place_paper_order(ticker, "BUY", shares)
+   │     ├─ conn.place_paper_order(ticker, action, shares)
    │     ├─ exit.open_position(signal, shares, variant_key)
    │     └─ Journal entry forensics
    │
    Exit-flow (når exit_decision returneres):
-   ├─ conn.place_paper_order(ticker, "SELL", shares)
+   ├─ close_action = "SELL" if position.side == "long" else "BUY"  # buy-to-cover for shorts
+   ├─ conn.place_paper_order(ticker, close_action, shares)
+   ├─ pnl_pct = (exit - entry)/entry for long, (entry - exit)/entry for short
    ├─ Bogfør trade, opdater P&L
    └─ Journal exit forensics
 ```
+
+### Short-specifikke noter
+
+- **Ordrer**: SHORT entry sendes som `place_paper_order(ticker, "SELL", shares)` uden eksisterende position. IBKR's paper-konto opretter automatisk en short hvis aktien er shortable.
+- **Shortability**: Ikke alle small caps i scanneren kan shortes. HTB/non-shortable tickers vil få ordren fejlet stille i IBKR (logges som warning). Algoritmens state-machine kommer ikke ud af sync — `_positions[ticker]` opdateres kun hvis `place_paper_order` returnerer success.
+- **PnL-bogføring**: `BaseStrategy.record_position_closed()` håndterer side-aware PnL automatisk via `pos["side"]` (sat ved `record_position_opened(ticker, price, shares, side)`).
+- **UI-broadcast**: Nye action-værdier i WebSocket-stream:
+  - `"buy"` — long entry
+  - `"sell_short"` — short entry
+  - `"sell"` — long close
+  - `"buy_cover"` — short close (buy-to-cover)
+  Trade-objektet inkluderer nu `"side": "long"|"short"`.
 
 ---
 
@@ -372,16 +462,16 @@ VIX hentes via yfinance (ingen IBKR-abonnement nødvendigt). SPY hentes via IBKR
 
 ## 9. Variant-oversigt (config.py)
 
-| Variant | stop_mode | target | vol_mult | BE | Trail | Bemærk |
-|---------|-----------|--------|----------|----|----|-----|
-| baseline | fixed_pct 2% | +4% | 1.5 | nej | nej | Den oprindelige enkle version |
-| A | orb_mid | +4% | 1.5 | +3% | +4%/1.5% | Default hybrid |
-| B | orb_low | +4% | 1.5 | +3% | +4%/1.5% | Mere plads til vejrtrækning |
-| C | orb_mid | +4% | 1.5 | +3% | +4%/2.0% | Bredere trail |
-| D | orb_mid | +4% | 1.5 | +2% | +4%/1.5% | Tidligere break-even |
-| **all_winner** | **orb_mid** | **+4%** | **3.0** | **+1%** | **+1.5%/0.5%** | **AKTIV — smal trail oven på BE** |
+| Variant | stop_mode | target | vol_mult | BE | Trail | Shorts | Bemærk |
+|---------|-----------|--------|----------|----|----|--------|-----|
+| baseline | fixed_pct 2% | +4% | 1.5 | nej | nej | nej | Den oprindelige enkle version |
+| A | orb_mid | +4% | 1.5 | +3% | +4%/1.5% | nej | Default hybrid |
+| B | orb_low | +4% | 1.5 | +3% | +4%/1.5% | nej | Mere plads til vejrtrækning |
+| C | orb_mid | +4% | 1.5 | +3% | +4%/2.0% | nej | Bredere trail |
+| D | orb_mid | +4% | 1.5 | +2% | +4%/1.5% | nej | Tidligere break-even |
+| **all_winner** | **orb_mid** | **+4%** | **3.0** | **+1%** | **+1.5%/0.5%** | **JA** | **AKTIV — long + short med smal trail** |
 
-Skift variant ved at ændre `LIVE_VARIANT_KEY` i `config.py` og genstarte backend.
+Skift variant ved at ændre `LIVE_VARIANT_KEY` i `config.py` og genstarte backend. Kun `all_winner` har `enable_shorts=True` — de øvrige er long-only og bagudkompatible.
 
 ---
 
@@ -415,7 +505,16 @@ Tidligere version solgte alle positioner hardcoded ved 10:30 — det dræbte for
 ORB Low er typisk -3-5% under entry — for stort tab per handel. ORB Mid er typisk -1-2%, hvilket matcher den ønskede 1:1 til 1:2 risk/reward med +1-4% target.
 
 **Hvorfor 1% gulv på stops?**
-ORB Mid kan ligge meget tæt på entry (måske $0.05 væk på en lavprisaktie). Uden gulv ville stop blive ramt på normal støj. 1% sikrer aktien får plads til at trække vejret.
+ORB Mid kan ligge meget tæt på entry (måske $0.05 væk på en lavprisaktie). Uden gulv ville stop blive ramt på normal støj. 1% sikrer aktien får plads til at trække vejret. Spejlvendt på short med 1% loft.
+
+**Hvorfor tilføje shorts nu (2026-05-17)?**
+Strategien har samme strukturelle edge i begge retninger — vi venter på en kraftig break af ORB-niveau med volumen-bekræftelse + retest. Long-only fanger kun halvdelen af momentum-dage; short åbner for breakdowns (high-volume sell-offs) på samme small caps. Risikoen er symmetrisk (samme stop-pct, samme target-pct, samme trail). Forventet effekt: roughly fordobler antallet af setups pr. uge — men det skal verificeres i backtest og live.
+
+**Hvorfor RSI > 20 for shorts i stedet for blot at droppe filteret?**
+RSI < 20 er typisk oversold-bouncezone — shorts der entres her bliver ofte squeezet ud af en automatisk bounce. RSI > 20 sikrer at vi shorter mens der stadig er momentum nedad, ikke når aktien allerede er teknisk udsalgt. Symmetrisk med long-filteret (RSI < 80 undgår overbought-tops).
+
+**Hvorfor lade long og short konkurrere om de samme max 3 positioner?**
+Vi har én kapitalpulje. Hvis algoritmen åbner 3 longs og derefter ser et perfekt short-setup, vil vi ikke åbne en 4. Risikoen i markedet er den samme uanset retning — det er total eksponering der betyder noget, ikke nettoeksponering.
 
 ---
 
