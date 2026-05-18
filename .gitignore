@@ -84,6 +84,7 @@ config.local.*
 backend/data/backtest_*.csv
 backend/data/universe_filter_*.csv
 backend/data/exploration_results_*.csv
+backend/data/debug_*.csv
 backend/sweep_results.csv
 backend/*_results.csv
 

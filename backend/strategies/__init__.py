@@ -10,10 +10,12 @@ Når en ny strategi tilføjes:
 """
 
 from strategies.momentum_orb import MomentumORBStrategy
+from strategies.confluence import ConfluenceStrategy
 
 # Registry: key → Strategy-klasse (ikke instans — instantieres ved brug)
 STRATEGY_REGISTRY = {
     "momentum_orb": MomentumORBStrategy,
+    "confluence":   ConfluenceStrategy,
 }
 
 

@@ -64,9 +64,18 @@ AD_RATIO_REDUCED  = 0.5
 SPY_GAP_MIN       = -1.5
 SPY_VOL_MIN_PCT   = 0.70
 
+
 MAX_CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 10
 MIN_UNIVERSE_SIZE   = 3
+
+# ── ORB universe-filter (matcher scanner_engine.py defaults) ─────
+# ORB er designet til small-cap momentum, derfor lavere pris-range
+# end Konfluens ($5-$50). Volume-grænse sikrer likviditet til breakouts.
+ORB_UNIVERSE_PRICE_MIN  = 1.0
+ORB_UNIVERSE_PRICE_MAX  = 20.0
+ORB_UNIVERSE_MIN_VOLUME = 500_000
+ORB_UNIVERSE_TOP_N      = 25
 
 FALLBACK_UNIVERSE = [
     "GME", "AMC", "CLOV", "SKLZ", "MVIS",
@@ -234,10 +243,39 @@ class MomentumORB(BaseStrategy):
     # -------------------------------------------------------------
 
     async def _prepare_universe(self):
-        self._status("scanning", "Scanner markedet efter dagens kandidater...")
+        self._status("scanning", "Scanner markedet via TradingView...")
+
+        # Vi bruger TV-screener (samme som Konfluens-strategien) i stedet
+        # for IBKR's scanner. IBKR's TOP_PERC_GAIN returnerer en helt anden
+        # liste end den Iben ser i sin TradingView screener. TV-screener
+        # giver os præcis det univers Iben forventer.
+        from strategies.confluence.tv_scanner import fetch_tv_top_gainers
+        import asyncio as _asyncio
 
         for attempt in range(1, 3):
-            self.universe = await self.conn.scan_top_gainers(max_results=25)
+            try:
+                loop = _asyncio.get_event_loop()
+                results = await _asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: fetch_tv_top_gainers(
+                            top_n             = ORB_UNIVERSE_TOP_N,
+                            price_min         = ORB_UNIVERSE_PRICE_MIN,
+                            price_max         = ORB_UNIVERSE_PRICE_MAX,
+                            min_volume        = ORB_UNIVERSE_MIN_VOLUME,
+                            require_all_green = True,  # 1D, 1W, 1M alle positive
+                        ),
+                    ),
+                    timeout=15.0,
+                )
+                self.universe = [symbol for symbol, _, _, _ in results]
+            except _asyncio.TimeoutError:
+                logger.error("TV-screener timeout")
+                self.universe = []
+            except Exception as e:
+                logger.error(f"TV-screener fejl: {e}")
+                self.universe = []
+
             if len(self.universe) >= MIN_UNIVERSE_SIZE:
                 break
             if attempt < 2:
@@ -251,7 +289,10 @@ class MomentumORB(BaseStrategy):
                          f"Scanner tom — bruger fallback universe: {', '.join(self.universe[:6])}")
         else:
             self._status("universe_ready",
-                         f"Universe klar ({len(self.universe)} aktier): {', '.join(self.universe[:25])}...")
+                         f"Universe klar ({len(self.universe)} aktier, "
+                         f"${ORB_UNIVERSE_PRICE_MIN:.0f}-${ORB_UNIVERSE_PRICE_MAX:.0f}, "
+                         f"vol >{ORB_UNIVERSE_MIN_VOLUME:,}, alle 3 grønne): "
+                         f"{', '.join(self.universe[:25])}")
 
         await asyncio.sleep(1)
 

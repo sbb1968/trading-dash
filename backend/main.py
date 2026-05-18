@@ -186,14 +186,14 @@ async def portfolio_loop():
 
 
 # ── Algo ──────────────────────────────────────────────────────
-async def start_algo():
-    """Start MomentumORB via StrategyManager (med fælles risk limits)."""
-    success, msg = await strategy_manager.start_strategy("Momentum ORB")
+async def start_algo(strategy_name: str = "Momentum ORB"):
+    """Start en strategi via StrategyManager (med fælles risk limits)."""
+    success, msg = await strategy_manager.start_strategy(strategy_name)
 
     if not success:
         await broadcast_algo({
-            "type": "algo_status", "status": "error",
-            "message": msg,
+            "type": "algo_status", "strategy": strategy_name,
+            "status": "error", "message": msg,
             "total_pnl": 0, "positions": 0, "trades": 0,
             "time": datetime.now().strftime("%H:%M:%S"),
         })
@@ -212,10 +212,10 @@ def broadcast_algo_sync(message: dict):
         return None
 
 
-async def stop_algo():
-    """Stop MomentumORB via StrategyManager."""
-    await strategy_manager.stop_strategy("Momentum ORB", reason="Manuelt stoppet fra UI")
-    print("[Algo] MomentumORB stoppet via StrategyManager")
+async def stop_algo(strategy_name: str = "Momentum ORB"):
+    """Stop en strategi via StrategyManager."""
+    await strategy_manager.stop_strategy(strategy_name, reason="Manuelt stoppet fra UI")
+    print(f"[Algo] {strategy_name} stoppet via StrategyManager")
 
 # ── Startup ───────────────────────────────────────────────────
 @app.on_event("startup")
@@ -257,6 +257,20 @@ async def startup():
         # Override broadcast: algoen sender via algo_clients (ikke strategy_clients)
         momentum._broadcast_fn = broadcast_algo_sync
         print(f"[Server] MomentumORB registreret — capital per handel: ${momentum_config.max_position_size:.0f}")
+
+        # ── Registrér Konfluens-strategien parallelt med ORB ────
+        from algo_confluence import ConfluenceLive
+
+        confluence_config = StrategyConfig(
+            max_loss_per_trade  = 150.0,     # Lidt løsere end ORB
+            max_daily_loss      = 250.0,
+            max_open_positions  = 3,
+            max_position_size   = 2500.0,    # Samme kapital pr. trade som ORB
+        )
+        confluence = ConfluenceLive(strategy_manager.get_ibkr(), config=confluence_config)
+        strategy_manager.register(confluence)
+        confluence._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] Konfluens registreret — capital per handel: ${confluence_config.max_position_size:.0f}")
 
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
@@ -541,25 +555,38 @@ async def websocket_algo(websocket: WebSocket):
     algo_clients.append(websocket)
     print(f"[Algo] Klient forbundet — {len(algo_clients)} aktive")
 
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    if momentum and momentum.status == StrategyStatus.RUNNING:
-        status  = "trading"
-        message = "Algoritme kører"
-        pnl     = momentum.stats.pnl_today
-        pos     = momentum.stats.open_positions
-        trades  = momentum.stats.trades_today
-    else:
-        status  = "idle"
-        message = "Algoritmen er ikke startet"
-        pnl     = 0
-        pos     = 0
-        trades  = 0
+    # Send initial-status for hver registreret algo-strategi.
+    # LiveAlgo.tsx vil modtage flere algo_status-beskeder; hver med 'strategy'-felt
+    # så frontenden kan adskille dem. Bagudkompatibilitet: hvis ingen ekstra
+    # strategier er registreret, sender vi som før (uden strategy-felt).
+    for strat_name in ("Momentum ORB", "Konfluens"):
+        strat = strategy_manager._strategies.get(strat_name)
+        if strat and strat.status == StrategyStatus.RUNNING:
+            status  = "trading"
+            message = f"{strat_name} kører"
+            pnl     = strat.stats.pnl_today
+            pos     = strat.stats.open_positions
+            trades  = strat.stats.trades_today
+        elif strat:
+            status  = "idle"
+            message = f"{strat_name} er ikke startet"
+            pnl     = 0
+            pos     = 0
+            trades  = 0
+        else:
+            # Strategi ikke registreret — spring over
+            continue
 
-    await websocket.send_text(json.dumps({
-        "type": "algo_status", "status": status, "message": message,
-        "total_pnl": pnl, "positions": pos, "trades": trades,
-        "time": datetime.now().strftime("%H:%M:%S"),
-    }))
+        await websocket.send_text(json.dumps({
+            "type":      "algo_status",
+            "strategy":  strat_name,
+            "status":    status,
+            "message":   message,
+            "total_pnl": pnl,
+            "positions": pos,
+            "trades":    trades,
+            "time":      datetime.now().strftime("%H:%M:%S"),
+        }))
 
     try:
         while True:
@@ -567,17 +594,23 @@ async def websocket_algo(websocket: WebSocket):
             message = json.loads(raw)
 
             if message.get("command") == "start":
-                print("[Algo] Start-kommando modtaget")
-                asyncio.create_task(start_algo())
+                # Strategi-agnostisk start. Default = "Momentum ORB" for bagudkompat
+                # (eksisterende LiveAlgo.tsx sender ingen strategy-felt).
+                strat_name = message.get("strategy", "Momentum ORB")
+                print(f"[Algo] Start-kommando modtaget for: {strat_name}")
+                asyncio.create_task(start_algo(strat_name))
 
             elif message.get("command") == "stop":
-                print("[Algo] Stop-kommando modtaget")
-                await stop_algo()
+                strat_name = message.get("strategy", "Momentum ORB")
+                print(f"[Algo] Stop-kommando modtaget for: {strat_name}")
+                await stop_algo(strat_name)
                 await broadcast_algo({
-                    "type": "algo_status", "status": "stopped",
-                    "message": "Algoritme stoppet manuelt",
+                    "type":      "algo_status",
+                    "strategy":  strat_name,
+                    "status":    "stopped",
+                    "message":   f"{strat_name} stoppet manuelt",
                     "total_pnl": 0, "positions": 0, "trades": 0,
-                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "time":      datetime.now().strftime("%H:%M:%S"),
                 })
 
             elif message.get("type") == "ping":

@@ -19,7 +19,8 @@ interface StatusMsg {
 
 interface TradeMsg {
   type:         "algo_trade";
-  action:       "buy" | "sell";
+  strategy?:    string;        // NY — "Momentum ORB" eller "Konfluens"
+  action:       "buy" | "sell" | "sell_short" | "buy_cover";
   ticker:       string;
   price?:       number;
   shares?:      number;
@@ -31,6 +32,9 @@ interface TradeMsg {
   entry_time?:  string;
   exit_time?:   string;
   time?:        string;
+  side?:        string;        // NY — "long" eller "short"
+  score?:       number;        // NY — Konfluens entry-score (4-6)
+  bricks?:      string;        // NY — Konfluens bricks "TV·H·L"
 }
 
 type AlgoMsg = StatusMsg | TradeMsg;
@@ -96,6 +100,14 @@ interface ManagerStatusMsg {
   risk:       RiskStatus;
   strategies: StrategyInfo[];
 }
+
+// ── Strategy display name → docs filename key mapping ─────────
+// Når en ny strategi registreres i backend, tilføj dens mapping her
+// så docs-knapperne henter de rigtige .md-filer.
+const STRATEGY_DOCS_KEYS: Record<string, string> = {
+  "Momentum ORB": "momentum_orb",
+  "Konfluens":    "confluence",
+};
 
 // ── Hjælpere ──────────────────────────────────────────────────
 function usd(v: number) {
@@ -466,14 +478,21 @@ export function LiveAlgo() {
         if (part) setUniverse(part.split(", ").filter(Boolean));
       }
     } else if (msg.type === "algo_trade") {
-      if (msg.action === "buy") {
+      // Strategi-prefix til log (KONF eller ORB) hvis strategy er sat
+      const stratPrefix = msg.strategy === "Konfluens" ? "[KONF] " :
+                          msg.strategy === "Momentum ORB" ? "[ORB] " : "";
+      // Konfluens-specifikt: vis bricks/score hvis tilgængelige
+      const bricksTag = msg.bricks ? `  [${msg.bricks}]` : "";
+
+      if (msg.action === "buy" || msg.action === "sell_short") {
         setPositions(prev => [...prev, {
           ticker: msg.ticker,
           entry_price: msg.price!,
           shares: msg.shares!,
           entry_time: msg.time!,
         }]);
-        addLog(`📈 KØB  ${msg.shares} ${msg.ticker} @ ${usd(msg.price!)}`);
+        const verb = msg.action === "buy" ? "KØB " : "SHRT";
+        addLog(`📈 ${stratPrefix}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.price!)}${bricksTag}`);
       } else {
         setPositions(prev => prev.filter(p => p.ticker !== msg.ticker));
         setTrades(prev => [...prev, {
@@ -482,7 +501,8 @@ export function LiveAlgo() {
           reason: msg.reason!, entry_time: msg.entry_time!, exit_time: msg.exit_time!,
         }]);
         const emoji = (msg.pnl || 0) >= 0 ? "✅" : "❌";
-        addLog(`📉 SÆLG ${msg.shares} ${msg.ticker} @ ${usd(msg.exit_price!)}  ${emoji} ${usd(msg.pnl!)} (${msg.reason})`);
+        const verb = msg.action === "buy_cover" ? "COVR" : "SÆLG";
+        addLog(`📉 ${stratPrefix}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.exit_price!)}  ${emoji} ${usd(msg.pnl!)} (${msg.reason})`);
       }
     }
   }
@@ -600,24 +620,28 @@ export function LiveAlgo() {
           }}>
             📋 Strategier ({strategies.length})
           </div>
-          {selectedStrategy && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <button
-                onClick={() => setDocsModal({ strategy: "momentum_orb", version: "iben" })}
-                style={docButtonStyle()}
-                title="Almindelig forklaring af strategien"
-              >
-                📖 Forklaring
-              </button>
-              <button
-                onClick={() => setDocsModal({ strategy: "momentum_orb", version: "teknisk" })}
-                style={docButtonStyle()}
-                title="Teknisk reference for strategien"
-              >
-                🔬 Teknisk
-              </button>
-            </div>
-          )}
+          {selectedStrategy && (() => {
+            // Map display name → docs filename key
+            const docsKey = STRATEGY_DOCS_KEYS[selectedStrategy] || "momentum_orb";
+            return (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => setDocsModal({ strategy: docsKey, version: "iben" })}
+                  style={docButtonStyle()}
+                  title="Almindelig forklaring af strategien"
+                >
+                  📖 Forklaring
+                </button>
+                <button
+                  onClick={() => setDocsModal({ strategy: docsKey, version: "teknisk" })}
+                  style={docButtonStyle()}
+                  title="Teknisk reference for strategien"
+                >
+                  🔬 Teknisk
+                </button>
+              </div>
+            );
+          })()}
         </div>
         {strategies.length === 0 ? (
           <div style={{
