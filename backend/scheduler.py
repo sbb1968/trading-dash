@@ -127,12 +127,17 @@ class AlgoScheduler:
         get_summary_fn:    Callable[[], dict],          # returnerer dagens stats
         tws_is_online_fn:  Callable[[], bool],
         reset_daily_fn:    Optional[Callable[[], Awaitable]] = None,
+        instance_role:     str = "algoserver",
     ):
         self._start_algo     = start_algo_fn
         self._stop_algo      = stop_algo_fn
         self._get_summary    = get_summary_fn
         self._tws_is_online  = tws_is_online_fn
         self._reset_daily    = reset_daily_fn
+        # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
+        # På workstation skal pre_flight_check og reset_daily fortsat køre,
+        # men strategien startes manuelt af brugeren via UI.
+        self._instance_role  = instance_role
 
         self._running = False
         self._task    = None
@@ -156,7 +161,16 @@ class AlgoScheduler:
 
         # Log næste planlagte start
         nxt = self._next_scheduled_start()
-        logger.info(f"[Scheduler] Startet — næste algo-start: {nxt.strftime('%Y-%m-%d %H:%M ET')}")
+        if self._instance_role == "algoserver":
+            logger.info(
+                f"[Scheduler] Startet (algoserver) — næste algo-start: "
+                f"{nxt.strftime('%Y-%m-%d %H:%M ET')}"
+            )
+        else:
+            logger.info(
+                f"[Scheduler] Startet ({self._instance_role}) — "
+                f"auto-start af algo deaktiveret, kør manuelt fra UI"
+            )
 
     async def stop(self):
         self._running = False
@@ -208,6 +222,18 @@ class AlgoScheduler:
         # )
 
     async def _job_start_algo(self):
+        # ── Instance-aware guard ─────────────────────────────────
+        # Auto-start må KUN ske på algoserveren. På workstation skal
+        # brugeren starte strategien manuelt via UI — ellers ville BÅDE
+        # workstation og algoserver køre samme strategi på samme tickers
+        # og generere parallel-handler på to forskellige paper-konti.
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_algo job sprunget over — "
+                f"instance_role='{self._instance_role}' (ikke 'algoserver')"
+            )
+            return
+
         if not self._tws_is_online():
             logger.warning("[Scheduler] Kan ikke starte algoritme — TWS er offline")
             # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat

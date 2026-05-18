@@ -314,6 +314,7 @@ async def startup():
         get_summary_fn   = get_daily_summary,
         tws_is_online_fn = tws_is_online,
         reset_daily_fn   = reset_daily_counters,
+        instance_role    = identity.instance_role,
     )
     await algo_scheduler.start()
     print("[Server] Algo-scheduler startet — autonom dagsplan aktiv")

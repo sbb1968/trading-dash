@@ -203,8 +203,13 @@ class TapeBuffer:
                         direction = "up"
                     elif bid and t.price <= bid:
                         direction = "down"
+                    # IBKR's t.time er tz-aware (UTC). For at undgå mix med
+                    # andre datetime.now()-baserede ts (depth, prune) gør vi
+                    # alt tz-naive ved at strippe tzinfo. Sammenligninger i
+                    # prune-loopet kræver konsistent type.
+                    ts = t.time.replace(tzinfo=None) if t.time else datetime.now()
                     buf.add_trade(TradeTick(
-                        ts=t.time if t.time else datetime.now(),
+                        ts=ts,
                         price=float(t.price),
                         size=int(t.size),
                         direction=direction,

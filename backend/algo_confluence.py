@@ -543,54 +543,64 @@ class ConfluenceLive(BaseStrategy):
         """
         Hent 5min bars fra IBKR for én ticker over en periode.
 
-        Bruger samme mønster som backtest_confluence.fetch_5min_bars: én dag
-        ad gangen for at undgå rate-limits og for at få granularitet.
+        IBKR's get_historical_bars accepterer ikke end_datetime — den henter
+        altid bars op til nu. Vi beregner derfor duration baseret på antal
+        kalenderdage i intervallet og henter alt i ét kald.
+
+        For LIVE warmup er det perfekt: vi vil have de seneste N dages bars
+        op til nu.
         """
         bars: list[Bar] = []
 
-        cur = start_date
-        while cur <= end_date:
-            if cur.weekday() >= 5:
-                cur += timedelta(days=1)
-                continue
+        # Beregn antal kalenderdage fra start_date til end_date (inkl.)
+        days_back = (end_date - start_date).days + 1
+        if days_back < 1:
+            days_back = 1
 
-            day_bars = await self.conn.get_historical_bars(
+        # IBKR's duration-format: "N D" eller "N W"
+        # Max 30 dage på 5min bars (IBKR-grænse), så vi capper for sikkerhed
+        if days_back > 30:
+            days_back = 30
+        duration_str = f"{days_back} D"
+
+        try:
+            raw_bars = await self.conn.get_historical_bars(
                 ticker,
-                duration="1 D",
+                duration=duration_str,
                 bar_size="5 mins",
                 what_to_show="TRADES",
-                end_datetime=ET.localize(datetime(cur.year, cur.month, cur.day, 16, 0)),
             )
+        except Exception as e:
+            logger.error(f"  {ticker}: get_historical_bars fejlede: {e}")
+            return []
 
-            if day_bars:
-                for raw in day_bars:
-                    # raw kan være dict eller bar-objekt afhængigt af IBKRConnection
-                    ts = raw.get("date") if isinstance(raw, dict) else raw.date
-                    if not isinstance(ts, datetime):
-                        continue
-                    if ts.tzinfo is None:
-                        ts = ET.localize(ts)
-                    else:
-                        ts = ts.astimezone(ET)
-                    if ts.date() != cur:
-                        continue
+        if not raw_bars:
+            return []
 
-                    o = raw.get("open")   if isinstance(raw, dict) else raw.open
-                    h = raw.get("high")   if isinstance(raw, dict) else raw.high
-                    l = raw.get("low")    if isinstance(raw, dict) else raw.low
-                    c = raw.get("close")  if isinstance(raw, dict) else raw.close
-                    v = raw.get("volume") if isinstance(raw, dict) else raw.volume
+        for raw in raw_bars:
+            # raw er dict fra IBKRConnection.get_historical_bars
+            ts = raw.get("datetime") if isinstance(raw, dict) else getattr(raw, "date", None)
+            if not isinstance(ts, datetime):
+                continue
+            if ts.tzinfo is None:
+                ts = ET.localize(ts)
+            else:
+                ts = ts.astimezone(ET)
 
-                    bars.append(Bar(
-                        timestamp=ts,
-                        open=float(o),
-                        high=float(h),
-                        low=float(l),
-                        close=float(c),
-                        volume=float(v) if v else 0.0,
-                    ))
+            o = raw.get("open")   if isinstance(raw, dict) else raw.open
+            h = raw.get("high")   if isinstance(raw, dict) else raw.high
+            l = raw.get("low")    if isinstance(raw, dict) else raw.low
+            c = raw.get("close")  if isinstance(raw, dict) else raw.close
+            v = raw.get("volume") if isinstance(raw, dict) else raw.volume
 
-            cur += timedelta(days=1)
+            bars.append(Bar(
+                timestamp=ts,
+                open=float(o),
+                high=float(h),
+                low=float(l),
+                close=float(c),
+                volume=float(v) if v else 0.0,
+            ))
 
         return bars
 
