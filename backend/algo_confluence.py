@@ -70,6 +70,13 @@ from strategies.confluence.exit import (
 )
 from strategies.base import Bar, Position
 
+# Trade Forensics — logger indikatorer, tape og L2 ved hver entry/exit
+from tape_buffer import TapeBuffer
+from trade_forensics import (
+    build_confluence_entry_snapshot,
+    build_confluence_exit_snapshot,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Konstanter ────────────────────────────────────────────────
@@ -127,6 +134,15 @@ class ConfluenceLive(BaseStrategy):
         # så vi ikke behandler samme bar to gange (vi poller hvert 30s
         # men en 5min bar ankommer kun hvert 5. min)
         self._last_bar_processed: dict[str, datetime]    = {}
+
+        # ── Trade Forensics ──────────────────────────────────
+        # TapeBuffer holder 180 sek tape + depth pr. ticker.
+        # Initialiseres lazily i _prepare_universe — kan være None hvis
+        # forensics-setup fejler ved opstart (algoen kører videre uden).
+        self._tape_buffer: Optional[TapeBuffer] = None
+        # Tracker MFE/MAE pr. position så vi kan logge dem ved exit
+        self._mfe: dict[str, float] = {}  # ticker → max favorable excursion (pris)
+        self._mae: dict[str, float] = {}  # ticker → max adverse excursion (pris)
 
         # Legacy-felter UI/journal forventer
         self._position_data:  dict[str, dict]            = {}
@@ -452,6 +468,40 @@ class ConfluenceLive(BaseStrategy):
         self._status("orb_ready",
                      f"✅ Universe klar — {len(self.universe)} tickers med fuld indikator-historie")
 
+        # ── Trade Forensics: start tape/depth subscriptions ───────
+        # Vi tape-subscriber alle tickers og forsøger depth på alle.
+        # Depth fejler typisk for de fleste pga. IBKR's 3-samtidige-grænse —
+        # det er accepteret og vi fortsætter uden L2 for dem.
+        try:
+            self._tape_buffer = TapeBuffer(self.conn)
+            await self._tape_buffer.start()
+
+            self._status("orb_ready",
+                         f"Forensics: subscriber tape + L2 for {len(self.universe)} aktier...")
+
+            tape_ok = depth_ok = depth_failed_count = 0
+            for ticker in self.universe:
+                result = await self._tape_buffer.subscribe(ticker)
+                if result.get("tape_ok"):
+                    tape_ok += 1
+                if result.get("depth_ok"):
+                    depth_ok += 1
+                else:
+                    depth_failed_count += 1
+                # Lille pause for at undgå IBKR-rate-limits
+                await asyncio.sleep(0.1)
+
+            self._status("orb_ready",
+                         f"✅ Forensics klar — Tape: {tape_ok}/{len(self.universe)}  "
+                         f"L2: {depth_ok}/{len(self.universe)} "
+                         f"({depth_failed_count} fejlede pga. IBKR-grænse)")
+        except Exception as e:
+            # Forensics-fejl må ALDRIG nedlægge handelsflowet
+            logger.exception(f"Forensics setup fejlede — fortsætter uden: {e}")
+            self._tape_buffer = None
+            self._status("orb_ready",
+                         f"⚠ Forensics-setup fejlede ({e}) — algoritmen kører videre uden")
+
     async def _scan_filtered_gainers(self, top_n: int) -> list[str]:
         """
         Hent top-N gainers via TradingView's screener API.
@@ -698,6 +748,12 @@ class ConfluenceLive(BaseStrategy):
         if ticker in self._positions:
             position = self._positions[ticker]
 
+            # Track MFE/MAE for forensics
+            if ticker in self._mfe:
+                self._mfe[ticker] = max(self._mfe[ticker], new_bar.high)
+            if ticker in self._mae:
+                self._mae[ticker] = min(self._mae[ticker], new_bar.low)
+
             ema_fast       = float(row["ema_fast"])       if not pd.isna(row["ema_fast"])       else None
             last_swing_low = float(row["last_swing_low"]) if not pd.isna(row["last_swing_low"]) else None
             atr_val        = float(row["atr"])            if not pd.isna(row["atr"])            else None
@@ -829,20 +885,27 @@ class ConfluenceLive(BaseStrategy):
         position = self._strategy.exit.open_position(signal, shares, self._variant_key)
         self._positions[signal.ticker] = position
 
-        # UI-kompatibel struktur
-        self._position_data[signal.ticker] = {
-            "ticker":      signal.ticker,
-            "entry_price": signal.entry_price,
-            "shares":      shares,
-            "side":        "long",
-            "entry_time":  signal.entry_time.strftime("%H:%M:%S"),
-            "stop_loss":   position.state.initial_stop,
-        }
-        self.record_position_opened(signal.ticker, signal.entry_price, shares, "long")
-
         variant = VARIANTS[self._variant_key]
         score = signal.metadata.get("entry_score", 0)
         bricks = signal.metadata.get("entry_short", "······")
+
+        # UI-kompatibel struktur — også gemmer forensics-metadata
+        self._position_data[signal.ticker] = {
+            "ticker":       signal.ticker,
+            "entry_price":  signal.entry_price,
+            "shares":       shares,
+            "side":         "long",
+            "entry_time":   signal.entry_time.strftime("%H:%M:%S"),
+            "stop_loss":    position.state.initial_stop,
+            # Forensics-felter (læses ved exit)
+            "entry_score":  score,
+            "entry_bricks": bricks,
+        }
+        self.record_position_opened(signal.ticker, signal.entry_price, shares, "long")
+
+        # Initialisér MFE/MAE tracking
+        self._mfe[signal.ticker] = signal.entry_price
+        self._mae[signal.ticker] = signal.entry_price
 
         await self._log(
             f"📈 {signal.ticker}: åbnet @ ${signal.entry_price:.2f} "
@@ -868,13 +931,43 @@ class ConfluenceLive(BaseStrategy):
                      f"📈 {signal.ticker}: købt {shares} @ ${signal.entry_price:.2f} "
                      f"| Bricks: {bricks}")
 
+        # ── Trade Forensics: log indikatorer, tape og L2 ─────────
+        try:
+            bars = self._bar_history.get(signal.ticker, [])
+            ctx  = self._contexts.get(signal.ticker, {})
+            snapshot = build_confluence_entry_snapshot(
+                ticker         = signal.ticker,
+                entry_price    = signal.entry_price,
+                entry_time     = signal.entry_time,
+                shares         = shares,
+                bars           = bars,
+                context        = ctx,
+                tape_buffer    = self._tape_buffer,
+                variant_name   = variant.name,
+                entry_score    = score,
+                entry_bricks   = bricks,
+                initial_stop   = position.state.initial_stop,
+            )
+            if self._journal:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "trade_forensics",
+                    symbol     = signal.ticker,
+                    payload    = snapshot,
+                )
+        except Exception as e:
+            logger.exception(f"Forensics (entry) for {signal.ticker} fejlede: {e}")
+
     async def _close(self, ticker: str, price: float, reason: str):
         """Luk en åben position."""
         if ticker not in self._positions:
             return
 
         position = self._positions.pop(ticker)
-        self._position_data.pop(ticker, None)
+        # Hent forensics-metadata FØR vi pop'er position_data
+        pos_data = self._position_data.pop(ticker, None) or {}
+        entry_score  = pos_data.get("entry_score", 0)
+        entry_bricks = pos_data.get("entry_bricks", "······")
 
         shares = position.shares
         pnl    = self.record_position_closed(ticker, price)
@@ -925,6 +1018,44 @@ class ConfluenceLive(BaseStrategy):
         )
         self._status("trading",
                      f"{emoji} {ticker}: solgt @ ${price:.2f} | P&L: ${pnl:+.2f}")
+
+        # ── Trade Forensics: log exit-snapshot ─────────────────
+        try:
+            bars = self._bar_history.get(ticker, [])
+            ctx  = self._contexts.get(ticker, {})
+            variant = VARIANTS[self._variant_key]
+
+            # Pop MFE/MAE — slet samtidig
+            mfe = self._mfe.pop(ticker, None)
+            mae = self._mae.pop(ticker, None)
+
+            snapshot = build_confluence_exit_snapshot(
+                ticker                  = ticker,
+                entry_price             = position.entry_price,
+                exit_price              = price,
+                entry_time              = position.entry_time,
+                exit_time               = datetime.now(ET),
+                shares                  = shares,
+                pnl                     = pnl,
+                reason                  = reason,
+                bars                    = bars,
+                context                 = ctx,
+                tape_buffer             = self._tape_buffer,
+                variant_name            = variant.name,
+                entry_score             = entry_score,
+                entry_bricks            = entry_bricks,
+                max_favorable_excursion = mfe,
+                max_adverse_excursion   = mae,
+            )
+            if self._journal:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "trade_forensics",
+                    symbol     = ticker,
+                    payload    = snapshot,
+                )
+        except Exception as e:
+            logger.exception(f"Forensics (exit) for {ticker} fejlede: {e}")
 
     async def _close_all(self, reason: str):
         """Luk alle åbne positioner (typisk ved market close eller stop)."""
