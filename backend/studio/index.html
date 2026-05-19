@@ -14,16 +14,17 @@
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             background: #1a1a1a;
-            color: #e0e0e0;
+            color: #f5f5f5;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            font-size: 15px;
         }
 
         header {
             background: #2a2a2a;
-            padding: 16px 24px;
-            border-bottom: 1px solid #444;
+            padding: 18px 24px;
+            border-bottom: 1px solid #4a4a4a;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -31,13 +32,15 @@
 
         header h1 {
             margin: 0;
-            font-size: 18px;
-            font-weight: 600;
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
         }
 
         .identity {
-            font-size: 13px;
-            color: #aaa;
+            font-size: 14px;
+            color: #d0d0d0;
+            font-weight: 500;
         }
 
         nav {
@@ -45,26 +48,29 @@
             padding: 0 24px;
             display: flex;
             gap: 4px;
-            border-bottom: 1px solid #444;
+            border-bottom: 1px solid #4a4a4a;
         }
 
         nav button {
             background: none;
             border: none;
-            color: #aaa;
-            padding: 12px 16px;
-            font-size: 14px;
+            color: #d0d0d0;
+            padding: 14px 18px;
+            font-size: 15px;
+            font-weight: 500;
             cursor: pointer;
-            border-bottom: 2px solid transparent;
+            border-bottom: 3px solid transparent;
         }
 
         nav button.active {
-            color: #fff;
-            border-bottom-color: #4a9eff;
+            color: #ffffff;
+            border-bottom-color: #5ab0ff;
+            font-weight: 600;
         }
 
         nav button:hover:not(.active) {
-            color: #ddd;
+            color: #ffffff;
+            background: rgba(255,255,255,0.03);
         }
 
         main {
@@ -76,16 +82,17 @@
         }
 
         .section-title {
-            font-size: 13px;
+            font-size: 15px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #888;
-            margin-bottom: 12px;
+            letter-spacing: 1.2px;
+            color: #c5c5c5;
+            font-weight: 700;
+            margin-bottom: 14px;
         }
 
         .card {
             background: #232323;
-            border: 1px solid #333;
+            border: 1px solid #3f3f3f;
             border-radius: 6px;
             padding: 24px;
             margin-bottom: 24px;
@@ -93,16 +100,17 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 28px;
         }
 
         .stat-label {
-            font-size: 12px;
+            font-size: 13px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #888;
-            margin-bottom: 6px;
+            letter-spacing: 0.7px;
+            color: #cfcfcf;
+            font-weight: 600;
+            margin-bottom: 8px;
         }
 
         /* Markdown-styling for strategi-dokumentation */
@@ -143,21 +151,22 @@
         }
 
         .stat-value {
-            font-size: 24px;
-            font-weight: 600;
+            font-size: 30px;
+            font-weight: 700;
             font-variant-numeric: tabular-nums;
+            color: #ffffff;
         }
 
         .stat-value.positive {
-            color: #4ade80;
+            color: #5ee99a;
         }
 
         .stat-value.negative {
-            color: #f87171;
+            color: #ff8a8a;
         }
 
         .stat-value.muted {
-            color: #888;
+            color: #b0b0b0;
         }
 
         table {
@@ -168,30 +177,612 @@
         th,
         td {
             text-align: left;
-            padding: 10px 12px;
-            border-bottom: 1px solid #333;
-            font-size: 14px;
+            padding: 14px 14px;
+            border-bottom: 1px solid #3a3a3a;
+            font-size: 15px;
+            color: #f0f0f0;
         }
 
         th {
-            color: #888;
-            font-weight: 500;
-            font-size: 12px;
+            color: #d8d8d8;
+            font-weight: 700;
+            font-size: 13px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.8px;
+            background: #2a2a2a;
+            border-bottom: 2px solid #4a4a4a;
         }
 
         td.num {
             text-align: right;
             font-variant-numeric: tabular-nums;
+            font-weight: 500;
         }
 
         td.positive {
-            color: #4ade80;
+            color: #5ee99a;
+            font-weight: 700;
         }
 
         td.negative {
-            color: #f87171;
+            color: #ff8a8a;
+            font-weight: 700;
+        }
+
+        tbody tr:hover {
+            background: rgba(255,255,255,0.04);
+        }
+
+        tbody tr.row-positive {
+            background: rgba(94, 233, 154, 0.05);
+        }
+
+        tbody tr.row-positive:hover {
+            background: rgba(94, 233, 154, 0.10);
+        }
+
+        tbody tr.row-negative {
+            background: rgba(255, 138, 138, 0.05);
+        }
+
+        tbody tr.row-negative:hover {
+            background: rgba(255, 138, 138, 0.10);
+        }
+
+        tbody tr.row-open {
+            background: rgba(90, 176, 255, 0.04);
+        }
+
+        tbody tr.row-open:hover {
+            background: rgba(90, 176, 255, 0.10);
+        }
+
+        /* ── Journal: filterbar ──────────────────────────────── */
+        .journal-filterbar {
+            padding: 20px 24px;
+        }
+
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 16px;
+            align-items: end;
+        }
+
+        .filter-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .filter-field label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #cfcfcf;
+            font-weight: 600;
+        }
+
+        .filter-field input,
+        .filter-field select {
+            padding: 10px 12px;
+            background: #1a1a1a;
+            border: 1px solid #4a4a4a;
+            border-radius: 4px;
+            color: #f0f0f0;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .filter-field input:focus,
+        .filter-field select:focus {
+            outline: none;
+            border-color: #5ab0ff;
+            box-shadow: 0 0 0 2px rgba(90,176,255,0.2);
+        }
+
+        .filter-actions {
+            flex-direction: row !important;
+            gap: 8px;
+        }
+
+        .filter-actions button {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .btn-primary {
+            background: #1a4a8a;
+            border-color: #5ab0ff;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #225aaa;
+        }
+
+        .btn-secondary {
+            background: #383838;
+            border-color: #5a5a5a;
+            color: #f0f0f0;
+        }
+
+        .btn-secondary:hover {
+            background: #454545;
+        }
+
+        /* ── Journal: summary-strip ──────────────────────────── */
+        .journal-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 24px;
+        }
+
+        /* ── Klikbare tabel-rækker ────────────────────────────── */
+        tbody tr.clickable-row {
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        tbody tr.clickable-row:hover {
+            background: rgba(90, 176, 255, 0.08) !important;
+        }
+
+        /* ── Generisk modal ───────────────────────────────────── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            backdrop-filter: blur(2px);
+        }
+
+        .modal-window {
+            background: #1a1a1a;
+            border: 1px solid #4a4a4a;
+            border-radius: 8px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+            overflow: hidden;
+        }
+
+        .trade-detail-modal {
+            width: min(720px, 95vw);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 24px;
+            border-bottom: 1px solid #3f3f3f;
+            background: #232323;
+            flex-shrink: 0;
+        }
+
+        .modal-title {
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+        }
+
+        .modal-close-btn {
+            background: transparent;
+            border: 1px solid #5a5a5a;
+            color: #d0d0d0;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .modal-close-btn:hover {
+            background: #383838;
+            color: #ffffff;
+        }
+
+        .modal-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+        }
+
+        /* ── Trade-detail sektioner ─────────────────────────── */
+        .trade-subheader {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            color: #d0d0d0;
+            padding: 12px 0 20px;
+            border-bottom: 1px solid #3a3a3a;
+            margin-bottom: 20px;
+        }
+
+        .trade-subheader-divider {
+            color: #5a5a5a;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section-title {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #c5c5c5;
+            font-weight: 700;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #3a3a3a;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 24px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 8px 0;
+        }
+
+        .detail-row-full {
+            grid-column: 1 / -1;
+        }
+
+        .detail-label {
+            color: #c5c5c5;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .detail-value {
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 600;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .detail-value.positive { color: #5ee99a; }
+        .detail-value.negative { color: #ff8a8a; }
+        .detail-value.muted    { color: #a0a0a0; }
+
+        .muted-text {
+            color: #a0a0a0;
+            font-size: 13px;
+            font-weight: 400;
+        }
+
+        .detail-notes-readonly {
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 12px 14px;
+            color: #f0f0f0;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            min-height: 40px;
+            text-align: left;
+        }
+
+        /* ── Notes-redigering ──────────────────────────────── */
+        .detail-section-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #3a3a3a;
+        }
+
+        .detail-section-title-text {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #c5c5c5;
+            font-weight: 700;
+        }
+
+        .notes-edit-btn {
+            background: transparent;
+            border: 1px solid #5a5a5a;
+            color: #d0d0d0;
+            border-radius: 4px;
+            padding: 4px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .notes-edit-btn:hover {
+            background: #383838;
+            color: #ffffff;
+            border-color: #7a7a7a;
+        }
+
+        .notes-edit-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .notes-textarea {
+            width: 100%;
+            min-height: 100px;
+            background: #1a1a1a;
+            border: 1px solid #4a4a4a;
+            border-radius: 4px;
+            padding: 12px 14px;
+            color: #f0f0f0;
+            font-size: 14px;
+            line-height: 1.5;
+            font-family: inherit;
+            resize: vertical;
+        }
+
+        .notes-textarea:focus {
+            outline: none;
+            border-color: #5ab0ff;
+            box-shadow: 0 0 0 2px rgba(90, 176, 255, 0.2);
+        }
+
+        .notes-edit-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .notes-edit-error {
+            color: #ff8a8a;
+            font-size: 13px;
+            min-height: 16px;
+        }
+
+        /* ── Forensics accordion ───────────────────────────── */
+        .detail-forensics {
+            margin-top: 20px;
+            background: #1f1f1f;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+        }
+
+        .detail-forensics summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            color: #c5c5c5;
+            font-weight: 600;
+            font-size: 14px;
+            user-select: none;
+        }
+
+        .detail-forensics summary:hover {
+            background: #252525;
+            color: #ffffff;
+        }
+
+        .detail-forensics[open] summary {
+            border-bottom: 1px solid #3a3a3a;
+        }
+
+        .detail-payload {
+            background: #141414;
+            color: #d0d0d0;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 14px 16px;
+            margin: 0;
+            overflow-x: auto;
+            white-space: pre;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* ── Meta-info nederst i modal ─────────────────────── */
+        .detail-meta {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid #3a3a3a;
+            font-size: 12px;
+            color: #a0a0a0;
+            line-height: 1.6;
+        }
+
+        .detail-meta code {
+            background: #2a2a2a;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #d0d0d0;
+            font-size: 11px;
+        }
+
+        /* ── Journal: paginering ─────────────────────────────── */
+        .journal-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 16px;
+            padding: 16px;
+        }
+
+        .journal-pagination button {
+            background: #383838;
+            border: 1px solid #5a5a5a;
+            color: #f0f0f0;
+            padding: 8px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .journal-pagination button:hover:not(:disabled) {
+            background: #454545;
+            border-color: #7a7a7a;
+        }
+
+        .journal-pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .journal-pagination .page-info {
+            color: #cfcfcf;
+            font-weight: 600;
+            font-size: 14px;
+            min-width: 120px;
+            text-align: center;
+        }
+
+        /* ── Pill badges til side, source, exit-grund ─────────── */
+        .pill {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .pill-long {
+            background: rgba(94, 233, 154, 0.18);
+            color: #5ee99a;
+            border: 1px solid rgba(94, 233, 154, 0.4);
+        }
+
+        .pill-short {
+            background: rgba(255, 138, 138, 0.18);
+            color: #ff8a8a;
+            border: 1px solid rgba(255, 138, 138, 0.4);
+        }
+
+        .pill-orb {
+            background: rgba(90, 176, 255, 0.18);
+            color: #7ec0ff;
+            border: 1px solid rgba(90, 176, 255, 0.4);
+        }
+
+        .pill-konfl {
+            background: rgba(196, 132, 252, 0.18);
+            color: #d4a8ff;
+            border: 1px solid rgba(196, 132, 252, 0.4);
+        }
+
+        .pill-manuel {
+            background: rgba(251, 146, 60, 0.18);
+            color: #fdba74;
+            border: 1px solid rgba(251, 146, 60, 0.4);
+        }
+
+        .pill-reason-target {
+            background: rgba(94, 233, 154, 0.15);
+            color: #5ee99a;
+        }
+
+        .pill-reason-trail {
+            background: rgba(90, 176, 255, 0.15);
+            color: #7ec0ff;
+        }
+
+        .pill-reason-stop {
+            background: rgba(255, 138, 138, 0.15);
+            color: #ff8a8a;
+        }
+
+        .pill-reason-force_close,
+        .pill-reason-manual {
+            background: rgba(160, 160, 160, 0.15);
+            color: #c5c5c5;
+        }
+
+        /* ── "Åben"-indikator med pulserende prik ──────────────── */
+        .open-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #7ec0ff;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .open-indicator::before {
+            content: "";
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #5ab0ff;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(90,176,255,0.6); }
+            50% { opacity: 0.5; box-shadow: 0 0 0 6px rgba(90,176,255,0); }
+        }
+
+        /* ── Stort hero-P&L tal øverst på Oversigt ─────────────── */
+        .hero-pnl {
+            text-align: center;
+            padding: 24px 0 12px;
+        }
+
+        .hero-pnl-label {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: #c5c5c5;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .hero-pnl-value {
+            font-size: 56px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -1px;
+            line-height: 1.1;
+        }
+
+        .hero-pnl-value.positive {
+            color: #5ee99a;
+            text-shadow: 0 0 24px rgba(94, 233, 154, 0.3);
+        }
+
+        .hero-pnl-value.negative {
+            color: #ff8a8a;
+            text-shadow: 0 0 24px rgba(255, 138, 138, 0.3);
+        }
+
+        .hero-pnl-value.muted {
+            color: #888;
+        }
+
+        .hero-pnl-meta {
+            font-size: 14px;
+            color: #c5c5c5;
+            margin-top: 8px;
         }
 
         .controls {
@@ -200,23 +791,26 @@
             align-items: center;
             margin-top: 24px;
             padding-top: 16px;
-            border-top: 1px solid #333;
-            font-size: 13px;
-            color: #888;
+            border-top: 1px solid #3a3a3a;
+            font-size: 14px;
+            color: #c0c0c0;
+            font-weight: 500;
         }
 
         .controls button {
-            background: #333;
-            border: 1px solid #555;
-            color: #ddd;
-            padding: 6px 14px;
+            background: #383838;
+            border: 1px solid #5a5a5a;
+            color: #f0f0f0;
+            padding: 8px 16px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 14px;
+            font-weight: 500;
         }
 
         .controls button:hover {
-            background: #3a3a3a;
+            background: #454545;
+            border-color: #7a7a7a;
         }
 
         .badge {
@@ -249,17 +843,19 @@
         }
 
         .empty {
-            color: #666;
+            color: #a0a0a0;
             font-style: italic;
-            padding: 24px;
+            padding: 28px;
             text-align: center;
+            font-size: 15px;
         }
 
         code {
             background: #2a2a2a;
-            padding: 2px 6px;
+            padding: 3px 8px;
             border-radius: 3px;
-            font-size: 13px;
+            font-size: 14px;
+            color: #f0f0f0;
         }
 
         .period-tabs {
@@ -382,9 +978,11 @@
         .status-dot.online  { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.6); }
         .status-dot.offline { background: #666; }
 
-        table th { color: #aaa; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-        table td { padding: 12px 8px; border-bottom: 1px solid #2a2a2a; font-size: 14px; }
-        table tr:last-child td { border-bottom: none; }
+        /* Genbrug af .table-rules — disse override'es allerede ovenfor.
+           Behold dem her for kompatibilitet med eksisterende Analyse-side. */
+        .markdown-body table th { color: #d8d8d8; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; }
+        .markdown-body table td { padding: 12px 10px; border-bottom: 1px solid #3a3a3a; font-size: 15px; }
+        .markdown-body table tr:last-child td { border-bottom: none; }
         
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
@@ -406,9 +1004,11 @@
     </header>
 
     <nav id="nav">
-        <button data-page="account" class="active">Konto</button>
+        <button data-page="oversigt" class="active">Oversigt</button>
+        <button data-page="account">Konto</button>
         <button data-page="strategies">Strategier</button>
         <button data-page="analysis">Analyse</button>
+        <button data-page="journal">Journal</button>
         <button data-page="backtest">Backtest</button>
         <button data-page="log">Log</button>
     </nav>
@@ -499,7 +1099,7 @@
                 hideLogin();
                 // Trigger initial side-load nu hvor vi er logget ind
                 loadIdentity();
-                switchPage(currentPage || "account");
+                switchPage(currentPage || "oversigt");
             } catch (e) {
                 errorDiv.textContent = "Backend ikke tilgængelig";
             } finally {
@@ -536,7 +1136,7 @@
                 }
                 hideLogin();
                 loadIdentity();
-                switchPage("account");
+                switchPage("oversigt");
                 return;
             }
 
@@ -557,7 +1157,7 @@
                 }
                 hideLogin();
                 loadIdentity();
-                switchPage("account");
+                switchPage("oversigt");
             } catch (e) {
                 showLogin();
             }
@@ -611,8 +1211,10 @@
         // ─────────────────────────────────────────────────────
         // Router — håndterer side-skift
         // ─────────────────────────────────────────────────────
-        let currentPage = "account";
+        let currentPage = "oversigt";
         let accountTimer = null;
+        let oversigtTimer = null;
+        let journalTimer = null;
 
         document.getElementById("nav").addEventListener("click", e => {
             const btn = e.target.closest("button[data-page]");
@@ -632,14 +1234,18 @@
             // Stop alle timers — ny side starter sine egne hvis nødvendigt
             if (accountTimer) { clearInterval(accountTimer); accountTimer = null; }
             if (strategiesTimer) { clearInterval(strategiesTimer); strategiesTimer = null; }
+            if (oversigtTimer) { clearInterval(oversigtTimer); oversigtTimer = null; }
+            if (journalTimer) { clearInterval(journalTimer); journalTimer = null; }
 
             // Render
             const content = document.getElementById("content");
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
 
-            if (page === "account") showAccount();
+            if (page === "oversigt") showOversigt();
+            else if (page === "account") showAccount();
             else if (page === "analysis") showAnalysis();
             else if (page === "strategies") showStrategies();
+            else if (page === "journal") showJournal();
             else showPlaceholder(page);
         }
 
@@ -656,6 +1262,858 @@
                     </div>
                 </div>
             `;
+        }
+
+        // ─────────────────────────────────────────────────────
+        // OVERSIGT-SIDE — dagens P&L + åbne positioner
+        // ─────────────────────────────────────────────────────
+        async function showOversigt() {
+            await loadOversigtData();
+            oversigtTimer = setInterval(() => {
+                if (currentPage === "oversigt") loadOversigtData();
+            }, 10_000);
+        }
+
+        async function loadOversigtData() {
+            try {
+                // Hent dagens data og åbne positioner parallelt
+                const [todayRes, openRes] = await Promise.all([
+                    authFetch("/journal/today"),
+                    authFetch("/journal/open-positions"),
+                ]);
+
+                if (!todayRes.ok) throw new Error(`HTTP ${todayRes.status} fra /journal/today`);
+                if (!openRes.ok)  throw new Error(`HTTP ${openRes.status} fra /journal/open-positions`);
+
+                const today = await todayRes.json();
+                const open  = await openRes.json();
+
+                renderOversigt(today, open);
+            } catch (e) {
+                renderOversigtError("Backend ikke tilgængelig: " + e.message);
+            }
+        }
+
+        function renderOversigtError(msg) {
+            document.getElementById("content").innerHTML = `
+                <div class="card">
+                    <div class="error"><strong>Fejl:</strong> ${msg}</div>
+                    <div class="controls">
+                        <span></span>
+                        <button onclick="loadOversigtData()">↻ Prøv igen</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderOversigt(today, open) {
+            const summary = today.summary || {};
+            const todaysTrades = today.trades || [];
+            const openPositions = open.positions || [];
+
+            // ── KPI'er ───────────────────────────────────────
+            const totalPnl    = summary.total_pnl   || 0;
+            const tradesCount = summary.count       || 0;
+            const wins        = summary.wins        || 0;
+            const losses      = summary.losses      || 0;
+            const winRate     = summary.win_rate    || 0;
+            const openCount   = summary.open_count  || 0;
+            const bestTrade   = summary.best_trade  || 0;
+            const worstTrade  = summary.worst_trade || 0;
+
+            // ── Helper: source-pill ──────────────────────────
+            const sourcePill = (source) => {
+                if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
+                if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
+                return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
+            };
+
+            // ── Helper: side-pill ────────────────────────────
+            const sidePill = (side) => side === "long"
+                ? `<span class="pill pill-long">Long</span>`
+                : `<span class="pill pill-short">Short</span>`;
+
+            // ── Helper: exit-reason-pill ─────────────────────
+            const reasonPill = (reason) => {
+                if (!reason) return "";
+                const cls = ["target","trail","stop","force_close","manual"].includes(reason)
+                    ? `pill-reason-${reason}` : "";
+                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+            };
+
+            // Vis dato pænt
+            const dateLabel = today.date ? new Date(today.date).toLocaleDateString("da-DK", {
+                weekday: "long", year: "numeric", month: "long", day: "numeric"
+            }) : "i dag";
+
+            // ── Åbne positioner-tabel ────────────────────────
+            const openRows = openPositions.length === 0
+                ? `<tr><td colspan="7" class="empty">Ingen åbne positioner</td></tr>`
+                : openPositions.map(p => {
+                    const stage = p.current_stage || "—";
+                    const targetCell = p.current_stage === "trailing"
+                        ? (p.trail_stop != null
+                            ? `<span style="color:#7ec0ff;font-weight:600;">↗ ${fmtMoney(p.trail_stop)}</span>`
+                            : "—")
+                        : (p.current_target != null ? fmtMoney(p.current_target) : "—");
+                    const entryTime = p.entry_time_et
+                        ? p.entry_time_et.substring(11, 16) + " ET"
+                        : "—";
+                    return `
+                        <tr class="row-open">
+                            <td>${entryTime}</td>
+                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(p.source)}</td>
+                            <td>${sidePill(p.side)}</td>
+                            <td class="num">${p.shares}</td>
+                            <td class="num">${fmtMoney(p.entry_price)}</td>
+                            <td class="num">${p.current_stop != null ? fmtMoney(p.current_stop) : "—"}</td>
+                            <td class="num">${targetCell}</td>
+                        </tr>
+                    `;
+                }).join("");
+
+            // ── Dagens handler-tabel ─────────────────────────
+            const tradeRows = todaysTrades.length === 0
+                ? `<tr><td colspan="8" class="empty">Ingen handler i dag</td></tr>`
+                : todaysTrades.map(t => {
+                    const entryTime = t.entry_time_et
+                        ? t.entry_time_et.substring(11, 16) + " ET"
+                        : "—";
+                    const exitTime = t.exit_time_et
+                        ? t.exit_time_et.substring(11, 16) + " ET"
+                        : `<span class="open-indicator">Åben</span>`;
+                    const exitCell = t.exit_price != null ? fmtMoney(t.exit_price) : "—";
+                    const pnlCell = t.pnl != null
+                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>`
+                        : `<span class="muted">—</span>`;
+
+                    // Farv rækken efter resultat
+                    const rowClass = t.pnl == null ? "row-open"
+                                   : t.pnl > 0    ? "row-positive"
+                                   : t.pnl < 0    ? "row-negative"
+                                   : "";
+
+                    return `
+                        <tr class="${rowClass}">
+                            <td>${entryTime}</td>
+                            <td>${exitTime}</td>
+                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}</td>
+                            <td>${sidePill(t.side)}</td>
+                            <td class="num">${t.shares}</td>
+                            <td class="num">${fmtMoney(t.entry_price)}</td>
+                            <td class="num">${exitCell}</td>
+                            <td class="num">${pnlCell}${reasonPill(t.exit_reason)}</td>
+                        </tr>
+                    `;
+                }).join("");
+
+            // ── Hero-PnL (stort tal øverst) ──────────────────
+            const heroPnlClass = totalPnl > 0 ? "positive"
+                              : totalPnl < 0 ? "negative"
+                              : "muted";
+
+            // ── Saml det hele ────────────────────────────────
+            document.getElementById("content").innerHTML = `
+                <div class="section-title">Oversigt — ${dateLabel}</div>
+
+                <div class="card">
+                    <div class="hero-pnl">
+                        <div class="hero-pnl-label">Realiseret P&L i dag</div>
+                        <div class="hero-pnl-value ${heroPnlClass}">${fmtMoneySigned(totalPnl)}</div>
+                        <div class="hero-pnl-meta">
+                            ${tradesCount > 0 ? `${tradesCount} handler · ${wins}V / ${losses}T · win rate ${winRate.toFixed(1)}%` : "Ingen lukkede handler endnu"}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="stats-grid">
+                        <div>
+                            <div class="stat-label">Åbne positioner</div>
+                            <div class="stat-value ${openCount > 0 ? '' : 'muted'}">${openCount}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Bedste handel</div>
+                            <div class="stat-value ${bestTrade > 0 ? 'positive' : 'muted'}">${bestTrade > 0 ? fmtMoneySigned(bestTrade) : "—"}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Værste handel</div>
+                            <div class="stat-value ${worstTrade < 0 ? 'negative' : 'muted'}">${worstTrade < 0 ? fmtMoneySigned(worstTrade) : "—"}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title">Åbne positioner (${openPositions.length})</div>
+                <div class="card" style="padding:0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Entry-tid</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th style="text-align:right;">Stk</th>
+                                <th style="text-align:right;">Entry</th>
+                                <th style="text-align:right;">Stop</th>
+                                <th style="text-align:right;">Target / Trail</th>
+                            </tr>
+                        </thead>
+                        <tbody>${openRows}</tbody>
+                    </table>
+                </div>
+
+                <div class="section-title">Dagens handler (${todaysTrades.length})</div>
+                <div class="card" style="padding:0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Entry-tid</th>
+                                <th>Exit-tid</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th style="text-align:right;">Stk</th>
+                                <th style="text-align:right;">Entry-pris</th>
+                                <th style="text-align:right;">Exit-pris</th>
+                                <th style="text-align:right;">P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>${tradeRows}</tbody>
+                    </table>
+                </div>
+
+                <div class="controls">
+                    <span>Auto-refresh hver 10s</span>
+                    <button onclick="loadOversigtData()">↻ Opdater nu</button>
+                </div>
+            `;
+        }
+
+        // ─────────────────────────────────────────────────────
+        // JOURNAL-SIDE — historisk gennemgang af alle trades
+        // ─────────────────────────────────────────────────────
+        // State for filtre og paginering
+        const JOURNAL_PAGE_SIZE = 25;
+        let journalFilters = null;  // initialiseres ved første load
+        let journalPage = 0;
+        let journalData = null;     // cache af seneste respons
+
+        function initJournalFilters() {
+            // Default: sidste 7 dage, alt valgt
+            const today = new Date();
+            const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+            const toISODate = d => d.toISOString().substring(0, 10);
+            return {
+                date_from: toISODate(sevenDaysAgo),
+                date_to: toISODate(today),
+                source: "",      // tom = alle
+                symbol: "",      // tom = alle
+                status: "all",   // all | open | closed
+            };
+        }
+
+        async function showJournal() {
+            if (!journalFilters) {
+                journalFilters = initJournalFilters();
+                journalPage = 0;
+            }
+
+            // Render skelet med filterbar straks (god UX)
+            renderJournalShell();
+
+            // Hent data
+            await loadJournalData();
+
+            // Auto-refresh hver 30 sek
+            journalTimer = setInterval(() => {
+                if (currentPage === "journal") loadJournalData();
+            }, 30_000);
+        }
+
+        function renderJournalShell() {
+            // Render hele siden inkl. filterbar — tabellen bliver indsat senere
+            const f = journalFilters;
+            const sourceOptions = [
+                ["",              "Alle strategier"],
+                ["Momentum ORB",  "Momentum ORB"],
+                ["Konfluens",     "Konfluens"],
+                ["manual",        "Manuel"],
+            ].map(([val, label]) => `
+                <option value="${val}" ${val === f.source ? "selected" : ""}>${label}</option>
+            `).join("");
+
+            const statusOptions = [
+                ["all",    "Alle"],
+                ["closed", "Lukkede"],
+                ["open",   "Åbne"],
+            ].map(([val, label]) => `
+                <option value="${val}" ${val === f.status ? "selected" : ""}>${label}</option>
+            `).join("");
+
+            document.getElementById("content").innerHTML = `
+                <div class="section-title">Journal — historisk gennemgang</div>
+
+                <div class="card journal-filterbar">
+                    <div class="filter-grid">
+                        <div class="filter-field">
+                            <label for="f-date-from">Fra dato</label>
+                            <input type="date" id="f-date-from" value="${f.date_from}">
+                        </div>
+                        <div class="filter-field">
+                            <label for="f-date-to">Til dato</label>
+                            <input type="date" id="f-date-to" value="${f.date_to}">
+                        </div>
+                        <div class="filter-field">
+                            <label for="f-source">Strategi</label>
+                            <select id="f-source">${sourceOptions}</select>
+                        </div>
+                        <div class="filter-field">
+                            <label for="f-symbol">Symbol</label>
+                            <input type="text" id="f-symbol" maxlength="8"
+                                   placeholder="fx CLOV" value="${f.symbol}"
+                                   style="text-transform:uppercase;">
+                        </div>
+                        <div class="filter-field">
+                            <label for="f-status">Status</label>
+                            <select id="f-status">${statusOptions}</select>
+                        </div>
+                        <div class="filter-field filter-actions">
+                            <button id="f-apply" class="btn-primary">Anvend filtre</button>
+                            <button id="f-reset" class="btn-secondary">Nulstil</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="journal-results">
+                    <div class="card">
+                        <div class="empty">Henter handler...</div>
+                    </div>
+                </div>
+            `;
+
+            // Tilkobl event-handlers
+            document.getElementById("f-apply").addEventListener("click", applyJournalFilters);
+            document.getElementById("f-reset").addEventListener("click", resetJournalFilters);
+
+            // Enter-tasten i felter = anvend
+            ["f-date-from", "f-date-to", "f-symbol"].forEach(id => {
+                document.getElementById(id).addEventListener("keypress", e => {
+                    if (e.key === "Enter") applyJournalFilters();
+                });
+            });
+
+            // Dropdown-ændring = anvend straks
+            ["f-source", "f-status"].forEach(id => {
+                document.getElementById(id).addEventListener("change", applyJournalFilters);
+            });
+        }
+
+        function applyJournalFilters() {
+            journalFilters = {
+                date_from: document.getElementById("f-date-from").value,
+                date_to:   document.getElementById("f-date-to").value,
+                source:    document.getElementById("f-source").value,
+                symbol:    document.getElementById("f-symbol").value.toUpperCase().trim(),
+                status:    document.getElementById("f-status").value,
+            };
+            journalPage = 0;  // reset til side 1 når filtre ændres
+            loadJournalData();
+        }
+
+        function resetJournalFilters() {
+            journalFilters = initJournalFilters();
+            journalPage = 0;
+            renderJournalShell();
+            loadJournalData();
+        }
+
+        async function loadJournalData() {
+            const f = journalFilters;
+            const params = new URLSearchParams();
+            if (f.date_from) params.set("date_from", f.date_from);
+            if (f.date_to)   params.set("date_to",   f.date_to);
+            if (f.source)    params.set("source",    f.source);
+            if (f.symbol)    params.set("symbol",    f.symbol);
+            if (f.status && f.status !== "all") params.set("status", f.status);
+            params.set("limit",  JOURNAL_PAGE_SIZE);
+            params.set("offset", journalPage * JOURNAL_PAGE_SIZE);
+
+            try {
+                const res = await authFetch(`/journal/trades?${params.toString()}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                journalData = await res.json();
+                renderJournalResults();
+            } catch (e) {
+                document.getElementById("journal-results").innerHTML = `
+                    <div class="card">
+                        <div class="error"><strong>Fejl:</strong> ${e.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function renderJournalResults() {
+            const data = journalData;
+            const trades = data.trades || [];
+            // Backenden returnerer "count" (ikke "total") — accepter begge for robusthed
+            const total = data.total ?? data.count ?? 0;
+            const totalPages = Math.max(1, Math.ceil(total / JOURNAL_PAGE_SIZE));
+
+            // ── Helper-funktioner (genbrug fra Oversigt) ─────
+            const sourcePill = (source) => {
+                if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
+                if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
+                return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
+            };
+            const sidePill = (side) => side === "long"
+                ? `<span class="pill pill-long">Long</span>`
+                : `<span class="pill pill-short">Short</span>`;
+            const reasonPill = (reason) => {
+                if (!reason) return "";
+                const cls = ["target","trail","stop","force_close","manual"].includes(reason)
+                    ? `pill-reason-${reason}` : "";
+                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+            };
+
+            // ── Beregn summary fra de viste trades ───────────
+            // (Bemærk: dette er kun for de viste 25 trades, ikke totalt over hele resultat-sættet)
+            const closedTrades = trades.filter(t => t.pnl != null);
+            const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+            const wins = closedTrades.filter(t => t.pnl > 0).length;
+            const losses = closedTrades.filter(t => t.pnl < 0).length;
+            const winRate = closedTrades.length > 0 ? (wins / closedTrades.length * 100) : 0;
+            const openCount = trades.filter(t => t.pnl == null && t.exit_time_et == null).length;
+
+            // ── Rækker ───────────────────────────────────────
+            const rows = trades.length === 0
+                ? `<tr><td colspan="9" class="empty">Ingen handler matcher filtrene</td></tr>`
+                : trades.map(t => {
+                    const date = t.entry_time_et
+                        ? t.entry_time_et.substring(0, 10)
+                        : "—";
+                    const entryTime = t.entry_time_et
+                        ? t.entry_time_et.substring(11, 16) + " ET"
+                        : "—";
+                    const exitTime = t.exit_time_et
+                        ? t.exit_time_et.substring(11, 16) + " ET"
+                        : `<span class="open-indicator">Åben</span>`;
+                    const exitCell = t.exit_price != null ? fmtMoney(t.exit_price) : "—";
+                    const pnlCell = t.pnl != null
+                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>`
+                        : `<span class="muted">—</span>`;
+                    const rowClass = t.pnl == null ? "row-open"
+                                   : t.pnl > 0    ? "row-positive"
+                                   : t.pnl < 0    ? "row-negative" : "";
+                    return `
+                        <tr class="${rowClass} clickable-row" onclick="openTradeDetail('${t.trade_id}')">
+                            <td>${date}</td>
+                            <td>${entryTime}</td>
+                            <td>${exitTime}</td>
+                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}</td>
+                            <td>${sidePill(t.side)}</td>
+                            <td class="num">${t.shares}</td>
+                            <td class="num">${fmtMoney(t.entry_price)}</td>
+                            <td class="num">${exitCell}</td>
+                            <td class="num">${pnlCell}${reasonPill(t.exit_reason)}</td>
+                        </tr>
+                    `;
+                }).join("");
+
+            // ── Paginerings-knapper ──────────────────────────
+            const fromIdx = total === 0 ? 0 : (journalPage * JOURNAL_PAGE_SIZE) + 1;
+            const toIdx = Math.min((journalPage + 1) * JOURNAL_PAGE_SIZE, total);
+            const prevDisabled = journalPage === 0 ? "disabled" : "";
+            const nextDisabled = (journalPage + 1) >= totalPages ? "disabled" : "";
+
+            document.getElementById("journal-results").innerHTML = `
+                <div class="card journal-summary">
+                    <div class="journal-summary-grid">
+                        <div>
+                            <div class="stat-label">I alt fundet</div>
+                            <div class="stat-value">${total}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Viser side</div>
+                            <div class="stat-value">${journalPage + 1} / ${totalPages}
+                                <span style="font-size:13px;color:#a0a0a0;font-weight:400;margin-left:8px;">
+                                    (${fromIdx}–${toIdx})
+                                </span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="stat-label">P&L (denne side)</div>
+                            <div class="stat-value ${cls(totalPnl)}">${closedTrades.length > 0 ? fmtMoneySigned(totalPnl) : "—"}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Win rate (denne side)</div>
+                            <div class="stat-value ${winRate >= 50 ? 'positive' : (closedTrades.length > 0 ? 'negative' : 'muted')}">${closedTrades.length > 0 ? winRate.toFixed(1) + "%" : "—"}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="padding:0;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Dato</th>
+                                <th>Entry-tid</th>
+                                <th>Exit-tid</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th style="text-align:right;">Stk</th>
+                                <th style="text-align:right;">Entry-pris</th>
+                                <th style="text-align:right;">Exit-pris</th>
+                                <th style="text-align:right;">P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+
+                <div class="journal-pagination">
+                    <button onclick="goToJournalPage(0)" ${prevDisabled}>« Første</button>
+                    <button onclick="goToJournalPage(${journalPage - 1})" ${prevDisabled}>‹ Forrige</button>
+                    <span class="page-info">Side ${journalPage + 1} af ${totalPages}</span>
+                    <button onclick="goToJournalPage(${journalPage + 1})" ${nextDisabled}>Næste ›</button>
+                    <button onclick="goToJournalPage(${totalPages - 1})" ${nextDisabled}>Sidste »</button>
+                </div>
+            `;
+        }
+
+        function goToJournalPage(page) {
+            const data = journalData;
+            if (!data) return;
+            const totalPages = Math.max(1, Math.ceil((data.total || 0) / JOURNAL_PAGE_SIZE));
+            if (page < 0 || page >= totalPages) return;
+            journalPage = page;
+            loadJournalData();
+        }
+
+        // ─────────────────────────────────────────────────────
+        // TRADE DETAIL — modal med fuld info pr. trade
+        // ─────────────────────────────────────────────────────
+        async function openTradeDetail(tradeId) {
+            // Opret overlay straks med loading-tilstand
+            const overlay = document.createElement("div");
+            overlay.id = "trade-detail-overlay";
+            overlay.className = "modal-overlay";
+            overlay.onclick = (e) => { if (e.target === overlay) closeTradeDetail(); };
+            overlay.innerHTML = `
+                <div class="modal-window trade-detail-modal">
+                    <div id="trade-detail-body">
+                        <div class="empty" style="padding:60px;">Indlæser handel...</div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            document.addEventListener("keydown", handleTradeDetailKeydown);
+
+            // Hent fuld trade-data
+            try {
+                const res = await authFetch(`/journal/trades/${tradeId}`);
+                if (!res.ok) {
+                    if (res.status === 404) throw new Error("Handlen findes ikke længere");
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const trade = await res.json();
+                renderTradeDetail(trade);
+            } catch (e) {
+                document.getElementById("trade-detail-body").innerHTML = `
+                    <div class="modal-header">
+                        <div class="modal-title" style="color:#ff8a8a;">Fejl</div>
+                        <button class="modal-close-btn" onclick="closeTradeDetail()">✕ Luk</button>
+                    </div>
+                    <div class="modal-content">
+                        <div class="error">${e.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function closeTradeDetail() {
+            const overlay = document.getElementById("trade-detail-overlay");
+            if (overlay) overlay.remove();
+            document.removeEventListener("keydown", handleTradeDetailKeydown);
+        }
+
+        function handleTradeDetailKeydown(e) {
+            if (e.key === "Escape") closeTradeDetail();
+        }
+
+        function renderTradeDetail(trade) {
+            // ── Helpers (gentaget her for at modalen er self-contained) ──
+            const sourceBadge = (src) => {
+                if (src === "Momentum ORB") return `<span class="pill pill-orb">Momentum ORB</span>`;
+                if (src === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
+                return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
+            };
+            const sideBadge = (side) => side === "long"
+                ? `<span class="pill pill-long">Long</span>`
+                : `<span class="pill pill-short">Short</span>`;
+
+            // ── Dato + tider ─────────────────────────────────
+            const dateStr = trade.entry_time_et
+                ? trade.entry_time_et.substring(0, 10)
+                : "—";
+            const entryTimeET = trade.entry_time_et
+                ? trade.entry_time_et.substring(11, 16) + " ET"
+                : "—";
+            const exitTimeET = trade.exit_time_et
+                ? trade.exit_time_et.substring(11, 16) + " ET"
+                : `<span class="open-indicator">Åben</span>`;
+
+            // Dansk tid — beregn fra UTC
+            const danskTime = (utcIso) => {
+                if (!utcIso) return null;
+                const d = new Date(utcIso);
+                return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
+            };
+            const entryTimeDansk = danskTime(trade.entry_time_utc);
+            const exitTimeDansk  = danskTime(trade.exit_time_utc);
+
+            // ── Varighed ─────────────────────────────────────
+            const durationStr = trade.duration_sec != null
+                ? `${Math.floor(trade.duration_sec / 60)} min ${trade.duration_sec % 60} sek`
+                : "—";
+
+            // ── P&L formatting ───────────────────────────────
+            const pnlText = trade.pnl != null
+                ? fmtMoneySigned(trade.pnl)
+                : "—";
+            const pnlPctText = trade.pnl_pct != null
+                ? ` (${trade.pnl_pct >= 0 ? "+" : ""}${trade.pnl_pct.toFixed(2)}%)`
+                : "";
+            const pnlClass = cls(trade.pnl);
+
+            // ── Status-indikator i header ────────────────────
+            const isOpen = trade.exit_time_et == null;
+            const statusIndicator = isOpen
+                ? `<span class="open-indicator" style="margin-left:auto;">Position åben</span>`
+                : trade.pnl > 0
+                    ? `<span style="margin-left:auto; color:#5ee99a; font-weight:700;">✓ Lukket med gevinst</span>`
+                    : trade.pnl < 0
+                        ? `<span style="margin-left:auto; color:#ff8a8a; font-weight:700;">✗ Lukket med tab</span>`
+                        : `<span style="margin-left:auto; color:#a0a0a0;">Lukket</span>`;
+
+            // ── Payload — formatteret JSON ───────────────────
+            const payloadJson = trade.payload && Object.keys(trade.payload).length > 0
+                ? JSON.stringify(trade.payload, null, 2)
+                : "(intet payload data)";
+
+            // ── Saml alt ─────────────────────────────────────
+            document.getElementById("trade-detail-body").innerHTML = `
+                <div class="modal-header">
+                    <div class="modal-title">
+                        <span style="font-size:24px;color:#ffffff;font-weight:800;">${trade.symbol}</span>
+                        <span style="margin-left:12px;">${sourceBadge(trade.source)}</span>
+                        <span style="margin-left:6px;">${sideBadge(trade.side)}</span>
+                    </div>
+                    <button class="modal-close-btn" onclick="closeTradeDetail()" title="Luk (ESC)">✕ Luk</button>
+                </div>
+
+                <div class="modal-content">
+                    <!-- Sub-header: dato, shares, P&L -->
+                    <div class="trade-subheader">
+                        <span><strong>${dateStr}</strong></span>
+                        <span class="trade-subheader-divider">·</span>
+                        <span>${trade.shares} stk</span>
+                        ${trade.pnl != null ? `
+                            <span class="trade-subheader-divider">·</span>
+                            <span class="${pnlClass}" style="font-weight:700;font-size:18px;">
+                                ${pnlText}${pnlPctText}
+                            </span>
+                        ` : ""}
+                        ${statusIndicator}
+                    </div>
+
+                    <!-- ENTRY-sektion -->
+                    <div class="detail-section">
+                        <div class="detail-section-title">Entry</div>
+                        <div class="detail-grid">
+                            <div class="detail-row">
+                                <div class="detail-label">Tid</div>
+                                <div class="detail-value">${entryTimeET}${entryTimeDansk ? ` <span class="muted-text">(${entryTimeDansk} dansk)</span>` : ""}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Pris</div>
+                                <div class="detail-value">${fmtMoney(trade.entry_price)}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Stop</div>
+                                <div class="detail-value">${trade.current_stop != null ? fmtMoney(trade.current_stop) : "—"}</div>
+                            </div>
+                            <div class="detail-row">
+                                <div class="detail-label">Target</div>
+                                <div class="detail-value">${trade.current_target != null ? fmtMoney(trade.current_target) : "—"}</div>
+                            </div>
+                            ${trade.entry_reason ? `
+                                <div class="detail-row detail-row-full">
+                                    <div class="detail-label">Entry-grund</div>
+                                    <div class="detail-value">${trade.entry_reason}</div>
+                                </div>
+                            ` : ""}
+                        </div>
+                    </div>
+
+                    <!-- EXIT-sektion -->
+                    <div class="detail-section">
+                        <div class="detail-section-title">Exit</div>
+                        ${isOpen ? `
+                            <div class="empty" style="padding:20px;">
+                                <span class="open-indicator">Positionen er stadig åben</span>
+                            </div>
+                        ` : `
+                            <div class="detail-grid">
+                                <div class="detail-row">
+                                    <div class="detail-label">Tid</div>
+                                    <div class="detail-value">${exitTimeET}${exitTimeDansk ? ` <span class="muted-text">(${exitTimeDansk} dansk)</span>` : ""}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Pris</div>
+                                    <div class="detail-value">${fmtMoney(trade.exit_price)}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Grund</div>
+                                    <div class="detail-value">${trade.exit_reason || "—"}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Varighed</div>
+                                    <div class="detail-value">${durationStr}</div>
+                                </div>
+                            </div>
+                        `}
+                    </div>
+
+                    <!-- P&L-sektion -->
+                    ${trade.pnl != null ? `
+                        <div class="detail-section">
+                            <div class="detail-section-title">Resultat</div>
+                            <div class="detail-grid">
+                                <div class="detail-row">
+                                    <div class="detail-label">Realiseret P&L</div>
+                                    <div class="detail-value ${pnlClass}" style="font-size:18px;font-weight:700;">${pnlText}${pnlPctText}</div>
+                                </div>
+                                <div class="detail-row">
+                                    <div class="detail-label">Kapital brugt</div>
+                                    <div class="detail-value">${trade.capital_used != null ? fmtMoney(trade.capital_used) : "—"}</div>
+                                </div>
+                            </div>
+                        </div>
+                    ` : ""}
+
+                    <!-- NOTES-sektion -->
+                    <div class="detail-section">
+                        <div class="detail-section-title-row">
+                            <span class="detail-section-title-text">Notes</span>
+                            <button id="notes-edit-btn" class="notes-edit-btn"
+                                    onclick="enterNotesEdit('${trade.trade_id}')">
+                                ✏ Rediger
+                            </button>
+                        </div>
+                        <div id="notes-display" class="detail-notes-readonly">
+                            ${trade.notes
+                                ? trade.notes.replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                                : "<span class='muted-text'>Ingen notes endnu — klik Rediger for at tilføje</span>"}
+                        </div>
+                        <div id="notes-edit" class="notes-edit-wrapper" style="display:none;">
+                            <textarea id="notes-textarea" class="notes-textarea"
+                                      placeholder="Tilføj læring, observationer eller kontekst om denne handel...">${
+                                trade.notes ? trade.notes.replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""
+                            }</textarea>
+                            <div id="notes-edit-error" class="notes-edit-error"></div>
+                            <div class="notes-edit-actions">
+                                <button class="btn-primary notes-save-btn"
+                                        onclick="saveNotes('${trade.trade_id}')">💾 Gem</button>
+                                <button class="btn-secondary"
+                                        onclick="cancelNotesEdit()">Annuller</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FORENSICS-sektion (collapsed accordion) -->
+                    <details class="detail-forensics">
+                        <summary>
+                            <span>▶ Forensics — rå data (klik for at se)</span>
+                        </summary>
+                        <pre class="detail-payload">${payloadJson.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>
+                    </details>
+
+                    <!-- META-info nederst -->
+                    <div class="detail-meta">
+                        Trade ID: <code>${trade.trade_id}</code><br>
+                        Konto: ${trade.account_id} · Instans: ${trade.instance_id} · IBKR: ${trade.ibkr_account}
+                        ${trade.variant ? ` · Variant: ${trade.variant}` : ""}
+                    </div>
+                </div>
+            `;
+        }
+
+        // ─── Notes-redigering ─────────────────────────────────
+        function enterNotesEdit(tradeId) {
+            document.getElementById("notes-display").style.display = "none";
+            document.getElementById("notes-edit-btn").style.display = "none";
+            document.getElementById("notes-edit").style.display = "block";
+            const textarea = document.getElementById("notes-textarea");
+            textarea.focus();
+            // Placer cursor i slutningen af eksisterende tekst
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+
+        function cancelNotesEdit() {
+            document.getElementById("notes-edit").style.display = "none";
+            document.getElementById("notes-display").style.display = "block";
+            document.getElementById("notes-edit-btn").style.display = "inline-block";
+            document.getElementById("notes-edit-error").textContent = "";
+        }
+
+        async function saveNotes(tradeId) {
+            const textarea = document.getElementById("notes-textarea");
+            const errorDiv = document.getElementById("notes-edit-error");
+            const saveBtn = document.querySelector(".notes-save-btn");
+
+            const newNotes = textarea.value.trim();
+
+            // UI feedback under save
+            saveBtn.disabled = true;
+            saveBtn.textContent = "Gemmer...";
+            errorDiv.textContent = "";
+
+            try {
+                const res = await authFetch(`/journal/trades/${tradeId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ notes: newNotes }),
+                });
+
+                if (!res.ok) {
+                    if (res.status === 404) throw new Error("Handlen findes ikke længere");
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                // Success: opdater display med ny tekst og gå tilbage til view-mode
+                const displayDiv = document.getElementById("notes-display");
+                if (newNotes) {
+                    displayDiv.innerHTML = newNotes
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                } else {
+                    displayDiv.innerHTML = "<span class='muted-text'>Ingen notes endnu — klik Rediger for at tilføje</span>";
+                }
+
+                // Skift tilbage til view-mode
+                document.getElementById("notes-edit").style.display = "none";
+                document.getElementById("notes-display").style.display = "block";
+                document.getElementById("notes-edit-btn").style.display = "inline-block";
+
+                // Refresh underliggende journal-data så tabellen er konsistent
+                // (silent — fejler ikke modal-flowet hvis tabel-refresh fejler)
+                loadJournalData().catch(() => {});
+            } catch (e) {
+                errorDiv.textContent = `Kunne ikke gemme: ${e.message}`;
+                saveBtn.disabled = false;
+                saveBtn.textContent = "💾 Gem";
+            }
         }
 
         // ─────────────────────────────────────────────────────
