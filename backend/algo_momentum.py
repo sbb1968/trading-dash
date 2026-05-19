@@ -506,6 +506,19 @@ class MomentumORB(BaseStrategy):
             # Opdatér state med ny pris (high_seen = price for snapshot)
             self._strategy.exit.update(position, price, self._variant_key)
 
+            # Sync live state til trades-tabel (best-effort, fejler ikke flowet).
+            # Kun hvis trade_id er sat (skrevet ved entry).
+            trade_id = position.metadata.get("trade_id")
+            if trade_id and self._journal:
+                state = position.state
+                await self._journal.update_trade_state(
+                    trade_id      = trade_id,
+                    current_stop  = state.stop,
+                    current_target= state.target,
+                    current_stage = str(getattr(state, "stage", "")) or None,
+                    trail_stop    = getattr(state, "trail_stop", None),
+                )
+
             # Tjek exit
             exit_decision = self._strategy.exit.check_exit_live(
                 position, price, now_et.time(), self._variant_key
@@ -603,6 +616,30 @@ class MomentumORB(BaseStrategy):
         self.record_position_opened(signal.ticker, signal.entry_price, shares, side)
 
         variant = VARIANTS[self._variant_key]
+
+        # ── Trades-tabel: åbn trade-row ───────────────────────────────
+        # trade_id gemmes på position.metadata så _close() kan finde den
+        # igen. Hvis journal-skrivning fejler er trade_id None — _close()
+        # håndterer den situation pænt (springer trade_close-kaldet over).
+        if self._journal:
+            initial_target = position.state.target
+            initial_stage  = getattr(position.state, "stage", None)
+            trade_id = await self._journal.log_trade_open(
+                source        = self.name,
+                symbol        = signal.ticker,
+                side          = side,
+                shares        = shares,
+                entry_price   = signal.entry_price,
+                entry_time    = signal.entry_time,
+                variant       = variant.name,
+                entry_reason  = f"Break & Retest {side.upper()} @ ${signal.entry_price:.2f}",
+                current_stop  = position.state.stop,
+                current_target= initial_target,
+                current_stage = "initial" if initial_stage is None else str(initial_stage),
+            )
+            if trade_id:
+                position.metadata["trade_id"] = trade_id
+                
         # Long: ▲ entry op-emoji, target over. Short: ▼ entry ned-emoji, target under.
         side_emoji = "📈" if side == "long" else "📉"
         side_label = "LONG" if side == "long" else "SHORT"
@@ -703,7 +740,33 @@ class MomentumORB(BaseStrategy):
             "entry_time":  position.entry_time.strftime("%H:%M:%S"),
             "exit_time":   datetime.now(ET).strftime("%H:%M:%S"),
         }
+        
+        trade = {
+            "ticker":      ticker,
+            "side":        side,
+            "entry_price": position.entry_price,
+            "exit_price":  price,
+            "shares":      shares,
+            "pnl":         round(pnl, 2),
+            "pnl_pct":     round(pnl_pct, 2),
+            "reason":      reason,
+            "entry_time":  position.entry_time.strftime("%H:%M:%S"),
+            "exit_time":   datetime.now(ET).strftime("%H:%M:%S"),
+        }
         self.trades.append(trade)
+
+        # ── Trades-tabel: luk trade-row ───────────────────────────────
+        # trade_id blev sat i _open(). Hvis det mangler (fx pga.
+        # journal-fejl ved entry), springer vi over uden at fejle.
+        trade_id = position.metadata.get("trade_id")
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id    = trade_id,
+                exit_price  = price,
+                exit_time   = datetime.now(ET),
+                exit_reason = reason,
+                pnl         = pnl,
+            )
 
         if self._broadcast_fn:
             # action="sell" for long-close (bagudkompat med UI), "buy_cover" for short-close

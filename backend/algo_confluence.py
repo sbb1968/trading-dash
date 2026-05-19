@@ -778,6 +778,20 @@ class ConfluenceLive(BaseStrategy):
                 atr_val=atr_val,
             )
 
+            # Sync live state til trades-tabel — fanger trail-aktivering
+            # og ratchet-bevægelser. Konfluens har ingen stage-streng,
+            # vi afleder den fra trail_active.
+            trade_id = position.metadata.get("trade_id")
+            if trade_id and self._journal:
+                state = position.state
+                stage = "trailing" if state.trail_active else "initial"
+                await self._journal.update_trade_state(
+                    trade_id     = trade_id,
+                    current_stop = state.current_stop,
+                    current_stage= stage,
+                    trail_stop   = state.trail_stop,
+                )
+
             decision = self._strategy.exit.check_exit_bar(
                 position, new_bar, self._variant_key, indicator_row=row
             )
@@ -923,6 +937,28 @@ class ConfluenceLive(BaseStrategy):
             f"score: {score}/6, bricks: {bricks})"
         )
 
+        # ── Trades-tabel: åbn trade-row ──────────────────────────
+        # Konfluens har ikke target eller multi-stage som ORB. Vi gemmer
+        # initial_stop som current_stop og stage="initial". Når trail
+        # aktiveres opdaterer _check_position_in_bar trade_state.
+        if self._journal:
+            trade_id = await self._journal.log_trade_open(
+                source         = self.name,
+                symbol         = signal.ticker,
+                side           = "long",
+                shares         = shares,
+                entry_price    = signal.entry_price,
+                entry_time     = signal.entry_time,
+                variant        = variant.name,
+                entry_reason   = f"Konfluens score={score}/6, bricks={bricks}",
+                current_stop   = position.state.initial_stop,
+                current_target = None,                 # Konfluens har intet target
+                current_stage  = "initial",
+                payload        = {"entry_score": score, "entry_bricks": bricks},
+            )
+            if trade_id:
+                position.metadata["trade_id"] = trade_id
+
         if self._broadcast_fn:
             msg = {
                 "type":     "algo_trade",
@@ -1016,6 +1052,21 @@ class ConfluenceLive(BaseStrategy):
             "exit_time":   datetime.now(ET).strftime("%H:%M:%S"),
         }
         self.trades.append(trade)
+
+        # ── Trades-tabel: luk trade-row ──────────────────────────
+        trade_id = position.metadata.get("trade_id")
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id    = trade_id,
+                exit_price  = price,
+                exit_time   = datetime.now(ET),
+                exit_reason = reason,
+                pnl         = pnl,
+                payload     = {
+                    "max_favorable_excursion": self._mfe.get(ticker),
+                    "max_adverse_excursion":   self._mae.get(ticker),
+                },
+            )
 
         if self._broadcast_fn:
             msg = {"type": "algo_trade", "strategy": self.name, "action": "sell", **trade}

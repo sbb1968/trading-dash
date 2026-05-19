@@ -648,6 +648,422 @@ async def cancel_order(req: CancelOrderRequest):
     result = await get_tracker().cancel(ibkr, req.order_id)
     return result
 
+# ── Journal / Trades endpoints ────────────────────────────────
+# Læser fra trades-tabellen. Skriver sker via algo-strategierne
+# (automatisk) eller via manuel-handel-endpoints (kommer senere).
+
+import trade_queries
+
+
+class UpdateNotesRequest(BaseModel):
+    notes: str
+
+
+@app.get("/journal/trades")
+async def journal_trades(
+    date_from:   str = None,
+    date_to:     str = None,
+    source:      str = None,
+    symbol:      str = None,
+    status:      str = None,
+    account_id:  str = None,
+    instance_id: str = None,
+    limit:       int = 200,
+    offset:      int = 0,
+):
+    """
+    List trades med filtre.
+
+    Alle query-parametre er valgfri:
+      date_from, date_to: ISO-dato ("2026-05-19"), filtrerer på ET-handelsdag
+      source: "Momentum ORB", "Konfluens", "manual"
+      symbol: ticker
+      status: "open", "closed", eller udelades for alle
+      account_id, instance_id: filtrerer på maskine (på lokal: typisk udelades)
+      limit, offset: paginering (default: 200 trades)
+    """
+    trades = await trade_queries.list_trades(
+        journal.db,
+        date_from=date_from, date_to=date_to,
+        source=source, symbol=symbol, status=status,
+        account_id=account_id, instance_id=instance_id,
+        limit=limit, offset=offset,
+    )
+    return {
+        "trades": trades,
+        "count":  len(trades),
+    }
+
+
+@app.get("/journal/trades/{trade_id}")
+async def journal_trade_detail(trade_id: str):
+    """Hent én specifik trade med fuld payload (forensics, indikatorer, etc.)."""
+    trade = await trade_queries.get_trade_by_id(journal.db, trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
+    return trade
+
+
+@app.get("/journal/today")
+async def journal_today():
+    """
+    Dagens trades (ET-handelsdag) + summary statistik.
+    Bruges af Studio's Oversigt-fane.
+    """
+    return await trade_queries.today_trades_and_summary(journal.db)
+
+
+@app.get("/journal/open-positions")
+async def journal_open_positions():
+    """
+    Alle nuværende åbne positioner.
+    Bruges af Oversigt-fanen og af mobile-quickview.
+    """
+    positions = await trade_queries.open_positions(journal.db)
+    return {
+        "positions": positions,
+        "count":     len(positions),
+    }
+
+
+@app.patch("/journal/trades/{trade_id}")
+async def journal_update_notes(trade_id: str, req: UpdateNotesRequest):
+    """
+    Opdater notes-feltet på en trade. Brugbart fra Studio når man
+    vil tilføje en kommentar efter en handel er lukket.
+    """
+    ok = await trade_queries.update_notes_via_journal(journal, trade_id, req.notes)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke eller fejlede")
+    return {"ok": True, "trade_id": trade_id}
+
+
+# ── Manuelle handel-endpoints ─────────────────────────────────
+# Frontend kalder disse når Iben/Søren manuelt åbner eller lukker
+# en position via Trading Dash UI'et. Backend sender ordren til IBKR
+# og logger trade-row i samme database som algo-handler.
+#
+# Designvalg:
+#   - Kun MKT-ordrer i første omgang (LMT kommer senere som feature)
+#   - Backend er autoritativ: ordre sendes server-side, trade_row
+#     oprettes først når fill er bekræftet med faktisk fill-pris
+#   - Ingen partial close: en manuel handel åbnes og lukkes komplet
+
+import pytz
+ET_TZ = pytz.timezone("America/New_York")
+
+
+class ManualTradeOpenRequest(BaseModel):
+    symbol:      str
+    side:        str             # "long" eller "short"
+    shares:      int
+    order_type:  str   = "MKT"   # foreløbig kun "MKT"
+    limit_price: float | None = None
+    notes:       str   | None = None
+
+
+class ManualTradeCloseRequest(BaseModel):
+    order_type:  str   = "MKT"
+    limit_price: float | None = None
+    notes:       str   | None = None   # tilføjes til eksisterende notes
+
+
+@app.post("/journal/manual-trade")
+async def open_manual_trade(req: ManualTradeOpenRequest):
+    """
+    Åbn en manuel position via IBKR paper trading.
+
+    Returnerer trade_id som frontend kan bruge til at lukke positionen
+    senere med /journal/manual-trade/{trade_id}/close.
+    """
+    # ── Validering ────────────────────────────────────────────
+    symbol = req.symbol.strip().upper()
+    if not symbol or len(symbol) > 10:
+        raise HTTPException(status_code=400, detail="Ugyldigt symbol")
+
+    if req.side not in ("long", "short"):
+        raise HTTPException(status_code=400, detail="side skal være 'long' eller 'short'")
+
+    if req.shares <= 0:
+        raise HTTPException(status_code=400, detail="shares skal være > 0")
+
+    if req.order_type != "MKT":
+        raise HTTPException(
+            status_code=400,
+            detail="Foreløbig kun MKT-ordrer understøttes for manuelle handler",
+        )
+
+    # ── IBKR-tjek ─────────────────────────────────────────────
+    ibkr = strategy_manager.get_ibkr()
+    if ibkr is None or not ibkr.connected:
+        raise HTTPException(
+            status_code=503,
+            detail="IBKR ikke forbundet — start TWS og prøv igen",
+        )
+
+    # ── Konvertér side → action ───────────────────────────────
+    # long  = BUY (køb først, sælg senere)
+    # short = SELL (sælg først uden at eje = short på IBKR)
+    action = "BUY" if req.side == "long" else "SELL"
+
+    # ── Send ordre til IBKR ───────────────────────────────────
+    result = await ibkr.place_paper_order(
+        ticker=symbol,
+        action=action,
+        quantity=req.shares,
+        order_type="MKT",
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ordre fejlede — IBKR returnerede ingen response for {symbol}",
+        )
+
+    # Tjek at ordren faktisk blev fyldt
+    status   = result.get("status", "")
+    filled   = result.get("filled", 0) or 0
+    avg_fill = result.get("avg_fill", 0) or 0
+
+    if filled < req.shares or avg_fill <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ordre ikke fyldt: status={status}, filled={filled}/{req.shares}, "
+                   f"avg_fill={avg_fill}. Tjek IBKR.",
+        )
+
+    # ── Registrer ordre hos OrdersTracker så Ordrer-vinduet viser den ──
+    try:
+        order_id = result.get("order_id")
+        if order_id:
+            get_tracker().record_placed(
+                order_id=order_id,
+                source="manual",
+                ticker=symbol,
+                action=action,
+                shares=req.shares,
+                order_type="MKT",
+            )
+    except Exception as e:
+        # Ikke fatalt — handel er allerede fyldt, vi mangler bare ordre-tracking
+        print(f"[ManualTrade] OrdersTracker fejl ved entry: {e}")
+
+    # ── Log trade-row ─────────────────────────────────────────
+    entry_time = datetime.now(ET_TZ)
+    trade_id = await journal.log_trade_open(
+        source       = "manual",
+        symbol       = symbol,
+        side         = req.side,
+        shares       = req.shares,
+        entry_price  = avg_fill,
+        entry_time   = entry_time,
+        variant      = None,
+        entry_reason = "Manuel handel",
+        notes        = req.notes,
+        payload      = {
+            "ibkr_order_id": result.get("order_id"),
+            "ibkr_status":   status,
+        },
+    )
+
+    if trade_id is None:
+        # Ordren er gået igennem hos IBKR, men vi kunne ikke logge den.
+        # Det her er en SÆRDELES ubehagelig situation — vi giver frontend
+        # alligevel besked om at handlen er udført, men flagger fejlen.
+        raise HTTPException(
+            status_code=500,
+            detail=f"⚠ Ordren blev udført på IBKR (fill @ ${avg_fill}), men "
+                   f"trade kunne ikke gemmes i journal. Tjek backend-logs.",
+        )
+
+    return {
+        "ok":          True,
+        "trade_id":    trade_id,
+        "symbol":      symbol,
+        "side":        req.side,
+        "shares":      req.shares,
+        "entry_price": avg_fill,
+        "entry_time":  entry_time.isoformat(),
+        "ibkr": {
+            "order_id": result.get("order_id"),
+            "status":   status,
+        },
+    }
+
+
+@app.post("/journal/manual-trade/{trade_id}/close")
+async def close_manual_trade(trade_id: str, req: ManualTradeCloseRequest):
+    """
+    Luk en åben manuel position.
+
+    Trade skal være:
+      - Eksisterende (404 hvis ikke fundet)
+      - Manuel (400 hvis source != "manual")
+      - Åben (400 hvis allerede lukket)
+      - Tilhøre denne maskine (403 hvis account_id mismatch)
+    """
+    # ── Slå trade op ──────────────────────────────────────────
+    trade = await trade_queries.get_trade_by_id(journal.db, trade_id)
+    if trade is None:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
+
+    # Manuel?
+    if trade["source"] != "manual":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Trade {trade_id} er ikke en manuel handel "
+                   f"(source='{trade['source']}'). Algo-handler lukkes af algoen selv.",
+        )
+
+    # Åben?
+    if trade["exit_time_utc"] is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Trade {trade_id} er allerede lukket "
+                   f"(exit_price=${trade['exit_price']}, reason='{trade['exit_reason']}')",
+        )
+
+    # Tilhører denne maskine?
+    if trade["account_id"] != identity.account_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Trade {trade_id} tilhører konto '{trade['account_id']}', "
+                   f"men denne backend er '{identity.account_id}'. "
+                   f"Luk handlen fra den korrekte maskine.",
+        )
+
+    # ── Validér request ──────────────────────────────────────
+    if req.order_type != "MKT":
+        raise HTTPException(
+            status_code=400,
+            detail="Foreløbig kun MKT-ordrer understøttes for manuelle handler",
+        )
+
+    # ── IBKR-tjek ────────────────────────────────────────────
+    ibkr = strategy_manager.get_ibkr()
+    if ibkr is None or not ibkr.connected:
+        raise HTTPException(
+            status_code=503,
+            detail="IBKR ikke forbundet — start TWS og prøv igen",
+        )
+
+    # ── Konvertér side → close-action ────────────────────────
+    # long-close = SELL (vi solgte for at lukke vores køb)
+    # short-close = BUY (buy-to-cover for at lukke vores short)
+    close_action = "SELL" if trade["side"] == "long" else "BUY"
+    symbol = trade["symbol"]
+    shares = trade["shares"]
+
+    # ── Send close-ordre ─────────────────────────────────────
+    result = await ibkr.place_paper_order(
+        ticker=symbol,
+        action=close_action,
+        quantity=shares,
+        order_type="MKT",
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Close-ordre fejlede — IBKR returnerede ingen response for {symbol}",
+        )
+
+    status   = result.get("status", "")
+    filled   = result.get("filled", 0) or 0
+    avg_fill = result.get("avg_fill", 0) or 0
+
+    if filled < shares or avg_fill <= 0:
+        # Position er muligvis halvt-lukket — vi logger ikke som lukket fordi
+        # vi ikke ved hvor mange shares der faktisk blev fyldt. Brugeren må
+        # tjekke i TWS og evt. lukke resten manuelt.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Close-ordre ikke fyldt komplet: status={status}, "
+                   f"filled={filled}/{shares}. Tjek IBKR — positionen kan være "
+                   f"halvt-lukket. trades-rækken er IKKE opdateret.",
+        )
+
+    # ── Registrer hos OrdersTracker ──────────────────────────
+    try:
+        order_id = result.get("order_id")
+        if order_id:
+            get_tracker().record_placed(
+                order_id=order_id,
+                source="manual",
+                ticker=symbol,
+                action=close_action,
+                shares=shares,
+                order_type="MKT",
+            )
+    except Exception as e:
+        print(f"[ManualTrade] OrdersTracker fejl ved close: {e}")
+
+    # ── Beregn P&L ────────────────────────────────────────────
+    entry_price = trade["entry_price"]
+    if trade["side"] == "long":
+        pnl = (avg_fill - entry_price) * shares
+    else:
+        # Short: profit hvis vi købte tilbage billigere end vi solgte
+        pnl = (entry_price - avg_fill) * shares
+
+    # ── Append notes hvis sendt ──────────────────────────────
+    # Vi merger med eksisterende notes for at bevare entry-noten
+    if req.notes:
+        existing = trade.get("notes") or ""
+        if existing:
+            merged_notes = f"{existing}\n[CLOSE] {req.notes}"
+        else:
+            merged_notes = f"[CLOSE] {req.notes}"
+        await journal.update_trade_notes(trade_id, merged_notes)
+
+    # ── Log trade-close ──────────────────────────────────────
+    exit_time = datetime.now(ET_TZ)
+    ok = await journal.log_trade_close(
+        trade_id    = trade_id,
+        exit_price  = avg_fill,
+        exit_time   = exit_time,
+        exit_reason = "manual",
+        pnl         = pnl,
+        payload     = {
+            "ibkr_close_order_id": result.get("order_id"),
+            "ibkr_close_status":   status,
+        },
+    )
+
+    if not ok:
+        # Ordren er fyldt, men vi kunne ikke opdatere DB'en.
+        # Det er en ubehagelig tilstand — alarmér frontend tydeligt.
+        raise HTTPException(
+            status_code=500,
+            detail=f"⚠ Close-ordren blev udført på IBKR (fill @ ${avg_fill}, "
+                   f"P&L=${pnl:.2f}), men trade-rækken kunne ikke opdateres. "
+                   f"Tjek backend-logs.",
+        )
+
+    # ── Beregn pnl_pct til response ──────────────────────────
+    if trade["side"] == "long":
+        pnl_pct = (avg_fill - entry_price) / entry_price * 100
+    else:
+        pnl_pct = (entry_price - avg_fill) / entry_price * 100
+
+    return {
+        "ok":          True,
+        "trade_id":    trade_id,
+        "symbol":      symbol,
+        "side":        trade["side"],
+        "shares":      shares,
+        "entry_price": entry_price,
+        "exit_price":  avg_fill,
+        "exit_time":   exit_time.isoformat(),
+        "pnl":         round(pnl, 2),
+        "pnl_pct":     round(pnl_pct, 2),
+        "ibkr": {
+            "order_id": result.get("order_id"),
+            "status":   status,
+        },
+    }
+
+
 # ── Strategi-dokumentation ────────────────────────────────────
 # Bruges af Live Algo og Studio til at vise strategi-info via UI-knap
 
