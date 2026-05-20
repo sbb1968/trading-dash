@@ -40,7 +40,47 @@ class IBKRConnection:
         self.ib        = IB()
         self.port      = TWS_PORT_PAPER if paper_trading else TWS_PORT_LIVE
         self.paper     = paper_trading
-        self.connected = False
+        # Internt flag: True når vi HAR forsøgt/opnået en forbindelse.
+        # Den offentlige `connected`-property kombinerer dette med
+        # ib.isConnected() så vi aldrig rapporterer en stale forbindelse
+        # som levende (fx når TWS lukker forbindelsen om natten).
+        self._connect_attempted = False
+
+    @property
+    def connected(self) -> bool:
+        """
+        Hurtig (passiv) forbindelsesstatus — afspejler ib_async's interne
+        flag for om vi HAR en forbindelse.
+
+        VIGTIGT: Dette flag er PASSIVT. ib.isConnected() returnerer bare
+        et internt _apiReady-flag der kun bliver False når biblioteket
+        aktivt registrerer en disconnect-event. Hvis TWS lukker mens
+        backenden sidder passivt, kan dette hænge på True i et stykke tid.
+        Brug is_alive() (aktivt probe) når det er KRITISK at vide om
+        forbindelsen reelt lever — fx før algo-start.
+        """
+        try:
+            return self._connect_attempted and self.ib.isConnected()
+        except Exception:
+            return False
+
+    async def is_alive(self, timeout: float = 3.0) -> bool:
+        """
+        AKTIV forbindelsestest — sender et rigtigt kald til TWS og ser om
+        den svarer. Det er den eneste pålidelige måde at fange en stale
+        forbindelse (TWS lukket, men ib_async's flag stadig True).
+
+        Bruger reqCurrentTimeAsync() — et let round-trip der returnerer
+        serverens tid. Svarer TWS inden timeout → forbindelsen lever.
+        Timeout eller fejl → forbindelsen er reelt død.
+        """
+        if not self._connect_attempted:
+            return False
+        try:
+            await asyncio.wait_for(self.ib.reqCurrentTimeAsync(), timeout=timeout)
+            return True
+        except Exception:
+            return False
 
     async def connect(self) -> bool:
         import random
@@ -53,21 +93,21 @@ class IBKRConnection:
                 timeout  = 15,
                 readonly = False,
             )
-            self.connected = True
+            self._connect_attempted = True
             kind = "PAPER" if self.paper else "LIVE"
             logger.info(f"✅ Forbundet til IBKR ({kind}) på port {self.port}")
             logger.info(f"   Konto: {self.ib.managedAccounts()}")
             return True
         except Exception as e:
-            self.connected = False
+            self._connect_attempted = False
             logger.error(f"❌ Forbindelsesfejl: {e}")
             return False
 
     def disconnect(self):
-        if self.connected:
+        if self.ib.isConnected():
             self.ib.disconnect()
-            self.connected = False
             logger.info("Afbrudt fra IBKR")
+        self._connect_attempted = False
 
     # ── Konto ─────────────────────────────────────────────────
     def get_account_summary(self) -> dict:

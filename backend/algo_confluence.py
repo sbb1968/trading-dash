@@ -1142,16 +1142,48 @@ class ConfluenceLive(BaseStrategy):
         else:
             self._broadcast_fn(msg)
 
-    async def _log(self, message: str):
-        """Log til journal."""
-        logger.info(f"[Konfluens] {message}")
+    async def _log(self, message: str, level: str = "info"):
+        """Log til journal OG broadcast til UI (Live Log).
+
+        level-parameteren matcher base-klassens signatur. Uden den
+        crasher base-klassens kald (pre-flight, nødstop, pause) der
+        sender level=. Vi videresender desuden loggen til broadcast_fn
+        så Konfluens' beskeder dukker op i Live Log ligesom ORB's.
+        """
+        full_msg = f"[Konfluens] {message}"
+        if level == "error":
+            logger.error(full_msg)
+        elif level == "warning":
+            logger.warning(full_msg)
+        else:
+            logger.info(full_msg)
+
+        # Journal (uændret adfærd)
         if self._journal:
             try:
                 await self._journal.log_event(
                     source     = self.name,
                     event_type = "log",
-                    payload    = {"message": message},
+                    payload    = {"message": message, "level": level},
                 )
+            except Exception:
+                pass
+
+        # Broadcast til UI så beskeden vises i Live Log
+        if self._broadcast_fn:
+            import inspect
+            msg = {
+                "type":      "strategy_log",
+                "strategy":  self.name,
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "message":   message,
+                "level":     level,
+            }
+            try:
+                if inspect.iscoroutinefunction(self._broadcast_fn):
+                    await self._broadcast_fn(msg)
+                else:
+                    self._broadcast_fn(msg)
             except Exception:
                 pass
 

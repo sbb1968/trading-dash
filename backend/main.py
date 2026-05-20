@@ -187,7 +187,35 @@ async def portfolio_loop():
 
 # ── Algo ──────────────────────────────────────────────────────
 async def start_algo(strategy_name: str = "Momentum ORB"):
-    """Start en strategi via StrategyManager (med fælles risk limits)."""
+    """Start en strategi via StrategyManager (med fælles risk limits).
+
+    Sikrer en levende IBKR-forbindelse FØR strategien startes. Det er
+    afgørende for autonom drift: IBKR lukker forbindelsen hver nat, og
+    backenden kører videre med en død forbindelse. Når Iben logger ind på
+    TWS igen om morgenen, har vi en frisk port at forbinde til — men
+    backendens forbindelsesobjekt er stadig det døde fra i nat.
+
+    connect_ibkr() er nu selv-helende: hvis den eksisterende forbindelse
+    er død (ib.isConnected() == False), rydder den op og genforbinder mod
+    den friske TWS. Hvis forbindelsen allerede lever, er kaldet en hurtig
+    no-op. Derfor er det sikkert at kalde her ved hver start.
+    """
+    global ibkr_connected
+
+    # ── Sørg for en levende IBKR-forbindelse før vi starter ──────
+    ok = await strategy_manager.connect_ibkr(paper_trading=True)
+    ibkr_connected = ok
+    if not ok:
+        msg = "Kan ikke starte — IBKR ikke forbundet (er TWS logget ind?)"
+        print(f"[Algo] {msg}")
+        await broadcast_algo({
+            "type": "algo_status", "strategy": strategy_name,
+            "status": "error", "message": msg,
+            "total_pnl": 0, "positions": 0, "trades": 0,
+            "time": datetime.now().strftime("%H:%M:%S"),
+        })
+        return
+
     success, msg = await strategy_manager.start_strategy(strategy_name)
 
     if not success:

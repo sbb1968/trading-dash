@@ -51,20 +51,49 @@ class StrategyManager:
     async def connect_ibkr(self, paper_trading: bool = True) -> bool:
         """
         Opret og hold den ene delte IBKR-forbindelse.
-        Sikker at kalde flere gange — genbruger eksisterende forbindelse.
+        Sikker at kalde flere gange — genforbinder hvis den eksisterende
+        forbindelse er død (fx efter IBKR's natlige nedlukning).
+
+        Vigtigt: ibkr_conn.connected er nu en property der spørger
+        ib.isConnected() direkte, så vi opdager en stale forbindelse
+        og rydder op før vi genforbinder — i stedet for at returnere
+        True på en død forbindelse.
         """
-        if self.ibkr_conn and self.ibkr_conn.connected:
-            return True
+        # Hvis vi allerede har en forbindelse, verificér AKTIVT at den
+        # reelt lever (sender et probe til TWS) — ikke bare stoler på det
+        # passive connected-flag, som kan hænge på True efter TWS er
+        # lukket. Det er forskellen mellem at fange nattens disconnect og
+        # at starte algoen på en død forbindelse.
+        if self.ibkr_conn is not None:
+            alive = await self.ibkr_conn.is_alive()
+            print(f"[StrategyManager] connect_ibkr: eksisterende forbindelse, is_alive={alive}")
+            if alive:
+                print("[StrategyManager] connect_ibkr: genbruger eksisterende forbindelse (probe sagde alive)")
+                return True
+            # Forbindelsen er reelt død — ryd op før vi genforbinder.
+            # Uden dette kan ib_async efterlade en halvdød session der
+            # blokerer en frisk connect.
+            try:
+                self.ibkr_conn.disconnect()
+                print("[StrategyManager] Død IBKR-forbindelse opdaget (probe fejlede) — ryddet op før genforbindelse")
+            except Exception as e:
+                logger.warning(f"[StrategyManager] Fejl ved oprydning af gammel forbindelse: {e}")
 
         self.ibkr_conn = IBKRConnection(paper_trading=paper_trading)
         ok = await self.ibkr_conn.connect()
         self.ibkr_ready = ok
 
         if ok:
-            logger.info("[StrategyManager] IBKR-forbindelse oprettet og delt")
-            # Giv forbindelsen til allerede-registrerede strategier
+            print("[StrategyManager] IBKR-forbindelse oprettet og delt")
+            # Giv den NYE forbindelse til alle registrerede strategier.
+            # VIGTIGT: strategierne bruger self.conn (sat i __init__), ikke
+            # self._ib. Ved genforbindelse SKAL vi opdatere self.conn —
+            # ellers peger strategien stadig på den gamle, døde forbindelse
+            # og dens pre-flight melder "IBKR ikke forbundet" selvom vi lige
+            # har genforbundet. Vi sætter begge attributter for robusthed.
             for strategy in self._strategies.values():
-                strategy._ib = self.ibkr_conn
+                strategy.conn = self.ibkr_conn
+                strategy._ib  = self.ibkr_conn
         else:
             logger.warning("[StrategyManager] Kunne ikke forbinde til IBKR")
 
@@ -81,6 +110,8 @@ class StrategyManager:
     def register(self, strategy: BaseStrategy) -> None:
         strategy._risk_manager = self.risk_manager
         strategy._broadcast_fn = self._broadcast
+        # Strategierne bruger self.conn — sæt den (og _ib for robusthed).
+        strategy.conn          = self.ibkr_conn
         strategy._ib           = self.ibkr_conn
 
         strategy._journal      = self.risk_manager._journal
@@ -113,6 +144,19 @@ class StrategyManager:
             return False, "Nødstop er aktivt — deaktiver det først"
         if self.risk_manager._daily_limit_hit:
             return False, "Daglig tab-grænse er nået for i dag"
+
+        # ── Sørg for en LEVENDE IBKR-forbindelse før start ──────────
+        # Dette er det fælles punkt ALLE start-veje går igennem:
+        #   - UI-knap → /ws/strategy → handle_command → start_strategy
+        #   - Scheduler 09:44 + /ws/algo → start_algo → start_strategy
+        # Ved at genforbinde her dækker vi alle veje ét sted. connect_ibkr
+        # prober aktivt og genforbinder hvis forbindelsen er død (fx efter
+        # IBKR's natlige nedlukning). Lever forbindelsen, er det en no-op.
+        print(f"[StrategyManager] start_strategy '{strategy_name}': sikrer IBKR-forbindelse")
+        ok = await self.connect_ibkr(paper_trading=True)
+        if not ok:
+            print(f"[StrategyManager] start_strategy '{strategy_name}': IBKR ikke forbundet")
+            return False, "IBKR ikke forbundet — er TWS logget ind?"
 
         success = await strategy.start()
         await self._broadcast_full_status()
