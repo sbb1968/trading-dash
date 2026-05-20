@@ -238,6 +238,19 @@ class MomentumORB(BaseStrategy):
             self._broadcast_fn(msg)
         logger.info(f"[{status}] {message}")
 
+        # Gem også til journal så pre-flight-trin, universe og status-beskeder
+        # kan ses i historik-loggen bagefter. _status er synkron, så vi bruger
+        # fire-and-forget (samme mønster som record_position_opened). Best-effort.
+        if self._journal:
+            try:
+                asyncio.create_task(self._journal.log_event(
+                    source     = self.name,
+                    event_type = "status",
+                    payload    = {"status": status, "message": message},
+                ))
+            except Exception as e:
+                logger.error(f"[{self.name}] _status journal-skriv fejlede: {e}")
+
     # -------------------------------------------------------------
     # Universe og dagskontekst — delegerer til strategien
     # -------------------------------------------------------------

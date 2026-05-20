@@ -376,3 +376,16 @@ class BaseStrategy(ABC):
                 await self._broadcast_fn(msg)
             else:
                 self._broadcast_fn(msg)
+
+        # Gem også til journal så beskeden kan ses i historik-loggen bagefter
+        # (ikke kun live via broadcast). Best-effort: journal-fejl må aldrig
+        # nedbryde handelsflowet — derfor try/except og ingen re-raise.
+        if self._journal:
+            try:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "log",
+                    payload    = {"message": message, "level": level},
+                )
+            except Exception as e:
+                logger.error(f"[{self.name}] _log journal-skriv fejlede: {e}")
