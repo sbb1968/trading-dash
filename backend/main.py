@@ -270,7 +270,7 @@ async def startup():
     )
 
     # Registrér strategier hos StrategyManager
-    if ok:
+    if True:   # ALTID registrér — strategier skal findes selv hvis TWS er nede ved opstart
         from algo_momentum import MomentumORB
         from strategy_base import StrategyConfig
 
@@ -751,6 +751,60 @@ async def journal_open_positions():
     return {
         "positions": positions,
         "count":     len(positions),
+    }
+
+
+@app.get("/journal/events")
+async def journal_events(
+    date:       str = None,        # "2026-05-20" (ET-handelsdag) — påkrævet i praksis
+    from_time:  str = "00:00",     # "HH:MM" ET
+    to_time:    str = "23:59",     # "HH:MM" ET
+    source:     str = None,        # "Momentum ORB" / "Konfluens" — None = alle
+    event_type: str = None,        # None = alle
+    limit:      int = 1000,
+):
+    """
+    Hent gemte journal-events for et ET-tidsvindue. Bruges af Studio's
+    Log-fane (Historik-tilstand) til at se hvad algoritmerne lavede selv
+    hvis man ikke fulgte med live.
+
+    date + from_time/to_time fortolkes i ET (America/New_York). Backenden
+    oversætter til UTC-grænser så filteret rammer korrekt uanset
+    sommer/vintertid. Ingen auth — kun læsning af log-data (samme som
+    /account/dash-snapshot).
+    """
+    import pytz
+    ET_TZ = pytz.timezone("America/New_York")
+
+    # Hvis ingen dato angivet: brug dagens ET-dato
+    if not date:
+        date = datetime.now(ET_TZ).strftime("%Y-%m-%d")
+
+    def et_window_to_utc(d: str, hhmm: str) -> str:
+        """Lav 'YYYY-MM-DD' + 'HH:MM' i ET om til en ISO UTC-streng."""
+        try:
+            naive = datetime.strptime(f"{d} {hhmm}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            naive = datetime.strptime(f"{d} 00:00", "%Y-%m-%d %H:%M")
+        et_dt = ET_TZ.localize(naive)
+        return et_dt.astimezone(pytz.utc).isoformat()
+
+    from_utc = et_window_to_utc(date, from_time)
+    to_utc   = et_window_to_utc(date, to_time)
+
+    events = await journal.get_events(
+        from_utc=from_utc, to_utc=to_utc,
+        source=source, event_type=event_type, limit=limit,
+    )
+    return {
+        "date":      date,
+        "from_time": from_time,
+        "to_time":   to_time,
+        "from_utc":  from_utc,
+        "to_utc":    to_utc,
+        "source":    source,
+        "count":     len(events),
+        "events":    events,
     }
 
 

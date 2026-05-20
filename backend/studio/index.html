@@ -272,6 +272,25 @@
             color: #f0f0f0;
             font-size: 14px;
             font-family: inherit;
+            color-scheme: dark;
+        }
+
+        /* Gør date/time-pickerens ikon lyst og synligt på mørk baggrund.
+           Vi erstatter browserens skjulte ikon med et eksplicit hvidt SVG —
+           det kan ikke overstyres af color-scheme og virker konsistent. */
+        .filter-field input[type="date"]::-webkit-calendar-picker-indicator,
+        .filter-field input[type="time"]::-webkit-calendar-picker-indicator {
+            cursor: pointer;
+            opacity: 0.85;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23f0f0f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='18' rx='2' ry='2'/%3E%3Cline x1='16' y1='2' x2='16' y2='6'/%3E%3Cline x1='8' y1='2' x2='8' y2='6'/%3E%3Cline x1='3' y1='10' x2='21' y2='10'/%3E%3C/svg%3E");
+            background-size: 16px 16px;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        .filter-field input[type="date"]::-webkit-calendar-picker-indicator:hover,
+        .filter-field input[type="time"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
         }
 
         .filter-field input:focus,
@@ -1237,6 +1256,9 @@
             if (oversigtTimer) { clearInterval(oversigtTimer); oversigtTimer = null; }
             if (journalTimer) { clearInterval(journalTimer); journalTimer = null; }
 
+            // Luk Log-fanens WebSocket når vi forlader fanen
+            stopLogStream();
+
             // Render
             const content = document.getElementById("content");
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
@@ -1246,6 +1268,7 @@
             else if (page === "analysis") showAnalysis();
             else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
+            else if (page === "log") showLog();
             else showPlaceholder(page);
         }
 
@@ -2736,6 +2759,295 @@
         function setPeriod(p) {
             analysisPeriod = p;
             loadAnalysis();
+        }
+
+        // ─────────────────────────────────────────────────────
+        // LOG-SIDE — live stream fra /ws/algo (samme som Trading Dash Live Log)
+        // ─────────────────────────────────────────────────────
+        let logSocket = null;
+        let logReconnectTimer = null;
+        let logEntries = [];           // buffer af log-linjer (nyeste sidst)
+        const LOG_MAX_ENTRIES = 500;   // begræns hukommelse — drop ældste
+
+        function stopLogStream() {
+            if (logReconnectTimer) { clearTimeout(logReconnectTimer); logReconnectTimer = null; }
+            if (logSocket) {
+                // Fjern handlers så onclose ikke trigger reconnect
+                logSocket.onclose = null;
+                logSocket.onerror = null;
+                try { logSocket.close(); } catch (e) {}
+                logSocket = null;
+            }
+        }
+
+        let logMode = "live";   // "live" eller "historik"
+
+        function showLog() {
+            logEntries = [];
+            const todayISO = new Date().toISOString().substring(0, 10);
+            document.getElementById("content").innerHTML = `
+                <div class="section-title">
+                    Live Log — ORB &amp; Konfluens
+                    <span id="log-conn" style="margin-left:12px; font-size:13px; font-weight:500;"></span>
+                </div>
+
+                <div class="card" style="padding:12px 18px; margin-bottom:0; border-radius:6px 6px 0 0;">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <button id="log-tab-live" class="btn-primary" onclick="setLogMode('live')"
+                                style="padding:8px 16px; font-size:13px;">● Live</button>
+                        <button id="log-tab-hist" class="btn-secondary" onclick="setLogMode('historik')"
+                                style="padding:8px 16px; font-size:13px;">Historik</button>
+                        <span style="flex:1;"></span>
+                        <button class="btn-secondary" onclick="clearLogView()"
+                                style="padding:6px 14px; font-size:13px;">Ryd visning</button>
+                    </div>
+
+                    <div id="log-hist-controls" style="display:none; margin-top:12px; gap:10px;
+                                align-items:end; flex-wrap:wrap;">
+                        <div class="filter-field" style="min-width:140px;">
+                            <label>Dato (ET)</label>
+                            <input type="date" id="log-date" value="${todayISO}">
+                        </div>
+                        <div class="filter-field" style="min-width:90px;">
+                            <label>Fra (ET)</label>
+                            <input type="time" id="log-from" value="09:30">
+                        </div>
+                        <div class="filter-field" style="min-width:90px;">
+                            <label>Til (ET)</label>
+                            <input type="time" id="log-to" value="10:30">
+                        </div>
+                        <div class="filter-field" style="min-width:150px;">
+                            <label>Strategi</label>
+                            <select id="log-source">
+                                <option value="">Alle</option>
+                                <option value="Momentum ORB">Momentum ORB</option>
+                                <option value="Konfluens">Konfluens</option>
+                            </select>
+                        </div>
+                        <div class="filter-field filter-actions">
+                            <button class="btn-primary" onclick="loadLogHistory()"
+                                    style="padding:10px 16px;">Hent</button>
+                            <button class="btn-secondary" onclick="setOrbWindow()"
+                                    style="padding:10px 14px;" title="ORB-vindue 09:30-10:30 ET">ORB</button>
+                            <button class="btn-secondary" onclick="setFullDay()"
+                                    style="padding:10px 14px;" title="Hele handelsdagen">Hele dagen</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="padding:0; border-radius:0 0 6px 6px;">
+                    <div id="log-stream" style="height:62vh; overflow-y:auto; padding:8px 14px;
+                                font-family:'Courier New', Consolas, monospace; font-size:12px;
+                                line-height:1.35;">
+                        <div class="empty">Venter på beskeder...</div>
+                    </div>
+                </div>
+            `;
+            setLogMode("live");
+        }
+
+        function setLogMode(mode) {
+            logMode = mode;
+            logEntries = [];
+            const liveTab = document.getElementById("log-tab-live");
+            const histTab = document.getElementById("log-tab-hist");
+            const histControls = document.getElementById("log-hist-controls");
+            const connEl = document.getElementById("log-conn");
+
+            if (mode === "live") {
+                liveTab.className = "btn-primary";
+                histTab.className = "btn-secondary";
+                histControls.style.display = "none";
+                histControls.style.display = "none";
+                connEl.style.display = "inline";
+                renderLogStream();
+                connectLogStream();   // start live-stream
+            } else {
+                liveTab.className = "btn-secondary";
+                histTab.className = "btn-primary";
+                histControls.style.display = "flex";
+                connEl.style.display = "none";
+                stopLogStream();      // luk live-stream — vi viser historik nu
+                document.getElementById("log-stream").innerHTML =
+                    `<div class="empty">Vælg tidsvindue og klik Hent</div>`;
+            }
+        }
+
+        function setOrbWindow() {
+            document.getElementById("log-from").value = "09:30";
+            document.getElementById("log-to").value   = "10:30";
+            loadLogHistory();
+        }
+
+        function setFullDay() {
+            document.getElementById("log-from").value = "08:00";
+            document.getElementById("log-to").value   = "16:30";
+            loadLogHistory();
+        }
+
+        async function loadLogHistory() {
+            const date   = document.getElementById("log-date").value;
+            const from   = document.getElementById("log-from").value;
+            const to     = document.getElementById("log-to").value;
+            const source = document.getElementById("log-source").value;
+            const stream = document.getElementById("log-stream");
+
+            stream.innerHTML = `<div class="empty">Henter events...</div>`;
+
+            const params = new URLSearchParams();
+            if (date) params.set("date", date);
+            if (from) params.set("from_time", from);
+            if (to)   params.set("to_time", to);
+            if (source) params.set("source", source);
+
+            try {
+                const res = await fetch(`/journal/events?${params.toString()}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                logEntries = (data.events || []).map(ev => {
+                    // ts_local er ISO med tz — træk HH:MM:SS ud
+                    const t = ev.ts_local ? ev.ts_local.substring(11, 19) : "";
+                    const lvl = ev.payload?.level
+                              || (ev.event_type === "strategy_stopped" ? "info" : "info");
+                    const sym = ev.symbol ? ` ${ev.symbol}` : "";
+                    const msg = ev.payload?.message
+                              || `${ev.event_type}${sym}`;
+                    return {
+                        time: t,
+                        text: `[${ev.source}] ${msg}`,
+                        level: lvl,
+                    };
+                });
+                if (logEntries.length === 0) {
+                    stream.innerHTML = `<div class="empty">Ingen events i dette vindue</div>`;
+                } else {
+                    renderLogStream();
+                }
+            } catch (e) {
+                stream.innerHTML = `<div class="error">Kunne ikke hente: ${e.message}</div>`;
+            }
+        }
+
+        function connectLogStream() {
+            stopLogStream();  // sikkerhed: luk evt. gammel
+
+            // Byg ws:// (eller wss://) URL ud fra den side der serverede Studio,
+            // så den altid peger på DENNE backends /ws/algo.
+            const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${proto}//${window.location.host}/ws/algo`;
+
+            try {
+                logSocket = new WebSocket(wsUrl);
+            } catch (e) {
+                setLogConn(false, "Kunne ikke forbinde");
+                scheduleLogReconnect();
+                return;
+            }
+
+            logSocket.onopen = () => setLogConn(true, "Forbundet");
+
+            logSocket.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); } catch (e) { return; }
+                handleLogMessage(msg);
+            };
+
+            logSocket.onclose = () => {
+                setLogConn(false, "Afbrudt — genforbinder...");
+                scheduleLogReconnect();
+            };
+
+            logSocket.onerror = () => {
+                setLogConn(false, "Forbindelsesfejl");
+                // onclose følger typisk efter og håndterer reconnect
+            };
+        }
+
+        function scheduleLogReconnect() {
+            // Genforbind kun hvis vi stadig er på Log-fanen OG i live-tilstand
+            if (currentPage !== "log" || logMode !== "live") return;
+            if (logReconnectTimer) return;
+            logReconnectTimer = setTimeout(() => {
+                logReconnectTimer = null;
+                if (currentPage === "log") connectLogStream();
+            }, 3000);
+        }
+
+        function setLogConn(online, text) {
+            const el = document.getElementById("log-conn");
+            if (!el) return;
+            el.innerHTML = `<span class="status-dot ${online ? "online" : "offline"}"></span> ${text}`;
+        }
+
+        function handleLogMessage(msg) {
+            const type = msg.type;
+            let time, text, level = "info";
+
+            if (type === "strategy_log") {
+                time  = msg.timestamp || "";
+                text  = `[${msg.strategy || "?"}] ${msg.message || ""}`;
+                level = msg.level || "info";
+            } else if (type === "algo_status") {
+                time  = msg.time || "";
+                const strat = msg.strategy ? `[${msg.strategy}] ` : "";
+                text  = `${strat}${msg.message || ""}`;
+                // Udled niveau fra status så fejl bliver røde
+                level = msg.status === "error" ? "error"
+                      : msg.status === "done"  ? "success"
+                      : "info";
+            } else if (type === "algo_trade") {
+                time  = msg.time || "";
+                const verb = { buy: "KØB", sell: "SÆLG", sell_short: "SHORT", buy_cover: "COVER" }[msg.action] || msg.action;
+                const px   = msg.price != null ? `$${msg.price}` : (msg.exit_price != null ? `$${msg.exit_price}` : "");
+                text  = `${verb} ${msg.shares || ""} ${msg.ticker || ""} ${px}`.trim();
+                level = (msg.action === "buy" || msg.action === "sell_short") ? "trade" : "success";
+            } else {
+                return;  // ukendt type — ignorér
+            }
+
+            logEntries.push({ time, text, level });
+            if (logEntries.length > LOG_MAX_ENTRIES) {
+                logEntries = logEntries.slice(-LOG_MAX_ENTRIES);
+            }
+            renderLogStream();
+        }
+
+        function renderLogStream() {
+            const container = document.getElementById("log-stream");
+            if (!container) return;
+
+            if (logEntries.length === 0) {
+                container.innerHTML = `<div class="empty">Venter på beskeder...</div>`;
+                return;
+            }
+
+            const colorFor = (level) => ({
+                error:   "#ff8a8a",
+                warning: "#fdba74",
+                success: "#5ee99a",
+                trade:   "#7ec0ff",
+                info:    "#d0d0d0",
+            }[level] || "#d0d0d0");
+
+            // Tjek om brugeren er scrollet til bunden FØR vi tilføjer
+            const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+
+            container.innerHTML = logEntries.map(e => {
+                const safeText = e.text
+                    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                return `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:0; padding:0;" title="${safeText}">` +
+                    `<span style="color:#666;">${e.time}</span> ` +
+                    `<span style="color:${colorFor(e.level)};">${safeText}</span>` +
+                    `</div>`;
+            }).join("");
+
+            // Auto-scroll til bunden hvis brugeren allerede var der
+            if (atBottom) container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogView() {
+            logEntries = [];
+            renderLogStream();
         }
 
         // ─────────────────────────────────────────────────────

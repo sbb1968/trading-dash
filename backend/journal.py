@@ -155,6 +155,72 @@ class Journal:
             row = await cur.fetchone()
             return row[0] if row else 0
 
+    async def get_events(
+        self,
+        from_utc:   Optional[str] = None,   # ISO UTC streng, inklusiv
+        to_utc:     Optional[str] = None,   # ISO UTC streng, inklusiv
+        source:     Optional[str] = None,   # fx "Momentum ORB" — None = alle
+        event_type: Optional[str] = None,   # fx "trade_forensics" — None = alle
+        limit:      int = 1000,
+    ) -> list[dict]:
+        """
+        Hent events filtreret på tidsvindue og/eller source.
+
+        from_utc/to_utc er ISO UTC-strenge (samme format som ts_utc gemmes i),
+        så tekstuel sammenligning på ts_utc fungerer korrekt. Frontend udregner
+        disse fra det ET-vindue brugeren vælger.
+
+        Returnerer events sorteret kronologisk (ældste først) så de kan vises
+        som en log. Tom liste hvis intet matcher eller journal ikke er klar.
+        """
+        if self._db is None:
+            return []
+
+        clauses = []
+        params: list = []
+        if from_utc:
+            clauses.append("ts_utc >= ?")
+            params.append(from_utc)
+        if to_utc:
+            clauses.append("ts_utc <= ?")
+            params.append(to_utc)
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = (
+            "SELECT ts_utc, ts_local, source, event_type, symbol, payload_json "
+            "FROM events" + where +
+            " ORDER BY ts_utc ASC LIMIT ?"
+        )
+        params.append(limit)
+
+        try:
+            rows = []
+            async with self._db.execute(sql, params) as cur:
+                async for r in cur:
+                    payload = {}
+                    try:
+                        payload = json.loads(r[5] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        payload = {}
+                    rows.append({
+                        "ts_utc":     r[0],
+                        "ts_local":   r[1],
+                        "source":     r[2],
+                        "event_type": r[3],
+                        "symbol":     r[4],
+                        "payload":    payload,
+                    })
+            return rows
+        except Exception as e:
+            logger.error(f"[Journal] get_events fejl: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Trades — mutable aggregeret view (entry + exit i én row)
     # ------------------------------------------------------------------
