@@ -472,7 +472,9 @@ export function LiveAlgo() {
       setStatus(msg.status);
       setMessage(msg.message);
       setTotalPnl(msg.total_pnl);
-      addLog(`[${msg.time}] ${msg.message}`);
+      const stratPrefix = msg.strategy === "Konfluens" ? "[KONF] " :
+                          msg.strategy === "Momentum ORB" ? "[ORB] " : "";
+      addLog(`[${msg.time}] ${stratPrefix}${msg.message}`);
       if (msg.status === "universe_ready" && msg.message.includes(":")) {
         const part = msg.message.split(":")[1]?.trim();
         if (part) setUniverse(part.split(", ").filter(Boolean));

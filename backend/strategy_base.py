@@ -344,7 +344,11 @@ class BaseStrategy(ABC):
                 "max_open_positions": self.config.max_open_positions,
                 "max_position_size":  self.config.max_position_size,
                 "enabled":            self.config.enabled,
-            }
+            },
+            # Dagens univers (de udvalgte tickers). getattr med fallback fordi
+            # universe kun sættes i de konkrete strategier (ORB/Konfluens), og
+            # først når de er startet — før det er den tom.
+            "universe": getattr(self, "universe", []),
         }
 
     # -----------------------------------------------------------------------
