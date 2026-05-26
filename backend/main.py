@@ -59,11 +59,16 @@ def _create_studio_token() -> str:
 def require_studio_auth(authorization: str = Header(None)) -> None:
     """
     FastAPI dependency: kræver gyldig Studio-token i Authorization header.
-    Brug som: dependencies=[Depends(require_studio_auth)] på protected endpoints.
+
+    Undtagelse: på workstations (udvikling) springes auth over, så man ikke
+    skal logge ind igen efter hver backend-genstart. Algoservere (produktion)
+    kræver altid gyldig token.
     """
+    if identity.instance_role == "workstation":
+        return  # Dev-maskine — ingen auth påkrævet
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Ikke logget ind")
-    token = authorization[7:]  # Strip "Bearer "
+    token = authorization[7:]
     if token not in _studio_tokens:
         raise HTTPException(status_code=401, detail="Ugyldig session")
     
@@ -1598,16 +1603,44 @@ async def auth_check(_=Depends(require_studio_auth)):
 # Bruges af Studio's "Strategier"-side for nem fjernstart/stop.
 # Bruger strategy_manager (samme tilgang som /health og /ws/algo).
 
+@app.get("/algo/list", dependencies=[Depends(require_studio_auth)])
+async def algo_list():
+    """Returnér status for ALLE registrerede strategier."""
+    ibkr = strategy_manager.get_ibkr()
+    ibkr_connected = ibkr is not None and ibkr.connected
+
+    strategies = []
+    for name, strat in strategy_manager._strategies.items():
+        running = strat.status == StrategyStatus.RUNNING
+        stats = {}
+        if running:
+            stats = {
+                "pnl_today":      strat.stats.pnl_today,
+                "trades_today":   strat.stats.trades_today,
+                "open_positions": strat.stats.open_positions,
+            }
+        strategies.append({
+            "name":    name,
+            "running": running,
+            "status":  strat.status.value if hasattr(strat.status, "value") else str(strat.status),
+            "stats":   stats,
+        })
+
+    return {
+        "strategies":     strategies,
+        "ibkr_connected": ibkr_connected,
+        "instance":       identity.instance_display_name,
+    }
+
+
 @app.get("/algo/status", dependencies=[Depends(require_studio_auth)])
 async def algo_status():
-    """Returnér status om algoritmen kører."""
+    """Bevaret for bagudkompatibilitet — status for Momentum ORB alene."""
     momentum = strategy_manager._strategies.get("Momentum ORB")
     running  = momentum is not None and momentum.status == StrategyStatus.RUNNING
 
-    ibkr_connected = False
     ibkr = strategy_manager.get_ibkr()
-    if ibkr is not None:
-        ibkr_connected = ibkr.connected
+    ibkr_connected = ibkr is not None and ibkr.connected
 
     stats = {}
     if running:
@@ -1625,32 +1658,40 @@ async def algo_status():
     }
 
 
-@app.post("/algo/start", dependencies=[Depends(require_studio_auth)])
-async def algo_start_endpoint():
-    """Start algoritmen. Idempotent — gør intet hvis allerede kører."""
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    if momentum is not None and momentum.status == StrategyStatus.RUNNING:
-        return {"ok": True, "already_running": True, "message": "Algoritmen kører allerede"}
+class AlgoActionRequest(BaseModel):
+    strategy: str = "Momentum ORB"
 
-    asyncio.create_task(start_algo())
-    return {"ok": True, "already_running": False, "message": "Algoritmen startes"}
+
+@app.post("/algo/start", dependencies=[Depends(require_studio_auth)])
+async def algo_start_endpoint(req: AlgoActionRequest = AlgoActionRequest()):
+    """Start en navngiven strategi. Idempotent."""
+    strat = strategy_manager._strategies.get(req.strategy)
+    if strat is None:
+        raise HTTPException(status_code=404, detail=f"Ukendt strategi: {req.strategy}")
+    if strat.status == StrategyStatus.RUNNING:
+        return {"ok": True, "already_running": True, "message": f"{req.strategy} kører allerede"}
+
+    asyncio.create_task(start_algo(req.strategy))
+    return {"ok": True, "already_running": False, "message": f"{req.strategy} startes"}
 
 
 @app.post("/algo/stop", dependencies=[Depends(require_studio_auth)])
-async def algo_stop_endpoint():
-    """Stop algoritmen. Idempotent — gør intet hvis ikke kører."""
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    if momentum is None or momentum.status != StrategyStatus.RUNNING:
-        return {"ok": True, "was_running": False, "message": "Algoritmen kørte ikke"}
+async def algo_stop_endpoint(req: AlgoActionRequest = AlgoActionRequest()):
+    """Stop en navngiven strategi. Idempotent."""
+    strat = strategy_manager._strategies.get(req.strategy)
+    if strat is None:
+        raise HTTPException(status_code=404, detail=f"Ukendt strategi: {req.strategy}")
+    if strat.status != StrategyStatus.RUNNING:
+        return {"ok": True, "was_running": False, "message": f"{req.strategy} kørte ikke"}
 
-    await stop_algo()
+    await stop_algo(req.strategy)
     await broadcast_algo({
-        "type": "algo_status", "status": "stopped",
-        "message": "Algoritme stoppet via Studio",
+        "type": "algo_status", "strategy": req.strategy, "status": "stopped",
+        "message": f"{req.strategy} stoppet via Studio",
         "total_pnl": 0, "positions": 0, "trades": 0,
         "time": datetime.now().strftime("%H:%M:%S"),
     })
-    return {"ok": True, "was_running": True, "message": "Algoritmen stoppet"}
+    return {"ok": True, "was_running": True, "message": f"{req.strategy} stoppet"}
 
 @app.get("/account", dependencies=[Depends(require_studio_auth)])
 async def account_info():

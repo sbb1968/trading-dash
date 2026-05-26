@@ -2269,7 +2269,7 @@
 
         async function loadStrategiesStatus() {
             try {
-                const res = await authFetch("/algo/status");
+                const res = await authFetch("/algo/list");
                 const data = await res.json();
                 renderStrategies(data);
             } catch (e) {
@@ -2285,80 +2285,113 @@
             `;
         }
 
-        function renderStrategies(data) {
-            const statusBadge = data.running
-                ? '<span class="badge" style="background:#4ade80;color:#000;">KØRER</span>'
-                : '<span class="badge" style="background:#444;color:#aaa;">STOPPET</span>';
+        // Map strategi-navn → docs-mappe og pill-stil
+        const STRATEGY_META = {
+            "Momentum ORB": { docs: "momentum_orb", pill: "pill-orb" },
+            "Konfluens":    { docs: "confluence",   pill: "pill-konfl" },
+        };
 
+        function renderStrategies(data) {
+            const strategies = data.strategies || [];
             const ibkrBadge = data.ibkr_connected
                 ? '<span style="color:#4ade80;">● IBKR forbundet</span>'
                 : '<span style="color:#f87171;">● IBKR ikke forbundet</span>';
 
-            const stats = data.stats || {};
-            const statsHtml = data.running ? `
-                <div class="stats-grid" style="margin-top:24px;">
-                    <div>
-                        <div class="stat-label">Dagens P&L</div>
-                        <div class="stat-value ${cls(stats.pnl_today)}">${fmtMoneySigned(stats.pnl_today)}</div>
-                    </div>
-                    <div>
-                        <div class="stat-label">Handler i dag</div>
-                        <div class="stat-value">${stats.trades_today || 0}</div>
-                    </div>
-                    <div>
-                        <div class="stat-label">Åbne positioner</div>
-                        <div class="stat-value">${stats.open_positions || 0}</div>
-                    </div>
-                </div>
-            ` : "";
+            if (strategies.length === 0) {
+                document.getElementById("content").innerHTML = `
+                    <div class="section-title">Strategier</div>
+                    <div class="card"><div class="empty">Ingen strategier registreret</div></div>
+                `;
+                return;
+            }
 
-            const startDisabled = data.running ? "disabled" : "";
-            const stopDisabled = !data.running ? "disabled" : "";
+            const cards = strategies.map(s => {
+                const running = s.running;
+                const meta = STRATEGY_META[s.name] || { docs: null, pill: "" };
 
-            document.getElementById("content").innerHTML = `
-                <div class="section-title">Momentum ORB ${statusBadge}</div>
-                <div class="card">
-                    <div style="font-size:14px;color:#aaa;margin-bottom:16px;">
-                        ${ibkrBadge}
-                        <span style="margin:0 12px;color:#444;">·</span>
-                        Instans: <code>${data.instance || "ukendt"}</code>
+                const statusBadge = running
+                    ? '<span class="badge" style="background:#4ade80;color:#000;">KØRER</span>'
+                    : '<span class="badge" style="background:#444;color:#aaa;">STOPPET</span>';
+
+                const stats = s.stats || {};
+                const statsHtml = running ? `
+                    <div class="stats-grid" style="margin-top:24px;">
+                        <div>
+                            <div class="stat-label">Dagens P&L</div>
+                            <div class="stat-value ${cls(stats.pnl_today)}">${fmtMoneySigned(stats.pnl_today)}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Handler i dag</div>
+                            <div class="stat-value">${stats.trades_today || 0}</div>
+                        </div>
+                        <div>
+                            <div class="stat-label">Åbne positioner</div>
+                            <div class="stat-value">${stats.open_positions || 0}</div>
+                        </div>
                     </div>
-                    <div style="display:flex;gap:12px;">
-                        <button id="btn-start" onclick="startAlgo()" ${startDisabled}
-                                style="flex:1;padding:14px;background:${data.running ? '#444' : '#4ade80'};
-                                       color:${data.running ? '#666' : '#000'};border:none;border-radius:6px;
-                                       font-size:14px;font-weight:600;cursor:${data.running ? 'not-allowed' : 'pointer'};">
-                            ▶ Start algoritme
-                        </button>
-                        <button id="btn-stop" onclick="stopAlgo()" ${stopDisabled}
-                                style="flex:1;padding:14px;background:${!data.running ? '#444' : '#f87171'};
-                                       color:${!data.running ? '#666' : '#000'};border:none;border-radius:6px;
-                                       font-size:14px;font-weight:600;cursor:${!data.running ? 'not-allowed' : 'pointer'};">
-                            ■ Stop algoritme
-                        </button>
-                    </div>
+                ` : "";
+
+                const startDisabled = running ? "disabled" : "";
+                const stopDisabled = !running ? "disabled" : "";
+                const nameJs = s.name.replace(/'/g, "\\'");
+
+                const docsButtons = meta.docs ? `
                     <div style="display:flex;gap:12px;margin-top:12px;">
-                        <button onclick="showStrategyDocs('momentum_orb', 'iben')"
+                        <button onclick="showStrategyDocs('${meta.docs}', 'iben')"
                                 style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
                                        border:1px solid #4a9eff;border-radius:6px;
                                        font-size:13px;font-weight:600;cursor:pointer;">
                             📖 Forklaring
                         </button>
-                        <button onclick="showStrategyDocs('momentum_orb', 'teknisk')"
+                        <button onclick="showStrategyDocs('${meta.docs}', 'teknisk')"
                                 style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
                                        border:1px solid #4a9eff;border-radius:6px;
                                        font-size:13px;font-weight:600;cursor:pointer;">
                             🔬 Teknisk reference
                         </button>
                     </div>
-                    ${statsHtml}
-                </div>
-            `;
+                ` : "";
+
+                return `
+                    <div class="section-title">
+                        <span class="pill ${meta.pill}">${s.name}</span> ${statusBadge}
+                    </div>
+                    <div class="card">
+                        <div style="font-size:14px;color:#aaa;margin-bottom:16px;">
+                            ${ibkrBadge}
+                            <span style="margin:0 12px;color:#444;">·</span>
+                            Instans: <code>${data.instance || "ukendt"}</code>
+                        </div>
+                        <div style="display:flex;gap:12px;">
+                            <button onclick="startAlgo('${nameJs}')" ${startDisabled}
+                                    style="flex:1;padding:14px;background:${running ? '#444' : '#4ade80'};
+                                           color:${running ? '#666' : '#000'};border:none;border-radius:6px;
+                                           font-size:14px;font-weight:600;cursor:${running ? 'not-allowed' : 'pointer'};">
+                                ▶ Start
+                            </button>
+                            <button onclick="stopAlgo('${nameJs}')" ${stopDisabled}
+                                    style="flex:1;padding:14px;background:${!running ? '#444' : '#f87171'};
+                                           color:${!running ? '#666' : '#000'};border:none;border-radius:6px;
+                                           font-size:14px;font-weight:600;cursor:${!running ? 'not-allowed' : 'pointer'};">
+                                ■ Stop
+                            </button>
+                        </div>
+                        ${docsButtons}
+                        ${statsHtml}
+                    </div>
+                `;
+            }).join("");
+
+            document.getElementById("content").innerHTML = cards;
         }
 
-        async function startAlgo() {
+        async function startAlgo(strategy) {
             try {
-                const res = await authFetch("/algo/start", { method: "POST" });
+                const res = await authFetch("/algo/start", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ strategy }),
+                });
                 const data = await res.json();
                 console.log("Start:", data);
                 // Status polles automatisk hvert 2. sek og opdaterer UI
@@ -2367,9 +2400,13 @@
             }
         }
 
-        async function stopAlgo() {
+        async function stopAlgo(strategy) {
             try {
-                const res = await authFetch("/algo/stop", { method: "POST" });
+                const res = await authFetch("/algo/stop", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ strategy }),
+                });
                 const data = await res.json();
                 console.log("Stop:", data);
             } catch (e) {
