@@ -56,16 +56,24 @@ def _create_studio_token() -> str:
     return token
 
 
-def require_studio_auth(authorization: str = Header(None)) -> None:
+def require_studio_auth(authorization: str = Header(None),
+                        x_internal_key: str = Header(None, alias="X-Internal-Key")) -> None:
     """
-    FastAPI dependency: kræver gyldig Studio-token i Authorization header.
+    FastAPI dependency: kræver gyldig adgang til beskyttede endpoints.
 
-    Undtagelse: på workstations (udvikling) springes auth over, så man ikke
-    skal logge ind igen efter hver backend-genstart. Algoservere (produktion)
-    kræver altid gyldig token.
+    Tre veje ind:
+      1. Peer-maskine med korrekt intern nøgle (fuld tillid inden for Tailscale)
+      2. Workstation i dev-mode (ingen auth — udviklingsbekvemmelighed)
+      3. Almindeligt bruger-token fra /auth/login (mennesket ved Studio)
     """
+    # 1. Peer-maskine med fælles intern nøgle
+    if x_internal_key and identity.internal_key and \
+            secrets.compare_digest(x_internal_key, identity.internal_key):
+        return
+    # 2. Workstation dev-mode
     if identity.instance_role == "workstation":
-        return  # Dev-maskine — ingen auth påkrævet
+        return
+    # 3. Almindeligt bruger-token
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Ikke logget ind")
     token = authorization[7:]

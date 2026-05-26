@@ -1019,7 +1019,14 @@
     </div>
     <header>
         <h1>Trading Dash Studio</h1>
-        <div class="identity" id="identity">Indlæser identitet...</div>
+        <div style="display:flex; align-items:center; gap:16px;">
+            <select id="peer-selector" style="background:#1a1a1a; color:#f0f0f0;
+                    border:1px solid #4a4a4a; border-radius:4px; padding:8px 12px;
+                    font-size:14px; font-family:inherit; cursor:pointer;">
+                <option value="">Denne maskine</option>
+            </select>
+            <div class="identity" id="identity">Indlæser identitet...</div>
+        </div>
     </header>
 
     <nav id="nav">
@@ -1059,19 +1066,74 @@
             localStorage.removeItem(TOKEN_KEY);
         }
 
+        // ── Peer-valg: hvilken maskine kigger vi på? ──────────
+        // selectedPeer === null betyder "denne lokale maskine" (Bearer-token).
+        // Ellers et peer-objekt fra peers.json — så kalder vi peerens URL
+        // med X-Internal-Key i stedet (Vej A: browseren kender nøglen).
+        let selectedPeer = null;
+        let internalKey  = null;   // hentes fra /internal-key efter login
+        let knownPeers   = [];     // cache af peers.json
+
+        async function loadInternalKey() {
+            try {
+                const res = await authFetch("/internal-key");
+                const data = await res.json();
+                internalKey = data.internal_key || null;
+            } catch (e) {
+                console.warn("[Peer] Kunne ikke hente intern nøgle:", e);
+                internalKey = null;
+            }
+        }
+
+        async function loadPeerSelector() {
+            try {
+                const res = await fetch("/peers");
+                const data = await res.json();
+                knownPeers = (data.peers || []).filter(p => p.enabled && p.url);
+            } catch (e) {
+                knownPeers = [];
+            }
+
+            const sel = document.getElementById("peer-selector");
+            if (!sel) return;
+
+            sel.innerHTML = `<option value="">Denne maskine</option>` +
+                knownPeers.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+
+            sel.onchange = () => {
+                const id = sel.value;
+                selectedPeer = id ? knownPeers.find(p => p.id === id) : null;
+                // Genindlæs den aktuelle fane med den nye maskines data
+                switchPage(currentPage || "oversigt");
+            };
+        }
+
         async function authFetch(url, options = {}) {
-            const token = getToken();
+            // Lokal maskine valgt → relativ URL + Bearer-token (som før)
+            if (!selectedPeer) {
+                const token = getToken();
+                const headers = {
+                    ...(options.headers || {}),
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                };
+                const res = await fetch(url, { ...options, headers });
+                if (res.status === 401) {
+                    clearToken();
+                    showLogin();
+                    throw new Error("Session udløbet");
+                }
+                return res;
+            }
+
+            // Peer valgt → peerens fulde URL + intern nøgle
+            const fullUrl = `${selectedPeer.url}${url}`;
             const headers = {
                 ...(options.headers || {}),
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                ...(internalKey ? { "X-Internal-Key": internalKey } : {}),
             };
-            const res = await fetch(url, { ...options, headers });
-
-            // Hvis 401, token er udløbet (backend genstartet) — vis login igen
+            const res = await fetch(fullUrl, { ...options, headers });
             if (res.status === 401) {
-                clearToken();
-                showLogin();
-                throw new Error("Session udløbet");
+                throw new Error(`Adgang nægtet på ${selectedPeer.name} — tjek at intern nøgle matcher`);
             }
             return res;
         }
@@ -1158,6 +1220,8 @@
                 }
                 hideLogin();
                 loadIdentity();
+                await loadInternalKey();
+                await loadPeerSelector();
                 switchPage("oversigt");
                 return;
             }
@@ -1179,6 +1243,8 @@
                 }
                 hideLogin();
                 loadIdentity();
+                await loadInternalKey();
+                await loadPeerSelector();
                 switchPage("oversigt");
             } catch (e) {
                 showLogin();

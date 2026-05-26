@@ -37,6 +37,7 @@ class AccountIdentity:
     paper_trading:        bool
     autostart_strategies: list[str]
     studio_password:      str       # Password til Studio (login fra browser/mobil)
+    internal_key:         str       # Fælles nøgle til maskine-til-maskine-tillid (Tailscale)
 
 
 def _fail(msg: str) -> None:
@@ -92,6 +93,7 @@ def load_identity() -> AccountIdentity:
             paper_trading         = bool(instance["paper_trading"]),
             autostart_strategies  = list(instance.get("autostart_strategies", [])),
             studio_password       = str(auth.get("studio_password", "")),
+            internal_key          = str(auth.get("internal_key", "")),
         )
     except (KeyError, TypeError) as e:
         _fail(f"Manglende eller forkert felt i account.yaml: {e}")
