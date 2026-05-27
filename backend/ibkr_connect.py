@@ -137,20 +137,36 @@ class IBKRConnection:
         bar_size:     str = "5 mins",
         what_to_show: str = "MIDPOINT",
     ) -> list[dict]:
-        """Henter historiske OHLCV bars. Brug MIDPOINT uden for handelstid."""
+        """Henter historiske OHLCV bars. Brug MIDPOINT uden for handelstid.
+
+        VIGTIGT: Begge TWS-kald er pakket i asyncio.wait_for med timeout.
+        Uden timeout kan reqHistoricalDataAsync hænge for evigt hvis TWS
+        modtager anmodningen men aldrig svarer (død data-subscription, TWS
+        overbelastet). Da strategi-loopet kalder denne metode sekventielt
+        for hver ticker, ville ét hæng fryse HELE strategien (set 2026-05-26:
+        konfluens frøs kl. 11:31 og handlede ikke resten af dagen). Med
+        timeout bliver et hæng til en TimeoutError → springer denne ticker
+        over og fortsætter loopet.
+        """
         if not self.connected:
             return []
         try:
             contract = Stock(ticker, "SMART", "USD")
-            await self.ib.qualifyContractsAsync(contract)
-            bars = await self.ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime    = "",
-                durationStr    = duration,
-                barSizeSetting = bar_size,
-                whatToShow     = what_to_show,
-                useRTH         = True,
-                formatDate     = 1,
+            await asyncio.wait_for(
+                self.ib.qualifyContractsAsync(contract),
+                timeout=10.0,
+            )
+            bars = await asyncio.wait_for(
+                self.ib.reqHistoricalDataAsync(
+                    contract,
+                    endDateTime    = "",
+                    durationStr    = duration,
+                    barSizeSetting = bar_size,
+                    whatToShow     = what_to_show,
+                    useRTH         = True,
+                    formatDate     = 1,
+                ),
+                timeout=15.0,
             )
             return [{
                 "datetime": bar.date,
@@ -160,19 +176,35 @@ class IBKRConnection:
                 "close":    bar.close,
                 "volume":   bar.volume,
             } for bar in bars]
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Historical bars TIMEOUT {ticker} — TWS svarede ikke "
+                f"inden for tidsgrænsen; springer over denne iteration"
+            )
+            return []
         except Exception as e:
             logger.error(f"Historical bars fejl {ticker}: {e}")
             return []
 
     # ── Snapshot ──────────────────────────────────────────────
     async def get_snapshot(self, ticker: str) -> Optional[dict]:
-        """Henter realtids snapshot. Kræver aktive market data abonnementer."""
+        """Henter realtids snapshot. Kræver aktive market data abonnementer.
+
+        Som get_historical_bars: TWS-kaldene er pakket i asyncio.wait_for,
+        så et hængende svar ikke kan fryse en kaldende loop.
+        """
         if not self.connected:
             return None
         try:
             contract = Stock(ticker, "SMART", "USD")
-            await self.ib.qualifyContractsAsync(contract)
-            tickers = await self.ib.reqTickersAsync(contract)
+            await asyncio.wait_for(
+                self.ib.qualifyContractsAsync(contract),
+                timeout=10.0,
+            )
+            tickers = await asyncio.wait_for(
+                self.ib.reqTickersAsync(contract),
+                timeout=10.0,
+            )
             if not tickers:
                 return None
             t = tickers[0]
@@ -187,6 +219,12 @@ class IBKRConnection:
                 "low":    t.low,
                 "close":  t.close,
             }
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Snapshot TIMEOUT {ticker} — TWS svarede ikke inden for "
+                f"tidsgrænsen"
+            )
+            return None
         except Exception as e:
             logger.error(f"Snapshot fejl {ticker}: {e}")
             return None
@@ -242,7 +280,13 @@ class IBKRConnection:
             raise ValueError("Brug kun place_paper_order på paper trading konto!")
         try:
             contract = Stock(ticker, "SMART", "USD")
-            await self.ib.qualifyContractsAsync(contract)
+            # Kun kvalificering har timeout — selve ordrelægningen (placeOrder)
+            # er synkron og røres IKKE, så vi aldrig afbryder en ordre der er
+            # på vej igennem.
+            await asyncio.wait_for(
+                self.ib.qualifyContractsAsync(contract),
+                timeout=10.0,
+            )
             order = MarketOrder(action, quantity) if order_type == "MKT" \
                     else LimitOrder(action, quantity, limit_price)
             trade = self.ib.placeOrder(contract, order)
@@ -256,6 +300,12 @@ class IBKRConnection:
                 "filled":   trade.orderStatus.filled,
                 "avg_fill": trade.orderStatus.avgFillPrice,
             }
+        except asyncio.TimeoutError:
+            logger.error(
+                f"Ordre TIMEOUT {ticker} — kontrakt-kvalificering svarede "
+                f"ikke; ordre IKKE sendt"
+            )
+            return None
         except Exception as e:
             logger.error(f"Ordre fejl {ticker}: {e}")
             return None

@@ -96,6 +96,10 @@ class BaseStrategy(ABC):
         self._open_positions: dict = {}
         self._start_time: Optional[datetime] = None
 
+        # Lag B-diagnostik: husker hver akties sidste afvisnings-streng,
+        # så vi KUN logger når begrundelsen ændrer sig. Nulstilles dagligt
+        # via reset_diagnostics().
+        self._last_rejection: dict[str, str] = {}
     # -----------------------------------------------------------------------
     # Abstrakte metoder
     # -----------------------------------------------------------------------
@@ -393,3 +397,68 @@ class BaseStrategy(ABC):
                 )
             except Exception as e:
                 logger.error(f"[{self.name}] _log journal-skriv fejlede: {e}")
+
+    # -----------------------------------------------------------------------
+    # Diagnostik-logging (Lag A/B/C) — fælles for ALLE strategier.
+    # Skrevet ÉN gang her; arves af enhver BaseStrategy-subklasse, nuværende
+    # som fremtidig. Strategi-specifikt indhold leveres som argumenter; selve
+    # journal-skrivningen og "kun ændringer"-mekanikken er fælles.
+    # account_id/instance_id sættes automatisk af journal.log_event.
+    # -----------------------------------------------------------------------
+
+    async def log_universe(self, tickers: list[str], meta: Optional[dict] = None) -> None:
+        """Lag A: Log dagens udvalgte univers. `meta` kan rumme strategi-
+        specifikke felter (raw_count, pris-filter, open_prices, used_fallback)."""
+        if not self._journal:
+            return
+        payload = {"tickers": list(tickers), "count": len(tickers)}
+        if meta:
+            payload.update(meta)
+        try:
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "universe_selected",
+                payload    = payload,
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] log_universe fejlede: {e}")
+
+    async def log_rejection_change(self, ticker: str, detail: str) -> bool:
+        """Lag B: Log HVORFOR en aktie ikke gav entry — men kun når
+        begrundelsen har ÆNDRET sig siden sidst. Mekanikken er fælles;
+        `detail`-strengen leveres af strategien (afvisningskriterier er
+        strategi-specifikke). Returnerer True hvis et event blev logget."""
+        if not self._journal:
+            return False
+        if self._last_rejection.get(ticker) == detail:
+            return False
+        self._last_rejection[ticker] = detail
+        try:
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "entry_rejected",
+                payload    = {"ticker": ticker, "detail": detail},
+                symbol     = ticker,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[{self.name}] log_rejection_change fejlede: {e}")
+            return False
+
+    async def log_daily_summary(self, summary: dict) -> None:
+        """Lag C: Log dagens aggregerede diagnostik (ét event ved dagsslut).
+        Strategien afleverer selv det aggregerede `summary`-dict."""
+        if not self._journal:
+            return
+        try:
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "daily_diagnostics",
+                payload    = summary or {},
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] log_daily_summary fejlede: {e}")
+
+    def reset_diagnostics(self) -> None:
+        """Nulstil Lag B-tilstand. Kaldes ved dagsstart / reset_daily."""
+        self._last_rejection.clear()

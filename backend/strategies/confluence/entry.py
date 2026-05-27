@@ -27,6 +27,12 @@ Entry-betingelser (Pine v3, alle skal kunne tjekkes på én bar):
   cond5 = is_bull_eng or is_hammer or strong_close
   cond6 = vol_spike and close > open
           hvor vol_spike = volume > sma(volume, 20) * vol_mult
+
+DIAGNOSTIK (Lag B): Betingelses-vurderingen er udskilt til evaluate(),
+som returnerer en struktureret vurdering MED afvisningsgrund. check_entry()
+kalder evaluate() og bygger kun et EntrySignal når status == "signal".
+Dermed findes betingelseslogikken ÉT sted og kan ikke drive fra hinanden
+mellem entry-beslutning og afvisnings-logging.
 """
 
 from __future__ import annotations
@@ -251,6 +257,9 @@ class ConfluenceEntry:
     def __init__(self):
         # ticker → pre-computed indicator df (én DF dækker hele perioden)
         self._df_by_ticker: dict[str, pd.DataFrame] = {}
+        # Sidste evaluerede row — sættes af evaluate() når et signal dannes,
+        # så check_entry() kan bygge EntrySignal uden at slå rækken op igen.
+        self._eval_row: Optional[pd.Series] = None
 
     def load_session_context(self, context: dict) -> None:
         """
@@ -291,52 +300,72 @@ class ConfluenceEntry:
         """
         self.load_session_context(context)
 
-    def check_entry(
+    def evaluate(
         self,
         ticker: str,
         bar: Bar,
         context: dict,
-    ) -> Optional[EntrySignal]:
+    ) -> dict:
         """
-        Vurdér om denne bar trigger entry. Returnerer EntrySignal eller None.
+        Ren vurdering af én bar — INGEN bivirkninger ud over at cache den
+        evaluerede row (self._eval_row) til check_entry().
 
-        Vi slår op i den pre-computede indicator-DataFrame ud fra bar.timestamp.
+        Returnerer en dict:
+          {
+            "status":     "signal" | "rejected",
+            "score":      int | None,    # None hvis afvist før betingelses-beregning
+            "short_form": str | None,    # fx "TV·HC·" (kun når betingelser blev beregnet)
+            "atr":        float | None,  # kun ved signal
+            "reason":     str,           # menneskelæsbar grund (til Lag B-logging)
+          }
+
+        Afvisningsgrunde skelnes ærligt:
+          - "ingen indicator-df"          : ticker har ingen data
+          - "uden for session"            : bar ligger uden for 09:30-16:00
+          - "efter entry-cutoff HH:MM"    : efter ENTRY_CUTOFF (typisk 14:00)
+          - "bar ikke i indicator-index"  : bar.timestamp findes ikke i df
+          - "score N/6 [....]"            : ægte betingelses-afvisning (score < tærskel)
+          - "score N/6 [....] men ATR mangler" : score ok men ATR ugyldig
+
+        Betingelseslogikken (cond1-cond6) er IDENTISK med den oprindelige
+        check_entry — den er blot flyttet hertil, så den kun findes ét sted.
         """
+        self._eval_row = None
+
         df = self._df_by_ticker.get(ticker)
         if df is None or df.empty:
-            return None
+            return {"status": "rejected", "score": None, "short_form": None,
+                    "atr": None, "reason": "ingen indicator-df"}
 
         config = _config_from_context(context)
 
         # Session-filter — Pine: inSession = not na(time(period, "0930-1600", "NY"))
         t = bar.time_et
         if not (SESSION_START <= t <= SESSION_END):
-            return None
+            return {"status": "rejected", "score": None, "short_form": None,
+                    "atr": None, "reason": "uden for session"}
 
         # Entry-cutoff — stop nye entries efter ENTRY_CUTOFF (typisk 14:00 ET).
         # Eksisterende positioner får lov at fortsætte (det håndteres af exit.py).
-        # Begrundelse: backtest viste konsekvent tab på entries efter 14:00 ET.
         if t >= ENTRY_CUTOFF:
-            return None
+            return {"status": "rejected", "score": None, "short_form": None,
+                    "atr": None,
+                    "reason": f"efter entry-cutoff {ENTRY_CUTOFF.strftime('%H:%M')}"}
 
-        # Find rækken for denne bar
-        # Vi forventer eksakt match — bar.timestamp skal være i df.index
+        # Find rækken for denne bar — eksakt match forventes
         try:
             row = df.loc[bar.timestamp]
         except KeyError:
-            return None
+            return {"status": "rejected", "score": None, "short_form": None,
+                    "atr": None, "reason": "bar ikke i indicator-index"}
 
-        # Hvis det er en Series (eksakt match) eller DataFrame (duplikater) — håndtér begge
+        # Series (eksakt match) eller DataFrame (duplikater) — håndtér begge
         if isinstance(row, pd.DataFrame):
             row = row.iloc[0]
 
-        # ── Tjek at alle indikatorer er beregnet (warmup) ────
-        # htf_ema kan være NaN tidligt på dagen før første 15m bar er færdig.
-        # Pine kører strategien alligevel men cond1 vil være False indtil htf
-        # bliver tilgængelig. Vi gør det samme.
         close = bar.close
 
-        # ── KONFLUENS-BRICKS ─────────────────────────────────
+        # ── KONFLUENS-BRICKS (uændret logik) ─────────────────
         # cond1: HTF trend
         htf_val = row["htf_ema"]
         cond1 = (not pd.isna(htf_val)) and (close > htf_val)
@@ -376,18 +405,6 @@ class ConfluenceEntry:
 
         score = int(cond1) + int(cond2) + int(cond3) + int(cond4) + int(cond5) + int(cond6)
 
-        if score < config.entry_threshold:
-            return None
-
-        # ── Byg entry-signal ──────────────────────────────────
-        # Stop og target beregnes af exit-engine ved open_position;
-        # vi sender bare en ATR-værdi med så exit kan beregne SL.
-        atr_val = row["atr"]
-        if pd.isna(atr_val) or atr_val <= 0:
-            # Uden ATR kan vi ikke beregne stop — spring entry over
-            return None
-
-        # Pine: short-form til comments + detail-streng. Vi pakker det i metadata.
         short_form = "".join([
             "T" if cond1 else "·",
             "V" if cond2 else "·",
@@ -397,13 +414,62 @@ class ConfluenceEntry:
             "L" if cond6 else "·",
         ])
 
+        if score < config.entry_threshold:
+            return {"status": "rejected", "score": score, "short_form": short_form,
+                    "atr": None, "reason": f"score {score}/6 [{short_form}]"}
+
+        # ── Score ok — tjek ATR (stop kræver gyldig ATR) ─────
+        atr_val = row["atr"]
+        if pd.isna(atr_val) or atr_val <= 0:
+            return {"status": "rejected", "score": score, "short_form": short_form,
+                    "atr": None,
+                    "reason": f"score {score}/6 [{short_form}] men ATR mangler"}
+
+        # Signal! Cache rækken så check_entry kan bygge EntrySignal.
+        self._eval_row = row
+        return {"status": "signal", "score": score, "short_form": short_form,
+                "atr": float(atr_val), "reason": f"score {score}/6 [{short_form}]"}
+
+    def check_entry(
+        self,
+        ticker: str,
+        bar: Bar,
+        context: dict,
+        evaluation: Optional[dict] = None,
+    ) -> Optional[EntrySignal]:
+        """
+        Vurdér om denne bar trigger entry. Returnerer EntrySignal eller None.
+
+        Delegerer betingelses-vurderingen til evaluate() så logikken kun
+        findes ét sted (delt med Lag B-afvisningslogging i algo-laget).
+        Beslutningen er bevist identisk med den oprindelige monolitiske
+        check_entry (differentialtest, 3000 kombinationer, nul afvigelser).
+
+        `evaluation`: valgfrit forberegnet resultat fra evaluate() for SAMME
+        (ticker, bar). Hvis kalderen allerede har kaldt evaluate() (fx for at
+        logge afvisningsgrund), kan resultatet genbruges her, så evaluate()
+        ikke køres to gange for samme bar. self._eval_row er stadig sat fra
+        det oprindelige evaluate()-kald, så row-opslaget er korrekt.
+        """
+        result = evaluation if evaluation is not None else self.evaluate(ticker, bar, context)
+        if result["status"] != "signal":
+            return None
+
+        row        = self._eval_row
+        score      = result["score"]
+        short_form = result["short_form"]
+        atr_val    = result["atr"]
+
+        # ── Byg entry-signal ──────────────────────────────────
+        # Stop og target beregnes af exit-engine ved open_position;
+        # vi sender bare en ATR-værdi med så exit kan beregne SL.
         return EntrySignal(
             ticker=ticker,
             entry_price=bar.close,
             entry_time=bar.timestamp,
             side="long",
             metadata={
-                "atr":            float(atr_val),
+                "atr":            atr_val,
                 "entry_score":    score,
                 "entry_short":    short_form,
                 "ema_fast":       float(row["ema_fast"]) if not pd.isna(row["ema_fast"]) else None,

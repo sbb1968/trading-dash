@@ -205,50 +205,25 @@ class MarketConditionChecker:
 
     async def _check_scanner(self, mc: MarketConditions) -> None:
         try:
-            from ib_async import ScannerSubscription
-            sub = ScannerSubscription(
-                instrument   = "STK",
-                locationCode = "STK.US.MAJOR",
-                scanCode     = "TOP_PERC_GAIN",
-            )
-            data = await asyncio.wait_for(
-                self.conn.ib.reqScannerDataAsync(sub),
+            # Kandidater hentes fra TradingView — samme kilde som algoerne bruger.
+            # Vi rører IKKE TWS her længere: tidligere hentede vi gap/relvol via
+            # IBKR-snapshots, hvilket fik MarketOverview til at hænge når TWS var nede.
+            from strategies.confluence.tv_scanner import fetch_tv_top_gainer_symbols
+            loop = asyncio.get_event_loop()
+            gainers = await asyncio.wait_for(
+                loop.run_in_executor(None, fetch_tv_top_gainer_symbols, 25),
                 timeout=15.0
             )
 
-            gainers = []
-            for item in data:
-                symbol = item.contractDetails.contract.symbol
-                if len(symbol) <= 5:
-                    gainers.append(symbol)
-
             mc.top_gainers = gainers[:25]
-
-            # Tæl gap og volumen for top 10
-            gap_count = relvol_count = 0
-            for symbol in gainers[:10]:
-                try:
-                    snap = await asyncio.wait_for(
-                        self.conn.get_snapshot(symbol),
-                        timeout=5.0
-                    )
-                    if not snap:
-                        continue
-                    if snap.get("open") and snap.get("close") and snap["close"] > 0:
-                        gap = (snap["open"] - snap["close"]) / snap["close"] * 100
-                        if gap > 10:
-                            gap_count += 1
-                    if snap.get("volume") and snap["volume"] > 500000:
-                        relvol_count += 1
-                except Exception:
-                    continue
-
-            mc.stocks_gap_over_10   = gap_count
-            mc.stocks_relvol_over_5 = relvol_count
-            logger.info(f"Scanner: {len(gainers)} gainers")
+            # gap/relvol-tælling er fjernet — krævede TWS og er ikke længere
+            # nødvendig nu hvor kandidaterne kommer fra TradingView.
+            mc.stocks_gap_over_10   = 0
+            mc.stocks_relvol_over_5 = 0
+            logger.info(f"Scanner (TV): {len(gainers)} gainers")
 
         except Exception as e:
-            logger.warning(f"Scanner fejl: {e}")
+            logger.warning(f"Scanner (TV) fejl: {e}")
             mc.top_gainers = []
 
     # -----------------------------------------------------------------------

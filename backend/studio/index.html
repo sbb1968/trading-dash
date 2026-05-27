@@ -1075,8 +1075,14 @@
         let knownPeers   = [];     // cache af peers.json
 
         async function loadInternalKey() {
+            // Nøglen hentes ALTID fra den lokale maskine — aldrig fra en peer.
+            // (Vi kan ikke nå en peer uden nøglen, så vi må hente den lokalt først.)
             try {
-                const res = await authFetch("/internal-key");
+                const token = getToken();
+                const res = await fetch("/internal-key", {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 internalKey = data.internal_key || null;
             } catch (e) {
@@ -1103,8 +1109,11 @@
             sel.onchange = () => {
                 const id = sel.value;
                 selectedPeer = id ? knownPeers.find(p => p.id === id) : null;
-                // Genindlæs den aktuelle fane med den nye maskines data
-                switchPage(currentPage || "oversigt");
+                // Analyse viser altid ALLE maskiner — den skal ikke genindlæses
+                // (og dermed ikke genkontakte en evt. slukket maskine) ved maskineskift.
+                if (currentPage !== "analysis") {
+                    switchPage(currentPage || "oversigt");
+                }
             };
         }
 
@@ -1125,17 +1134,32 @@
                 return res;
             }
 
-            // Peer valgt → peerens fulde URL + intern nøgle
+            // Peer valgt → peerens fulde URL + intern nøgle, med timeout
             const fullUrl = `${selectedPeer.url}${url}`;
             const headers = {
                 ...(options.headers || {}),
                 ...(internalKey ? { "X-Internal-Key": internalKey } : {}),
             };
-            const res = await fetch(fullUrl, { ...options, headers });
-            if (res.status === 401) {
-                throw new Error(`Adgang nægtet på ${selectedPeer.name} — tjek at intern nøgle matcher`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+            try {
+                const res = await fetch(fullUrl, { ...options, headers, signal: controller.signal });
+                clearTimeout(timeoutId);
+                if (res.status === 401) {
+                    throw new Error(`Adgang nægtet på ${selectedPeer.name} — tjek at intern nøgle matcher`);
+                }
+                return res;
+            } catch (e) {
+                clearTimeout(timeoutId);
+                if (e.name === "AbortError") {
+                    throw new Error(`${selectedPeer.name} svarer ikke (timeout — maskinen er måske slukket)`);
+                }
+                // Bevar 401-beskeden hvis det var den vi selv kastede ovenfor
+                if (e.message && e.message.startsWith("Adgang nægtet")) {
+                    throw e;
+                }
+                throw new Error(`${selectedPeer.name} ikke tilgængelig`);
             }
-            return res;
         }
 
         function showLogin() {
@@ -2699,9 +2723,6 @@
                         ${rows}
                     </tbody>
                 </table>
-                <div style="margin-top:16px; font-size:12px; color:#666;">
-                    Auth bliver tilføjet senere — viser kun offentlige /health-data for nu.
-                </div>
             `;
         }
 

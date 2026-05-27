@@ -1732,6 +1732,16 @@ async def get_peers():
     except Exception as e:
         return {"peers": [], "error": str(e)}
 
+@app.get("/internal-key", dependencies=[Depends(require_studio_auth)])
+async def get_internal_key():
+    """Giver den autentificerede Studio-browser den fælles interne nøgle,
+    så den kan kalde peer-maskiner direkte (Vej A).
+
+    Beskyttet af require_studio_auth — kun en allerede-indlogget bruger
+    (eller dev-mode workstation) kan hente den.
+    """
+    return {"internal_key": identity.internal_key}
+
 # Tracker hvornår sidste account_snapshot blev skrevet til journal —
 # så vi ikke logger ved hver auto-refresh, kun én gang i timen.
 _last_snapshot_journaled_at: datetime | None = None

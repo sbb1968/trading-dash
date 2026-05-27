@@ -152,6 +152,15 @@ class ConfluenceLive(BaseStrategy):
         self._position_size_pct: float                   = 1.0
         self._loop_task: Optional[asyncio.Task]          = None
 
+        # Lag C-diagnostik: aggregeret statistik for dagen, bruges til
+        # daglig opsummering (peak score pr. aktie, hyppigst manglende
+        # betingelse). Nulstilles ved dagsstart.
+        self._diag_max_score:     dict[str, int]         = {}
+        self._diag_eval_count:    int                    = 0
+        self._diag_scored_bars:   int                    = 0
+        self._diag_entries:       int                    = 0
+        self._diag_missing:       list[int]              = [0, 0, 0, 0, 0, 0]
+
     # -------------------------------------------------------------
     # BaseStrategy interface — properties
     # -------------------------------------------------------------
@@ -313,6 +322,15 @@ class ConfluenceLive(BaseStrategy):
         # Vi bypass'er self.conn.scan_top_gainers fordi den IBKR-wrapper
         # ikke understøtter abovePrice/belowPrice/aboveVolume — den
         # returnerer rå TOP_PERC_GAIN hvilket er domineret af penny-stocks.
+        # Lag C: nulstil dagens diagnostik-aggregering ved dagsstart, så
+        # statistikken ikke akkumulerer hvis instansen kører over flere dage.
+        self._diag_max_score.clear()
+        self._diag_eval_count = 0
+        self._diag_scored_bars = 0
+        self._diag_entries = 0
+        self._diag_missing = [0, 0, 0, 0, 0, 0]
+        self.reset_diagnostics()   # nulstiller også Lag B's "kun ændringer"-state
+
         raw_tickers: list[str] = []
         for attempt in range(1, 3):
             raw_tickers = await self._scan_filtered_gainers(UNIVERSE_TOP_N)
@@ -415,20 +433,17 @@ class ConfluenceLive(BaseStrategy):
             self.status = StrategyStatus.ERROR
             return
 
-        # Logge til journal som scanner-cache (option B for fremtidige backtests)
-        if self._journal:
-            await self._journal.log_event(
-                source     = self.name,
-                event_type = "universe_selected",
-                payload    = {
-                    "raw_count":    len(raw_tickers),
-                    "filtered_count": len(self.universe),
-                    "tickers":      self.universe,
-                    "open_prices":  {t: p for t, p in passed},
-                    "price_min":    UNIVERSE_PRICE_MIN,
-                    "price_max":    UNIVERSE_PRICE_MAX,
-                },
-            )
+        # Lag A: universe-logging via den fælles BaseStrategy-metode (arvet).
+        # Samme data som før, men skrivningen lever ét sted for alle strategier.
+        await self.log_universe(
+            self.universe,
+            meta = {
+                "raw_count":   len(raw_tickers),
+                "open_prices": {t: p for t, p in passed},
+                "price_min":   UNIVERSE_PRICE_MIN,
+                "price_max":   UNIVERSE_PRICE_MAX,
+            },
+        )
 
         # ── Hent warmup-historie for hver ticker ──────────────
         config = VARIANTS[self._variant_key]
@@ -657,6 +672,30 @@ class ConfluenceLive(BaseStrategy):
                              f"✅ Handelsdagen afsluttet | "
                              f"P&L: ${self.total_pnl:+,.2f} | "
                              f"{len(self.trades)} handler ({wins}W/{losses}L)")
+
+                # Lag C: daglig diagnostik-opsummering via arvet metode.
+                _cond_names = ["trend(HTF)", "VWAP", "RSI", "higher-low", "candle", "volumen"]
+                _most_missing = None
+                if self._diag_scored_bars > 0:
+                    _idx = max(range(6), key=lambda i: self._diag_missing[i])
+                    _pct = round(self._diag_missing[_idx] / self._diag_scored_bars * 100, 1)
+                    _most_missing = f"{_cond_names[_idx]} (manglede i {_pct}% af scorede bars)"
+                _peak = max(self._diag_max_score.values()) if self._diag_max_score else None
+                await self.log_daily_summary({
+                    "universe_size":          len(self._diag_max_score),
+                    "evaluations":            self._diag_eval_count,
+                    "scored_bars":            self._diag_scored_bars,
+                    "entries":                self._diag_entries,
+                    "trades":                 len(self.trades),
+                    "total_pnl":              round(self.total_pnl, 2),
+                    "peak_score":             _peak,
+                    "max_score_per_ticker":   dict(self._diag_max_score),
+                    "most_missing_condition": _most_missing,
+                    "missing_by_condition":   {
+                        _cond_names[i]: self._diag_missing[i] for i in range(6)
+                    },
+                })
+
                 self.status = StrategyStatus.STOPPED
                 break
 
@@ -812,10 +851,36 @@ class ConfluenceLive(BaseStrategy):
                 await self._close(ticker, decision.exit_price, decision.reason)
             return
 
-        # ── Ingen position: tjek entry ────────────────────────
-        signal = self._strategy.entry.check_entry(ticker, new_bar, context)
-        if signal is not None:
-            await self._open(signal)
+        # ── Ingen position: vurdér entry ──────────────────────
+        # Kald evaluate() én gang. Ved signal genbruges resultatet i
+        # check_entry (intet dobbeltarbejde). Ved afvisning logges grunden
+        # via den arvede log_rejection_change (Lag B) — som kun skriver når
+        # begrundelsen har ÆNDRET sig siden sidste bar for denne ticker.
+        # Dette punkt nås kun ved NY bar (sikret af _last_bar_processed
+        # tidligere i _check_ticker), så afvisnings-logging sker ikke hver loop.
+        evaluation = self._strategy.entry.evaluate(ticker, new_bar, context)
+
+        # Lag C: opsaml diagnostik-statistik (ny-bar-evaluering)
+        self._diag_eval_count += 1
+        _score = evaluation.get("score")
+        _short = evaluation.get("short_form")
+        if _score is not None and _short is not None:
+            self._diag_scored_bars += 1
+            if ticker not in self._diag_max_score or _score > self._diag_max_score[ticker]:
+                self._diag_max_score[ticker] = _score
+            for _i, _ch in enumerate(_short):
+                if _ch == "·":
+                    self._diag_missing[_i] += 1
+
+        if evaluation["status"] == "signal":
+            signal = self._strategy.entry.check_entry(
+                ticker, new_bar, context, evaluation=evaluation
+            )
+            if signal is not None:
+                self._diag_entries += 1
+                await self._open(signal)
+        else:
+            await self.log_rejection_change(ticker, evaluation["reason"])
 
     async def _fetch_latest_bar(self, ticker: str) -> Optional[Bar]:
         """

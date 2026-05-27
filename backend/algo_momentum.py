@@ -69,6 +69,22 @@ MAX_CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 10
 MIN_UNIVERSE_SIZE   = 3
 
+# Lag C: rangordning af ORB-entry-tilstande (højere = tættere på entry).
+# Bruges til at aggregere hvor langt hver ticker nåede i breakout-sekvensen.
+_ORB_STATE_RANK = {
+
+    "waiting":           0,
+    "breakout_detected": 1,
+    "awaiting_retest":   2,
+    "done_for_day":      3,
+}
+_ORB_STATE_LABEL = {
+    "waiting":           "afventer breakout",
+    "breakout_detected": "breakout set, afventer pullback",
+    "awaiting_retest":   "afventer retest-bounce",
+    "done_for_day":      "færdig (handlet eller opgivet)",
+}
+
 # ── ORB universe-filter (matcher scanner_engine.py defaults) ─────
 # ORB er designet til small-cap momentum, derfor lavere pris-range
 # end Konfluens ($5-$50). Volume-grænse sikrer likviditet til breakouts.
@@ -128,6 +144,12 @@ class MomentumORB(BaseStrategy):
 
         self._position_size_pct: float = 1.0
         self._loop_task: Optional[asyncio.Task] = None
+
+        # Lag C-diagnostik: hvor langt hver ticker nåede i breakout-state-
+        # machinen i dag. ORB's svar på "hvorfor handlede den ikke".
+        self._diag_max_state:  dict[str, str] = {}
+        self._diag_eval_count: int = 0
+        self._diag_entries:    int = 0
 
     # -------------------------------------------------------------
     # BaseStrategy interface
@@ -298,14 +320,35 @@ class MomentumORB(BaseStrategy):
 
         if len(self.universe) < MIN_UNIVERSE_SIZE:
             self.universe = FALLBACK_UNIVERSE
+            used_fallback = True
             self._status("universe_ready",
                          f"Scanner tom — bruger fallback universe: {', '.join(self.universe[:6])}")
         else:
+            used_fallback = False
             self._status("universe_ready",
                          f"Universe klar ({len(self.universe)} aktier, "
                          f"${ORB_UNIVERSE_PRICE_MIN:.0f}-${ORB_UNIVERSE_PRICE_MAX:.0f}, "
                          f"vol >{ORB_UNIVERSE_MIN_VOLUME:,}, alle 3 grønne): "
                          f"{', '.join(self.universe[:25])}")
+
+        # Lag A: universe-logging via arvet BaseStrategy-metode.
+        await self.log_universe(
+            self.universe,
+            meta = {
+                "used_fallback": used_fallback,
+                "price_min":     ORB_UNIVERSE_PRICE_MIN,
+                "price_max":     ORB_UNIVERSE_PRICE_MAX,
+                "min_volume":    ORB_UNIVERSE_MIN_VOLUME,
+                "require_all_green": True,
+            },
+        )
+
+        # Lag C: nulstil dagens diagnostik ved dagsstart (så den ikke
+        # akkumulerer hvis instansen kører over flere dage).
+        self._diag_max_state.clear()
+        self._diag_eval_count = 0
+        self._diag_entries = 0
+        self.reset_diagnostics()   # nulstiller Lag B's "kun ændringer"-state
 
         await asyncio.sleep(1)
 
@@ -430,6 +473,28 @@ class MomentumORB(BaseStrategy):
                              f"✅ Handelsdagen afsluttet | "
                              f"P&L: ${self.total_pnl:+,.2f} | "
                              f"{len(self.trades)} handler ({wins}W/{losses}L)")
+
+                # Lag C: daglig diagnostik — hvor langt nåede universet i
+                # breakout-sekvensen? Via arvet log_daily_summary.
+                _dist = {"waiting": 0, "breakout_detected": 0,
+                         "awaiting_retest": 0, "done_for_day": 0}
+                for _st in self._diag_max_state.values():
+                    _dist[_st] = _dist.get(_st, 0) + 1
+                await self.log_daily_summary({
+                    "universe_size":  len(self._diag_max_state),
+                    "evaluations":    self._diag_eval_count,
+                    "entries":        self._diag_entries,
+                    "trades":         len(self.trades),
+                    "total_pnl":      round(self.total_pnl, 2),
+                    "max_state_distribution": {
+                        _ORB_STATE_LABEL[k]: _dist[k] for k in _dist
+                    },
+                    "max_state_per_ticker": {
+                        t: _ORB_STATE_LABEL.get(s, s)
+                        for t, s in self._diag_max_state.items()
+                    },
+                })
+
                 self.status = StrategyStatus.STOPPED
                 break
 
@@ -556,7 +621,24 @@ class MomentumORB(BaseStrategy):
             return
 
         signal = self._strategy.entry.check_entry(ticker, pseudo_bar, context)
+
+        # Lag B + C: aflæs tickerens tilstand EFTER check_entry (state-machinen
+        # kan have ændret den). Tilstanden ER ORB's afvisningsgrund.
+        self._diag_eval_count += 1
+        try:
+            state = self._strategy.entry.get_state(ticker)
+        except Exception:
+            state = None
+        if state is not None:
+            prev = self._diag_max_state.get(ticker)
+            if prev is None or _ORB_STATE_RANK.get(state, 0) > _ORB_STATE_RANK.get(prev, 0):
+                self._diag_max_state[ticker] = state
+            # Lag B: log tilstanden som afvisningsgrund (kun ved ændring)
+            label = _ORB_STATE_LABEL.get(state, state)
+            await self.log_rejection_change(ticker, f"tilstand: {label}")
+
         if signal is not None:
+            self._diag_entries += 1
             await self._open(signal)
 
     # -------------------------------------------------------------
