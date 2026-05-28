@@ -459,6 +459,65 @@ class BaseStrategy(ABC):
         except Exception as e:
             logger.error(f"[{self.name}] log_daily_summary fejlede: {e}")
 
+    async def log_bar_evaluation(
+        self,
+        ticker: str,
+        bar_time_et: str,
+        status: str,
+        score: Optional[int] = None,
+        short_form: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Lag B+: Log HVER bar-evaluering — ikke kun ændringer.
+
+        Dette er det granulære spor der gør det muligt bagefter at se
+        præcis hvad strategien så på et givet tidspunkt for en given
+        ticker (fx for at sammenligne med Pine-script entries).
+
+        Best-effort: må aldrig nedbryde handelsflowet.
+
+        OBS: Skriver ét event pr. ny bar pr. ticker. Ved fx 18 tickers og
+        ~72 bars/dag bliver det ~1300 events/dag. Det er håndterbart, men
+        hvis du vil skrue ned: log kun når score >= et minimum (se
+        BAR_EVAL_MIN_SCORE i Konfluens-kaldet).
+        """
+        if not self._journal:
+            return
+        try:
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "bar_evaluation",
+                payload    = {
+                    "ticker":      ticker,
+                    "bar_time_et": bar_time_et,
+                    "status":      status,
+                    "score":       score,
+                    "short_form":  short_form,
+                    "reason":      reason,
+                },
+                symbol     = ticker,
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] log_bar_evaluation fejlede: {e}")
+
+    async def log_heartbeat(self, snapshot: dict) -> None:
+        """Vej 1: Periodisk snapshot af kumulative diagnostik-tællere.
+
+        Skrives fx hvert 5. minut fra trading-loopet, så vi har data selv
+        hvis backenden crasher før dagsslut. Strategien afleverer selv
+        snapshot-dict (evaluations, scored_bars, entries, open_positions...).
+        """
+        if not self._journal:
+            return
+        try:
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "diagnostics_heartbeat",
+                payload    = snapshot or {},
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] log_heartbeat fejlede: {e}")
+
     def reset_diagnostics(self) -> None:
         """Nulstil Lag B-tilstand. Kaldes ved dagsstart / reset_daily."""
         self._last_rejection.clear()

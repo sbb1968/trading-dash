@@ -102,6 +102,14 @@ WARMUP_TRADING_DAYS = 20
 # kunne reagere hurtigt på exit-betingelser.
 LOOP_SLEEP_SECONDS = 30
 
+# Bar-evaluering logges for hver ny bar pr. ticker. Sæt til et tal 0-6 for
+# kun at logge bars med mindst den score (skruer ned på journal-volumen).
+# 0 = log ALT (mest data, bedst til at debugge "hvorfor ingen entry").
+BAR_EVAL_MIN_SCORE = 0
+
+# Heartbeat-interval i sekunder (Vej 1). 300 = hvert 5. minut.
+HEARTBEAT_INTERVAL_SEC = 300
+
 # Fallback (ikke brugt i normal drift — kun hvis scanner fejler komplet)
 FALLBACK_UNIVERSE: list[str] = []
 
@@ -649,89 +657,126 @@ class ConfluenceLive(BaseStrategy):
         """
         self._status("trading", "Overvåger markedet — venter på 5min bars...")
         consecutive_errors = 0
+        _shutdown_reason = "unknown"
+        _last_heartbeat = datetime.now(ET)   # til Vej 1 (se DEL 3)
 
-        while self.status == StrategyStatus.RUNNING:
-            now_et = datetime.now(ET)
-            t      = now_et.time()
+        try:
+            while self.status == StrategyStatus.RUNNING:
+                now_et = datetime.now(ET)
+                t      = now_et.time()
 
-            # Før session-start: vent
-            if t < SESSION_START:
-                self._status("orb_ready",
-                             f"Venter på handelsvindue — starter kl. {SESSION_START.strftime('%H:%M')} ET")
+                # Før session-start: vent
+                if t < SESSION_START:
+                    self._status("orb_ready",
+                                 f"Venter på handelsvindue — starter kl. {SESSION_START.strftime('%H:%M')} ET")
+                    await asyncio.sleep(LOOP_SLEEP_SECONDS)
+                    continue
+
+                # Efter session-slut: luk alle positioner og afslut dagen
+                if t >= MARKET_CLOSE:
+                    if self._positions:
+                        self._status("trading", "Markedet lukker — lukker alle positioner")
+                        await self._close_all("market_close 15:55")
+                    wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
+                    losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
+                    self._status("done",
+                                 f"✅ Handelsdagen afsluttet | "
+                                 f"P&L: ${self.total_pnl:+,.2f} | "
+                                 f"{len(self.trades)} handler ({wins}W/{losses}L)")
+
+                    await self._write_daily_diagnostics(reason="normal_close")
+
+                    self.status = StrategyStatus.STOPPED
+                    break
+
+                self._status("trading",
+                             f"Overvåger {len(self.universe)} aktier — "
+                             f"{now_et.strftime('%H:%M:%S')} ET | "
+                             f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
+
+                # Vej 1: periodisk heartbeat så diagnostik overlever crash.
+                if (now_et - _last_heartbeat).total_seconds() >= HEARTBEAT_INTERVAL_SEC:
+                    _last_heartbeat = now_et
+                    await self.log_heartbeat({
+                        "evaluations":    self._diag_eval_count,
+                        "scored_bars":    self._diag_scored_bars,
+                        "entries":        self._diag_entries,
+                        "open_positions": self.stats.open_positions,
+                        "universe_size":  len(self.universe),
+                    })
+
+                if self._position_size_pct == 0.0:
+                    self._status("orb_ready",
+                                 "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
+                    await asyncio.sleep(60)
+                    continue
+
+                try:
+                    for ticker in self.universe:
+                        if self.status != StrategyStatus.RUNNING:
+                            break
+                        await self._check_ticker(ticker)
+                    consecutive_errors = 0
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.exception(f"Fejl i handels-loop: {e}")
+                    if consecutive_errors >= 3:
+                        self._status("trading",
+                                     f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
+                        reconnected = await self._reconnect()
+                        if reconnected:
+                            consecutive_errors = 0
+                            self._status("trading", "✅ Genforbundet — fortsætter handel")
+                        else:
+                            self._status("error", "❌ Kunne ikke genforbinde — stopper")
+                            self.status = StrategyStatus.ERROR
+                            break
+
                 await asyncio.sleep(LOOP_SLEEP_SECONDS)
-                continue
 
-            # Efter session-slut: luk alle positioner og afslut dagen
-            if t >= MARKET_CLOSE:
-                if self._positions:
-                    self._status("trading", "Markedet lukker — lukker alle positioner")
-                    await self._close_all("market_close 15:55")
-                wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
-                losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
-                self._status("done",
-                             f"✅ Handelsdagen afsluttet | "
-                             f"P&L: ${self.total_pnl:+,.2f} | "
-                             f"{len(self.trades)} handler ({wins}W/{losses}L)")
+        except asyncio.CancelledError:
+            _shutdown_reason = "cancelled"
+            raise
+        except Exception as e:
+            _shutdown_reason = f"crash: {type(e).__name__}: {e}"
+            logger.exception("_trading_loop crashede")
+            raise
+        finally:
+            await self._write_daily_diagnostics(reason=_shutdown_reason)
 
-                # Lag C: daglig diagnostik-opsummering via arvet metode.
-                _cond_names = ["trend(HTF)", "VWAP", "RSI", "higher-low", "candle", "volumen"]
-                _most_missing = None
-                if self._diag_scored_bars > 0:
-                    _idx = max(range(6), key=lambda i: self._diag_missing[i])
-                    _pct = round(self._diag_missing[_idx] / self._diag_scored_bars * 100, 1)
-                    _most_missing = f"{_cond_names[_idx]} (manglede i {_pct}% af scorede bars)"
-                _peak = max(self._diag_max_score.values()) if self._diag_max_score else None
-                await self.log_daily_summary({
-                    "universe_size":          len(self._diag_max_score),
-                    "evaluations":            self._diag_eval_count,
-                    "scored_bars":            self._diag_scored_bars,
-                    "entries":                self._diag_entries,
-                    "trades":                 len(self.trades),
-                    "total_pnl":              round(self.total_pnl, 2),
-                    "peak_score":             _peak,
-                    "max_score_per_ticker":   dict(self._diag_max_score),
-                    "most_missing_condition": _most_missing,
-                    "missing_by_condition":   {
-                        _cond_names[i]: self._diag_missing[i] for i in range(6)
-                    },
-                })
-
-                self.status = StrategyStatus.STOPPED
-                break
-
-            self._status("trading",
-                         f"Overvåger {len(self.universe)} aktier — "
-                         f"{now_et.strftime('%H:%M:%S')} ET | "
-                         f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
-
-            if self._position_size_pct == 0.0:
-                self._status("orb_ready",
-                             "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
-                await asyncio.sleep(60)
-                continue
-
-            try:
-                for ticker in self.universe:
-                    if self.status != StrategyStatus.RUNNING:
-                        break
-                    await self._check_ticker(ticker)
-                consecutive_errors = 0
-            except Exception as e:
-                consecutive_errors += 1
-                logger.exception(f"Fejl i handels-loop: {e}")
-                if consecutive_errors >= 3:
-                    self._status("trading",
-                                 f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
-                    reconnected = await self._reconnect()
-                    if reconnected:
-                        consecutive_errors = 0
-                        self._status("trading", "✅ Genforbundet — fortsætter handel")
-                    else:
-                        self._status("error", "❌ Kunne ikke genforbinde — stopper")
-                        self.status = StrategyStatus.ERROR
-                        break
-
-            await asyncio.sleep(LOOP_SLEEP_SECONDS)
+    async def _write_daily_diagnostics(self, reason: str) -> None:
+        """Skriv daily_diagnostics. Kaldes ved pæn nedlukning OG fra
+        finally i _trading_loop, så diagnostik aldrig går tabt.
+        Idempotent — sidste skrivning vinder."""
+        try:
+            _cond_names = ["trend(HTF)", "VWAP", "RSI",
+                           "higher-low", "candle", "volumen"]
+            _most_missing = None
+            if self._diag_scored_bars > 0:
+                _idx = max(range(6), key=lambda i: self._diag_missing[i])
+                _pct = round(self._diag_missing[_idx]
+                             / self._diag_scored_bars * 100, 1)
+                _most_missing = (f"{_cond_names[_idx]} "
+                                 f"(manglede i {_pct}% af scorede bars)")
+            _peak = (max(self._diag_max_score.values())
+                     if self._diag_max_score else None)
+            await self.log_daily_summary({
+                "shutdown_reason":        reason,
+                "universe_size":          len(self._diag_max_score),
+                "evaluations":            self._diag_eval_count,
+                "scored_bars":            self._diag_scored_bars,
+                "entries":                self._diag_entries,
+                "trades":                 len(self.trades),
+                "total_pnl":              round(self.total_pnl, 2),
+                "peak_score":             _peak,
+                "max_score_per_ticker":   dict(self._diag_max_score),
+                "most_missing_condition": _most_missing,
+                "missing_by_condition":   {
+                    _cond_names[i]: self._diag_missing[i] for i in range(6)
+                },
+            })
+        except Exception as e:
+            logger.exception(f"Kunne ikke skrive daily_diagnostics: {e}")
 
     async def _reconnect(self) -> bool:
         for attempt in range(1, MAX_CONNECT_RETRIES + 1):
@@ -872,6 +917,20 @@ class ConfluenceLive(BaseStrategy):
                 if _ch == "·":
                     self._diag_missing[_i] += 1
 
+        # Lag B+: log DENNE bars evaluering (ikke kun ændringer). Det er
+        # sporet der lader os sammenligne med Pine bagefter.
+        _bar_et = new_bar.timestamp.astimezone(ET).strftime("%H:%M") \
+            if hasattr(new_bar.timestamp, "astimezone") else str(new_bar.timestamp)
+        if _score is None or _score >= BAR_EVAL_MIN_SCORE:
+            await self.log_bar_evaluation(
+                ticker      = ticker,
+                bar_time_et = _bar_et,
+                status      = evaluation["status"],
+                score       = _score,
+                short_form  = _short,
+                reason      = evaluation.get("reason"),
+            )
+
         if evaluation["status"] == "signal":
             signal = self._strategy.entry.check_entry(
                 ticker, new_bar, context, evaluation=evaluation
@@ -880,6 +939,8 @@ class ConfluenceLive(BaseStrategy):
                 self._diag_entries += 1
                 await self._open(signal)
         else:
+            # Beholdes: aggregeret "kun ændringer"-spor (Lag B) til hurtigt
+            # overblik. bar_evaluation ovenfor er det fulde granulære spor.
             await self.log_rejection_change(ticker, evaluation["reason"])
 
     async def _fetch_latest_bar(self, ticker: str) -> Optional[Bar]:
@@ -905,7 +966,7 @@ class ConfluenceLive(BaseStrategy):
 
         # Tag seneste bar — IBKR returnerer i kronologisk rækkefølge
         raw = bars[-1]
-        ts = raw.get("date") if isinstance(raw, dict) else raw.date
+        ts = raw.get("datetime") if isinstance(raw, dict) else raw.date
         if not isinstance(ts, datetime):
             return None
         if ts.tzinfo is None:
