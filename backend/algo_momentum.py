@@ -151,6 +151,11 @@ class MomentumORB(BaseStrategy):
         self._diag_eval_count: int = 0
         self._diag_entries:    int = 0
 
+        # B1: ny-bar-detektion (entry kører nu på rigtige 5min-bars).
+        # ticker → timestamp for sidst behandlede bar, så vi kun evaluerer
+        # entry ÉN gang pr. ny færdig bar (ikke hvert loop som med snapshots).
+        self._last_bar_processed: dict[str, datetime] = {}
+
     # -------------------------------------------------------------
     # BaseStrategy interface
     # -------------------------------------------------------------
@@ -391,7 +396,39 @@ class MomentumORB(BaseStrategy):
                 continue
 
             self._day_contexts[ticker] = context
+
+            # B1: forvarm RSI-closes med FLERE dages bars, så RSI(14) er
+            # "varm" allerede ved entry-vinduets start (09:45 ET).
+            # Verificeret (test_b1_rsi_warmup): kun dagens bars giver ~3
+            # closes ved 09:45 → RSI=50.0 (filter slukket). Flere dages
+            # bars giver 300+ closes → RSI varm og korrekt.
+            # Vi henter 5 D til warmup, men bruger KUN closes FØR dagens
+            # entry-vindue-start, så vi ikke "ser ind i fremtiden".
+            warmup_closes = []
+            try:
+                warmup_raw = await self.conn.get_historical_bars(
+                    ticker, duration="5 D", bar_size="5 mins", what_to_show="TRADES"
+                )
+                if warmup_raw:
+                    for wb in warmup_raw:
+                        wts = wb["datetime"]
+                        if not hasattr(wts, "time"):
+                            continue
+                        wts = wts if (getattr(wts, "tzinfo", None)) else ET.localize(wts)
+                        wts_et = wts.astimezone(ET)
+                        # Kun closes FØR dagens entry-start (undgå look-ahead)
+                        if wts_et.date() < today or (
+                            wts_et.date() == today and wts_et.time() < TRADE_START
+                        ):
+                            warmup_closes.append(float(wb["close"]))
+            except Exception as e:
+                logger.warning(f"  {ticker}: RSI-warmup-hentning fejlede: {e}")
+
+            # reset_for_day sætter _closes = prior_closes fra context; vi
+            # injicerer warmup-historikken via context så reset bruger den.
+            context["prior_closes"] = warmup_closes
             self._strategy.entry.reset_for_day(today, context)
+
             # Gem bar-history så forensics kan beregne indikatorer ved entry/exit
             self._bar_history[ticker] = list(bars)
             ok_count += 1
@@ -447,89 +484,164 @@ class MomentumORB(BaseStrategy):
     async def _trading_loop(self):
         self._status("trading", "Overvåger markedet — venter på breakouts...")
         consecutive_errors = 0
+        _shutdown_reason = "unknown"
+        _last_heartbeat = datetime.now(ET)
 
-        while self.status == StrategyStatus.RUNNING:
-            now_et = datetime.now(ET)
-            t      = now_et.time()
+        try:
+            while self.status == StrategyStatus.RUNNING:
+                now_et = datetime.now(ET)
+                t      = now_et.time()
 
-            if t < TRADE_START:
-                self._status("orb_ready", "Venter på handelsvindue — starter kl. 09:45 ET")
-                await asyncio.sleep(15)
-                continue
+                if t < TRADE_START:
+                    self._status("orb_ready", "Venter på handelsvindue — starter kl. 09:45 ET")
+                    await asyncio.sleep(15)
+                    continue
 
-            # Efter ENTRY_END (11:00 ET): stop nye entries, men lad
-            # eksisterende positioner køre videre til exit-regler triggrer
-            # eller markedet lukker (15:55 ET).
-            entries_allowed = t < ENTRY_END
+                # Efter ENTRY_END (11:00 ET): stop nye entries, men lad
+                # eksisterende positioner køre videre til exit-regler triggrer
+                # eller markedet lukker (15:55 ET).
+                entries_allowed = t < ENTRY_END
 
-            # Markedsluk — luk alle positioner som backup
-            if t >= MARKET_CLOSE:
-                if self._positions:
-                    self._status("trading", "Markedet lukker — lukker alle positioner")
-                    await self._close_all("market_close 15:55")
-                wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
-                losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
-                self._status("done",
-                             f"✅ Handelsdagen afsluttet | "
-                             f"P&L: ${self.total_pnl:+,.2f} | "
-                             f"{len(self.trades)} handler ({wins}W/{losses}L)")
+                # Markedsluk — luk alle positioner som backup
+                if t >= MARKET_CLOSE:
+                    if self._positions:
+                        self._status("trading", "Markedet lukker — lukker alle positioner")
+                        await self._close_all("market_close 15:55")
+                    wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
+                    losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
+                    self._status("done",
+                                 f"✅ Handelsdagen afsluttet | "
+                                 f"P&L: ${self.total_pnl:+,.2f} | "
+                                 f"{len(self.trades)} handler ({wins}W/{losses}L)")
 
-                # Lag C: daglig diagnostik — hvor langt nåede universet i
-                # breakout-sekvensen? Via arvet log_daily_summary.
-                _dist = {"waiting": 0, "breakout_detected": 0,
-                         "awaiting_retest": 0, "done_for_day": 0}
-                for _st in self._diag_max_state.values():
-                    _dist[_st] = _dist.get(_st, 0) + 1
-                await self.log_daily_summary({
-                    "universe_size":  len(self._diag_max_state),
-                    "evaluations":    self._diag_eval_count,
-                    "entries":        self._diag_entries,
-                    "trades":         len(self.trades),
-                    "total_pnl":      round(self.total_pnl, 2),
-                    "max_state_distribution": {
-                        _ORB_STATE_LABEL[k]: _dist[k] for k in _dist
-                    },
-                    "max_state_per_ticker": {
-                        t: _ORB_STATE_LABEL.get(s, s)
-                        for t, s in self._diag_max_state.items()
-                    },
-                })
+                    await self._write_daily_diagnostics(reason="normal_close")
 
-                self.status = StrategyStatus.STOPPED
-                break
+                    self.status = StrategyStatus.STOPPED
+                    break
 
-            self._status("trading",
-                         f"Overvåger {len(self.universe)} aktier — "
-                         f"{datetime.now(ET).strftime('%H:%M:%S')} ET")
+                self._status("trading",
+                             f"Overvåger {len(self.universe)} aktier — "
+                             f"{datetime.now(ET).strftime('%H:%M:%S')} ET")
 
-            if self._position_size_pct == 0.0:
-                self._status("orb_ready",
-                             "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
-                await asyncio.sleep(60)
-                continue
+                if (now_et - _last_heartbeat).total_seconds() >= 300:
+                    _last_heartbeat = now_et
+                    await self.log_heartbeat({
+                        "evaluations":    self._diag_eval_count,
+                        "entries":        self._diag_entries,
+                        "open_positions": self.stats.open_positions,
+                        "universe_size":  len(self.universe),
+                    })
 
-            try:
-                for ticker in self.universe:
-                    if self.status != StrategyStatus.RUNNING:
-                        break
-                    await self._check_ticker(ticker, entries_allowed)
-                consecutive_errors = 0
-            except Exception as e:
-                consecutive_errors += 1
-                logger.error(f"Fejl i handels-loop: {e}")
-                if consecutive_errors >= 3:
-                    self._status("trading",
-                                 f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
-                    reconnected = await self._reconnect()
-                    if reconnected:
-                        consecutive_errors = 0
-                        self._status("trading", "✅ Genforbundet — fortsætter handel")
-                    else:
-                        self._status("error", "❌ Kunne ikke genforbinde — stopper")
-                        self.status = StrategyStatus.ERROR
-                        break
+                if self._position_size_pct == 0.0:
+                    self._status("orb_ready",
+                                 "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
+                    await asyncio.sleep(60)
+                    continue
 
-            await asyncio.sleep(30)
+                try:
+                    for ticker in self.universe:
+                        if self.status != StrategyStatus.RUNNING:
+                            break
+                        await self._check_ticker(ticker, entries_allowed)
+                    consecutive_errors = 0
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.error(f"Fejl i handels-loop: {e}")
+                    if consecutive_errors >= 3:
+                        self._status("trading",
+                                     f"⚠ {consecutive_errors} fejl — forsøger genforbinding...")
+                        reconnected = await self._reconnect()
+                        if reconnected:
+                            consecutive_errors = 0
+                            self._status("trading", "✅ Genforbundet — fortsætter handel")
+                        else:
+                            self._status("error", "❌ Kunne ikke genforbinde — stopper")
+                            self.status = StrategyStatus.ERROR
+                            break
+
+                await asyncio.sleep(30)
+
+        except asyncio.CancelledError:
+            _shutdown_reason = "cancelled"
+            raise
+        except Exception as e:
+            _shutdown_reason = f"crash: {type(e).__name__}: {e}"
+            logger.exception("_trading_loop crashede")
+            raise
+        finally:
+            await self._write_daily_diagnostics(reason=_shutdown_reason)
+
+    async def _write_daily_diagnostics(self, reason: str) -> None:
+        """Skriv daily_diagnostics. Kaldes ved pæn nedlukning OG fra
+        finally i _trading_loop, så diagnostik aldrig går tabt — også
+        ved crash, cancellation eller UI-stop. Idempotent.
+
+        ORB's diagnostik er state-baseret: hvor langt hver ticker nåede
+        i breakout-state-machinen (waiting → breakout → retest → done).
+        Det er ORB's svar på 'hvorfor handlede den ikke'."""
+        try:
+            _dist = {"waiting": 0, "breakout_detected": 0,
+                     "awaiting_retest": 0, "done_for_day": 0}
+            for _st in self._diag_max_state.values():
+                _dist[_st] = _dist.get(_st, 0) + 1
+            await self.log_daily_summary({
+                "shutdown_reason": reason,
+                "universe_size":  len(self._diag_max_state),
+                "evaluations":    self._diag_eval_count,
+                "entries":        self._diag_entries,
+                "trades":         len(self.trades),
+                "total_pnl":      round(self.total_pnl, 2),
+                "max_state_distribution": {
+                    _ORB_STATE_LABEL[k]: _dist[k] for k in _dist
+                },
+                "max_state_per_ticker": {
+                    t: _ORB_STATE_LABEL.get(s, s)
+                    for t, s in self._diag_max_state.items()
+                },
+            })
+        except Exception as e:
+            logger.exception(f"Kunne ikke skrive daily_diagnostics: {e}")
+
+    async def _fetch_latest_bar(self, ticker: str) -> Optional[Bar]:
+        """Hent den seneste FÆRDIGE 5min-bar (B1 — samme mønster som
+        Konfluens). Returnerer Bar eller None.
+
+        Bruger 'datetime'-nøglen (IBKR-wrapperen returnerer dicts keyed
+        'datetime', ikke 'date')."""
+        try:
+            bars = await self.conn.get_historical_bars(
+                ticker,
+                duration="3600 S",
+                bar_size="5 mins",
+                what_to_show="TRADES",
+            )
+        except Exception as e:
+            logger.warning(f"  {ticker}: kunne ikke hente bar: {e}")
+            return None
+
+        if not bars:
+            return None
+
+        raw = bars[-1]
+        ts = raw.get("datetime") if isinstance(raw, dict) else raw.date
+        if not isinstance(ts, datetime):
+            return None
+        if ts.tzinfo is None:
+            ts = ET.localize(ts)
+        else:
+            ts = ts.astimezone(ET)
+
+        o = raw.get("open")   if isinstance(raw, dict) else raw.open
+        h = raw.get("high")   if isinstance(raw, dict) else raw.high
+        l = raw.get("low")    if isinstance(raw, dict) else raw.low
+        c = raw.get("close")  if isinstance(raw, dict) else raw.close
+        v = raw.get("volume") if isinstance(raw, dict) else raw.volume
+
+        return Bar(
+            timestamp=ts,
+            open=float(o), high=float(h), low=float(l), close=float(c),
+            volume=float(v) if v else 0.0,
+        )
 
     async def _reconnect(self) -> bool:
         for attempt in range(1, MAX_CONNECT_RETRIES + 1):
@@ -564,7 +676,6 @@ class MomentumORB(BaseStrategy):
             return
 
         price  = snap.get("last") or 0
-        volume = snap.get("volume") or 0
         if price <= 0:
             return
 
@@ -605,22 +716,29 @@ class MomentumORB(BaseStrategy):
                 await self._close(ticker, exit_decision.exit_price, exit_decision.reason)
             return
 
-        # ── Ingen position: konvertér snapshot til Bar og kald entry ──
-        # Vi laver en "pseudo-bar" baseret på snapshot — strategien forventer
-        # OHLC, men i live har vi kun last price. high=low=close=open=price.
-        # Entry-engine bruger primært close og volume.
-        pseudo_bar = Bar(
-            timestamp=now_et,
-            open=price, high=price, low=price, close=price,
-            volume=volume,
-        )
-
-        # Efter 10:30 ET er nye entries deaktiveret — kun eksisterende
+        # Efter ENTRY_END er nye entries deaktiveret — kun eksisterende
         # positioner får lov at fortsætte til exit-reglerne triggrer
         if not entries_allowed:
             return
 
-        signal = self._strategy.entry.check_entry(ticker, pseudo_bar, context)
+        # ── Ingen position: hent seneste FÆRDIGE 5min-bar og kald entry ──
+        # B1: vi bruger nu rigtige bars (ikke snapshot-pseudo-bar). Det giver
+        #   - korrekt bar-volumen til vol-filteret (snapshot.volume var
+        #     dagsakkumuleret → vol-filter var dødt)
+        #   - RSI på 5min-closes (matcher backtestens kadence)
+        # Exit-grenen ovenfor bruger STADIG snapshot-pris for hurtig
+        # stop/target-reaktion — kun entry er bar-baseret.
+        new_bar = await self._fetch_latest_bar(ticker)
+        if new_bar is None:
+            return
+
+        last = self._last_bar_processed.get(ticker)
+        if last is not None and new_bar.timestamp <= last:
+            # Allerede behandlet denne bar — vent på næste færdige bar
+            return
+        self._last_bar_processed[ticker] = new_bar.timestamp
+
+        signal = self._strategy.entry.check_entry(ticker, new_bar, context)
 
         # Lag B + C: aflæs tickerens tilstand EFTER check_entry (state-machinen
         # kan have ændret den). Tilstanden ER ORB's afvisningsgrund.
