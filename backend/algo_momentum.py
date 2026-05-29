@@ -190,16 +190,28 @@ class MomentumORB(BaseStrategy):
         if self._risk_manager:
             await self._risk_manager.update_nlv(balance)
 
+        # Datafeed-tjek med retry. IBKR returnerer sometimes tomt i de
+        # foerste minutter efter markedsaabning (TRADES-aggregation forsinkelse,
+        # API-throttle, eller TWS-sync). Tre forsoeg med 30 sek mellemrum
+        # giver datafeed tid til at komme i gang foer vi giver op.
         self._status("started", "Pre-flight: Tester datafeed (AAPL)...")
-        test_bars = await self.conn.get_historical_bars(
-            "AAPL", duration="1 D", bar_size="5 mins", what_to_show="TRADES"
-        )
-        if not test_bars:
+        test_bars = None
+        for attempt in range(1, 4):  # 3 forsoeg
             test_bars = await self.conn.get_historical_bars(
-                "AAPL", duration="1 D", bar_size="5 mins", what_to_show="MIDPOINT"
+                "AAPL", duration="1 D", bar_size="5 mins", what_to_show="TRADES"
             )
+            if not test_bars:
+                test_bars = await self.conn.get_historical_bars(
+                    "AAPL", duration="1 D", bar_size="5 mins", what_to_show="MIDPOINT"
+                )
+            if test_bars:
+                break  # virkede paa forsoeg attempt
+            if attempt < 3:
+                self._status("started",
+                    f"Pre-flight: Datafeed tom (forsoeg {attempt}/3), venter 30 sek...")
+                await asyncio.sleep(30)
         if not test_bars:
-            return False, "Kan ikke hente markedsdata"
+            return False, "Kan ikke hente markedsdata efter 3 forsoeg (90 sek)"
         checks.append(f"Datafeed virker — {len(test_bars)} bars")
 
         # ── Markedsoverblik ──────────────────────────────────
