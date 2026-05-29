@@ -13,7 +13,7 @@ specifikke krav:
     Derefter appender vi live bars til konteksten efterhånden som de
     færdiggøres.
 
-  - HELE DAGEN: Konfluens trigger fra 09:30 til 15:55 ET (ingen
+  - HELE DAGEN: Konfluens trigger fra 09:30 til 15:45 ET (ingen
     ENTRY_END som ORB har). Vi løber bar-loopet hele handelsdagen.
 
   - 5MIN BARS: Vi venter på færdige 5min bars (ikke snapshots).
@@ -84,8 +84,8 @@ ET = pytz.timezone("America/New_York")
 SESSION_START = dtime(*SESSION_START_HHMM)
 SESSION_END   = dtime(*SESSION_END_HHMM)
 
-# Force-close 5 min før session-slut (matcher MomentumORB og strategi-exit)
-MARKET_CLOSE = dtime(15, 55)
+# Force-close 15 min før session-slut (matcher MomentumORB og strategi-exit)
+MARKET_CLOSE = dtime(15, 45)
 
 # Genforbinding
 MAX_CONNECT_RETRIES = 3
@@ -676,7 +676,7 @@ class ConfluenceLive(BaseStrategy):
                 if t >= MARKET_CLOSE:
                     if self._positions:
                         self._status("trading", "Markedet lukker — lukker alle positioner")
-                        await self._close_all("market_close 15:55")
+                        await self._close_all("market_close 15:45")
                     wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
                     losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
                     self._status("done",

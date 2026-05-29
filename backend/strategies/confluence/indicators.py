@@ -448,8 +448,8 @@ def candle_features(open_: pd.Series, high: pd.Series, low: pd.Series,
     """
     body       = (close - open_).abs()
     range_bar  = high - low
-    upper_wick = high - close.combine(open_, max)
-    lower_wick = close.combine(open_, min) - low
+    upper_wick = high - np.maximum(close, open_)
+    lower_wick = np.minimum(close, open_) - low
 
     prev_open  = open_.shift(1)
     prev_close = close.shift(1)

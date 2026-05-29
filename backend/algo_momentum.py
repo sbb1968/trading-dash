@@ -37,7 +37,7 @@ from strategies.momentum_orb.exit import TRADE_END_TIME as TRADE_END
 from strategies.base import Bar
 
 # Cut-off for NYE entries — efter denne tid handler vi ikke længere på breakouts.
-# Eksisterende positioner fortsætter dog indtil TRADE_END (15:55 ET force-close)
+# Eksisterende positioner fortsætter dog indtil TRADE_END (15:45 ET force-close)
 # eller indtil stop/target/trail udløses.
 ENTRY_END = dtime(11, 0)
 
@@ -45,9 +45,9 @@ ENTRY_END = dtime(11, 0)
 from tape_buffer import TapeBuffer
 from trade_forensics import build_entry_snapshot, build_exit_snapshot
 
-# Markedet lukker kl. 16:00 ET — vi lukker positioner 5 min før så
+# Markedet lukker kl. 16:00 ET — vi lukker positioner 15 min før så
 # vi undgår closing auction-volatilitet
-MARKET_CLOSE = dtime(15, 55)
+MARKET_CLOSE = dtime(15, 45)
 
 
 logger = logging.getLogger(__name__)
@@ -499,14 +499,14 @@ class MomentumORB(BaseStrategy):
 
                 # Efter ENTRY_END (11:00 ET): stop nye entries, men lad
                 # eksisterende positioner køre videre til exit-regler triggrer
-                # eller markedet lukker (15:55 ET).
+                # eller markedet lukker (15:45 ET).
                 entries_allowed = t < ENTRY_END
 
                 # Markedsluk — luk alle positioner som backup
                 if t >= MARKET_CLOSE:
                     if self._positions:
                         self._status("trading", "Markedet lukker — lukker alle positioner")
-                        await self._close_all("market_close 15:55")
+                        await self._close_all("market_close 15:45")
                     wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
                     losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
                     self._status("done",

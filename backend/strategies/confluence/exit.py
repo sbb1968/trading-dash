@@ -67,8 +67,8 @@ from strategies.confluence.config import (
 # Konstanter
 # ─────────────────────────────────────────────────────────────────
 
-# Force-close 5 min før session-slut (15:55 ET) — matcher MomentumORB
-SESSION_FORCE_CLOSE = dtime(15, 55)
+# Force-close 15 min før session-slut (15:45 ET) — matcher MomentumORB
+SESSION_FORCE_CLOSE = dtime(15, 45)
 
 # Exit-reasons
 REASON_STOP         = "stop"
@@ -286,7 +286,7 @@ class ConfluenceExit:
         Tjek exit i backtest (OHLC-bar). Returnerer ExitDecision eller None.
 
         Rækkefølge (Pine-konvention):
-          1. Session force-close (15:55 ET) → bar.close
+          1. Session force-close (15:45 ET) → bar.close
           2. Stop / Trail-stop (bar.low ≤ current_stop) → current_stop
           3. Signal exit (3+/5 exit-bricks) → bar.close
 
@@ -303,7 +303,7 @@ class ConfluenceExit:
         if position.side != "long":
             raise NotImplementedError("Konfluens er long-only")
 
-        # 1. Force-close kl. 15:55 ET — alle long positioner lukkes
+        # 1. Force-close kl. 15:45 ET — alle long positioner lukkes
         if bar.time_et >= SESSION_FORCE_CLOSE:
             return ExitDecision(exit_price=bar.close, reason=REASON_SESSION_CLOSE)
 
