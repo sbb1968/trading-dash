@@ -140,6 +140,85 @@ i stedet — element-vis, robust mod NaN. Test-dækning blev tilføjet
 
 ---
 
+### 5. Tailscale-laget (multi-maskine, mobil-adgang)
+
+**Symptomer:**
+- Studio på mobil viser kun "Denne maskine" i peer-dropdown
+- "Backend ikke tilgængelig: [Maskine] svarer ikke (timeout)"
+- ERR_CONNECTION_TIMED_OUT når du prøver at nå en anden maskine via Tailscale-IP
+- Mobil-versionen viser gamle data efter en kode-ændring
+
+**Værktøjer:**
+- `tailscale ip -4` — viser maskinens Tailscale-IP (formatet 100.x.y.z)
+- `tailscale status` — viser alle maskiner i tailnettet
+- `netstat -ano | findstr :8000` — viser hvilken adresse backend lytter på
+- `Test-NetConnection [tailscale-ip] -Port 8000` — tester direkte connectivity
+
+**Fix-tjekliste:**
+
+1. **Backend skal lytte på 0.0.0.0, ikke 127.0.0.1**
+
+   Default uvicorn binder kun til localhost. For at andre maskiner og mobiler
+   kan nå backend, skal den startes med `--host 0.0.0.0`:
+
+   ```powershell
+   uvicorn main:app --host 0.0.0.0
+   ```
+
+   Verificér med `netstat -ano | findstr :8000`. Forventet:
+   ```
+   TCP    0.0.0.0:8000           0.0.0.0:0              LISTENING
+   ```
+
+   Hvis det viser `127.0.0.1:8000`, lytter backend kun lokalt. Stop og
+   genstart med `--host 0.0.0.0`-flag.
+
+2. **peers.json bør bruge Tailscale-IP'er, ikke hostnames**
+
+   Hostnames som `ibenspc` resolves ikke over Tailscale uden MagicDNS.
+   Brug Tailscale-IP'erne direkte:
+
+   ```json
+   {
+     "id": "iben-ws",
+     "name": "Iben Workstation",
+     "url": "http://100.84.58.39:8000",
+     "enabled": true
+   }
+   ```
+
+   Find IP'erne med `tailscale ip -4` på hver maskine.
+
+3. **Mobil-Chrome cacher aggressivt — hard refresh efter kode-ændringer**
+
+   Hvis Studio's UI ser forkert ud på mobilen efter en commit + pull,
+   er det sandsynligvis Chrome der viser cached HTML/JS. Fix:
+
+   - **Hurtigt:** Slet Chrome's site-data for Studio's adresse
+     (Chrome → Indstillinger → Site-indstillinger → Data fra hjemmesider)
+   - **Grundigt:** Slet ikonet fra hjemmeskærmen, slet cache, åbn Studio
+     igen via URL, tilføj nyt ikon
+
+**Konkret eksempel — dag 2 (29. maj 2026):**
+
+Efter commit af Studio's mobil-version oplevede vi to relaterede problemer:
+- Mobil-Chrome viste forældet version af Studio (cache)
+- "Iben Workstation svarer ikke" når peer-selector pegede på workstation
+
+Begge løst:
+- Cache: hard refresh på telefonen
+- Workstation utilgængelig: backend var startet uden `--host 0.0.0.0`,
+  så den lyttede kun på 127.0.0.1. Genstart med flagget løste det.
+
+**Vigtigt om binding og sikkerhed:**
+
+`--host 0.0.0.0` gør backend tilgængelig på alle netværks-interfaces, ikke
+kun Tailscale. Det inkluderer LAN'et. For et hjemmenetværk er det fint, men
+hvis du nogensinde kører backenden et offentligt sted (fx café-WiFi), skal
+du være opmærksom på at andre på samme netværk kan nå port 8000.
+Tailscale-VPN'en er stadig sikker; det ekstra eksponering er kun på det
+lokale netværk.
+
 ## Workflows
 
 ### "Algoritmen handlede ikke i dag — hvad gør jeg?"
