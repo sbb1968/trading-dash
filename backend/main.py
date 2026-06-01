@@ -382,26 +382,81 @@ async def start_finnhub_feed():
 # ── Shutdown ──────────────────────────────────────────────────
 @app.on_event("shutdown")
 async def shutdown():
-    """Ryd op pænt — stop scheduler, watchdog, algo og luk IBKR."""
+    """Ryd op pænt — stop scheduler, watchdog, ALLE strategier, baggrunds-
+    loops og luk IBKR. Uden at annullere baggrunds-loopsene (portfolio,
+    feed, finnhub) hænger uvicorn ved nedlukning, fordi de kører while True
+    og aldrig afslutter af sig selv."""
     print("[Server] Shutting down...")
 
     # 1. Stop scheduler først så ingen nye jobs starter
     if algo_scheduler:
-        await algo_scheduler.stop()
-        print("[Server] Scheduler stoppet")
+        try:
+            await algo_scheduler.stop()
+            print("[Server] Scheduler stoppet")
+        except Exception as e:
+            print(f"[Server] Fejl ved scheduler-stop: {e}")
 
     # 2. Stop watchdog så vi ikke får falske offline-alerts
     if tws_watchdog:
-        await tws_watchdog.stop()
-        print("[Server] Watchdog stoppet")
+        try:
+            await tws_watchdog.stop()
+            print("[Server] Watchdog stoppet")
+        except Exception as e:
+            print(f"[Server] Fejl ved watchdog-stop: {e}")
 
-    # 3. Stop kørende strategi pænt (lukker åbne positioner via on_stop)
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    if momentum and momentum.status == StrategyStatus.RUNNING:
-        await strategy_manager.stop_strategy("Momentum ORB", reason="Backend shutdown")
-        print("[Server] MomentumORB stoppet pænt")
+    # 3. Stop ALLE kørende strategier pænt (ikke kun Momentum ORB).
+    #    stop_strategy udløser on_stop → daily_diagnostics via try/finally.
+    for _name, _strat in list(strategy_manager._strategies.items()):
+        try:
+            if _strat.status == StrategyStatus.RUNNING:
+                await strategy_manager.stop_strategy(_name, reason="Backend shutdown")
+                print(f"[Server] {_name} stoppet pænt")
+        except Exception as e:
+            print(f"[Server] Fejl ved stop af {_name}: {e}")
 
-    # 4. Luk IBKR-forbindelse
+    # 4. Stop live_feed pænt (annullerer market-data subscriptions)
+    if live_feed is not None:
+        try:
+            await live_feed.stop()
+            print("[Server] Live feed stoppet")
+        except Exception as e:
+            print(f"[Server] Fejl ved live_feed-stop: {e}")
+
+    # 5. Annullér de gemte baggrunds-tasks (feed + finnhub)
+    for _task_name, _task in (("live_feed_task", live_feed_task),
+                              ("finnhub_feed_task", finnhub_feed_task)):
+        if _task is not None and not _task.done():
+            _task.cancel()
+            try:
+                await _task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"[Server] {_task_name} afsluttede med fejl: {e}")
+            print(f"[Server] {_task_name} annulleret")
+
+    # 6. Annullér KUN vores egne baggrunds-loops ved navn (portfolio_loop,
+    #    mock_data_loop). Vi maa IKKE feje alle tasks, for det rammer ogsaa
+    #    uvicorns egen lifespan-task og giver CancelledError-traceback.
+    #    Identificér ved coroutine-navn, spring shutdown selv over.
+    _OURS = {"portfolio_loop", "mock_data_loop"}
+    _current = asyncio.current_task()
+    _to_cancel = []
+    for _t in asyncio.all_tasks():
+        if _t is _current or _t.done():
+            continue
+        _coro = _t.get_coro()
+        _name = getattr(_coro, "__name__", None) or getattr(
+            getattr(_coro, "cr_code", None), "co_name", None)
+        if _name in _OURS:
+            _to_cancel.append(_t)
+    for _t in _to_cancel:
+        _t.cancel()
+    if _to_cancel:
+        await asyncio.gather(*_to_cancel, return_exceptions=True)
+        print(f"[Server] {len(_to_cancel)} egne baggrunds-loops annulleret")
+
+    # 7. Luk IBKR-forbindelse
     try:
         ibkr = strategy_manager.get_ibkr()
         if ibkr and ibkr.connected:
@@ -410,7 +465,7 @@ async def shutdown():
     except Exception as e:
         print(f"[Server] Fejl ved IBKR-disconnect: {e}")
 
-    # 5. Journal shutdown event (best effort)
+    # 8. Journal shutdown event (best effort)
     try:
         await journal.log_event(
             source     = "system",
