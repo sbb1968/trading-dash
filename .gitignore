@@ -93,6 +93,9 @@ backend/orders_log.json
 backend/data/ticker_names_cache.json
 backend/large_cap_universe.txt
 backend/universe.txt
+bar_cache/
+historical_universe_*.json
+diff_oversigt.txt
 
 # -- Lokale backup-filer ------------------------------------
 *.bak
