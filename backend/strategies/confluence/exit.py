@@ -96,6 +96,10 @@ class ConfluenceExitState:
     trail_stop:      Optional[float] = None
     trail_active:    bool            = False
     atr_at_entry:    float           = 0.0
+    # Hoejeste close set siden entry. Bruges kun af trail_type="Percent" til at
+    # beregne trail_stop = highest_close_since_entry * (1 - trail_percent).
+    # Andre trail-typer ignorerer den.
+    highest_close_since_entry: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -170,10 +174,13 @@ class ConfluenceExit:
         state = ConfluenceExitState(
             initial_stop=initial_stop,
             risk_per_share=risk_per_share,
-            current_stop=initial_stop,
+            current_stop=initial_stop,  # før trail aktiveres
             trail_stop=None,
             trail_active=False,
             atr_at_entry=atr_val,
+            # Initialiser med entry_price. Opdateres i update() naar nye close-priser
+            # kommer ind. Kun trail_type="Percent" bruger denne.
+            highest_close_since_entry=signal.entry_price,
         )
 
         return Position(
@@ -247,6 +254,12 @@ class ConfluenceExit:
             #  math.max() opad — så trail kan først løfte stop, aldrig sænke)
             state.trail_stop = state.initial_stop
 
+        # Opdater highest_close_since_entry uanset trail-status. Bruges af
+        # trail_type="Percent" naar trail aktiveres. Vi opdaterer her foer
+        # selve trail-checket saa det er klar.
+        if close > state.highest_close_since_entry:
+            state.highest_close_since_entry = close
+
         # ── Trail-vedligehold (kun hvis aktiv) ───────────────
         if state.trail_active:
             candidate = state.trail_stop  # fallback til nuværende
@@ -261,6 +274,12 @@ class ConfluenceExit:
                 if atr_val is not None and not pd.isna(atr_val):
                     atr_trail = close - config.trail_atr_mult * atr_val
                     candidate = max(state.trail_stop, atr_trail)
+            elif config.trail_type == "Percent":
+                # Stop = hoejeste close siden entry * (1 - trail_percent).
+                # Trailer aktivt med hoejeste sete close — ikke baseret paa
+                # swing lows eller indikatorer.
+                pct_trail = state.highest_close_since_entry * (1.0 - config.trail_percent)
+                candidate = max(state.trail_stop, pct_trail)
 
             # trailingStop ratcheter kun OPAD
             if candidate > state.trail_stop:

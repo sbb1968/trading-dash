@@ -88,8 +88,9 @@ class ConfluenceVariantConfig:
     atr_len:           int   = 14
     atr_sl_mult:       float = 1.2
     trail_activ_r:     float = 1.0       # Trail aktiveres ved +X R
-    trail_type:        str   = "Swing Low"
+    trail_type:        str   = "Swing Low"  # "Swing Low" | "EMA Fast" | "ATR" | "Percent"
     trail_atr_mult:    float = 1.5
+    trail_percent:     float = 0.12      # Kun brugt naar trail_type="Percent". 0.12 = 12%
 
     # ── RSI (exit) ─────────────────────────────────────────────
     rsi_overbought:    int   = 65
@@ -130,6 +131,26 @@ VARIANTS: dict[str, ConfluenceVariantConfig] = {
         atr_sl_mult=1.5,
         trail_type="ATR",
         trail_atr_mult=2.0,
+    ),
+    # Rene trail-varianter til sammenligning: identisk med baseline paa alt
+    # UNDTAGEN trail_type. Bruges til at maale effekten af trail-typen alene
+    # uden stoej fra andre parameter-forskelle.
+    "baseline_ema": ConfluenceVariantConfig(
+        name="Baseline + EMA Fast trail (kun trail aendret)",
+        trail_type="EMA Fast",
+    ),
+    "baseline_atr": ConfluenceVariantConfig(
+        name="Baseline + ATR trail 1.5x (kun trail aendret)",
+        trail_type="ATR",
+        trail_atr_mult=1.5,
+    ),
+    "percent": ConfluenceVariantConfig(
+        name="Percent trail (12% fra hoejeste close)",
+        # Alle andre defaults som baseline. Eneste forskel: trail-typen.
+        # Bruges til at sammenligne mod baseline (Swing Low) paa momentum
+        # spikes hvor swing-low trail er for konservativ.
+        trail_type="Percent",
+        trail_percent=0.12,
     ),
 }
 
