@@ -11,14 +11,18 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class RiskConfig:
-    daily_loss_limit:        float = 300.0     # $300 kombineret daglig grænse
-    max_total_exposure:      float = 20000.0   # Max $ samlet i markedet
-    max_total_positions:     int   = 6         # Max positioner på tværs
+    daily_loss_limit:        float = 300.0     # $300 kombineret daglig grænse (konto)
+    # PER-STRATEGI grænser — hver strategi opfører sig som om den var alene:
+    max_positions_per_strategy: int   = 3      # Max åbne positioner pr. strategi
+    max_exposure_per_strategy:  float = 20000.0  # Max $ i markedet pr. strategi
+    # KONTO-BAGSTOPPER — højt sat, så normal drift aldrig rammer det; fanger
+    # kun en strategi der er løbet løbsk:
+    max_total_exposure:      float = 200000.0  # Samlet loft på tværs (bagstopper)
+    max_total_positions:     int   = 50        # Samlet positionsloft (bagstopper)
     nlv_emergency_threshold: float = 5000.0    # Nødstop hvis NLV falder hertil
-    block_duplicate_tickers: bool  = True      # Forhindre samme ticker i 2 strategier
+    block_duplicate_tickers: bool  = False     # Strategier MÅ dele samme ticker
 
 
 @dataclass
@@ -53,7 +57,9 @@ class RiskManager:
         self._total_pnl_today:      float = 0.0
         self._exposure_by_strategy: dict[str, float] = {}
         self._total_exposure:       float = 0.0
-        self._open_tickers:         dict[str, str]   = {}  # ticker → strategy_name
+        # (strategy_name, ticker) → True. Nøglet på BEGGE, så samme ticker kan
+        # være åben i flere strategier samtidig uden at overskrive hinanden.
+        self._open_positions:       dict[tuple[str, str], bool] = {}
 
         self._approval_log:  list[ApprovalRecord]  = []
         self._rejection_log: list[RejectionRecord] = []
@@ -97,35 +103,50 @@ class RiskManager:
             return False, f"Daglig tab-grænse overskredet: ${self._total_pnl_today:.2f}"
 
         estimated_value = order.quantity * (order.limit_price or 10.0)
-        if self._total_exposure + estimated_value > self.config.max_total_exposure:
-            reason = (f"Max eksponering overskredet: "
-                      f"${self._total_exposure:.0f} + ${estimated_value:.0f} "
-                      f"> ${self.config.max_total_exposure:.0f}")
-            # Cooldown bruger en stabil kategori, ikke den fulde reason-streng
-            silent = (order.strategy_name, order.ticker, "max_exposure") in self._rejection_cooldown
+        strat = order.strategy_name
+
+        # ── PER-STRATEGI: positionsantal ──
+        strat_positions = sum(1 for (s, _t) in self._open_positions if s == strat)
+        if order.action == "BUY" and strat_positions >= self.config.max_positions_per_strategy:
+            reason = (f"{strat}: max positioner pr. strategi "
+                      f"({self.config.max_positions_per_strategy})")
+            silent = (strat, order.ticker, "max_pos_strat") in self._rejection_cooldown
+            await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_pos_strat")
+            return False, reason
+
+        # ── PER-STRATEGI: eksponering ──
+        strat_exposure = self._exposure_by_strategy.get(strat, 0.0)
+        if order.action == "BUY" and strat_exposure + estimated_value > self.config.max_exposure_per_strategy:
+            reason = (f"{strat}: max eksponering pr. strategi overskredet "
+                      f"(${strat_exposure:.0f} + ${estimated_value:.0f} "
+                      f"> ${self.config.max_exposure_per_strategy:.0f})")
+            silent = (strat, order.ticker, "max_exp_strat") in self._rejection_cooldown
+            await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_exp_strat")
+            return False, reason
+
+        # ── KONTO-BAGSTOPPER: samlet eksponering (højt sat) ──
+        if order.action == "BUY" and self._total_exposure + estimated_value > self.config.max_total_exposure:
+            reason = (f"KONTO-BAGSTOPPER: samlet eksponering overskredet "
+                      f"(${self._total_exposure:.0f} + ${estimated_value:.0f} "
+                      f"> ${self.config.max_total_exposure:.0f})")
+            silent = (strat, order.ticker, "max_exposure") in self._rejection_cooldown
             await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_exposure")
             return False, reason
 
-        if len(self._open_tickers) >= self.config.max_total_positions:
-            reason = f"Max antal positioner nået ({self.config.max_total_positions})"
-            silent = (order.strategy_name, order.ticker, "max_positions") in self._rejection_cooldown
+        # ── KONTO-BAGSTOPPER: samlet positionsantal (højt sat) ──
+        if order.action == "BUY" and len(self._open_positions) >= self.config.max_total_positions:
+            reason = f"KONTO-BAGSTOPPER: samlet positionsantal nået ({self.config.max_total_positions})"
+            silent = (strat, order.ticker, "max_positions") in self._rejection_cooldown
             await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="max_positions")
             return False, reason
 
-        if self.config.block_duplicate_tickers and order.action == "BUY":
-            if order.ticker in self._open_tickers:
-                existing = self._open_tickers[order.ticker]
-                if existing != order.strategy_name:
-                    reason = f"{order.ticker} er allerede åben i strategi '{existing}'"
-                    silent = (order.strategy_name, order.ticker, "duplicate_ticker") in self._rejection_cooldown
-                    await self._log_rejection(timestamp, order, reason, silent=silent, cooldown_key="duplicate_ticker")
-                    return False, reason
+        # duplicate-ticker-blokering er bevidst FJERNET: strategier må dele ticker.
 
         if order.action == "BUY":
-            self._open_tickers[order.ticker] = order.strategy_name
+            self._open_positions[(strat, order.ticker)] = True
             self._total_exposure += estimated_value
-            self._exposure_by_strategy[order.strategy_name] = (
-                self._exposure_by_strategy.get(order.strategy_name, 0) + estimated_value
+            self._exposure_by_strategy[strat] = (
+                self._exposure_by_strategy.get(strat, 0) + estimated_value
             )
 
         record = ApprovalRecord(
@@ -159,8 +180,9 @@ class RiskManager:
             await self._trigger_daily_limit_stop()
 
     def release_exposure(self, strategy_name: str, ticker: str, estimated_value: float) -> None:
-        if ticker in self._open_tickers:
-            del self._open_tickers[ticker]
+        key = (strategy_name, ticker)
+        if key in self._open_positions:
+            del self._open_positions[key]
         self._total_exposure = max(0, self._total_exposure - estimated_value)
         if strategy_name in self._exposure_by_strategy:
             self._exposure_by_strategy[strategy_name] = max(
@@ -238,7 +260,7 @@ class RiskManager:
     def reset_daily(self) -> None:
         self._pnl_by_strategy.clear()
         self._total_pnl_today = 0.0
-        self._open_tickers.clear()
+        self._open_positions.clear()
         self._exposure_by_strategy.clear()
         self._total_exposure   = 0.0
         self._daily_limit_hit  = False
@@ -261,7 +283,7 @@ class RiskManager:
             "emergency_active":   self._emergency_active,
             "total_exposure":     round(self._total_exposure, 2),
             "max_total_exposure": self.config.max_total_exposure,
-            "open_tickers":       dict(self._open_tickers),
+            "open_positions":     [f"{s}:{t}" for (s, t) in self._open_positions],
             "pnl_by_strategy":    {k: round(v, 2) for k, v in self._pnl_by_strategy.items()},
             "current_nlv":        round(self._current_nlv, 2),
             "nlv_threshold":      self.config.nlv_emergency_threshold,
