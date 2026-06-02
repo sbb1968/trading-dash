@@ -247,6 +247,15 @@ class MomentumORB(BaseStrategy):
         variant = VARIANTS[self._variant_key]
         self._status("started",
                      f"Algoritme starter — variant: {variant.name}")
+
+        # ── Reconciliation: ryd forældreløse positioner FØR vi handler ──
+        # Hvis en tidligere session efterlod positioner i IBKR (genstart,
+        # tabt forbindelse, eller en lukkeordre der aldrig fyldte), kender
+        # strategien dem ikke — de er uovervågede og uden stop. Vi flader
+        # dem ud og retter journalen, så vi aldrig bærer spøgelseshandler
+        # mellem dagene.
+        await self._reconcile_orphans()
+
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
 
@@ -258,6 +267,124 @@ class MomentumORB(BaseStrategy):
             self._loop_task.cancel()
         if self._positions:
             await self._close_all("strategi stoppet")
+
+    async def _reconcile_orphans(self) -> None:
+        """Luk gamle åbne IBKR-positioner ved opstart og ret journalen.
+
+        En gammel åben position er en position IBKR holder, men som
+        strategien ikke har i self._positions (typisk efter en genstart
+        eller en lukkeordre der aldrig fyldte). Da ORB er intradag og lukker
+        alt samme dag (force-close 15:55 ET), må intet bæres mellem dagene —
+        så vi lukker dem og bogfører resultatet ærligt.
+
+        Forudsætning: denne IBKR-konto bruges KUN af denne strategi (ingen
+        manuel handel, ingen anden strategi på samme konto). Holder det ikke,
+        så indsæt en guard der kun flader tickers med journal-spor fra os.
+
+        Kører best-effort: en fejl her må ikke blokere dagens handel.
+        """
+        if self.conn is None or not self.conn.connected:
+            self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
+            return
+
+        try:
+            positions = self.conn.get_positions()
+        except Exception as e:
+            logger.error(f"[{self.name}] reconciliation: kunne ikke hente IBKR-positioner: {e}")
+            return
+
+        # Ved opstart er self._positions tom, så alt med antal != 0 er
+        # pr. definition uovervåget.
+        orphans = [p for p in positions if p.get("position") and abs(p["position"]) > 0]
+        if not orphans:
+            return
+
+        from trade_queries import list_trades
+
+        flattened = 0
+        for p in orphans:
+            ticker = (p.get("ticker") or "").upper()
+            qty    = p["position"]
+            avg    = p.get("avg_cost") or 0.0
+            shares = int(abs(qty))
+            if shares <= 0:
+                continue
+
+            # Long (qty>0) lukkes med SELL; short (qty<0) med BUY-to-cover.
+            action = "SELL" if qty > 0 else "BUY"
+            result = await self.conn.place_paper_order(ticker, action, shares)
+            if not result:
+                logger.error(
+                    f"[{self.name}] reconciliation: kunne IKKE lukke {ticker} "
+                    f"({action} {shares}) — forbindelse nede? Springer over."
+                )
+                self._status("started", f"⚠ Reconciliation: {ticker} kunne ikke lukkes")
+                continue
+
+            fill       = result.get("avg_fill")
+            exit_price = fill if (fill and fill > 0) else avg
+            now_et     = datetime.now(ET)
+            side       = "long" if qty > 0 else "short"
+            sign       = 1 if side == "long" else -1
+
+            # Find en åben journal-row for denne ticker fra os selv.
+            open_rows = []
+            try:
+                if self._journal:
+                    open_rows = await list_trades(
+                        self._journal.db, status="open",
+                        source=self.name, symbol=ticker,
+                    )
+            except Exception as e:
+                logger.error(f"[{self.name}] reconciliation: list_trades({ticker}) fejlede: {e}")
+
+            if open_rows:
+                # ÅBEN_REEL: luk den eksisterende åbne row med den faktiske fill.
+                for row in open_rows:
+                    tid = row.get("trade_id")
+                    if tid and self._journal:
+                        entry = row.get("entry_price", exit_price)
+                        await self._journal.log_trade_close(
+                            trade_id    = tid,
+                            exit_price  = exit_price,
+                            exit_time   = now_et,
+                            exit_reason = "reconcile_flatten",
+                            pnl         = (exit_price - entry) * shares * sign,
+                        )
+            elif self._journal:
+                # USPORET (fx tidligere fantom-lukket): opret en reconcile-
+                # handel så den reelle afvikling fanges i journalen.
+                tid = await self._journal.log_trade_open(
+                    source         = self.name,
+                    symbol         = ticker,
+                    side           = side,
+                    shares         = shares,
+                    entry_price    = avg,
+                    entry_time     = now_et,
+                    variant        = VARIANTS[self._variant_key].name,
+                    entry_reason   = "reconcile: gammel åben IBKR-position fundet ved opstart",
+                    current_stop   = avg,
+                    current_target = None,
+                    current_stage  = "reconcile",
+                )
+                if tid:
+                    await self._journal.log_trade_close(
+                        trade_id    = tid,
+                        exit_price  = exit_price,
+                        exit_time   = now_et,
+                        exit_reason = "reconcile_flatten",
+                        pnl         = (exit_price - avg) * shares * sign,
+                    )
+
+            flattened += 1
+            logger.info(
+                f"[{self.name}] reconciliation: Lukket gammel åben position {ticker} "
+                f"({action} {shares} @ ${exit_price:.2f})"
+            )
+
+        if flattened:
+            self._status("started",
+                         f"Reconciliation: {flattened} Gammel/Gamle position(er) er lukket")
 
     # -------------------------------------------------------------
     # Status broadcast
@@ -919,17 +1046,39 @@ class MomentumORB(BaseStrategy):
         if ticker not in self._positions:
             return
 
+        position = self._positions[ticker]
+        shares   = position.shares
+        side     = position.side
+
+        # ── Send luknings-ordren FØR vi bogfører noget ──────────────────
+        # place_paper_order returnerer None hvis ordren IKKE kunne sendes
+        # (forbindelse nede, timeout, fejl). Tidligere bogførte vi alligevel
+        # en journal-close — typisk flad på entry-pris ved stop med en
+        # døende forbindelse — mens IBKR beholdt positionen. Det skabte
+        # spøgelseshandler mellem dagene. Nu lader vi positionen blive åben
+        # og bogfører INTET, så on_start-reconciliation rydder op næste gang.
+        close_action = "SELL" if side == "long" else "BUY"
+        close_result = await self.conn.place_paper_order(ticker, close_action, shares)
+        if not close_result:
+            logger.error(
+                f"[{self.name}] _close({ticker}): {close_action}-ordre kunne IKKE "
+                f"sendes — beholder position åben, ingen journal-close"
+            )
+            self._status("trading",
+                         f"⚠ {ticker}: lukkeordre ikke sendt — position forbliver åben")
+            return
+
+        # Ordren er sendt. Brug den faktiske fill-pris hvis IBKR gav en.
+        fill = close_result.get("avg_fill")
+        if fill and fill > 0:
+            price = fill
+
+        # Nu er det sikkert at fjerne positionen og bogføre.
         position = self._positions.pop(ticker)
         pos_data = self._position_data.pop(ticker, None)
 
-        shares = position.shares
-        side   = position.side
-        pnl    = self.record_position_closed(ticker, price)
+        pnl = self.record_position_closed(ticker, price)
         self.total_pnl += pnl
-
-        # Long lukkes med SELL. Short lukkes med BUY (buy-to-cover).
-        close_action = "SELL" if side == "long" else "BUY"
-        close_result = await self.conn.place_paper_order(ticker, close_action, shares)
 
         # Registrer luknings-ordren hos OrdersTracker
         try:
