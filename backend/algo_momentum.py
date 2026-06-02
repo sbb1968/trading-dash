@@ -508,6 +508,15 @@ class MomentumORB(BaseStrategy):
             raw_bars = await self.conn.get_historical_bars(
                 ticker, duration="1 D", bar_size="5 mins", what_to_show="TRADES"
             )
+            # MIDPOINT-fallback: TRADES returnerer tomt omkring/uden for
+            # handelstid og tidligt på dagen (samme aggregations-forsinkelse
+            # som pre-flight håndterer). Uden fallback fejler kontekst-bygning
+            # for ALLE tickers → orb_highs tom → ingen handler. Spejler
+            # pre-flightens TRADES→MIDPOINT-mønster, så live er konsistent.
+            if not raw_bars:
+                raw_bars = await self.conn.get_historical_bars(
+                    ticker, duration="1 D", bar_size="5 mins", what_to_show="MIDPOINT"
+                )
             if not raw_bars:
                 fail_tickers.append(ticker)
                 continue
@@ -548,6 +557,10 @@ class MomentumORB(BaseStrategy):
                 warmup_raw = await self.conn.get_historical_bars(
                     ticker, duration="5 D", bar_size="5 mins", what_to_show="TRADES"
                 )
+                if not warmup_raw:
+                    warmup_raw = await self.conn.get_historical_bars(
+                        ticker, duration="5 D", bar_size="5 mins", what_to_show="MIDPOINT"
+                    )
                 if warmup_raw:
                     for wb in warmup_raw:
                         wts = wb["datetime"]
