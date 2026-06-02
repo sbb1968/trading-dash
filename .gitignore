@@ -107,4 +107,8 @@ backend/studio/dev_config.js
 # Codebase-generator (lokalt værktøj)
 update_knowledge.py
 backend/update_knowledge.py
-codebase.md
+codebase.mdbackend/baseline_dag1.txt
+backend/baseline_foer.txt
+backend/historical_universe_*.json
+backend/bar_cache/
+backend/data/backtest_confluence2_*.csv
