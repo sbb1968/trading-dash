@@ -1,0 +1,70 @@
+# Konfluens 2 — sådan virker strategien
+
+Konfluens 2 er en momentum-strategi der handler på 1-minuts candles på
+amerikanske small-cap aktier. Den blev bygget efter erfaringerne med den
+oprindelige Konfluens-strategi, som ventede på flere bagudskuende bekræftelser
+og derfor ofte handlede *efter* en bevægelse allerede var sket. Konfluens 2
+reagerer i stedet på selve impulsen i realtid.
+
+## Idéen i én sætning
+
+Når en aktie pludselig viser et kraftigt købspres — stor volumen, stor
+prisbevægelse og en stærk grøn candle — på samme minut, så er der ofte mere
+bevægelse på vej de næste minutter. Konfluens 2 fanger den impuls og holder
+positionen indtil momentum vender.
+
+## Hvornår køber den
+
+En handel kræver to ting på samme afsluttede 1-minuts candle:
+
+Først to obligatoriske impuls-tegn: usædvanligt høj volumen i forhold til både
+forrige candle og det seneste gennemsnit, og en stor, stærk grøn candle (stor
+krop, lukker højt i sit eget interval). Det er selve impulsen.
+
+Dernæst mindst nogle af fire kontekst-betingelser, der bekræfter at impulsen
+sker i et fornuftigt miljø: at prisen ikke allerede er løbet alt for langt fra
+sit gennemsnit, at den bryder forrige candles top, at momentum (RSI) er i et
+sundt interval, og at den brede trend ikke er imod.
+
+Når impulsen og nok kontekst er til stede, køber strategien ved candlens
+lukkekurs.
+
+## Hvornår sælger den
+
+Konfluens 2 kører i den validerede variant "impulse-low". Den sælger i to
+tilfælde: hvis prisen falder under bunden af den candle der udløste købet
+(det er strategiens stop — bevægelsen fejlede), eller ved dagens lukning, hvor
+alle positioner lukkes så intet bæres natten over.
+
+Det betyder at strategien tager mange små, kontrollerede tab på de impulser der
+ikke fortsætter, og til gengæld lader de få vindere løbe gennem dagen. Det er
+dér gevinsten kommer fra: et mindre antal handler der løber langt, som mere end
+opvejer de mange små stop-tab.
+
+## Hvor mange penge per handel
+
+Positionsstørrelsen beregnes ud fra risiko: omkring 1 % af kapitalen sættes på
+spil per handel, målt som afstanden fra købskurs ned til stoppet. Det betyder at
+en handel med et tæt stop får flere aktier end en med et fjernt stop, så hver
+handel risikerer nogenlunde det samme beløb. Strategien holder højst tre
+positioner åbne samtidig.
+
+## Hvad vi ved om den
+
+Konfluens 2 er testet grundigt på historiske data over to måneder (april og maj
+2026). Den viste en ægte fordel der overlevede realistiske handelsomkostninger,
+positionsbegrænsninger og test på data den aldrig var tilpasset. Resultaterne
+var stabile på tværs af begge måneder med begrænsede kursudsving undervejs.
+
+Men: backtest er ikke det samme som live handel. Strategien er endnu ikke bevist
+under rigtige markedsforhold med en live scanner, og begge testmåneder var
+relativt gunstige for momentum. Derfor kører Konfluens 2 udelukkende paper
+trading indtil den har vist sig konsistent over en længere periode med blandede
+markedsforhold. Først derefter overvejes rigtige penge.
+
+## Kort sagt
+
+Konfluens 2 fanger pludselige købsimpulser på 1-minuts candles, risikostyrer
+hver handel til omkring 1 % af kapitalen, tager hurtige små tab når impulsen
+fejler, og lader vinderne løbe til dagens slutning. Den er valideret på
+historiske data men er stadig i paper-test-fasen.

@@ -107,6 +107,7 @@ interface ManagerStatusMsg {
 const STRATEGY_DOCS_KEYS: Record<string, string> = {
   "Momentum ORB": "momentum_orb",
   "Konfluens":    "confluence",
+  "Konfluens 2":  "confluence2",
 };
 
 // ── Hjælpere ──────────────────────────────────────────────────
@@ -472,7 +473,8 @@ export function LiveAlgo() {
       setStatus(msg.status);
       setMessage(msg.message);
       setTotalPnl(msg.total_pnl);
-      const stratPrefix = msg.strategy === "Konfluens" ? "[KONF] " :
+      const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
+                          msg.strategy === "Konfluens" ? "[KONF] " :
                           msg.strategy === "Momentum ORB" ? "[ORB] " : "";
       addLog(`[${msg.time}] ${stratPrefix}${msg.message}`);
       if (msg.status === "universe_ready" && msg.message.includes(":")) {
@@ -481,7 +483,8 @@ export function LiveAlgo() {
       }
     } else if (msg.type === "algo_trade") {
       // Strategi-prefix til log (KONF eller ORB) hvis strategy er sat
-      const stratPrefix = msg.strategy === "Konfluens" ? "[KONF] " :
+      const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
+                          msg.strategy === "Konfluens" ? "[KONF] " :
                           msg.strategy === "Momentum ORB" ? "[ORB] " : "";
       // Konfluens-specifikt: vis bricks/score hvis tilgængelige
       const bricksTag = msg.bricks ? `  [${msg.bricks}]` : "";

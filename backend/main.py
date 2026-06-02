@@ -313,6 +313,20 @@ async def startup():
         confluence._broadcast_fn = broadcast_algo_sync
         print(f"[Server] Konfluens registreret — capital per handel: ${confluence_config.max_position_size:.0f}")
 
+        # ── Registrér Konfluens 2 (1-min impuls) parallelt ──────
+        from algo_confluence2 import Confluence2Live
+
+        confluence2_config = StrategyConfig(
+            max_loss_per_trade  = 150.0,
+            max_daily_loss      = 250.0,
+            max_open_positions  = 3,
+            max_position_size   = 2500.0,
+        )
+        confluence2 = Confluence2Live(strategy_manager.get_ibkr(), config=confluence2_config)
+        strategy_manager.register(confluence2)
+        confluence2._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] Konfluens 2 registreret — capital per handel: ${confluence2_config.max_position_size:.0f}")
+
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
     asyncio.create_task(start_finnhub_feed())

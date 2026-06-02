@@ -97,9 +97,11 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
     ),
 }
 
-# Hvilken variant er "live"? INGEN endnu — K2 er uvalideret.
-# Sættes først efter en bred backtest har vist en vinder.
-LIVE_VARIANT_KEY = "D_target_2r"
+# Live-variant: A_impulse_low. Valgt efter validering på maj (in-sample,
+# portefølje-PF 2,85/3,01) OG april (out-of-sample, PF 1,83/1,69), begge med
+# lav drawdown og robust på tværs af fifo/priority signalvalg. De øvrige
+# varianter (B/C/D) overlevede ikke slippage + positions-loft og er kun ref.
+LIVE_VARIANT_KEY = "A_impulse_low"
 
 # ── Strategi-konstanter (ikke variant-specifikke) ─────────────
 SESSION_START_HHMM = (9, 30)
