@@ -312,7 +312,7 @@ class MomentumORB(BaseStrategy):
 
             # Long (qty>0) lukkes med SELL; short (qty<0) med BUY-to-cover.
             action = "SELL" if qty > 0 else "BUY"
-            result = await self.conn.place_paper_order(ticker, action, shares)
+            result = await self.conn.place_paper_order(ticker, action, shares, source=self.name)
             if not result:
                 logger.error(
                     f"[{self.name}] reconciliation: kunne IKKE lukke {ticker} "
@@ -945,7 +945,7 @@ class MomentumORB(BaseStrategy):
             if not approved:
                 return
 
-        result = await self.conn.place_paper_order(signal.ticker, action, shares)
+        result = await self.conn.place_paper_order(signal.ticker, action, shares, source=self.name)
         if not result:
             return
 
@@ -1071,7 +1071,7 @@ class MomentumORB(BaseStrategy):
         # spøgelseshandler mellem dagene. Nu lader vi positionen blive åben
         # og bogfører INTET, så on_start-reconciliation rydder op næste gang.
         close_action = "SELL" if side == "long" else "BUY"
-        close_result = await self.conn.place_paper_order(ticker, close_action, shares)
+        close_result = await self.conn.place_paper_order(ticker, close_action, shares, source=self.name)
         if not close_result:
             logger.error(
                 f"[{self.name}] _close({ticker}): {close_action}-ordre kunne IKKE "

@@ -334,7 +334,7 @@ class ConfluenceLive(BaseStrategy):
 
             # Long (qty>0) lukkes med SELL; short (qty<0) med BUY-to-cover.
             action = "SELL" if qty > 0 else "BUY"
-            result = await self.conn.place_paper_order(ticker, action, shares)
+            result = await self.conn.place_paper_order(ticker, action, shares, source=self.name)
             if not result:
                 logger.error(
                     f"[Konfluens] reconciliation: kunne IKKE flade {ticker} "
@@ -1151,7 +1151,7 @@ class ConfluenceLive(BaseStrategy):
             if not approved:
                 return
 
-        result = await self.conn.place_paper_order(signal.ticker, "BUY", shares)
+        result = await self.conn.place_paper_order(signal.ticker, "BUY", shares, source=self.name)
         if not result:
             return
 
@@ -1285,7 +1285,7 @@ class ConfluenceLive(BaseStrategy):
         # døende forbindelse — mens IBKR beholdt positionen. Det skabte
         # spøgelseshandler mellem dagene. Nu lader vi positionen blive åben
         # og bogfører INTET, så on_start-reconciliation rydder op næste gang.
-        close_result = await self.conn.place_paper_order(ticker, "SELL", shares)
+        close_result = await self.conn.place_paper_order(ticker, "SELL", shares, source=self.name)
         if not close_result:
             logger.error(
                 f"[Konfluens] _close({ticker}): SELL-ordre kunne IKKE sendes "
