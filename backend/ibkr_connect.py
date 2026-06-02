@@ -272,8 +272,14 @@ class IBKRConnection:
         quantity:    float,
         order_type:  str   = "MKT",
         limit_price: float = 0,
+        source:      str   = "",
     ) -> Optional[dict]:
-        """Sender en ordre til paper trading kontoen."""
+        """Sender en ordre til paper trading kontoen.
+
+        source: strateginavn (fx "Momentum ORB"). Saettes som orderRef paa
+        ordren, saa fills og ordrehistorik kan spores tilbage til den strategi
+        der sendte ordren — afgoerende naar flere strategier deler samme konto.
+        """
         if not self.connected:
             return None
         if not self.paper:
@@ -289,17 +295,20 @@ class IBKRConnection:
             )
             order = MarketOrder(action, quantity) if order_type == "MKT" \
                     else LimitOrder(action, quantity, limit_price)
+            if source:
+                order.orderRef = source
             trade = self.ib.placeOrder(contract, order)
             await asyncio.sleep(1)
             return {
-                "ticker":   ticker,
-                "action":   action,
-                "quantity": quantity,
-                "order_id": trade.order.orderId,
-                "status":   trade.orderStatus.status,
-                "filled":   trade.orderStatus.filled,
-                "avg_fill": trade.orderStatus.avgFillPrice,
-            }
+                "ticker":    ticker,
+                "action":    action,
+                "quantity":  quantity,
+                "order_id":  trade.order.orderId,
+                "order_ref": trade.order.orderRef,
+                "status":    trade.orderStatus.status,
+                "filled":    trade.orderStatus.filled,
+                "avg_fill":  trade.orderStatus.avgFillPrice,
+            } 
         except asyncio.TimeoutError:
             logger.error(
                 f"Ordre TIMEOUT {ticker} — kontrakt-kvalificering svarede "
