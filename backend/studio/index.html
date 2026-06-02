@@ -1111,6 +1111,29 @@
                 font-weight: 500;
             }
 
+            /* Nye felter: tickerline med pills, pris-linje, højre-kolonne */
+            .mobile-pos-left, .mobile-trade-left { min-width: 0; flex: 1; }
+            .mobile-pos-right, .mobile-trade-right { text-align: right; flex-shrink: 0; padding-left: 10px; }
+            .mobile-pos-tickerline {
+                display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            }
+            .mobile-pos-tickerline .pill { font-size: 10px; padding: 2px 7px; }
+            .mobile-pos-prices {
+                display: flex; gap: 12px; font-size: 11px; color: #a0a0a0; margin-top: 4px;
+            }
+            .mobile-pos-last { color: #ffd23f; font-weight: 700; }
+            .mobile-pos-sell { color: #e0e0e0; font-weight: 600; }
+            .mobile-pos-pct.positive { color: #5ee99a; }
+            .mobile-pos-pct.negative { color: #ff8a8a; }
+            .mobile-pos-pct.muted    { color: #a0a0a0; }
+            .mobile-trade-pct {
+                font-size: 11px; font-weight: 600; margin-top: 2px;
+                font-variant-numeric: tabular-nums;
+            }
+            .mobile-trade-pct.positive { color: #5ee99a; }
+            .mobile-trade-pct.negative { color: #ff8a8a; }
+            .mobile-trade-pct.muted    { color: #a0a0a0; }
+
             /* Mobil trade-liste: lukkede handler */
             .mobile-trade-card {
                 display: flex;
@@ -1778,6 +1801,17 @@
         // (CSS media query @media max-width:768px styrer visning)
         // ═══════════════════════════════════════════════════════════════
         function renderOversigtMobile(today, open, snap, dateLabel) {
+            // Lokale pill-hjælpere (renderOversigt's egne er ikke i scope her)
+            const sourcePill = (source) => {
+                if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
+                if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
+                return `<span class="pill" style="background:#333;color:#aaa;">${source || "—"}</span>`;
+            };
+            const sidePill = (side) => side === "long"
+                ? `<span class="pill pill-long">Long</span>`
+                : `<span class="pill pill-short">Short</span>`;
+
             const summary = today.summary || {};
             const totalPnl    = summary.total_pnl   || 0;
             const tradesCount = summary.count       || 0;
@@ -1809,55 +1843,102 @@
                             : posCount === 1 ? "1 åben"
                             : `${posCount} åbne`;
 
-            // ── Åbne positioner med live P&L ─────────────────
-            const positions = (hasSnap && snap.positions) ? snap.positions : [];
-            const positionCards = positions.length === 0
+            // ── Åbne positioner ──────────────────────────────
+            // Struktur (strategi, retning, antal, købstid, entry, total købspris)
+            // kommer fra journalen (open.positions). KUN aktuel pris + urealiseret
+            // P&L flettes ind fra snapshot — det eneste live-tal journalen ikke har.
+            const snapByTicker = {};
+            if (hasSnap && snap.positions) {
+                for (const sp of snap.positions) {
+                    if (sp.ticker) snapByTicker[sp.ticker.toUpperCase()] = sp;
+                }
+            }
+            const journalOpen = (open && open.positions) ? open.positions : [];
+            const sortedOpen = [...journalOpen].sort((a, b) =>
+                (b.entry_time_et || "").localeCompare(a.entry_time_et || ""));
+
+            const positionCards = sortedOpen.length === 0
                 ? `<div class="empty" style="padding:16px; font-size:13px;">Ingen åbne positioner</div>`
-                : positions.map(p => {
-                    const pnl = p.pnl;
-                    const pnlClass = pnl == null ? "muted"
-                                   : pnl > 0 ? "positive"
-                                   : pnl < 0 ? "negative" : "muted";
-                    const cardClass = pnl == null ? ""
-                                    : pnl > 0 ? "win"
-                                    : pnl < 0 ? "loss" : "";
-                    const sideLabel = p.position > 0 ? "Long" : (p.position < 0 ? "Short" : "—");
-                    const qty = Math.abs(p.position);
-                    const pctText = p.pnl_pct != null
-                        ? `${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct.toFixed(2)}%`
-                        : "—";
+                : sortedOpen.map(p => {
+                    const sym       = (p.symbol || "").toUpperCase();
+                    const live      = snapByTicker[sym] || null;
+                    const lastPrice = live && live.last_price != null ? live.last_price : null;
+                    const unrPnl    = live && live.pnl     != null ? live.pnl     : null;
+                    const unrPct    = live && live.pnl_pct != null ? live.pnl_pct : null;
+                    const totalCost = (p.entry_price != null && p.shares != null)
+                        ? p.entry_price * p.shares : null;
+
+                    const pnlClass = unrPnl == null ? "muted"
+                                   : unrPnl > 0 ? "positive"
+                                   : unrPnl < 0 ? "negative" : "muted";
+                    const cardClass = unrPnl == null ? ""
+                                    : unrPnl > 0 ? "win"
+                                    : unrPnl < 0 ? "loss" : "";
+                    const entryTime = p.entry_time_et
+                        ? p.entry_time_et.substring(11, 16) + " ET" : "—";
+                    const pctText = unrPct != null
+                        ? `${unrPct >= 0 ? "+" : ""}${unrPct.toFixed(2)}%` : "—";
+
                     return `
                         <div class="mobile-pos-card ${cardClass}">
-                            <div>
-                                <div class="mobile-pos-ticker">${p.ticker}</div>
-                                <div class="mobile-pos-meta">${sideLabel} · ${qty} stk @ ${fmtMoney(p.avg_cost)}</div>
+                            <div class="mobile-pos-left">
+                                <div class="mobile-pos-tickerline">
+                                    <span class="mobile-pos-ticker">${sym}</span>
+                                    ${sourcePill(p.source)}
+                                    ${sidePill(p.side)}
+                                </div>
+                                <div class="mobile-pos-meta">${entryTime} · ${p.shares} stk</div>
+                                <div class="mobile-pos-prices">
+                                    <span>Køb ${totalCost != null ? fmtMoney(totalCost) : "—"}</span>
+                                    <span class="mobile-pos-last">Nu ${lastPrice != null ? fmtMoney(lastPrice) : "—"}</span>
+                                </div>
                             </div>
-                            <div>
-                                <div class="mobile-pos-pnl ${pnlClass}">${pnl != null ? fmtMoneySigned(pnl) : "—"}</div>
-                                <div class="mobile-pos-pct">${pctText}</div>
+                            <div class="mobile-pos-right">
+                                <div class="mobile-pos-pnl ${pnlClass}">${unrPnl != null ? fmtMoneySigned(unrPnl) : "—"}</div>
+                                <div class="mobile-pos-pct ${pnlClass}">${pctText}</div>
                             </div>
                         </div>
                     `;
                 }).join("");
 
-            // ── Nyeste 5 lukkede handler ─────────────────────
-            const tradeCards = recentTrades.length === 0
+            // ── Seneste handler ──────────────────────────────
+            // Alle felter fra journalen. Sorteret nyest SOLGTE først.
+            const closedSorted = [...closedTrades].sort((a, b) =>
+                (b.exit_time_et || "").localeCompare(a.exit_time_et || ""));
+            const recent = closedSorted.slice(0, 8);
+
+            const tradeCards = recent.length === 0
                 ? `<div class="empty" style="padding:16px; font-size:13px;">Ingen lukkede handler i dag</div>`
-                : recentTrades.map(t => {
+                : recent.map(t => {
                     const pnlClass = t.pnl > 0 ? "positive"
                                    : t.pnl < 0 ? "negative" : "muted";
                     const cardClass = t.pnl > 0 ? "win"
                                     : t.pnl < 0 ? "loss" : "";
-                    const exitTime = t.exit_time_et
-                        ? t.exit_time_et.substring(11, 16) + " ET"
-                        : "—";
+                    const entryTime = t.entry_time_et
+                        ? t.entry_time_et.substring(11, 16) : "—";
+                    const exitTime  = t.exit_time_et
+                        ? t.exit_time_et.substring(11, 16) + " ET" : "—";
+                    const pctText = t.pnl_pct != null
+                        ? `${t.pnl_pct >= 0 ? "+" : ""}${t.pnl_pct.toFixed(2)}%` : "—";
+
                     return `
                         <div class="mobile-trade-card ${cardClass}">
                             <div class="mobile-trade-left">
-                                <div class="mobile-trade-ticker">${t.symbol}</div>
-                                <div class="mobile-trade-time">${exitTime} · ${t.exit_reason || "—"}</div>
+                                <div class="mobile-pos-tickerline">
+                                    <span class="mobile-trade-ticker">${t.symbol}</span>
+                                    ${sourcePill(t.source)}
+                                    ${sidePill(t.side)}
+                                </div>
+                                <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk</div>
+                                <div class="mobile-pos-prices">
+                                    <span>Køb ${fmtMoney(t.entry_price)}</span>
+                                    <span class="mobile-pos-sell">Salg ${t.exit_price != null ? fmtMoney(t.exit_price) : "—"}</span>
+                                </div>
                             </div>
-                            <div class="mobile-trade-pnl ${pnlClass}">${fmtMoneySigned(t.pnl)}</div>
+                            <div class="mobile-trade-right">
+                                <div class="mobile-trade-pnl ${pnlClass}">${fmtMoneySigned(t.pnl)}</div>
+                                <div class="mobile-trade-pct ${pnlClass}">${pctText}</div>
+                            </div>
                         </div>
                     `;
                 }).join("");
@@ -1881,15 +1962,15 @@
                         </div>
                     </div>
 
-                    <div class="section-title">Åbne positioner (${positions.length})</div>
+                    <div class="section-title">Åbne positioner (${sortedOpen.length})</div>
                     <div class="mobile-pos-list">
                         ${positionCards}
                     </div>
 
-                    ${recentTrades.length > 0 ? `
-                        <div class="section-title" style="margin-top:18px;">Seneste handler</div>
+                    <div class="section-title" style="margin-top:18px;">Seneste handler</div>
+                    <div class="mobile-pos-list">
                         ${tradeCards}
-                    ` : ""}
+                    </div>
 
                     <div style="text-align:center; color:#888; font-size:11px; margin-top:18px;">
                         Auto-opdaterer hver 10s · <a href="javascript:loadOversigtData()" style="color:#5ab0ff;">Opdater nu</a>
