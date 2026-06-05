@@ -715,6 +715,12 @@
             border: 1px solid rgba(196, 132, 252, 0.4);
         }
 
+        .pill-konfl2 {
+            background: rgba(45, 212, 191, 0.18);
+            color: #5eead4;
+            border: 1px solid rgba(45, 212, 191, 0.4);
+        }
+
         .pill-manuel {
             background: rgba(251, 146, 60, 0.18);
             color: #fdba74;
@@ -1045,7 +1051,7 @@
                 border: 1px solid #333;
             }
             .mobile-hero-label {
-                font-size: 11px;
+                font-size: 13px;
                 text-transform: uppercase;
                 letter-spacing: 0.6px;
                 color: #c5c5c5;
@@ -1062,7 +1068,7 @@
             .mobile-hero-value.negative { color: #ff8a8a; }
             .mobile-hero-value.muted    { color: #888; }
             .mobile-hero-meta {
-                font-size: 11px;
+                font-size: 13px;
                 color: #a0a0a0;
                 margin-top: 4px;
             }
@@ -1091,7 +1097,7 @@
                 color: #fff;
             }
             .mobile-pos-meta {
-                font-size: 11px;
+                font-size: 13px;
                 color: #a0a0a0;
                 margin-top: 2px;
             }
@@ -1105,7 +1111,7 @@
             .mobile-pos-pnl.negative { color: #ff8a8a; }
             .mobile-pos-pnl.muted    { color: #a0a0a0; }
             .mobile-pos-pct {
-                font-size: 11px;
+                font-size: 13px;
                 color: #a0a0a0;
                 margin-top: 2px;
                 font-weight: 500;
@@ -1117,9 +1123,9 @@
             .mobile-pos-tickerline {
                 display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
             }
-            .mobile-pos-tickerline .pill { font-size: 10px; padding: 2px 7px; }
+            .mobile-pos-tickerline .pill { font-size: 12px; padding: 2px 7px; }
             .mobile-pos-prices {
-                display: flex; gap: 12px; font-size: 11px; color: #a0a0a0; margin-top: 4px;
+                display: flex; gap: 12px; font-size: 13px; color: #a0a0a0; margin-top: 4px;
             }
             .mobile-pos-last { color: #ffd23f; font-weight: 700; }
             .mobile-pos-sell { color: #e0e0e0; font-weight: 600; }
@@ -1127,7 +1133,7 @@
             .mobile-pos-pct.negative { color: #ff8a8a; }
             .mobile-pos-pct.muted    { color: #a0a0a0; }
             .mobile-trade-pct {
-                font-size: 11px; font-weight: 600; margin-top: 2px;
+                font-size: 13px; font-weight: 600; margin-top: 2px;
                 font-variant-numeric: tabular-nums;
             }
             .mobile-trade-pct.positive { color: #5ee99a; }
@@ -1158,7 +1164,7 @@
                 color: #fff;
             }
             .mobile-trade-time {
-                font-size: 11px;
+                font-size: 13px;
                 color: #888;
             }
             .mobile-trade-pnl {
@@ -1615,6 +1621,7 @@
             const sourcePill = (source) => {
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -1638,8 +1645,16 @@
             }) : "i dag";
 
             // ── Åbne positioner-tabel ────────────────────────
+            // Urealiseret P&L pr. position hentes fra live-snapshot (snap),
+            // præcis som mobil-versionen — journalen selv har ikke live-tallet.
+            const snapByTicker = {};
+            if (snap && snap.ok && snap.positions) {
+                for (const sp of snap.positions) {
+                    if (sp.ticker) snapByTicker[sp.ticker.toUpperCase()] = sp;
+                }
+            }
             const openRows = openPositions.length === 0
-                ? `<tr><td colspan="7" class="empty">Ingen åbne positioner</td></tr>`
+                ? `<tr><td colspan="8" class="empty">Ingen åbne positioner</td></tr>`
                 : openPositions.map(p => {
                     const stage = p.current_stage || "—";
                     const targetCell = p.current_stage === "trailing"
@@ -1650,6 +1665,11 @@
                     const entryTime = p.entry_time_et
                         ? p.entry_time_et.substring(11, 16) + " ET"
                         : "—";
+                    const live   = snapByTicker[(p.symbol || "").toUpperCase()] || null;
+                    const unrPnl = live && live.pnl != null ? live.pnl : null;
+                    const pnlCell = unrPnl != null
+                        ? `<span class="${cls(unrPnl)}" style="font-weight:700;">${fmtMoneySigned(unrPnl)}</span>`
+                        : `<span class="muted">—</span>`;
                     return `
                         <tr class="row-open">
                             <td>${entryTime}</td>
@@ -1659,6 +1679,7 @@
                             <td class="num">${fmtMoney(p.entry_price)}</td>
                             <td class="num">${p.current_stop != null ? fmtMoney(p.current_stop) : "—"}</td>
                             <td class="num">${targetCell}</td>
+                            <td class="num">${pnlCell}</td>
                         </tr>
                     `;
                 }).join("");
@@ -1761,6 +1782,7 @@
                                 <th style="text-align:right;">Entry</th>
                                 <th style="text-align:right;">Stop</th>
                                 <th style="text-align:right;">Target / Trail</th>
+                                <th style="text-align:right;">P&L</th>
                             </tr>
                         </thead>
                         <tbody>${openRows}</tbody>
@@ -1805,6 +1827,7 @@
             const sourcePill = (source) => {
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source || "—"}</span>`;
             };
@@ -1887,9 +1910,9 @@
                                     ${sourcePill(p.source)}
                                     ${sidePill(p.side)}
                                 </div>
-                                <div class="mobile-pos-meta">${entryTime} · ${p.shares} stk</div>
+                                <div class="mobile-pos-meta">${entryTime} · ${p.shares} stk · ${totalCost != null ? fmtMoney(totalCost) : "—"}</div>
                                 <div class="mobile-pos-prices">
-                                    <span>Køb ${totalCost != null ? fmtMoney(totalCost) : "—"}</span>
+                                    <span>Køb ${p.entry_price != null ? fmtMoney(p.entry_price) : "—"}</span>
                                     <span class="mobile-pos-last">Nu ${lastPrice != null ? fmtMoney(lastPrice) : "—"}</span>
                                 </div>
                             </div>
@@ -1972,7 +1995,7 @@
                         ${tradeCards}
                     </div>
 
-                    <div style="text-align:center; color:#888; font-size:11px; margin-top:18px;">
+                    <div style="text-align:center; color:#888; font-size:13px; margin-top:18px;">
                         Auto-opdaterer hver 10s · <a href="javascript:loadOversigtData()" style="color:#5ab0ff;">Opdater nu</a>
                     </div>
                 </div>
@@ -2153,6 +2176,7 @@
             const sourcePill = (source) => {
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2336,6 +2360,7 @@
             const sourceBadge = (src) => {
                 if (src === "Momentum ORB") return `<span class="pill pill-orb">Momentum ORB</span>`;
                 if (src === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+                if (src === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
             };
@@ -2752,6 +2777,7 @@
         const STRATEGY_META = {
             "Momentum ORB": { docs: "momentum_orb", pill: "pill-orb" },
             "Konfluens":    { docs: "confluence",   pill: "pill-konfl" },
+            "Konfluens 2":  { docs: "confluence2",  pill: "pill-konfl2" },
         };
 
         function renderStrategies(data) {
