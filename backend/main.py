@@ -291,7 +291,7 @@ async def startup():
             max_loss_per_trade  = 100.0,
             max_daily_loss      = 150.0,
             max_open_positions  = 3,
-            max_position_size   = 2500.0,    # Capital per handel
+            max_position_size   = 1000.0,    # Capital per handel
         )
         momentum = MomentumORB(strategy_manager.get_ibkr(), config=momentum_config)
         strategy_manager.register(momentum)
@@ -306,7 +306,7 @@ async def startup():
             max_loss_per_trade  = 150.0,     # Lidt løsere end ORB
             max_daily_loss      = 250.0,
             max_open_positions  = 3,
-            max_position_size   = 2500.0,    # Samme kapital pr. trade som ORB
+            max_position_size   = 1000.0,    # Samme kapital pr. trade som ORB
         )
         confluence = ConfluenceLive(strategy_manager.get_ibkr(), config=confluence_config)
         strategy_manager.register(confluence)
@@ -320,7 +320,7 @@ async def startup():
             max_loss_per_trade  = 150.0,
             max_daily_loss      = 250.0,
             max_open_positions  = 3,
-            max_position_size   = 2500.0,
+            max_position_size   = 1000.0,
         )
         confluence2 = Confluence2Live(strategy_manager.get_ibkr(), config=confluence2_config)
         strategy_manager.register(confluence2)
@@ -670,7 +670,7 @@ async def websocket_algo(websocket: WebSocket):
     # LiveAlgo.tsx vil modtage flere algo_status-beskeder; hver med 'strategy'-felt
     # så frontenden kan adskille dem. Bagudkompatibilitet: hvis ingen ekstra
     # strategier er registreret, sender vi som før (uden strategy-felt).
-    for strat_name in ("Momentum ORB", "Konfluens"):
+    for strat_name in ("Momentum ORB", "Konfluens", "Konfluens 2"):
         strat = strategy_manager._strategies.get(strat_name)
         if strat and strat.status == StrategyStatus.RUNNING:
             status  = "trading"
