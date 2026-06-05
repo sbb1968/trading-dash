@@ -1,35 +1,45 @@
 """
 backtest_confluence.py
 ──────────────────────
-Backtest-motor for Konfluens-strategien.
+Backtest-motor for Konfluens-strategien (K1) — opgraderet til K2-niveau, så
+K1 kan valideres med SAMME metodologi som backtest_confluence2.py:
 
-Henter top-gainer-univers fra IBKR scanner (TOP_PERC_GAIN, STK.US.MAJOR)
-ved hvert backtest-løb. Henter historiske 5min bars fra IBKR for hver
-ticker over en valgt periode, kører strategien gennem precompute + bar-loop,
-og udskriver komplet resultat-tabel.
+  - Point-in-time univers-fil (--universe file) — ingen survivorship/look-ahead
+  - ALLE varianter i én kørsel (uden --variant) eller én fokuseret (--variant X)
+  - Bar-cache på disk (5-min) så gentagne kørsler er øjeblikkelige
+  - Slippage-følsom omkostningsmodel (IBKR Pro Fixed $0,005/aktie + 0¢/1¢/2¢)
+  - Portefølje-simulation (1% risk/equity, max 3 samtidige) — samme som K2
 
-DATO-FILTER (matcher Pine scriptets useStartDate/useEndDate):
-  --date 2026-05-15
-      Backtest kun den ene dag (matcher din TradingView-test af fredag).
-  --start 2026-05-13 --end 2026-05-17
-      Backtest et vindue.
-  Uden flag: sidste handelsdag (typisk fredag hvis kørt mandag morgen).
+METODOLOGI (matcher K2):
+  Raw-trades sizes med FAST notional ($2.500) og bærer BRUTTO-P&L; omkostninger
+  og slippage lægges på i stats()/trade_cost() på tabel-tid. Risk-sizing (1% af
+  løbende equity / R) sker KUN i portefølje-sim'en, hvor R = entry − stop_price.
+  K1's stop_price er det INITIELLE ATR-stop fra exit-engine (state.initial_stop),
+  veldefineret for alle 6 varianter.
 
-UNIVERSE:
-  --top-n 6
-      Tag top 6 gainers (matcher din manuelle 6-aktier-test).
-  --tickers AAPL,NVDA,TSLA
-      Override scanner — brug eksplicit liste.
+  VIGTIGT — afsluttede bars: Backtesten evaluerer på AFSLUTTEDE 5-min bars (den
+  korrekte model). Den laves IKKE om til intra-bar.
+
+UNIVERS-MODES:
+  --universe scanner  (DEFAULT) — top-N gainers fra TradingView screener, anvendt
+                      på hver handelsdag i [start,end]. Bevarer dagens adfærd.
+  --universe tickers --tickers AAPL,NVDA  — eksplicit liste på hver dag i vinduet
+  --universe file --universe-file historical_universe_2026-05-01_2026-05-29.json
+                      — point-in-time per-dag univers (samme filer som K2 brugte)
+  --universe journal  — det faktiske daglige univers fra journalen (source=Konfluens)
+
+DATO-FILTER:
+  --date 2026-05-15            én dag
+  --start 2026-04-01 --end 2026-04-30   vindue (for file/journal: filtrerer dage)
+  Uden flag: sidste handelsdag (kun relevant for scanner/tickers).
 
 EKSEMPLER:
-  # Reproducer TradingView-test af 15. maj:
-  python backtest_confluence.py --date 2026-05-15 --top-n 6 --variant baseline
-
-  # Bredere historik:
-  python backtest_confluence.py --start 2026-04-01 --end 2026-05-17 --top-n 10
-
-  # Test specifikke aktier:
-  python backtest_confluence.py --date 2026-05-15 --tickers AAPL,NVDA,TSLA,AMD,META,GOOGL
+  # Maj in-sample, alle varianter:
+  python backtest_confluence.py --universe file --universe-file historical_universe_2026-05-01_2026-05-29.json
+  # April out-of-sample, kun baseline:
+  python backtest_confluence.py --universe file --universe-file historical_universe_2026-04-01_2026-04-30.json --variant baseline
+  # Scanner-mode (som før), én dag:
+  python backtest_confluence.py --date 2026-05-15 --top-n 6
 
 KRÆVER:
   - TWS oppe på port 7497 (paper trading)
@@ -43,10 +53,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import csv
+import csv as _csv
+import json
 import logging
+import sqlite3
 import sys
-from dataclasses import asdict
 from datetime import datetime, timedelta, time as dtime, date as date_cls
 from pathlib import Path
 from typing import Optional
@@ -89,23 +100,27 @@ IBKR_PORT       = 7497   # Paper trading
 IBKR_CLIENT_ID  = 12     # Anden end live algo (10) og fetch_universe (11)
 CONNECT_TIMEOUT = 15
 
-# Default capital til R-beregning (matcher Pine's initial_capital=10000)
-INITIAL_CAPITAL = 10_000.0
-
-# Warmup-vindue: antal handelsdage HISTORIK at hente FØR target-perioden.
-# Pine's HTF EMA(50) på 15min kræver ~50 × 15min = 12.5 timer = ~2 handelsdage,
-# men for at matche Pine fuldt ud (hvor scriptet har set hele charts historie)
-# vil vi have en pæn buffer. 20 handelsdage = ~4 uger giver:
-#   - HTF EMA(50) fuldt warmed up
-#   - RSI / ATR / vol_ma (alle ≤20 perioder) konvergeret
-#   - Pivot/swing-state opbygget gennem flere markedsfaser
-# OBS: For meget store warmup-vinduer kan IBKR returnere mange tomme dage hvor
-# tickeren ikke handlede; det er OK — vi bruger bare det vi får.
+# Warmup-vindue: antal handelsdage HISTORIK at hente FØR hver target-dag.
+# HTF EMA(50) på 15min + RSI/ATR/vol_ma konvergeret. 20 handelsdage ≈ 35
+# kalenderdage (konservativ approksimation, 7 kalender pr. 5 handelsdage).
 WARMUP_TRADING_DAYS = 20
+WARMUP_CALENDAR_DAYS = int(WARMUP_TRADING_DAYS * 1.5) + 5
 
-# Output
-DATA_DIR = Path(__file__).parent / "data"
+# ── Portefølje-/omkostnings-konstanter (match K2 eksakt) ──────
+MAX_POSITION_SIZE  = 2_500.0    # fast notional pr. raw-trade
+START_EQUITY       = 10_000.0
+RISK_PCT           = 0.01       # 1% af løbende equity pr. trade i sim
+MAX_CONCURRENT     = 3
+MAX_TOTAL_EXPOSURE = 25_000.0
+COMMISSION_PER_SHARE = 0.005    # IBKR Pro Fixed: $0,005/aktie
+COMMISSION_MIN       = 1.00     # min $1 pr. ordre
+
+# Output + cache
+DATA_DIR  = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
+CACHE_DIR = Path(__file__).parent / "bar_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+DB_PATH   = Path(__file__).parent / "trading_dash.db"
 
 
 # ── Logging ──────────────────────────────────────────────────
@@ -138,6 +153,10 @@ except ImportError:
 # IBKR-forbindelse + scanner
 # ─────────────────────────────────────────────────────────────
 
+class IBKRConnectionError(Exception):
+    """Rejses når TWS-sessionen er optaget af en anden IP — al data fejler."""
+
+
 async def connect_ibkr():
     """Opret IBKR-forbindelse — kræver TWS oppe."""
     from ib_async import IB
@@ -154,19 +173,12 @@ async def connect_ibkr():
     return ib
 
 
-async def fetch_top_gainers(ib, top_n: int = UNIVERSE_TOP_N) -> list[str]:
+def fetch_top_gainers(top_n: int = UNIVERSE_TOP_N) -> list[str]:
     """
     Hent top-N gainers via TradingView's screener API.
 
-    Vi bruger TV i stedet for IBKR's scanner fordi IBKR's TOP_PERC_GAIN
-    returnerer aktier på basis af noget der ikke matcher hvad TV viser.
     TV's API returnerer præcis den liste Iben kan se i sit TradingView
-    "US Top Gainers" screener — samme priser, samme rækkefølge, samme
-    procent-gain.
-
-    'ib' parameteren bruges ikke længere (TV-screener bruger sin egen API)
-    men vi beholder den i signaturen så kalderen ikke skal ændres.
-
+    "US Top Gainers" screener — samme priser, rækkefølge og procent-gain.
     Falder tilbage til tom liste hvis TV-API'et er nede.
     """
     from strategies.confluence.tv_scanner import fetch_tv_top_gainer_symbols
@@ -179,57 +191,92 @@ async def fetch_top_gainers(ib, top_n: int = UNIVERSE_TOP_N) -> list[str]:
 
 def passes_price_filter(bars_for_target_day: list[Bar]) -> tuple[bool, str]:
     """
-    Sanity-check af pris-filter EFTER TV-scanner har gjort sit arbejde.
+    Sanity-check af pris-filter på dagens åbnings-pris (kun scanner-mode).
 
-    TV-scanner filtrerer allerede på pris og volumen. Dette tjek er en
-    backup hvis target-dagens åbnings-pris afviger markant fra hvad TV
-    så ved scanner-tidspunktet (typisk pga. gap-up natten over), eller
-    hvis vi kører med --tickers liste der overrider scanner.
+    file/journal/tickers-universer er allerede pris-filtreret ved opbygning.
     """
     if not bars_for_target_day:
         return False, "ingen bars på target-dag"
 
     open_price = bars_for_target_day[0].open
-
     if open_price < UNIVERSE_PRICE_MIN:
         return False, f"åbnings-pris ${open_price:.2f} < ${UNIVERSE_PRICE_MIN:.2f}"
     if open_price > UNIVERSE_PRICE_MAX:
         return False, f"åbnings-pris ${open_price:.2f} > ${UNIVERSE_PRICE_MAX:.2f}"
-
     return True, ""
 
 
-async def fetch_5min_bars(
-    ib,
-    ticker: str,
-    start_date: date_cls,
-    end_date: date_cls,
-) -> list[Bar]:
+# ─────────────────────────────────────────────────────────────
+# Bar-cache (5-min) + hentning
+# ─────────────────────────────────────────────────────────────
+# 38-BYTE-FALDGRUBEN (jf. UNIVERS_backtest_dokumentation.md): cachen gemmer
+# også TOMME resultater, så døde tickers ikke gen-forsøges. Men hvis hentningen
+# afbrydes af en FORBINDELSESFEJL, må vi IKKE gemme en tom fil (38 bytes: kun
+# header) — den ville fejlagtigt læses som "ingen data" for evigt. Vi gemmer
+# derfor kun tom cache når der ikke var forbindelsesfejl (conn_errors == 0).
+# Oprydning ved mistanke: slet 38-byte filer i bar_cache/ og genhent.
+
+def _cache_path(ticker: str, start: date_cls, end: date_cls) -> Path:
+    return CACHE_DIR / f"{ticker}_{start}_{end}_5min.csv"
+
+
+def _load_cache(ticker: str, start: date_cls, end: date_cls) -> Optional[list[Bar]]:
+    p = _cache_path(ticker, start, end)
+    if not p.exists():
+        return None
+    bars: list[Bar] = []
+    with p.open(newline="") as f:
+        for row in _csv.DictReader(f):
+            ts = datetime.fromisoformat(row["timestamp"])
+            bars.append(Bar(timestamp=ts, open=float(row["open"]), high=float(row["high"]),
+                            low=float(row["low"]), close=float(row["close"]),
+                            volume=float(row["volume"])))
+    return bars
+
+
+def _save_cache(ticker: str, start: date_cls, end: date_cls, bars: list[Bar]) -> None:
+    p = _cache_path(ticker, start, end)
+    with p.open("w", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+        for b in bars:
+            w.writerow([b.timestamp.isoformat(), b.open, b.high, b.low, b.close, b.volume])
+
+
+async def fetch_5min_bars(ib, ticker: str, start_date: date_cls, end_date: date_cls) -> list[Bar]:
     """
-    Hent 5min bars for én ticker over et periode-vindue fra IBKR.
+    Hent 5-min bars for én ticker over [start_date, end_date] fra IBKR, med cache.
 
-    Vi bruger reqHistoricalDataAsync med RTH=True (kun handelstid 09:30-16:00).
-
-    BEMÆRK: IBKR's historiske data har maks-grænser. For 5min bars er
-    grænsen typisk 2 år tilbage og 30 dage pr. request. Vi tager én dag ad
-    gangen for at undgå rate-issues og bevare granularitet.
+    Én dag ad gangen (RTH=True, 09:30-16:00 ET) for at undgå rate-issues.
+    Resultatet caches på disk; næste kørsel genbruger det øjeblikkeligt.
+    Rejser IBKRConnectionError hvis TWS-sessionen er optaget af en anden IP.
     """
     from ib_async import Stock
 
-    bars: list[Bar] = []
-    contract = Stock(ticker, "SMART", "USD")
-    await ib.qualifyContractsAsync(contract)
+    # 1) Cache først
+    cached = _load_cache(ticker, start_date, end_date)
+    if cached is not None:
+        return cached
 
-    # Iterér over hver handelsdag i [start_date, end_date]
+    contract = Stock(ticker, "SMART", "USD")
+    try:
+        await ib.qualifyContractsAsync(contract)
+    except Exception:
+        contract = Stock(ticker, "SMART", "USD", primaryExchange="NASDAQ")
+        try:
+            await ib.qualifyContractsAsync(contract)
+        except Exception as e:
+            logger.warning(f"  {ticker}: qualify fejlede: {e}")
+            return []
+
+    bars: list[Bar] = []
+    conn_errors = 0
     cur = start_date
     while cur <= end_date:
-        # Spring weekender over
         if cur.weekday() >= 5:
             cur += timedelta(days=1)
             continue
 
-        # IBKR forventer endDateTime som "YYYYMMDD HH:MM:SS US/Eastern"
-        # For at få én dag tager vi bars frem til markedsluk (16:00 ET) på dagen.
         end_dt_et = ET.localize(datetime(cur.year, cur.month, cur.day, 16, 0))
         end_str   = end_dt_et.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
@@ -244,33 +291,24 @@ async def fetch_5min_bars(
                 formatDate     = 1,
             )
         except Exception as e:
-            logger.warning(f"  {ticker} {cur}: bars-fejl: {e}")
+            msg = str(e)
+            if "different IP address" in msg or "session is connected" in msg:
+                conn_errors += 1
+                if conn_errors >= 2:
+                    raise IBKRConnectionError(
+                        "TWS-sessionen er forbundet fra en anden IP. Luk IBKR Mobile-app "
+                        "og Client Portal i browseren, genstart TWS, og prøv igen.")
+            logger.debug(f"  {ticker} {cur}: bars-fejl: {e}")
             cur += timedelta(days=1)
             continue
 
-        if not ibkr_bars:
-            logger.debug(f"  {ticker} {cur}: 0 bars")
-            cur += timedelta(days=1)
-            continue
-
-        for ib_bar in ibkr_bars:
-            # ib_async returnerer bar.date som datetime (lokaltid US/Eastern)
+        for ib_bar in ibkr_bars or []:
             ts = ib_bar.date
             if not isinstance(ts, datetime):
-                # Hvis bar.date er date (daily bars) — vi skipper
                 continue
-
-            # Sikr ET-tidszone
-            if ts.tzinfo is None:
-                ts = ET.localize(ts)
-            else:
-                ts = ts.astimezone(ET)
-
-            # Verificér at bar er på dagen vi spurgte om — IBKR kan give
-            # forrige dages bars hvis cur er en helligdag
+            ts = ET.localize(ts) if ts.tzinfo is None else ts.astimezone(ET)
             if ts.date() != cur:
                 continue
-
             bars.append(Bar(
                 timestamp=ts,
                 open=float(ib_bar.open),
@@ -279,10 +317,48 @@ async def fetch_5min_bars(
                 close=float(ib_bar.close),
                 volume=float(ib_bar.volume) if ib_bar.volume else 0.0,
             ))
-
         cur += timedelta(days=1)
 
+    bars.sort(key=lambda x: x.timestamp)
+    # Gem i cache — også hvis tom, MEN kun hvis vi faktisk fik kontakt
+    # (undgår 38-byte tom-cache efter en forbindelsesfejl).
+    if bars or conn_errors == 0:
+        _save_cache(ticker, start_date, end_date, bars)
     return bars
+
+
+# ─────────────────────────────────────────────────────────────
+# Journal-univers (det faktiske daglige univers)
+# ─────────────────────────────────────────────────────────────
+
+def read_daily_universes(start: Optional[date_cls], end: Optional[date_cls]) -> dict[date_cls, list[str]]:
+    """Læs {dag: [tickers]} fra journalens 'universe_selected'-events (source=Konfluens)."""
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Fandt ikke {DB_PATH}")
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT ts_local, payload_json FROM events "
+            "WHERE event_type='universe_selected' AND source='Konfluens' ORDER BY ts_local ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+    out: dict[date_cls, list[str]] = {}
+    for r in rows:
+        try:
+            d = datetime.fromisoformat(r["ts_local"]).date()
+        except (ValueError, TypeError):
+            continue
+        if (start and d < start) or (end and d > end):
+            continue
+        try:
+            p = json.loads(r["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if p.get("tickers"):
+            out[d] = list(p["tickers"])
+    return dict(sorted(out.items()))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -296,46 +372,32 @@ def backtest_ticker(
     variant_key: str,
     target_start: date_cls,
     target_end: date_cls,
-    initial_equity: float = INITIAL_CAPITAL,
 ) -> list[dict]:
     """
     Kør backtest for én ticker over en kontinuerlig bar-periode.
 
-    KONTINUERLIG INDIKATOR-DRIFT:
-    bars indeholder BÅDE warmup (før target_start) OG target-perioden.
-    Vi pre-computer alle indikatorer over hele bar-rækken og lader Pine's
-    'var'-state akkumulere kontinuerligt. Entry-tjek udløses kun for bars
-    inden for [target_start, target_end] — det matcher Pine's
-    `inDateRange = time >= startDate AND time <= endDate`.
+    bars indeholder BÅDE warmup (før target_start) OG target-perioden. Vi
+    pre-computer indikatorer over hele rækken (kontinuerlig 'var'-drift) og
+    udløser entry KUN for bars i [target_start, target_end]. Exit-tjek kører
+    uanset (positioner åbnet i target skal kunne lukkes).
 
-    Equity opdateres fortløbende så 1%-risk-sizing afspejler vinder/taber-runde.
-
-    Returnerer liste af trade-dicts.
+    SIZING: fast notional (MAX_POSITION_SIZE) — som K2. Portefølje-sim'en står
+    for den rigtige risk-sizing. Returnerer liste af BRUTTO trade-dicts.
     """
     if not bars:
         return []
 
     config = VARIANTS[variant_key]
     trades: list[dict] = []
-    equity = initial_equity
 
     # Build ÉN session context med pre-computed indikatorer over HELE perioden
     context = strategy.build_session_context(ticker, bars, config=config)
     if context is None:
-        logger.warning(f"  {ticker}: for få bars til at bygge session-context "
-                       f"({len(bars)} bars hentet) — springer over")
         return []
 
-    # Load context i entry-engine ÉN gang (ikke pr. dag)
     strategy.entry.load_session_context(context)
     ind_df = context["ind_df"]
 
-    # Tæl warmup-statistik til log
-    bars_warmup = sum(1 for b in bars if b.date < target_start)
-    bars_target = sum(1 for b in bars if target_start <= b.date <= target_end)
-    logger.info(f"  {ticker}: {bars_warmup} warmup bars + {bars_target} target bars")
-
-    # Position-tracking (pyramiding=0: én long position ad gangen)
     position = None
     session_bars = sorted(
         [b for b in bars if SESSION_START <= b.time_et <= SESSION_END],
@@ -343,7 +405,6 @@ def backtest_ticker(
     )
 
     for bar in session_bars:
-        # Slå indicator-row op (alle bars har en row siden vi pre-computede over hele perioden)
         try:
             row = ind_df.loc[bar.timestamp]
             if isinstance(row, pd.DataFrame):
@@ -352,8 +413,6 @@ def backtest_ticker(
             row = None
 
         # ── Hvis åben position: opdatér og tjek exit ────────────
-        # Exit-tjek kører UANSET om vi er i target-perioden — hvis position
-        # blev åbnet i target-perioden skal den også kunne lukkes senere
         if position is not None:
             ema_fast       = float(row["ema_fast"])        if row is not None and not pd.isna(row["ema_fast"])        else None
             last_swing_low = float(row["last_swing_low"])  if row is not None and not pd.isna(row["last_swing_low"])  else None
@@ -372,204 +431,240 @@ def backtest_ticker(
                 position, bar, variant_key, indicator_row=row
             )
             if decision is not None:
-                trade = _close_trade(position, decision, bar, config, ticker)
-                equity += trade["pnl"]
-                trades.append(trade)
+                trades.append(_close_trade(position, decision, bar, ticker))
                 position = None
                 continue   # ingen ny entry på samme bar som exit
 
         # ── Ingen position: tjek entry — KUN inden for target-vinduet ──
         if position is None:
-            # in_date_range modsvarer Pine's `inDateRange` filter
-            in_date_range = target_start <= bar.date <= target_end
-            if not in_date_range:
+            if not (target_start <= bar.date <= target_end):
                 continue
 
             signal = strategy.entry.check_entry(ticker, bar, context)
             if signal is not None:
-                # 1%-risk sizing
-                atr_val_signal = signal.metadata["atr"]
-                risk_per_share = config.atr_sl_mult * atr_val_signal
-                risk_amount    = equity * (config.risk_percent / 100.0)
-                shares = int(risk_amount / max(risk_per_share, MINTICK))
+                if signal.entry_price <= 0:
+                    continue
+                shares = int(MAX_POSITION_SIZE / signal.entry_price)
                 if shares <= 0:
                     continue
-
                 position = strategy.exit.open_position(signal, shares, variant_key)
 
-    # Defensiv: hvis backtest slutter med åben position, force-close på sidste bar
+    # Defensiv: åben position ved periodeslut → force-close på sidste bar
     if position is not None and session_bars:
         last_bar = session_bars[-1]
         from strategies.base import ExitDecision
         from strategies.confluence.exit import REASON_SESSION_CLOSE
         decision = ExitDecision(exit_price=last_bar.close, reason=REASON_SESSION_CLOSE)
-        trade = _close_trade(position, decision, last_bar, config, ticker)
-        equity += trade["pnl"]
-        trades.append(trade)
+        trades.append(_close_trade(position, decision, last_bar, ticker))
 
     return trades
 
 
-def _close_trade(
-    position,
-    decision,
-    bar: Bar,
-    config: ConfluenceVariantConfig,
-    ticker: str,
-) -> dict:
-    """Beregn trade-resultat inkl. friktion."""
+def _close_trade(position, decision, bar: Bar, ticker: str) -> dict:
+    """
+    Byg BRUTTO trade-dict med K2-kompatible nøgler + K1's stop_price/score.
+
+    pnl er BRUTTO (ingen friktion) — omkostninger lægges på i stats()/trade_cost()
+    på tabel-tid. stop_price = det initielle ATR-stop (state.initial_stop), som
+    portefølje-sim'en bruger til R = entry − stop_price.
+    """
     entry_price = position.entry_price
     exit_price  = decision.exit_price
     shares      = position.shares
 
-    # Friktion: slippage + commission begge sider
-    slip_per_side = config.slippage_ticks * MINTICK
-    entry_friction = (
-        slip_per_side * shares
-        + (entry_price * shares) * (config.commission_pct / 100.0)
-    )
-    exit_friction = (
-        slip_per_side * shares
-        + (exit_price * shares) * (config.commission_pct / 100.0)
-    )
-
     gross_pnl = (exit_price - entry_price) * shares
-    net_pnl   = gross_pnl - entry_friction - exit_friction
-    pnl_pct   = (exit_price - entry_price) / entry_price * 100.0
-
-    duration_min = (bar.timestamp - position.entry_time).total_seconds() / 60.0
+    pct       = (exit_price - entry_price) / entry_price * 100.0 if entry_price > 0 else 0.0
+    stop_price = getattr(position.state, "initial_stop", None)
 
     return {
-        "ticker":        ticker,
-        "date":          position.entry_time.date().isoformat(),
-        "entry_time":    position.entry_time.strftime("%H:%M:%S"),
-        "exit_time":     bar.timestamp.strftime("%H:%M:%S"),
-        "entry_price":   round(entry_price, 4),
-        "exit_price":    round(exit_price, 4),
-        "shares":        shares,
-        "side":          position.side,
-        "reason":        decision.reason,
-        "gross_pnl":     round(gross_pnl, 2),
-        "friction":      round(entry_friction + exit_friction, 2),
-        "pnl":           round(net_pnl, 2),
-        "pnl_pct":       round(pnl_pct, 3),
-        "duration_min":  round(duration_min, 1),
-        "entry_score":   position.metadata.get("entry_score"),
-        "entry_bricks":  position.metadata.get("entry_short"),
-        "variant":       position.metadata.get("variant_key"),
+        "date":        position.entry_time.date().isoformat(),
+        "ticker":      ticker,
+        "entry_time":  position.entry_time.strftime("%H:%M"),
+        "exit_time":   bar.timestamp.strftime("%H:%M"),
+        "entry":       round(entry_price, 4),
+        "exit":        round(exit_price, 4),
+        "shares":      shares,
+        "pnl":         round(gross_pnl, 2),       # BRUTTO
+        "pct":         round(pct, 2),
+        "reason":      decision.reason,
+        "stop_price":  round(stop_price, 4) if stop_price is not None else None,
+        "score":       position.metadata.get("entry_score"),
+        "bricks":      position.metadata.get("entry_short"),
+        "variant":     position.metadata.get("variant_key"),
     }
 
 
 # ─────────────────────────────────────────────────────────────
-# Statistik
+# Omkostningsmodel: IBKR Pro Fixed + slippage  (kopieret fra K2)
 # ─────────────────────────────────────────────────────────────
 
-def calc_stats(trades: list[dict]) -> dict:
-    """Beregn samlet statistik for en liste af trades."""
+def trade_cost(shares: int, slippage_per_share: float) -> float:
+    """
+    Samlede omkostninger for ÉN rundtur (køb + salg):
+      - kommission: max($0,005 × aktier, $1) for HVER side
+      - slippage:   slippage_per_share × aktier for HVER side
+    """
+    commission = 2 * max(COMMISSION_PER_SHARE * shares, COMMISSION_MIN)
+    slippage   = 2 * slippage_per_share * shares
+    return commission + slippage
+
+
+def stats(trades: list[dict], slippage_per_share: float = 0.0) -> dict:
+    """Statistik. slippage_per_share=0 → brutto; >0 → netto efter omkostninger."""
     if not trades:
-        return {
-            "trades": 0, "win_rate": 0.0, "total_pnl": 0.0,
-            "avg_pnl": 0.0, "profit_factor": 0.0, "max_dd": 0.0,
-            "best": 0.0, "worst": 0.0, "avg_duration_min": 0.0,
-            "by_reason": {},
-        }
-
-    pnls = [t["pnl"] for t in trades]
-    wins = [p for p in pnls if p > 0]
-    losses = [p for p in pnls if p <= 0]
-
-    total = sum(pnls)
-    win_rate = len(wins) / len(pnls) * 100.0 if pnls else 0.0
-
-    profit_sum = sum(wins)
-    loss_sum   = abs(sum(losses))
-    pf = profit_sum / loss_sum if loss_sum > 0 else float("inf") if profit_sum > 0 else 0.0
-
-    # Drawdown
-    cum = 0.0
-    peak = 0.0
-    max_dd = 0.0
-    for p in pnls:
-        cum += p
-        if cum > peak:
-            peak = cum
-        dd = peak - cum
-        if dd > max_dd:
-            max_dd = dd
-
-    # Tæl exit-reasons
-    by_reason: dict[str, int] = {}
+        return {"trades": 0, "win_rate": 0.0, "pnl": 0.0, "pf": 0.0, "avg": 0.0}
+    net_pnls = []
     for t in trades:
-        r = t["reason"]
-        by_reason[r] = by_reason.get(r, 0) + 1
+        cost = trade_cost(t["shares"], slippage_per_share)
+        net_pnls.append(t["pnl"] - cost)
+    wins = [p for p in net_pnls if p > 0]
+    losses = [p for p in net_pnls if p < 0]
+    gross_w, gross_l = sum(wins), abs(sum(losses))
+    pf = (gross_w / gross_l) if gross_l > 0 else float("inf")
+    return {"trades": len(trades), "win_rate": len(wins) / len(net_pnls) * 100,
+            "pnl": sum(net_pnls), "pf": pf, "avg": sum(net_pnls) / len(net_pnls)}
 
-    return {
-        "trades":          len(trades),
-        "win_rate":        round(win_rate, 2),
-        "total_pnl":       round(total, 2),
-        "avg_pnl":         round(total / len(trades), 2),
-        "profit_factor":   round(pf, 2) if pf != float("inf") else float("inf"),
-        "max_dd":          round(max_dd, 2),
-        "best":            round(max(pnls), 2),
-        "worst":           round(min(pnls), 2),
-        "avg_duration_min": round(sum(t["duration_min"] for t in trades) / len(trades), 1),
-        "by_reason":       by_reason,
-    }
+
+def print_stats(label: str, s: dict) -> None:
+    pf = f"{s['pf']:.2f}" if s["pf"] != float("inf") else "∞"
+    c = GREEN if s["pnl"] > 0 else RED if s["pnl"] < 0 else ""
+    print(f"  {label:<28} {s['trades']:>4} trades | WR {s['win_rate']:>4.0f}% | "
+          f"P&L {c}${s['pnl']:>+9.2f}{RESET} | PF {pf:>5} | avg ${s['avg']:>+7.2f}")
 
 
 # ─────────────────────────────────────────────────────────────
-# Output
+# Porteføljesimulator: equity-sizing + max samtidige positioner
 # ─────────────────────────────────────────────────────────────
+# Eneste forskel fra K2: R = entry − stop_price (K1's variant-afhængige ATR-stop),
+# hvor K2 brugte R = entry − impulse_low.
 
-def print_trades_table(trades: list[dict]) -> None:
-    if not trades:
-        print(f"  {YELLOW}Ingen handler i perioden{RESET}")
-        return
-
-    print()
-    print(f"  {BOLD}{'Date':10s} {'Time':16s} {'Ticker':6s} "
-          f"{'Entry':>8s} {'Exit':>8s} {'Shrs':>5s} "
-          f"{'PnL':>9s} {'%':>7s} {'Min':>5s} {'Reason':12s} {'Bricks':6s}{RESET}")
-    print(f"  {DIM}{'-' * 110}{RESET}")
+def simulate_portfolio(trades: list[dict], selection: str = "fifo",
+                       slippage_per_share: float = 0.0) -> dict:
+    """Afvikl handler som portefølje: løbende equity (1% risk/R sizing), max 3
+    samtidige positioner, lofter. selection: 'fifo' eller 'priority' (højest
+    score blandt SAMME-minut-signaler først). Returnerer stats-dict."""
+    evs = []
     for t in trades:
-        color = GREEN if t["pnl"] > 0 else (RED if t["pnl"] < 0 else "")
-        print(f"  {t['date']:10s} {t['entry_time']}-{t['exit_time']:7s} "
-              f"{t['ticker']:6s} "
-              f"${t['entry_price']:>6.2f} ${t['exit_price']:>6.2f} "
-              f"{t['shares']:>5d} "
-              f"{color}${t['pnl']:>+7.2f}{RESET} "
-              f"{color}{t['pnl_pct']:>+6.2f}%{RESET} "
-              f"{t['duration_min']:>5.0f} "
-              f"{t['reason']:12s} {t.get('entry_bricks') or '':6s}")
+        ymd = t["date"]
+        e_dt = datetime.strptime(f"{ymd} {t['entry_time']}", "%Y-%m-%d %H:%M")
+        x_dt = datetime.strptime(f"{ymd} {t['exit_time']}", "%Y-%m-%d %H:%M")
+        evs.append({**t, "_e": e_dt, "_x": x_dt})
+
+    if selection == "priority":
+        evs.sort(key=lambda t: (t["_e"], -(t.get("score") or 0)))
+    else:
+        evs.sort(key=lambda t: t["_e"])
+
+    equity = START_EQUITY
+    open_positions: list[dict] = []
+    taken = 0
+    net_pnls: list[float] = []
+    equity_curve: list[float] = []
+
+    for t in evs:
+        still_open = []
+        for op in open_positions:
+            if op["_x"] <= t["_e"]:
+                equity += op["net_pnl"]
+                equity_curve.append(equity)
+            else:
+                still_open.append(op)
+        open_positions = still_open
+
+        if len(open_positions) >= MAX_CONCURRENT:
+            continue
+
+        entry = t["entry"]
+        stop = t.get("stop_price")
+        if stop is None or entry <= stop:
+            continue
+        R = entry - stop
+        shares = int((equity * RISK_PCT) / R)
+        if shares <= 0:
+            continue
+        if shares * entry > MAX_POSITION_SIZE:
+            shares = int(MAX_POSITION_SIZE / entry)
+        cur_exp = sum(op["exposure"] for op in open_positions)
+        if cur_exp + shares * entry > MAX_TOTAL_EXPOSURE:
+            shares = int((MAX_TOTAL_EXPOSURE - cur_exp) / entry)
+        if shares <= 0:
+            continue
+
+        gross = (t["exit"] - entry) * shares
+        net = gross - trade_cost(shares, slippage_per_share)
+        open_positions.append({"_x": t["_x"], "exposure": shares * entry, "net_pnl": net})
+        taken += 1
+        net_pnls.append(net)
+
+    for op in sorted(open_positions, key=lambda o: o["_x"]):
+        equity += op["net_pnl"]
+        equity_curve.append(equity)
+
+    wins = [p for p in net_pnls if p > 0]
+    losses = [p for p in net_pnls if p < 0]
+    pf = (sum(wins) / abs(sum(losses))) if losses else float("inf")
+    peak, maxdd = START_EQUITY, 0.0
+    for eq in equity_curve:
+        peak = max(peak, eq)
+        maxdd = min(maxdd, eq - peak)
+    return {"taken": taken, "skipped": len(trades) - taken,
+            "final_equity": equity, "pnl": equity - START_EQUITY,
+            "win_rate": (len(wins) / taken * 100) if taken else 0,
+            "pf": pf, "max_dd": maxdd}
 
 
-def print_summary(stats: dict, label: str = "") -> None:
-    if label:
-        print(f"\n  {BOLD}{label}:{RESET}")
+# ─────────────────────────────────────────────────────────────
+# Univers-bygning
+# ─────────────────────────────────────────────────────────────
 
-    pf_str = f"{stats['profit_factor']:.2f}" if stats['profit_factor'] != float('inf') else "∞"
-    total_color = GREEN if stats['total_pnl'] > 0 else RED if stats['total_pnl'] < 0 else ""
-
-    print(f"    Trades:         {stats['trades']}")
-    print(f"    Win Rate:       {stats['win_rate']:.1f}%")
-    print(f"    Total P&L:      {total_color}${stats['total_pnl']:+,.2f}{RESET}")
-    print(f"    Avg P&L:        ${stats['avg_pnl']:+,.2f}")
-    print(f"    Profit Factor:  {pf_str}")
-    print(f"    Max Drawdown:   ${stats['max_dd']:,.2f}")
-    print(f"    Best/Worst:     ${stats['best']:+,.2f} / ${stats['worst']:+,.2f}")
-    print(f"    Avg Duration:   {stats['avg_duration_min']:.1f} min")
-    if stats["by_reason"]:
-        print(f"    Exit reasons:   {', '.join(f'{k}={v}' for k, v in stats['by_reason'].items())}")
+def _weekday_range(start: date_cls, end: date_cls) -> list[date_cls]:
+    out, d = [], start
+    while d <= end:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
 
 
-def export_trades_csv(trades: list[dict], path: Path) -> None:
-    if not trades:
-        return
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(trades[0].keys()))
-        writer.writeheader()
-        writer.writerows(trades)
-    logger.info(f"  Trades eksporteret: {path}  ({len(trades)} rækker)")
+def build_days(args, start: Optional[date_cls], end: Optional[date_cls]) -> dict[date_cls, list[str]]:
+    """Byg {dag: [tickers]} afhængig af univers-mode."""
+    if args.universe == "file":
+        if not args.universe_file:
+            logger.error("--universe file kræver --universe-file")
+            return {}
+        raw = json.loads(Path(args.universe_file).read_text())
+        days: dict[date_cls, list[str]] = {}
+        for dstr, tickers in raw.items():
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+            if (start and d < start) or (end and d > end):
+                continue
+            days[d] = list(tickers)
+        return dict(sorted(days.items()))
+
+    if args.universe == "journal":
+        return read_daily_universes(start, end)
+
+    # scanner / tickers kræver et dato-vindue
+    if not (start and end):
+        logger.error(f"--universe {args.universe} kræver --date eller --start/--end")
+        return {}
+    trading_days = _weekday_range(start, end)
+    if not trading_days:
+        return {}
+
+    if args.universe == "tickers":
+        if not args.tickers:
+            logger.error("--universe tickers kræver --tickers")
+            return {}
+        tks = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+        return {d: list(tks) for d in trading_days}
+
+    # scanner (default)
+    tks = fetch_top_gainers(args.top_n)
+    if not tks:
+        logger.error("Scanner returnerede 0 tickers")
+        return {}
+    return {d: list(tks) for d in trading_days}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -578,224 +673,158 @@ def export_trades_csv(trades: list[dict], path: Path) -> None:
 
 async def main_async(args) -> int:
     # ── Bestem dato-vindue ────────────────────────────────────
+    start = end = None
     if args.date:
-        start_date = end_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        start = end = datetime.strptime(args.date, "%Y-%m-%d").date()
     elif args.start and args.end:
-        start_date = datetime.strptime(args.start, "%Y-%m-%d").date()
-        end_date   = datetime.strptime(args.end,   "%Y-%m-%d").date()
-        if end_date < start_date:
+        start = datetime.strptime(args.start, "%Y-%m-%d").date()
+        end   = datetime.strptime(args.end,   "%Y-%m-%d").date()
+        if end < start:
             logger.error("--end er før --start")
             return 2
     elif args.start:
-        start_date = datetime.strptime(args.start, "%Y-%m-%d").date()
-        end_date   = datetime.now(ET).date()
-    else:
-        # Default: sidste handelsdag
-        today = datetime.now(ET).date()
-        last_day = today
+        start = datetime.strptime(args.start, "%Y-%m-%d").date()
+        end   = datetime.now(ET).date()
+    elif args.universe in ("scanner", "tickers"):
+        # Default: sidste handelsdag (kun relevant for scanner/tickers)
+        last_day = datetime.now(ET).date()
         while last_day.weekday() >= 5:
             last_day -= timedelta(days=1)
-        start_date = end_date = last_day
+        start = end = last_day
 
-    # ── Beregn warmup-vindue ────────────────────────────────────
-    # Vi henter WARMUP_TRADING_DAYS handelsdage før start_date.
-    # Konservativ approksimation: 7 kalenderdage pr. 5 handelsdage.
-    warmup_calendar_days = int(WARMUP_TRADING_DAYS * 1.5) + 5
-    fetch_start_date = start_date - timedelta(days=warmup_calendar_days)
-    # Skub fetch_start_date til mandag hvis det rammer weekend
-    while fetch_start_date.weekday() >= 5:
-        fetch_start_date -= timedelta(days=1)
+    # ── Byg univers {dag: [tickers]} ──────────────────────────
+    days = build_days(args, start, end)
+    if not days:
+        logger.warning("Ingen dage/tickers i univers — afbryder")
+        return 0
 
-    print(f"\n{BOLD}{'=' * 90}{RESET}")
-    print(f"{BOLD}  KONFLUENS BACKTEST{RESET}")
-    print(f"{BOLD}  Target-periode:  {start_date}  →  {end_date}{RESET}")
-    print(f"{BOLD}  Warmup-periode:  {fetch_start_date}  →  {start_date - timedelta(days=1)} "
-          f"(~{WARMUP_TRADING_DAYS} handelsdage){RESET}")
-    print(f"{BOLD}  Variant:         {args.variant!r}  ({VARIANTS[args.variant].name}){RESET}")
-    if not args.tickers:
-        print(f"{BOLD}  Univers:         top-{args.top_n} fra TradingView screener, "
-              f"filter ${UNIVERSE_PRICE_MIN:.0f}-${UNIVERSE_PRICE_MAX:.0f}, "
-              f"vol >{UNIVERSE_MIN_VOLUME:,}{RESET}")
-    print(f"{BOLD}{'=' * 90}{RESET}\n")
+    variant_keys = [args.variant] if args.variant else list(VARIANTS.keys())
+    all_tickers = sorted({t for ts in days.values() for t in ts})
+    fetch_start = min(days) - timedelta(days=WARMUP_CALENDAR_DAYS)
+    while fetch_start.weekday() >= 5:
+        fetch_start -= timedelta(days=1)
+    fetch_end = max(days)
+
+    print(f"\n{BOLD}{'=' * 92}{RESET}")
+    print(f"{BOLD}  KONFLUENS (K1) BACKTEST — 5-min, afsluttede bars{RESET}")
+    print(f"{BOLD}  Univers-kilde:   {args.universe}{RESET}")
+    print(f"{BOLD}  Dage:            {min(days)} → {max(days)}  ({len(days)} dage){RESET}")
+    print(f"{BOLD}  Unikke aktier:   {len(all_tickers)}{RESET}")
+    print(f"{BOLD}  Varianter:       {', '.join(variant_keys)}{RESET}")
+    print(f"{BOLD}{'=' * 92}{RESET}\n")
 
     # ── Forbind IBKR ──────────────────────────────────────────
     ib = await connect_ibkr()
+    strategy = ConfluenceStrategy()
     try:
-        # ── Bestem univers ────────────────────────────────────
-        if args.tickers:
-            tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
-            logger.info(f"Eksplicit ticker-liste: {', '.join(tickers)}")
-        else:
-            tickers = await fetch_top_gainers(ib, args.top_n)
-            if not tickers:
-                logger.error("Scanner returnerede 0 tickers — afbryder")
-                return 1
-
-        # ── Hent bars for hver ticker (2-faset for performance) ─────
-        # Fase 1: Hent KUN target-dagens bars (~1 sek pr. ticker) og tjek pris-filter
-        # Fase 2: For tickers der passerer, hent warmup-bars (~30 sek pr. ticker)
-        # Tickers der filtreres ud i fase 1 koster os kun ~1 sek hver, ikke 30+
-        strategy = ConfluenceStrategy()
-        all_trades: list[dict] = []
-        per_ticker_stats: dict[str, dict] = {}
-        filtered_out: list[tuple[str, str]] = []
-
-        n_total = len(tickers)
-        t_overall_start = datetime.now()
-
-        # Hvor lang en gennemsnitlig target-fetch (sek) — bruges til ETA
-        avg_target_fetch_sec = 1.5
-        # Hvor lang en gennemsnitlig warmup-fetch (sek)
-        avg_warmup_fetch_sec = 30.0
-
-        print()
-        logger.info(f"{BOLD}Fase 1/2: Tjekker pris-filter for {n_total} tickers...{RESET}")
-        eta_phase1 = avg_target_fetch_sec * n_total
-        logger.info(f"  Forventet tid: ~{eta_phase1:.0f} sek")
-        print()
-
-        # Gem target-bars for de tickers der passerer (så vi ikke henter dem to gange)
-        passed_tickers: list[tuple[str, list[Bar], float]] = []  # (ticker, target_bars, open_price)
-
-        for i, ticker in enumerate(tickers, start=1):
-            t_start = datetime.now()
-            prefix = f"  [{i:2d}/{n_total}] {ticker:6s}"
-
+        # ── Hent 5-min bars (cache pr. ticker over hele spændet) ──
+        logger.info(f"{BOLD}Henter 5-min bars for {len(all_tickers)} aktier "
+                    f"({fetch_start} → {fetch_end})...{RESET}")
+        logger.info(f"  (cache: {CACHE_DIR} — allerede-hentede aktier genbruges øjeblikkeligt)")
+        cache: dict[str, list[Bar]] = {}
+        n_cached, n_fetched = 0, 0
+        for i, t in enumerate(all_tickers, 1):
+            was_cached = _cache_path(t, fetch_start, fetch_end).exists()
             try:
-                target_bars = await fetch_5min_bars(ib, ticker, start_date, end_date)
-            except Exception as e:
-                elapsed = (datetime.now() - t_start).total_seconds()
-                logger.warning(f"{prefix}  {RED}FEJL{RESET} ({elapsed:.1f}s) — {e}")
-                filtered_out.append((ticker, f"bar-hentning fejlede: {e}"))
-                continue
-
-            elapsed = (datetime.now() - t_start).total_seconds()
-
-            if not target_bars:
-                logger.info(f"{prefix}  {YELLOW}0 bars på target-dag{RESET} ({elapsed:.1f}s)")
-                filtered_out.append((ticker, "ingen bars på target-dato"))
-                continue
-
-            target_day_bars = [b for b in target_bars if b.date == start_date]
-            ok, reason = passes_price_filter(target_day_bars)
-            if not ok:
-                logger.info(f"{prefix}  {YELLOW}filtreret væk{RESET} ({elapsed:.1f}s) — {reason}")
-                filtered_out.append((ticker, reason))
-                continue
-
-            open_price = target_day_bars[0].open
-            logger.info(f"{prefix}  {GREEN}OK{RESET} ({elapsed:.1f}s) — "
-                        f"åbning ${open_price:.2f}")
-            passed_tickers.append((ticker, target_bars, open_price))
-
-        # ── Fase 2: Hent warmup + kør backtest for de tickers der passerede ──
-        phase1_elapsed = (datetime.now() - t_overall_start).total_seconds()
-        n_passed = len(passed_tickers)
-        print()
-        logger.info(f"{BOLD}Fase 1 færdig: {n_passed}/{n_total} tickers passerede "
-                    f"pris-filter ({phase1_elapsed:.0f}s){RESET}")
-        print()
-
-        if n_passed == 0:
-            logger.warning(f"{YELLOW}Ingen tickers tilbage efter pris-filter — afbryder{RESET}")
-            return 0
-
-        eta_phase2 = avg_warmup_fetch_sec * n_passed
-        logger.info(f"{BOLD}Fase 2/2: Henter warmup + backtester {n_passed} tickers...{RESET}")
-        logger.info(f"  Forventet tid: ~{eta_phase2:.0f} sek ({eta_phase2/60:.1f} min)")
-        print()
-
-        warmup_end = start_date - timedelta(days=1)
-
-        for i, (ticker, target_bars, open_price) in enumerate(passed_tickers, start=1):
-            t_start = datetime.now()
-            prefix = f"  [{i:2d}/{n_passed}] {ticker:6s}"
-
-            # Beregn forventet resterende tid
-            t_so_far = (datetime.now() - t_overall_start).total_seconds() - phase1_elapsed
-            if i > 1:
-                avg_per_ticker = t_so_far / (i - 1)
-                eta_remaining = avg_per_ticker * (n_passed - i + 1)
-                eta_str = f"ETA ~{eta_remaining:.0f}s"
+                bars = await fetch_5min_bars(ib, t, fetch_start, fetch_end)
+            except IBKRConnectionError as e:
+                logger.error(f"\n{RED}✗ IBKR-FORBINDELSESPROBLEM{RESET}")
+                logger.error(f"  {e}")
+                logger.error("  Allerede hentede aktier er gemt i cache og genbruges næste gang.")
+                return 3
+            cache[t] = bars
+            if was_cached:
+                n_cached += 1
             else:
-                eta_str = f"ETA ~{eta_phase2:.0f}s"
+                n_fetched += 1
+            tag = "cache" if was_cached else "IBKR"
+            logger.info(f"  [{i:3d}/{len(all_tickers)}] {t:6s}  {len(bars):5d} bars  ({tag})")
+        logger.info(f"  → {n_cached} fra cache, {n_fetched} hentet fra IBKR")
 
-            try:
-                warmup_bars = await fetch_5min_bars(ib, ticker, fetch_start_date, warmup_end)
-            except Exception as e:
-                logger.warning(f"{prefix}  {RED}warmup fejlede{RESET} — {e}")
-                filtered_out.append((ticker, f"warmup-fetch fejlede: {e}"))
-                continue
+        # ── Sweep varianter ──
+        results_by_variant: dict[str, list[dict]] = {}
+        for vk in variant_keys:
+            all_trades: list[dict] = []
+            for day, tickers in days.items():
+                wstart = day - timedelta(days=WARMUP_CALENDAR_DAYS)
+                for t in tickers:
+                    tbars = [b for b in cache.get(t, []) if wstart <= b.date <= day]
+                    if not tbars:
+                        continue
+                    if args.universe == "scanner":
+                        day_bars = [b for b in tbars if b.date == day]
+                        ok, _reason = passes_price_filter(day_bars)
+                        if not ok:
+                            continue
+                    all_trades.extend(backtest_ticker(strategy, t, tbars, vk, day, day))
+            results_by_variant[vk] = all_trades
+            logger.info(f"  variant {vk:<14} → {len(all_trades)} rå-signaler")
 
-            bars = warmup_bars + target_bars
-            fetch_elapsed = (datetime.now() - t_start).total_seconds()
+        # ── Tabel 1: variant-sammenligning med slippage-følsomhed ──
+        slippage_levels = [0.0, 0.01, 0.02]
+        print(f"\n{BOLD}{'=' * 92}{RESET}")
+        print(f"{BOLD}  VARIANT-SAMMENLIGNING — netto efter IBKR Pro Fixed ($0,005/aktie) + slippage{RESET}")
+        print(f"{BOLD}{'=' * 92}{RESET}")
+        header = f"  {'variant':<16} {'trades':>7}"
+        for sl in slippage_levels:
+            header += f" | {'P&L@' + str(int(sl * 100)) + '¢':>11} {'PF':>5}"
+        print(header)
+        print(f"  {'-' * 16} {'-' * 7}" + (" | " + "-" * 11 + " " + "-" * 5) * len(slippage_levels))
+        for vk in variant_keys:
+            trades = results_by_variant[vk]
+            line = f"  {vk:<16} {len(trades):>7}"
+            for sl in slippage_levels:
+                s = stats(trades, sl)
+                pf = f"{s['pf']:.2f}" if s["pf"] != float("inf") else "∞"
+                c = GREEN if s["pnl"] > 0 else RED
+                line += f" | {c}${s['pnl']:>+9.0f}{RESET} {pf:>5}"
+            print(line)
+        print(f"\n  Læsning: kolonnerne er stigende slippage (0¢ = brutto, 1¢, 2¢ pr. aktie pr. side).")
+        print(f"  Ved hvilket slippage-niveau falder PF under 1,0? Det er strategiens margin mod virkeligheden.")
 
-            target_bar_count = len(target_bars)
-            logger.info(f"{prefix}  {len(warmup_bars):4d} warmup + {target_bar_count:3d} target "
-                        f"({fetch_elapsed:.1f}s, {eta_str})")
+        # ── Tabel 2: portefølje-simulation ──
+        print(f"\n{BOLD}{'=' * 92}{RESET}")
+        print(f"{BOLD}  PORTEFØLJE-SIMULATION — 1% risk/equity, max 3 samtidige, $10k start{RESET}")
+        print(f"{BOLD}  (R = entry − initielt ATR-stop; afslører reel edge når positions-loftet rammer){RESET}")
+        print(f"{BOLD}{'=' * 92}{RESET}")
+        for vk in variant_keys:
+            trades = results_by_variant[vk]
+            print(f"\n  {BOLD}{vk}{RESET} ({len(trades)} rå-signaler)")
+            print(f"    {'regel':<10} {'taget':>6} {'afvist':>7} "
+                  f"{'P&L@1¢':>11} {'PF':>6} {'WR':>5} {'maxDD':>10} {'slut-equity':>12}")
+            for sel in ["fifo", "priority"]:
+                s = simulate_portfolio(trades, sel, 0.01)
+                pf = f"{s['pf']:.2f}" if s["pf"] != float("inf") else "∞"
+                c = GREEN if s["pnl"] > 0 else RED
+                print(f"    {sel:<10} {s['taken']:>6} {s['skipped']:>7} "
+                      f"{c}${s['pnl']:>+9.0f}{RESET} {pf:>6} {s['win_rate']:>4.0f}% "
+                      f"${s['max_dd']:>+8.0f} ${s['final_equity']:>10.0f}")
+        print(f"\n  Læsning: 'taget' vs 'afvist' viser hvor ofte loftet på 3 positioner")
+        print(f"  binder. Stor forskel mellem fifo og priority = edgen er følsom for")
+        print(f"  signalvalg. maxDD er største fald fra equity-top undervejs.")
 
-            # Kør backtest
-            t_bt_start = datetime.now()
-            trades = backtest_ticker(
-                strategy=strategy,
-                ticker=ticker,
-                bars=bars,
-                variant_key=args.variant,
-                target_start=start_date,
-                target_end=end_date,
-                initial_equity=INITIAL_CAPITAL,
-            )
-            bt_elapsed = (datetime.now() - t_bt_start).total_seconds()
+        # ── Detaljer for fokus-variant (den valgte, ellers live-variant) ──
+        focus = args.variant or LIVE_VARIANT_KEY
+        ftrades = results_by_variant.get(focus, [])
+        ftrades = sorted(ftrades, key=lambda t: (t["date"], t["entry_time"]))
+        if ftrades and len(ftrades) <= 80:
+            print(f"\n{BOLD}  HANDLER — {focus} (pnl er BRUTTO; se tabel ovenfor for netto){RESET}")
+            print(f"  {'dato':<11} {'tid':>11} {'tkr':<6} {'entry':>7} {'exit':>7} "
+                  f"{'stop':>7} {'pnl':>9} {'%':>7} {'reason':<13} bricks")
+            for t in ftrades:
+                c = GREEN if t["pnl"] > 0 else RED
+                stop_s = f"${t['stop_price']:>6.3f}" if t["stop_price"] is not None else "    —  "
+                print(f"  {t['date']:<11} {t['entry_time']}-{t['exit_time']} {t['ticker']:<6} "
+                      f"${t['entry']:>6.3f} ${t['exit']:>6.3f} {stop_s} "
+                      f"{c}{t['pnl']:>+8.2f}{RESET} {t['pct']:>+6.1f}% "
+                      f"{t['reason']:<13} {t['bricks'] or ''}")
 
-            all_trades.extend(trades)
-            per_ticker_stats[ticker] = calc_stats(trades)
-            pnl_total = sum(t["pnl"] for t in trades)
-            pnl_color = GREEN if pnl_total > 0 else (RED if pnl_total < 0 else "")
-            logger.info(f"            → {len(trades)} trades, "
-                        f"{pnl_color}P&L ${pnl_total:+.2f}{RESET}  "
-                        f"(backtest {bt_elapsed:.2f}s)")
-
-        total_elapsed = (datetime.now() - t_overall_start).total_seconds()
-        print()
-        logger.info(f"{BOLD}Færdig: total {total_elapsed:.0f}s "
-                    f"({total_elapsed/60:.1f} min){RESET}")
-
-        # ── Output ────────────────────────────────────────────
-        print()
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        print(f"{BOLD}  ALLE HANDLER{RESET}")
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        # Sorter på tid
-        all_trades.sort(key=lambda t: (t["date"], t["entry_time"]))
-        print_trades_table(all_trades)
-
-        # ── Filtered-out rapport ──────────────────────────────
-        if filtered_out:
-            print()
-            print(f"{BOLD}{'=' * 90}{RESET}")
-            print(f"{BOLD}  TICKERS FRAFILTRERET  ({len(filtered_out)} af {len(tickers)}){RESET}")
-            print(f"{BOLD}{'=' * 90}{RESET}")
-            for ticker, reason in filtered_out:
-                print(f"  {YELLOW}{ticker:8s}{RESET}  {reason}")
-
-        print()
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        print(f"{BOLD}  PR. TICKER  ({len(per_ticker_stats)} aktier handlede){RESET}")
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        for ticker, st in sorted(per_ticker_stats.items(),
-                                 key=lambda kv: kv[1]["total_pnl"], reverse=True):
-            print_summary(st, label=ticker)
-
-        print()
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        print(f"{BOLD}  SAMLET{RESET}")
-        print(f"{BOLD}{'=' * 90}{RESET}")
-        print_summary(calc_stats(all_trades), label="Total")
-
-        # ── Eksporter CSV ─────────────────────────────────────
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_path = DATA_DIR / f"backtest_confluence_{args.variant}_{timestamp}.csv"
-        export_trades_csv(all_trades, csv_path)
+        # ── CSV ──
+        if ftrades:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = DATA_DIR / f"backtest_confluence_{focus}_{ts}.csv"
+            pd.DataFrame(ftrades).to_csv(path, index=False)
+            logger.info(f"  {focus}: {len(ftrades)} handler → {path}")
 
         return 0
     finally:
@@ -805,36 +834,39 @@ async def main_async(args) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Backtest Konfluens-strategi mod IBKR top gainers",
+        description="Backtest Konfluens-strategi (K1) — K2-metodologi",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Eksempler:\n"
-            "  # Reproducer TradingView-test af 15. maj 2026:\n"
-            "  python backtest_confluence.py --date 2026-05-15\n\n"
-            "  # Vindue:\n"
-            "  python backtest_confluence.py --start 2026-04-01 --end 2026-05-17\n\n"
-            "  # Eksplicit univers:\n"
-            "  python backtest_confluence.py --date 2026-05-15 --tickers AAPL,NVDA,TSLA\n\n"
-            f"  Pris-filter: ${UNIVERSE_PRICE_MIN:.0f}-${UNIVERSE_PRICE_MAX:.0f} (på dagens åbnings-pris)\n"
-            f"  Default univers: top {UNIVERSE_TOP_N} fra IBKR scanner\n"
+            "  # Maj in-sample, alle varianter:\n"
+            "  python backtest_confluence.py --universe file --universe-file historical_universe_2026-05-01_2026-05-29.json\n\n"
+            "  # April out-of-sample, kun baseline:\n"
+            "  python backtest_confluence.py --universe file --universe-file historical_universe_2026-04-01_2026-04-30.json --variant baseline\n\n"
+            "  # Scanner-mode, én dag:\n"
+            "  python backtest_confluence.py --date 2026-05-15 --top-n 6\n"
         ),
     )
+
+    # Univers
+    parser.add_argument("--universe", choices=["scanner", "tickers", "file", "journal"],
+                        default="scanner",
+                        help="Univers-kilde (default: scanner = TV top-gainers)")
+    parser.add_argument("--universe-file", type=str,
+                        help="JSON-fil fra build_historical_universe.py (for --universe file)")
+    parser.add_argument("--top-n",   type=int, default=UNIVERSE_TOP_N,
+                        help=f"Antal top gainers fra TV-scanner (default {UNIVERSE_TOP_N})")
+    parser.add_argument("--tickers", type=str,
+                        help="Eksplicit komma-separeret ticker-liste (for --universe tickers)")
 
     # Dato-styring
     parser.add_argument("--date",  type=str, help="Én enkelt dato (YYYY-MM-DD)")
     parser.add_argument("--start", type=str, help="Startdato (YYYY-MM-DD)")
     parser.add_argument("--end",   type=str, help="Slutdato (YYYY-MM-DD)")
 
-    # Universe
-    parser.add_argument("--top-n",   type=int, default=UNIVERSE_TOP_N,
-                        help=f"Antal top gainers fra IBKR scanner (default {UNIVERSE_TOP_N})")
-    parser.add_argument("--tickers", type=str,
-                        help="Eksplicit komma-separeret ticker-liste (override scanner + pris-filter)")
-
     # Strategi
-    parser.add_argument("--variant", type=str, default=LIVE_VARIANT_KEY,
+    parser.add_argument("--variant", type=str, default=None,
                         choices=list(VARIANTS.keys()),
-                        help=f"Variant at backteste (default {LIVE_VARIANT_KEY!r})")
+                        help="Kør kun én variant (default: sweep alle 6)")
 
     args = parser.parse_args()
 
