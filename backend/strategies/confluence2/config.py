@@ -55,6 +55,8 @@ class Confluence2VariantConfig:
     exit_mode: str = "target_r"    # "impulse_low" | "trail_hl" | "momentum" | "target_r"
     target_r: float = 2.0          # for target_r: target = entry + target_r × R
     catastrophe_stop: bool = True  # impuls-low som hård bund (alle modes undtagen rene impulse_low)
+    breakeven_r: float | None = None  # hvis sat: flyt stop til entry når high ≥ entry + breakeven_r × R (kun impulse_low)
+    confirm_next_bar: bool = False  # hvis True: fyld kun pending entry hvis næste bars open ≥ impuls-close (følge-igennem)
 
     # ── Rammer ─────────────────────────────────────────────────
     entry_cutoff_hhmm: tuple[int, int] = (15, 0)   # ingen nye entries efter dette (ET)
@@ -70,6 +72,18 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
         name="A: Impuls-low stop (vidt, hold-til-stop)",
         exit_mode="impulse_low",
         catastrophe_stop=False,    # impuls-low ER stoppet her
+    ),
+    "A_be1r": Confluence2VariantConfig(
+        name="A+BE: Impuls-low + breakeven efter +1R",
+        exit_mode="impulse_low",
+        catastrophe_stop=False,
+        breakeven_r=1.0,
+    ),
+    "A_confirm": Confluence2VariantConfig(
+        name="A+CONF: Impuls-low + bekræftelse på næste bar",
+        exit_mode="impulse_low",
+        catastrophe_stop=False,
+        confirm_next_bar=True,
     ),
     "B_trail_hl": Confluence2VariantConfig(
         name="B: Trailing higher-low (1-min)",

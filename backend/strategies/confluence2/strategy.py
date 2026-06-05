@@ -170,6 +170,8 @@ class Confluence2Entry:
             side="long",
             metadata={
                 "impulse_low": bar.low,
+                "impulse_high": bar.high,
+                "impulse_close": bar.close,
                 "score": ev.get("score"),
                 "bricks": ev.get("short_form"),
             },
@@ -211,12 +213,18 @@ class Confluence2Exit:
 
     def update(self, position: Position, high_seen: float, variant_key: str,
                low_seen: Optional[float] = None) -> None:
-        """For trail_hl: løft trail-stop til nye higher lows."""
+        """For trail_hl: løft trail-stop til nye higher lows.
+        For breakeven_r: løft stop til entry når high ≥ entry + breakeven_r × R."""
         cfg = VARIANTS[variant_key]
         st: Confluence2ExitState = position.state
         if cfg.exit_mode == "trail_hl" and low_seen is not None:
             if low_seen > st.trail_stop:
                 st.trail_stop = low_seen
+        be_r = getattr(cfg, "breakeven_r", None)
+        if be_r and st.risk_per_share > 0:
+            if high_seen >= st.entry_price + be_r * st.risk_per_share:
+                if st.entry_price > st.trail_stop:
+                    st.trail_stop = st.entry_price
 
     def check_exit_bar(self, position: Position, bar: Bar, variant_key: str,
                        indicator_row: Optional[Any] = None) -> Optional[ExitDecision]:
@@ -231,8 +239,10 @@ class Confluence2Exit:
         mode = cfg.exit_mode
 
         if mode == "impulse_low":
-            if bar.low <= st.impulse_low:
-                return ExitDecision(exit_price=st.impulse_low, reason="stop")
+            # trail_stop starter = impulse_low; breakeven_r kan have løftet den til entry
+            if bar.low <= st.trail_stop:
+                reason = "breakeven" if st.trail_stop > st.impulse_low else "stop"
+                return ExitDecision(exit_price=st.trail_stop, reason=reason)
             return None
 
         if mode == "trail_hl":

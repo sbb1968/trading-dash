@@ -52,6 +52,7 @@ DATA_DIR   = Path(__file__).parent / "data"; DATA_DIR.mkdir(exist_ok=True)
 CACHE_DIR  = Path(__file__).parent / "bar_cache"; CACHE_DIR.mkdir(exist_ok=True)
 PORT, CLIENT_ID, TIMEOUT = 7497, 15, 15
 MAX_POSITION_SIZE = 2500.0
+ENTRY_FILL_NEXT_OPEN = True   # True = realistisk: fyld på næste bars open. False = gammel model: signal-barens close
 WARMUP_DAYS = 5   # 1-min: 5 handelsdage warmup er rigeligt til EMA20/RSI/ATR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s  %(message)s",
@@ -187,7 +188,7 @@ def backtest_day(strategy, ticker, bars, day, variant_key) -> list[dict]:
     strategy.exit.load_session_context(ctx)
     ind = ctx["ind_df"]
 
-    trades, pos, entry_meta = [], None, None
+    trades, pos, entry_meta, pending_sig = [], None, None, None
     day_bars = [b for b in bars if b.date == day and SESS_START <= b.time_et <= SESS_END]
     for b in day_bars:
         try:
@@ -196,17 +197,41 @@ def backtest_day(strategy, ticker, bars, day, variant_key) -> list[dict]:
                 row = row.iloc[0]
         except KeyError:
             continue
+
+        # Realistisk fill: et signal fra forrige bar fyldes på DENNE bars open.
+        if pos is None and pending_sig is not None:
+            _cfg = VARIANTS[variant_key]
+            _imp_close = pending_sig.metadata.get("impulse_close", pending_sig.entry_price)
+            if getattr(_cfg, "confirm_next_bar", False) and b.open < _imp_close:
+                pending_sig = None          # ingen følge-igennem på næste bars open → drop signalet
+            else:
+                pending_sig.entry_price = b.open
+                pending_sig.entry_time  = b.timestamp
+                shares = int(MAX_POSITION_SIZE / pending_sig.entry_price) if pending_sig.entry_price > 0 else 0
+                if shares > 0:
+                    pos = strategy.exit.open_position(pending_sig, shares, variant_key)
+                    entry_meta = {"time": b.time_et, "price": pending_sig.entry_price,
+                                  "bricks": pending_sig.metadata.get("bricks"), "shares": shares,
+                                  "impulse_low": pending_sig.metadata.get("impulse_low"),
+                                  "score": pending_sig.metadata.get("score")}
+                pending_sig = None
+            # INGEN continue: fill-baren exit-tjekkes også (falder igennem til
+            # else-grenen nedenfor) — den kan selv ramme stoppet, som en rigtig fill.
+
         if pos is None:
             sig = strategy.entry.check_entry(ticker, b, ctx)
             if sig:
-                shares = int(MAX_POSITION_SIZE / sig.entry_price) if sig.entry_price > 0 else 0
-                if shares <= 0:
-                    continue
-                pos = strategy.exit.open_position(sig, shares, variant_key)
-                entry_meta = {"time": b.time_et, "price": sig.entry_price,
-                              "bricks": sig.metadata.get("bricks"), "shares": shares,
-                              "impulse_low": sig.metadata.get("impulse_low"),
-                              "score": sig.metadata.get("score")}
+                if ENTRY_FILL_NEXT_OPEN:
+                    pending_sig = sig          # åbn IKKE nu — vent på næste bars open
+                else:
+                    shares = int(MAX_POSITION_SIZE / sig.entry_price) if sig.entry_price > 0 else 0
+                    if shares <= 0:
+                        continue
+                    pos = strategy.exit.open_position(sig, shares, variant_key)
+                    entry_meta = {"time": b.time_et, "price": sig.entry_price,
+                                  "bricks": sig.metadata.get("bricks"), "shares": shares,
+                                  "impulse_low": sig.metadata.get("impulse_low"),
+                                  "score": sig.metadata.get("score")}
         else:
             strategy.exit.update(pos, b.high, variant_key, low_seen=b.low)
             dec = strategy.exit.check_exit_bar(pos, b, variant_key, indicator_row=row)
