@@ -38,6 +38,10 @@ class AccountIdentity:
     autostart_strategies: list[str]
     studio_password:      str       # Password til Studio (login fra browser/mobil)
     internal_key:         str       # Fælles nøgle til maskine-til-maskine-tillid (Tailscale)
+    # ── Replikering ──
+    replication_enabled:    bool = False
+    replication_target_url: str  = ""
+    source_id:              str  = ""   # afledt: "<account_id>_<instance_role>"
 
 
 def _fail(msg: str) -> None:
@@ -83,6 +87,7 @@ def load_identity() -> AccountIdentity:
         account  = data["account"]
         instance = data["instance"]
         auth     = data.get("auth", {}) or {}
+        repl     = data.get("replication", {}) or {}
 
         identity = AccountIdentity(
             account_id            = str(account["id"]),
@@ -94,6 +99,9 @@ def load_identity() -> AccountIdentity:
             autostart_strategies  = list(instance.get("autostart_strategies", [])),
             studio_password       = str(auth.get("studio_password", "")),
             internal_key          = str(auth.get("internal_key", "")),
+            replication_enabled    = bool(repl.get("enabled", False)),
+            replication_target_url = str(repl.get("target_url", "")),
+            source_id              = f"{str(account['id'])}_{str(instance['role'])}",
         )
     except (KeyError, TypeError) as e:
         _fail(f"Manglende eller forkert felt i account.yaml: {e}")

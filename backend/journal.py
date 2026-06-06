@@ -32,6 +32,7 @@ from typing import Optional
 import aiosqlite
 import pytz
 
+import replication
 from accounts import identity
 
 # Tidszone-konstant — bruges af trade-helpers til at gemme entry_time_et og exit_time_et
@@ -138,6 +139,7 @@ class Journal:
                 ),
             )
             await self._db.commit()
+            replication.notify_change()   # poke replikering — billigt flag-sæt
 
         except Exception as e:
             # Vi sluger fejlen bevidst — journalisering må aldrig
@@ -319,6 +321,7 @@ class Journal:
                 ),
             )
             await self._db.commit()
+            replication.notify_change()   # poke replikering — billigt flag-sæt
             return trade_id
 
         except Exception as e:
@@ -416,6 +419,7 @@ class Journal:
                 ),
             )
             await self._db.commit()
+            replication.notify_change()   # poke replikering — billigt flag-sæt
             return True
 
         except Exception as e:
@@ -471,6 +475,7 @@ class Journal:
         try:
             await self._db.execute(sql, params)
             await self._db.commit()
+            replication.notify_change()   # poke replikering — billigt flag-sæt
             return True
         except Exception as e:
             logger.error(f"[Journal] update_trade_state fejl ({trade_id}): {e}")

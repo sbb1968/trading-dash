@@ -112,3 +112,8 @@ backend/baseline_foer.txt
 backend/historical_universe_*.json
 backend/bar_cache/
 backend/data/backtest_confluence2_*.csv
+
+# Replikering — runtime-mapper, må aldrig committes
+backend/replication_tmp/
+backend/archives/
+backend/test_ollama.py

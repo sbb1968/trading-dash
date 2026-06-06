@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from alert_engine import AlertEngine
@@ -264,6 +264,18 @@ async def startup():
     global ibkr_connected
 
     await journal.init()
+
+    # ── Replikering: start snapshot-push (no-op hvis enabled=false) ──
+    import replication
+    replication.replicator.init(
+        db_path      = journal.db_path,
+        source_id    = identity.source_id,
+        target_url   = identity.replication_target_url,
+        internal_key = identity.internal_key,
+        enabled      = identity.replication_enabled,
+    )
+    await replication.replicator.start()
+
     await journal.log_event(
         source="system",
         event_type="system_startup",
@@ -488,6 +500,15 @@ async def shutdown():
         )
     except Exception:
         pass
+
+    # ── Replikering: ét sidste flush + stop loop ──
+    try:
+        import replication
+        await replication.replicator.flush()
+        await replication.replicator.stop()
+        print("[Server] Replication flush + stop")
+    except Exception as e:
+        print(f"[Server] Replication shutdown-fejl: {e}")
 
     print("[Server] Shutdown færdig")
 
@@ -2072,6 +2093,34 @@ async def studio_static(filename: str):
         return {"error": "File not found"}, 404
     
     return FileResponse(file_path)
+
+# ── Replikering: modtager-endpoint (algoserveren) ──────────────
+@app.post("/replication/upload")
+async def replication_upload(
+    request:  Request,
+    source:   str = "",
+    artifact: str = "db",
+    x_internal_key: str = Header(None),
+):
+    if not identity.internal_key or x_internal_key != identity.internal_key:
+        raise HTTPException(status_code=401, detail="Ugyldig intern nøgle")
+    body = await request.body()
+    import replication_store
+    try:
+        result = await asyncio.to_thread(
+            replication_store.store_artifact, source, artifact, body
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lagring fejlede: {e}")
+    return result
+
+
+@app.get("/replication/sources", dependencies=[Depends(require_studio_auth)])
+async def replication_sources():
+    import replication_store
+    return {"sources": replication_store.list_sources()}
 
 # ── Analyse-side endpoint ──────────────────────────
 @app.get("/analysis/summary", dependencies=[Depends(require_studio_auth)])
