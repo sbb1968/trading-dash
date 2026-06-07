@@ -182,6 +182,7 @@ async def trades_summary(
     date_from:   Optional[str] = None,
     date_to:     Optional[str] = None,
     source:      Optional[str] = None,
+    symbol:      Optional[str] = None,
     account_id:  Optional[str] = None,
     instance_id: Optional[str] = None,
 ) -> dict:
@@ -217,6 +218,9 @@ async def trades_summary(
     if source:
         where.append("source = ?")
         params.append(source)
+    if symbol:
+        where.append("symbol = ?")
+        params.append(symbol.upper())
     if account_id:
         where.append("account_id = ?")
         params.append(account_id)

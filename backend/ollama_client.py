@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_HOST          = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL        = "qwen3:8b"
-GENERATE_TIMEOUT     = 180   # sek — rummelig; en 8B kan være langsom
+GENERATE_TIMEOUT     = 600   # sek — CPU-only algoserver er langsom på lange prompts
 AVAILABILITY_TIMEOUT = 3     # sek — hurtigt tjek
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)

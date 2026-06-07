@@ -853,7 +853,16 @@ async def journal_trades(
             source=source, symbol=symbol, status=status,
             account_id=account_id, instance_id=instance_id,
         )
-    return {"trades": trades, "count": len(trades), "total": total}
+        # Aggregat over HELE det filtrerede sæt (ikke kun denne side).
+        # trades_summary tæller kun lukkede (pnl findes kun for lukkede);
+        # status-filteret styrer kun tabellens rækker, ikke KPI-boksen.
+        summary = await trade_queries.trades_summary(
+            db,
+            date_from=date_from, date_to=date_to,
+            source=source, symbol=symbol,
+            account_id=account_id, instance_id=instance_id,
+        )
+    return {"trades": trades, "count": len(trades), "total": total, "summary": summary}
 
 
 @app.get("/journal/trades/{trade_id}")
