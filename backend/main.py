@@ -2186,3 +2186,23 @@ async def analysis_summary(period: str = "all"):
     if period not in ("today", "7d", "30d", "all"):
         return {"error": f"Ugyldig periode: {period}"}
     return build_summary(period)
+
+
+# ── Fleet-rapport + AI dagsrapport ─────────────────────────────
+@app.get("/analysis/fleet-summary", dependencies=[Depends(require_studio_auth)])
+async def analysis_fleet_summary(period: str = "today"):
+    """Tal på tværs af alle maskiner (denne + arkiver). Ingen AI."""
+    if period not in ("today", "7d", "30d", "all"):
+        return {"error": f"Ugyldig periode: {period}"}
+    import fleet_report
+    return await fleet_report.build_fleet_report(journal.db, period=period)
+
+
+@app.post("/ai/daily-report", dependencies=[Depends(require_studio_auth)])
+async def ai_daily_report(period: str = "today", model: str = "qwen3:8b"):
+    """Fleet-tal + AI-narrativ (dansk). Tallene returneres altid; narrative er
+    None hvis Ollama er nede."""
+    if period not in ("today", "7d", "30d", "all"):
+        return {"error": f"Ugyldig periode: {period}"}
+    import daily_report
+    return await daily_report.generate_daily_report(journal.db, period=period, model=model)
