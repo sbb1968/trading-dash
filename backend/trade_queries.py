@@ -130,6 +130,33 @@ async def list_trades(
         return []
 
 
+async def count_trades(
+    db,
+    date_from=None, date_to=None, source=None, symbol=None,
+    status=None, account_id=None, instance_id=None,
+) -> int:
+    """Antal trades der matcher filtrene (uden limit/offset) — til paginering."""
+    if db is None:
+        return 0
+    where, params = [], []
+    if date_from:   where.append("entry_time_et >= ?"); params.append(date_from)
+    if date_to:     where.append("entry_time_et <= ?"); params.append(date_to + "T23:59:59")
+    if source:      where.append("source = ?");         params.append(source)
+    if symbol:      where.append("symbol = ?");         params.append(symbol.upper())
+    if status == "open":     where.append("exit_time_utc IS NULL")
+    elif status == "closed": where.append("exit_time_utc IS NOT NULL")
+    if account_id:  where.append("account_id = ?");     params.append(account_id)
+    if instance_id: where.append("instance_id = ?");    params.append(instance_id)
+    where_clause = ("WHERE " + " AND ".join(where)) if where else ""
+    try:
+        async with db.execute(f"SELECT COUNT(*) FROM trades {where_clause}", params) as cur:
+            row = await cur.fetchone()
+        return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"[trade_queries] count_trades fejl: {e}")
+        return 0
+
+
 async def get_trade_by_id(db, trade_id: str) -> Optional[dict]:
     """Hent én trade med fuld payload, eller None hvis ikke fundet."""
     if db is None:

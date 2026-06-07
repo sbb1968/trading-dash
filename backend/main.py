@@ -847,10 +847,13 @@ async def journal_trades(
             account_id=account_id, instance_id=instance_id,
             limit=limit, offset=offset,
         )
-    return {
-        "trades": trades,
-        "count":  len(trades),
-    }
+        total = await trade_queries.count_trades(
+            db,
+            date_from=date_from, date_to=date_to,
+            source=source, symbol=symbol, status=status,
+            account_id=account_id, instance_id=instance_id,
+        )
+    return {"trades": trades, "count": len(trades), "total": total}
 
 
 @app.get("/journal/trades/{trade_id}")
