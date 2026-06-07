@@ -1209,6 +1209,7 @@
         <button data-page="account">Konto</button>
         <button data-page="strategies">Strategier</button>
         <button data-page="analysis">Analyse</button>
+        <button data-page="dagsrapport">Dagsrapport</button>
         <button data-page="journal">Journal</button>
         <button data-page="backtest">Backtest</button>
         <button data-page="log">Log</button>
@@ -1583,6 +1584,7 @@
             else if (page === "status") showStatus();
             else if (page === "account") showAccount();
             else if (page === "analysis") showAnalysis();
+            else if (page === "dagsrapport") renderDagsrapport();
             else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
             else if (page === "log") showLog();
@@ -1602,6 +1604,131 @@
                     </div>
                 </div>
             `;
+        }
+
+        // ─────────────────────────────────────────────────────
+        // DAGSRAPPORT-SIDE — fleet-tal + AI-narrativ (Ollama)
+        // ─────────────────────────────────────────────────────
+        // Pill-helperne er lokale her (som i de øvrige render-funktioner —
+        // de er ikke globale). De globale fmtMoneySigned/cls genbruges.
+        const _drSourcePill = (source) => {
+            if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
+            if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
+            if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+            if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
+            return `<span class="pill" style="background:#333;color:#aaa;">${source || "?"}</span>`;
+        };
+        const _drSidePill = (side) => side === "long"
+            ? `<span class="pill pill-long">Long</span>`
+            : `<span class="pill pill-short">Short</span>`;
+        const _drReasonPill = (reason) => {
+            if (!reason) return "";
+            const cls2 = ["target","trail","stop","force_close","manual"].includes(reason)
+                ? `pill-reason-${reason}` : "";
+            return `<span class="pill ${cls2}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+        };
+
+        function drFmtSummary(s) {
+            const pf = (s.profit_factor != null) ? s.profit_factor : "—";
+            return `${s.count} handler · ${s.wins}V/${s.losses}T · winrate ${s.win_rate}% · `
+                 + `<span class="${cls(s.total_pnl)}">P&L ${fmtMoneySigned(s.total_pnl)}</span> · PF ${pf}`;
+        }
+
+        async function renderDagsrapport() {
+            document.getElementById("content").innerHTML = `
+                <div class="card">
+                    <div class="controls">
+                        <select id="dr-period">
+                            <option value="today">I dag</option>
+                            <option value="7d">Sidste 7 dage</option>
+                            <option value="30d">Sidste 30 dage</option>
+                        </select>
+                        <button class="btn-primary" id="dr-gen">Generér rapport</button>
+                    </div>
+                    <div id="dr-out"><div class="muted">Vælg periode og tryk Generér.</div></div>
+                </div>`;
+
+            document.getElementById("dr-gen").onclick = async () => {
+                const period = document.getElementById("dr-period").value;
+                const out = document.getElementById("dr-out");
+                out.innerHTML = `<div class="muted">Genererer rapport… (kan tage et øjeblik)</div>`;
+                try {
+                    const res = await authFetch(
+                        `/ai/daily-report?period=${period}&model=qwen3:8b`, { method: "POST" });
+                    const data = await res.json();
+                    renderDagsrapportResult(out, data);
+                } catch (e) {
+                    out.innerHTML = `<div class="error">Fejl: ${e.message}</div>`;
+                }
+            };
+        }
+
+        function renderDagsrapportResult(out, data) {
+            const n = data.numbers;
+            let html = "";
+
+            // 1) AI-narrativ (eller pæn fallback) — tallene vises uanset
+            if (data.ai_available && data.narrative) {
+                html += `<div class="card"><div style="white-space:pre-wrap; line-height:1.6;">`
+                      + data.narrative.replace(/\n/g, "<br>") + `</div></div>`;
+            } else {
+                html += `<div class="card"><div class="muted">`
+                      + `(AI-kommentar utilgængelig — viser kun tal)</div></div>`;
+            }
+
+            // 2) Flåde i alt
+            html += `<div class="card"><h3>Flåde i alt</h3><div>${drFmtSummary(n.fleet.summary)}</div></div>`;
+
+            // 3) Pr. konto (SKAT)
+            html += `<div class="card"><h3>Pr. konto (SKAT)</h3>`;
+            for (const a of n.by_account) {
+                const lbl = a.ibkr_account ? `${a.account_id} / ${a.ibkr_account}` : a.account_id;
+                html += `<div style="margin:4px 0;"><strong>${lbl}</strong>: ${drFmtSummary(a.summary)}</div>`;
+            }
+            html += `</div>`;
+
+            // 4) Pr. maskine
+            for (const m of n.machines) {
+                const stale = (!m.reported_today && !m.is_self)
+                    ? ` <span class="pill" style="background:#7a5a00;color:#ffd479;">arkiv ikke opdateret i dag</span>` : "";
+                const acct = m.ibkr_account ? `${m.account_id} / ${m.ibkr_account}` : m.account_id;
+                html += `<div class="card"><h3>${m.name} <span class="muted">(${acct})</span>${stale}</h3>`;
+                html += `<div class="muted" style="font-size:12px;">Sidst opdateret: ${m.last_updated}</div>`;
+
+                if (m.error) {
+                    html += `<div class="error">(kunne ikke læse arkiv)</div></div>`;
+                    continue;
+                }
+
+                html += `<div style="margin:8px 0;">${drFmtSummary(m.summary)}</div>`;
+                if (m.open_count) {
+                    const old = m.old_open_count ? ` (heraf ${m.old_open_count} gamle åbne positioner)` : "";
+                    html += `<div>Åbne positioner: ${m.open_count}${old}</div>`;
+                }
+                for (const ps of m.per_strategy) {
+                    html += `<div style="margin:2px 0;">&nbsp;&nbsp;${_drSourcePill(ps.strategy)} ${drFmtSummary(ps.summary)}</div>`;
+                }
+                if (Object.keys(m.exit_reasons).length) {
+                    html += `<div style="margin-top:6px;">Exit: ` + Object.entries(m.exit_reasons)
+                        .map(([k, v]) => `${_drReasonPill(k)}×${v}`).join(" ") + `</div>`;
+                }
+                if (m.trades.length) {
+                    html += `<table style="margin-top:10px;"><thead><tr>`
+                          + `<th>Ticker</th><th>Side</th><th>Strategi</th><th>Entry</th>`
+                          + `<th>Exit</th><th>P&L</th><th>Årsag</th></tr></thead><tbody>`;
+                    for (const t of m.trades) {
+                        const rowClass = t.pnl == null ? "" : t.pnl > 0 ? "row-positive" : t.pnl < 0 ? "row-negative" : "";
+                        html += `<tr class="${rowClass}"><td><strong>${t.symbol ?? ""}</strong></td><td>${_drSidePill(t.side)}</td>`
+                              + `<td>${_drSourcePill(t.source)}</td>`
+                              + `<td class="num">${fmtMoney(t.entry_price)}</td><td class="num">${fmtMoney(t.exit_price)}</td>`
+                              + `<td class="num ${cls(t.pnl)}">${t.pnl != null ? fmtMoneySigned(t.pnl) : "—"}</td>`
+                              + `<td>${_drReasonPill(t.exit_reason)}</td></tr>`;
+                    }
+                    html += `</tbody></table>`;
+                }
+                html += `</div>`;
+            }
+            out.innerHTML = html;
         }
 
         // ─────────────────────────────────────────────────────
