@@ -1245,6 +1245,7 @@
         // Ellers et peer-objekt fra peers.json — så kalder vi peerens URL
         // med X-Internal-Key i stedet (Vej A: browseren kender nøglen).
         let selectedPeer = null;
+        let selectedSource = "";   // Del 3b: "" = denne maskine (lokal), ellers source_id fra /machines
         let internalKey  = null;   // hentes fra /internal-key efter login
         let knownPeers   = [];     // cache af peers.json
 
@@ -1266,6 +1267,7 @@
         }
 
         async function loadPeerSelector() {
+            // knownPeers bevares uændret (bruges af Analyse-fleet-board).
             try {
                 const res = await fetch("/peers");
                 const data = await res.json();
@@ -1274,17 +1276,31 @@
                 knownPeers = [];
             }
 
+            // Dropdown drives nu af /machines (kilder med arkiv + denne maskine),
+            // ikke af /peers. source_id er det /journal-endpoints forventer i ?archive=.
+            let machines = [];
+            try {
+                const res = await fetch("/machines");
+                const data = await res.json();
+                machines = data.machines || [];
+            } catch (e) {
+                machines = [];
+            }
+
             const sel = document.getElementById("peer-selector");
             if (!sel) return;
 
-            sel.innerHTML = `<option value="">Denne maskine</option>` +
-                knownPeers.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+            const self = machines.find(m => m.is_self);
+            const others = machines.filter(m => !m.is_self && m.har_arkiv);
+            const selfLabel = self ? `${self.name} (denne)` : "Denne maskine";
+
+            sel.innerHTML =
+                `<option value="">${selfLabel}</option>` +
+                others.map(m => `<option value="${m.source_id}">${m.name} (arkiv)</option>`).join("");
 
             sel.onchange = () => {
-                const id = sel.value;
-                selectedPeer = id ? knownPeers.find(p => p.id === id) : null;
-                // Analyse viser altid ALLE maskiner — den skal ikke genindlæses
-                // (og dermed ikke genkontakte en evt. slukket maskine) ved maskineskift.
+                selectedSource = sel.value;   // "" = lokal, ellers source_id
+                // Analyse = fleet board (alle maskiner) — påvirkes ikke af kildevalg.
                 if (currentPage !== "analysis") {
                     switchPage(currentPage || "oversigt");
                 }
@@ -1292,6 +1308,13 @@
         }
 
         async function authFetch(url, options = {}) {
+            // Del 3b: arkiv-bagede journal-endpoints læser fra den valgte kilde.
+            // Andre endpoints (konto, strategier, status) ignorerer kilden og
+            // viser altid denne (algoserver-)maskines live-data.
+            if (selectedSource && url.startsWith("/journal/")) {
+                url += (url.includes("?") ? "&" : "?") + "archive=" + encodeURIComponent(selectedSource);
+            }
+
             // Lokal maskine valgt → relativ URL + Bearer-token (som før)
             if (!selectedPeer) {
                 const token = getToken();

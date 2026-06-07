@@ -1,28 +1,28 @@
 {
   "peers": [
     {
-      "id": "iben-algo",
+      "id": "iben_algoserver",
       "name": "Iben Algo",
       "host": "iben-algo",
       "url": "http://iben-algo:8000",
       "enabled": true
     },
     {
-      "id": "iben-ws",
+      "id": "iben_workstation",
       "name": "Iben Workstation",
       "host": "ibenspc",
       "url": "http://ibenspc:8000",
       "enabled": true
     },
     {
-      "id": "soren-ws",
+      "id": "soren_workstation",
       "name": "Søren Workstation",
       "host": "win11sbb",
       "url": "http://win11sbb:8000",
       "enabled": true
     },
     {
-      "id": "soren-algo",
+      "id": "soren_algoserver",
       "name": "Søren Algo",
       "host": null,
       "url": null,
