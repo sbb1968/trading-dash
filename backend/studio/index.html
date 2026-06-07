@@ -1521,6 +1521,31 @@
         // Router — håndterer side-skift
         // ─────────────────────────────────────────────────────
         let currentPage = "oversigt";
+
+        // Map strategi-navn → docs-mappe og pill-stil.
+        // ENESTE sandhedskilde for strategi-listen: pills OG begge filter-dropdowns
+        // bygges herfra. Tilføj en ny strategi her → den dukker op alle steder.
+        // Placeret tidligt fordi Journal-render (buildStrategiOptions) ligger
+        // før den oprindelige placering — const er ikke hoisted.
+        const STRATEGY_META = {
+            "Momentum ORB": { docs: "momentum_orb", pill: "pill-orb" },
+            "Konfluens":    { docs: "confluence",   pill: "pill-konfl" },
+            "Konfluens 2":  { docs: "confluence2",  pill: "pill-konfl2" },
+        };
+
+        // Byg <option>-liste til strategi-filtre ud fra STRATEGY_META — den
+        // eneste sandhedskilde. allLabel er teksten på "alle"-valget ("Alle
+        // strategier" i Journal, "Alle" i Log). "manual"/"Manuel" tilføjes
+        // eksplicit da den ikke står i STRATEGY_META.
+        function buildStrategiOptions(selectedVal, allLabel) {
+            const items = [["", allLabel]]
+                .concat(Object.keys(STRATEGY_META).map(k => [k, k]))
+                .concat([["manual", "Manuel"]]);
+            return items.map(([val, label]) =>
+                `<option value="${val}" ${val === (selectedVal || "") ? "selected" : ""}>${label}</option>`
+            ).join("");
+        }
+
         let accountTimer = null;
         let oversigtTimer = null;
         let journalTimer = null;
@@ -2069,14 +2094,7 @@
         function renderJournalShell() {
             // Render hele siden inkl. filterbar — tabellen bliver indsat senere
             const f = journalFilters;
-            const sourceOptions = [
-                ["",              "Alle strategier"],
-                ["Momentum ORB",  "Momentum ORB"],
-                ["Konfluens",     "Konfluens"],
-                ["manual",        "Manuel"],
-            ].map(([val, label]) => `
-                <option value="${val}" ${val === f.source ? "selected" : ""}>${label}</option>
-            `).join("");
+            const sourceOptions = buildStrategiOptions(f.source, "Alle strategier");
 
             const statusOptions = [
                 ["all",    "Alle"],
@@ -2796,13 +2814,6 @@
             `;
         }
 
-        // Map strategi-navn → docs-mappe og pill-stil
-        const STRATEGY_META = {
-            "Momentum ORB": { docs: "momentum_orb", pill: "pill-orb" },
-            "Konfluens":    { docs: "confluence",   pill: "pill-konfl" },
-            "Konfluens 2":  { docs: "confluence2",  pill: "pill-konfl2" },
-        };
-
         function renderStrategies(data) {
             const strategies = data.strategies || [];
             const ibkrBadge = data.ibkr_connected
@@ -3370,9 +3381,7 @@
                         <div class="filter-field" style="min-width:150px;">
                             <label>Strategi</label>
                             <select id="log-source">
-                                <option value="">Alle</option>
-                                <option value="Momentum ORB">Momentum ORB</option>
-                                <option value="Konfluens">Konfluens</option>
+                                ${buildStrategiOptions("", "Alle")}
                             </select>
                         </div>
                         <div class="filter-field filter-actions">
