@@ -3595,7 +3595,7 @@
             container.innerHTML = logEntries.map(e => {
                 const safeText = e.text
                     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                return `<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin:0; padding:0;" title="${safeText}">` +
+                return `<div style="white-space:pre; margin:0; padding:0;" title="${safeText}">` +
                     `<span style="color:#666;">${e.time}</span> ` +
                     `<span style="color:${colorFor(e.level)};">${safeText}</span>` +
                     `</div>`;
