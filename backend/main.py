@@ -24,6 +24,9 @@ from accounts import identity
 from fastapi.responses import FileResponse
 from pathlib import Path
 
+from contextlib import asynccontextmanager
+import aiosqlite
+
 import secrets
 from fastapi import HTTPException, Header
 
@@ -790,6 +793,28 @@ class UpdateNotesRequest(BaseModel):
     notes: str
 
 
+# ── Del 3: arkiv-læsning ───────────────────────────────────────
+# Vælg hvilken DB en read-query læser fra:
+#   archive tom/None  → live journal.db (denne maskines egen data)
+#   archive sat       → arkivet i archives/<archive>/trading_dash.db (read-only)
+# Den arkiverede DB åbnes read-only pr. request og lukkes bagefter.
+# Læser fra et statisk snapshot — ingen WAL-skrivning i gang, så mode=ro er sikkert.
+@asynccontextmanager
+async def _resolve_db(archive):
+    if not archive:
+        yield journal.db
+        return
+    import replication_store
+    path = replication_store.archive_db_path(archive)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"Intet arkiv for kilde: {archive!r}")
+    conn = await aiosqlite.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
 @app.get("/journal/trades")
 async def journal_trades(
     date_from:   str = None,
@@ -799,6 +824,7 @@ async def journal_trades(
     status:      str = None,
     account_id:  str = None,
     instance_id: str = None,
+    archive:     str = None,
     limit:       int = 200,
     offset:      int = 0,
 ):
@@ -813,13 +839,14 @@ async def journal_trades(
       account_id, instance_id: filtrerer på maskine (på lokal: typisk udelades)
       limit, offset: paginering (default: 200 trades)
     """
-    trades = await trade_queries.list_trades(
-        journal.db,
-        date_from=date_from, date_to=date_to,
-        source=source, symbol=symbol, status=status,
-        account_id=account_id, instance_id=instance_id,
-        limit=limit, offset=offset,
-    )
+    async with _resolve_db(archive) as db:
+        trades = await trade_queries.list_trades(
+            db,
+            date_from=date_from, date_to=date_to,
+            source=source, symbol=symbol, status=status,
+            account_id=account_id, instance_id=instance_id,
+            limit=limit, offset=offset,
+        )
     return {
         "trades": trades,
         "count":  len(trades),
@@ -827,30 +854,27 @@ async def journal_trades(
 
 
 @app.get("/journal/trades/{trade_id}")
-async def journal_trade_detail(trade_id: str):
+async def journal_trade_detail(trade_id: str, archive: str = None):
     """Hent én specifik trade med fuld payload (forensics, indikatorer, etc.)."""
-    trade = await trade_queries.get_trade_by_id(journal.db, trade_id)
+    async with _resolve_db(archive) as db:
+        trade = await trade_queries.get_trade_by_id(db, trade_id)
     if trade is None:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
     return trade
 
 
 @app.get("/journal/today")
-async def journal_today():
-    """
-    Dagens trades (ET-handelsdag) + summary statistik.
-    Bruges af Studio's Oversigt-fane.
-    """
-    return await trade_queries.today_trades_and_summary(journal.db)
+async def journal_today(archive: str = None):
+    """Dagens trades (ET-handelsdag) + summary statistik."""
+    async with _resolve_db(archive) as db:
+        return await trade_queries.today_trades_and_summary(db)
 
 
 @app.get("/journal/open-positions")
-async def journal_open_positions():
-    """
-    Alle nuværende åbne positioner.
-    Bruges af Oversigt-fanen og af mobile-quickview.
-    """
-    positions = await trade_queries.open_positions(journal.db)
+async def journal_open_positions(archive: str = None):
+    """Alle nuværende åbne positioner."""
+    async with _resolve_db(archive) as db:
+        positions = await trade_queries.open_positions(db)
     return {
         "positions": positions,
         "count":     len(positions),
@@ -865,6 +889,7 @@ async def journal_events(
     source:     str = None,        # "Momentum ORB" / "Konfluens" — None = alle
     event_type: str = None,        # None = alle
     limit:      int = 1000,
+    archive:    str = None,
 ):
     """
     Hent gemte journal-events for et ET-tidsvindue. Bruges af Studio's
@@ -895,10 +920,12 @@ async def journal_events(
     from_utc = et_window_to_utc(date, from_time)
     to_utc   = et_window_to_utc(date, to_time)
 
-    events = await journal.get_events(
-        from_utc=from_utc, to_utc=to_utc,
-        source=source, event_type=event_type, limit=limit,
-    )
+    async with _resolve_db(archive) as db:
+        events = await journal.get_events(
+            from_utc=from_utc, to_utc=to_utc,
+            source=source, event_type=event_type, limit=limit,
+            db=db,
+        )
     return {
         "date":      date,
         "from_time": from_time,
@@ -1821,6 +1848,36 @@ async def get_peers():
         return data
     except Exception as e:
         return {"peers": [], "error": str(e)}
+
+@app.get("/machines")
+async def get_machines():
+    """Samlet liste over maskiner Studio kan læse data for.
+
+    is_self=True   → denne maskines egen data (læses direkte fra journal.db)
+    har_arkiv=True → en anden maskine hvis data ligger replikeret i archives/
+
+    Ingen auth — kun maskinnavne, intet hemmeligt (som /peers).
+    """
+    import replication_store
+    sources = replication_store.list_sources()
+    out = [{
+        "id":        identity.source_id,
+        "name":      identity.instance_display_name,
+        "source_id": identity.source_id,
+        "har_arkiv": False,
+        "is_self":   True,
+    }]
+    for s in sources:
+        if s == identity.source_id:
+            continue
+        out.append({
+            "id":        s,
+            "name":      s.replace("_", " ").title(),
+            "source_id": s,
+            "har_arkiv": True,
+            "is_self":   False,
+        })
+    return {"machines": out}
 
 @app.get("/internal-key", dependencies=[Depends(require_studio_auth)])
 async def get_internal_key():

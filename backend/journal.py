@@ -164,6 +164,7 @@ class Journal:
         source:     Optional[str] = None,   # fx "Momentum ORB" — None = alle
         event_type: Optional[str] = None,   # fx "trade_forensics" — None = alle
         limit:      int = 1000,
+        db=None,
     ) -> list[dict]:
         """
         Hent events filtreret på tidsvindue og/eller source.
@@ -175,7 +176,8 @@ class Journal:
         Returnerer events sorteret kronologisk (ældste først) så de kan vises
         som en log. Tom liste hvis intet matcher eller journal ikke er klar.
         """
-        if self._db is None:
+        conn = db if db is not None else self._db
+        if conn is None:
             return []
 
         clauses = []
@@ -203,7 +205,7 @@ class Journal:
 
         try:
             rows = []
-            async with self._db.execute(sql, params) as cur:
+            async with conn.execute(sql, params) as cur:
                 async for r in cur:
                     payload = {}
                     try:
