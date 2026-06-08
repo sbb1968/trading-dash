@@ -1875,6 +1875,23 @@
             return [...(positions || [])].sort((a, b) =>
                 (b.entry_time_et || "").localeCompare(a.entry_time_et || ""));
         }
+        // Synlig status-stribe der forklarer HVORFOR pris/urealiseret evt.
+        // mangler — eller "" hvis alt er fint. Bruges af baade desktop og mobil.
+        function buildPriceStatusBanner(snap, openViews) {
+            const box = (color, text) =>
+                `<div class="card" style="padding:8px 12px; border-left:3px solid ${color}; font-size:13px; color:${color};">${text}</div>`;
+            if (!snap || !snap.ok) {
+                const why = (snap && snap.error) ? snap.error : "IBKR ikke forbundet";
+                return box("#f59e0b",
+                    `⚠ Live konto-data utilgængelig — ${why}. Aktuel pris og urealiseret P&L kan ikke vises (tjek at TWS er logget ind og at backenden kører).`);
+            }
+            const missing = openViews.filter(v => v.lastPrice == null).length;
+            if (missing > 0) {
+                return box("#f59e0b",
+                    `⚠ Afventer live pris for ${missing} af ${openViews.length} ${openViews.length === 1 ? "position" : "positioner"} — markedet er sandsynligvis lukket eller dataen er forsinket.`);
+            }
+            return "";
+        }
 
         function renderOversigt(today, open, snap) {
             const summary = today.summary || {};
@@ -2042,7 +2059,8 @@
                     </div>
                 </div>
 
-                <div class="section-title">Åbne positioner (${openPositions.length})</div>
+                <div class="section-title">Åbne positioner (${openViews.length})</div>
+                ${buildPriceStatusBanner(snap, openViews)}
                 <div class="card" style="padding:0;">
                     <table>
                         <thead>
@@ -2247,6 +2265,7 @@
                     </div>
 
                     <div class="section-title">Åbne positioner (${openViews.length})</div>
+                    ${buildPriceStatusBanner(snap, openViews)}
                     <div class="mobile-pos-list">
                         ${positionCards}
                     </div>
