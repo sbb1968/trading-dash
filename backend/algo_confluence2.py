@@ -447,6 +447,13 @@ class Confluence2Live(BaseStrategy):
             self.status = StrategyStatus.ERROR
             return
 
+        # Vis HELE universet i live-loggen — alle kandidater der potentielt kan
+        # handles i dag. Status "universe_ready" gør at frontenden også fanger
+        # listen (split på første ":") til universe-visning.
+        self._status("universe_ready",
+                     f"📋 Dagens univers — {len(self.universe)} aktier der potentielt "
+                     f"kan handles: {', '.join(self.universe)}")
+
         await self.log_universe(
             self.universe,
             meta = {
@@ -502,7 +509,8 @@ class Confluence2Live(BaseStrategy):
             self._strategy.entry.load_session_context(self._contexts[ticker])
 
         self._status("orb_ready",
-                     f"✅ Universe klar — {len(self.universe)} tickers med fuld indikator-historie")
+                     f"✅ Universe klar — {len(self.universe)} tickers med fuld "
+                     f"indikator-historie: {', '.join(self.universe)}")
 
         # ── Trade Forensics: start tape/depth subscriptions ───────
         try:
