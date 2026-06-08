@@ -2381,6 +2381,7 @@
             const summary = data.summary || {};
             const sumCount = summary.count     ?? 0;
             const sumPnl   = summary.total_pnl ?? 0;
+            const sumPct   = summary.pnl_pct   ?? 0;
             const sumWinRt = summary.win_rate  ?? 0;
             const hasClosed = sumCount > 0;
 
@@ -2452,7 +2453,9 @@
                         </div>
                         <div>
                             <div class="stat-label">P&L (alle valgte)</div>
-                            <div class="stat-value ${cls(sumPnl)}">${hasClosed ? fmtMoneySigned(sumPnl) : "—"}</div>
+                            <div class="stat-value ${cls(sumPnl)}">${hasClosed ? fmtMoneySigned(sumPnl) : "—"}
+                                <span style="font-size:15px; font-weight:600; margin-left:8px;">${hasClosed ? "(" + (sumPct >= 0 ? "+" : "") + sumPct.toFixed(2) + "%)" : ""}</span>
+                            </div>
                         </div>
                         <div>
                             <div class="stat-label">Win rate (alle valgte)</div>

@@ -238,7 +238,8 @@ async def trades_summary(
             COALESCE(SUM(pnl), 0)               AS total_pnl,
             COALESCE(AVG(pnl), 0)               AS avg_pnl,
             COALESCE(MAX(pnl), 0)               AS best_trade,
-            COALESCE(MIN(pnl), 0)               AS worst_trade
+            COALESCE(MIN(pnl), 0)               AS worst_trade,
+            COALESCE(SUM(entry_price * shares), 0) AS total_cost
         FROM trades
         {where_clause}
     """
@@ -246,10 +247,11 @@ async def trades_summary(
         async with db.execute(sql, params) as cur:
             row = await cur.fetchone()
 
-        count, wins, losses, total, avg, best, worst = row
+        count, wins, losses, total, avg, best, worst, total_cost = row
         wins = wins or 0
         losses = losses or 0
         count = count or 0
+        total_cost = total_cost or 0.0
 
         # Åbne positioner — separat query med samme filtre minus pnl-krav
         open_where = [w for w in where if w != "exit_time_utc IS NOT NULL"]
@@ -264,6 +266,9 @@ async def trades_summary(
         open_count = (open_row[0] if open_row else 0) or 0
 
         win_rate = (wins / count * 100.0) if count > 0 else 0.0
+        # Samlet afkast i % = samlet P&L / samlet kostpris (entry_price*shares),
+        # dvs. vægtet efter positionsstørrelse — konsistent med per-handel-%.
+        pnl_pct = ((total or 0.0) / total_cost * 100.0) if total_cost > 0 else 0.0
 
         return {
             "count":       count,
@@ -271,6 +276,8 @@ async def trades_summary(
             "losses":      losses,
             "win_rate":    round(win_rate, 2),
             "total_pnl":   round(total or 0.0, 2),
+            "total_cost":  round(total_cost, 2),
+            "pnl_pct":     round(pnl_pct, 2),
             "avg_pnl":     round(avg   or 0.0, 2),
             "best_trade":  round(best  or 0.0, 2),
             "worst_trade": round(worst or 0.0, 2),
@@ -288,6 +295,8 @@ def _empty_summary() -> dict:
         "losses":      0,
         "win_rate":    0.0,
         "total_pnl":   0.0,
+        "total_cost":  0.0,
+        "pnl_pct":     0.0,
         "avg_pnl":     0.0,
         "best_trade":  0.0,
         "worst_trade": 0.0,
