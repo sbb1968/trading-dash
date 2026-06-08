@@ -1192,8 +1192,32 @@
             }
             .mobile-trade-pnl.positive { color: #5ee99a; }
             .mobile-trade-pnl.negative { color: #ff8a8a; }
+
+            /* ── Alle faner brugbare på mobil: vandret rulleskakt ──────────
+               Fanerne uden dedikeret mobil-version (Status, Analyse, Konto,
+               Strategier, Backtest, Log, Journal) beholder desktop-tabellen i
+               fuld bredde og kan scrolles vandret — i stedet for at klemme
+               kolonnerne sammen eller klippe dem af. */
+            #content {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;   /* blød touch-scroll på iOS */
+            }
+            /* Tabeller beholder naturlig bredde (fylder mindst skærmen, vokser
+               med indholdet → vandret scroll når de er bredere end skærmen). */
+            #content table {
+                width: auto !important;
+                min-width: 100%;
+            }
+            #content th,
+            #content td {
+                white-space: nowrap;
+            }
+            /* Strategi-dokumentation (prosa) skal fortsat ombryde normalt. */
+            #content .markdown-body table { width: 100% !important; }
+            #content .markdown-body th,
+            #content .markdown-body td { white-space: normal; }
         }
-        
+
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
     <script src="/studio/dev_config.js" onerror="console.log('[DEV] Ingen dev_config.js — prod mode aktiv')"></script>
