@@ -1881,7 +1881,7 @@
                 }
             }
             const openRows = openPositions.length === 0
-                ? `<tr><td colspan="8" class="empty">Ingen åbne positioner</td></tr>`
+                ? `<tr><td colspan="9" class="empty">Ingen åbne positioner</td></tr>`
                 : openPositions.map(p => {
                     const stage = p.current_stage || "—";
                     const targetCell = p.current_stage === "trailing"
@@ -1892,10 +1892,20 @@
                     const entryTime = p.entry_time_et
                         ? p.entry_time_et.substring(11, 16) + " ET"
                         : "—";
-                    const live   = snapByTicker[(p.symbol || "").toUpperCase()] || null;
-                    const unrPnl = live && live.pnl != null ? live.pnl : null;
+                    const live      = snapByTicker[(p.symbol || "").toUpperCase()] || null;
+                    const lastPrice = live && live.last_price != null ? live.last_price : null;
+                    const unrPnl    = live && live.pnl != null ? live.pnl : null;
+                    const unrPct    = live && live.pnl_pct != null ? live.pnl_pct : null;
+                    // Aktuel pris ("Nu") — altid den live pris så afvigelsen fra
+                    // entry er synlig.
+                    const lastCell = lastPrice != null
+                        ? `<span style="color:#7ec0ff;">${fmtMoney(lastPrice)}</span>`
+                        : `<span class="muted">—</span>`;
+                    const pctText = unrPct != null
+                        ? ` <span style="font-size:11px;opacity:.75;">(${unrPct >= 0 ? "+" : ""}${unrPct.toFixed(2)}%)</span>`
+                        : "";
                     const pnlCell = unrPnl != null
-                        ? `<span class="${cls(unrPnl)}" style="font-weight:700;">${fmtMoneySigned(unrPnl)}</span>`
+                        ? `<span class="${cls(unrPnl)}" style="font-weight:700;">${fmtMoneySigned(unrPnl)}${pctText}</span>`
                         : `<span class="muted">—</span>`;
                     return `
                         <tr class="row-open">
@@ -1904,6 +1914,7 @@
                             <td>${sidePill(p.side)}</td>
                             <td class="num">${p.shares}</td>
                             <td class="num">${fmtMoney(p.entry_price)}</td>
+                            <td class="num">${lastCell}</td>
                             <td class="num">${p.current_stop != null ? fmtMoney(p.current_stop) : "—"}</td>
                             <td class="num">${targetCell}</td>
                             <td class="num">${pnlCell}</td>
@@ -2007,6 +2018,7 @@
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
                                 <th style="text-align:right;">Entry</th>
+                                <th style="text-align:right;">Nu</th>
                                 <th style="text-align:right;">Stop</th>
                                 <th style="text-align:right;">Target / Trail</th>
                                 <th style="text-align:right;">P&L</th>

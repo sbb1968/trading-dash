@@ -1996,6 +1996,46 @@ async def get_internal_key():
 _last_snapshot_journaled_at: datetime | None = None
 
 
+def _best_snapshot_price(snap: dict):
+    """Bedste tilgængelige 'aktuelle' pris fra et get_snapshot-dict.
+
+    IBKR's `last` er ofte NaN/0 uden for RTH eller ved forsinket data — så vi
+    falder tilbage: last → bid/ask-midtpris → seneste close → open. Returnerer
+    None hvis intet brugbart felt findes.
+
+    Det er denne fallback der gør, at Studio ALTID kan vise en aktuel pris pr.
+    position (og dermed urealiseret P&L pr. handel) — ikke kun det aggregerede
+    konto-tal i toppen. Før faldt vi tilbage til None hvis `last` manglede, så
+    rækkerne stod tomme selvom konto-summen havde et tal.
+    """
+    if not snap:
+        return None
+    import math
+
+    def f(v):
+        if v is None:
+            return None
+        try:
+            x = float(v)
+        except (ValueError, TypeError):
+            return None
+        if math.isnan(x) or math.isinf(x) or x <= 0:
+            return None
+        return x
+
+    last = f(snap.get("last"))
+    if last is not None:
+        return last
+    bid, ask = f(snap.get("bid")), f(snap.get("ask"))
+    if bid is not None and ask is not None:
+        return round((bid + ask) / 2, 4)
+    for key in ("close", "open"):
+        v = f(snap.get(key))
+        if v is not None:
+            return v
+    return None
+
+
 @app.get("/account/snapshot", dependencies=[Depends(require_studio_auth)])
 async def account_snapshot(force_journal: bool = False):
     """
@@ -2048,7 +2088,9 @@ async def account_snapshot(force_journal: bool = False):
         async def fetch_price(ticker):
             try:
                 snap = await asyncio.wait_for(conn.get_snapshot(ticker), timeout=2.0)
-                return safe_float(snap.get("last")) if snap else None
+                # Robust pris: last → bid/ask-midt → close → open. IBKR's `last`
+                # er ofte NaN uden for RTH, hvilket før gav tomme pris/P&L-felter.
+                return _best_snapshot_price(snap)
             except (asyncio.TimeoutError, Exception):
                 return None
 
@@ -2161,7 +2203,9 @@ async def account_dash_snapshot():
         async def fetch_price(ticker):
             try:
                 snap = await asyncio.wait_for(conn.get_snapshot(ticker), timeout=2.0)
-                return safe_float(snap.get("last")) if snap else None
+                # Robust pris: last → bid/ask-midt → close → open. IBKR's `last`
+                # er ofte NaN uden for RTH, hvilket før gav tomme pris/P&L-felter.
+                return _best_snapshot_price(snap)
             except (asyncio.TimeoutError, Exception):
                 return None
 
