@@ -50,6 +50,10 @@ from strategies.confluence2.config import (
     UNIVERSE_PRICE_MAX,
     UNIVERSE_MIN_VOLUME,
     UNIVERSE_TOP_N,
+    UNIVERSE_MKT_CAP_MIN,
+    UNIVERSE_MKT_CAP_MAX,
+    UNIVERSE_ATR_PCT_MIN,
+    UNIVERSE_EXCHANGES,
 )
 from strategies.base import Bar, Position
 
@@ -405,7 +409,7 @@ class Confluence2Live(BaseStrategy):
 
         raw_tickers: list[str] = []
         for attempt in range(1, 3):
-            raw_tickers = await self._scan_filtered_gainers(UNIVERSE_TOP_N)
+            raw_tickers = await self._scan_volatility_universe(UNIVERSE_TOP_N)
             if len(raw_tickers) >= MIN_UNIVERSE_SIZE:
                 break
             if attempt < 2:
@@ -425,87 +429,31 @@ class Confluence2Live(BaseStrategy):
 
         self._status("scanning",
                      f"Scanner fandt {len(raw_tickers)} tickers fra TradingView "
-                     f"(pris ${UNIVERSE_PRICE_MIN}-${UNIVERSE_PRICE_MAX}, vol >{UNIVERSE_MIN_VOLUME:,})")
+                     f"Intraday Volatility (pris ${UNIVERSE_PRICE_MIN:.0f}-${UNIVERSE_PRICE_MAX:.0f}, "
+                     f"mkt-cap ${UNIVERSE_MKT_CAP_MIN/1e9:.0f}B-${UNIVERSE_MKT_CAP_MAX/1e12:.0f}T, "
+                     f"avg-vol >{UNIVERSE_MIN_VOLUME:,}, ATR-1W >{UNIVERSE_ATR_PCT_MIN:.0f}%)")
 
-        # ── Pris-filtrering ──────────────────────────────────
-        now_et = datetime.now(ET)
-        market_open = SESSION_START <= now_et.time() <= SESSION_END
-        SNAPSHOT_TIMEOUT_SEC = 5.0
-
-        passed: list[tuple[str, float]] = []
-        snapshot_failures = 0
-        for idx, ticker in enumerate(raw_tickers, 1):
-            ref_price = None
-            try:
-                if market_open:
-                    snap = await asyncio.wait_for(
-                        self.conn.get_snapshot(ticker),
-                        timeout=SNAPSHOT_TIMEOUT_SEC,
-                    )
-                    if snap:
-                        ref_price = snap.get("open") or snap.get("last")
-                else:
-                    daily_bars = await asyncio.wait_for(
-                        self.conn.get_historical_bars(
-                            ticker,
-                            duration="2 D",
-                            bar_size="1 day",
-                            what_to_show="TRADES",
-                        ),
-                        timeout=SNAPSHOT_TIMEOUT_SEC,
-                    )
-                    if daily_bars:
-                        last_bar = daily_bars[-1]
-                        ref_price = (
-                            last_bar.get("close") if isinstance(last_bar, dict)
-                            else last_bar.close
-                        )
-            except asyncio.TimeoutError:
-                logger.warning(f"  [{idx}/{len(raw_tickers)}] {ticker}: pris-lookup timeout")
-                snapshot_failures += 1
-                continue
-            except Exception as e:
-                logger.warning(f"  [{idx}/{len(raw_tickers)}] {ticker}: pris-lookup fejl — {e}")
-                snapshot_failures += 1
-                continue
-
-            if not ref_price or ref_price <= 0:
-                logger.debug(f"  [{idx}/{len(raw_tickers)}] {ticker}: ingen pris tilgængelig")
-                snapshot_failures += 1
-                continue
-
-            if ref_price < UNIVERSE_PRICE_MIN or ref_price > UNIVERSE_PRICE_MAX:
-                logger.info(f"  [{idx}/{len(raw_tickers)}] {ticker}: ${ref_price:.2f} "
-                            f"udenfor ${UNIVERSE_PRICE_MIN}-${UNIVERSE_PRICE_MAX}")
-                continue
-
-            logger.info(f"  [{idx}/{len(raw_tickers)}] {ticker}: ${ref_price:.2f} ✓")
-            passed.append((ticker, ref_price))
-
-        if snapshot_failures == len(raw_tickers):
-            self._status("error",
-                         f"Kunne ikke hente pris for nogen af {len(raw_tickers)} tickers "
-                         f"(marked sandsynligvis lukket eller IBKR-problem) — afbryder")
-            self.status = StrategyStatus.ERROR
-            return
-
-        self.universe = [t for t, _ in passed]
+        # ── Stol 100% på TV-screeneren — INTET andet-trins IBKR-pris-refilter ──
+        # TradingView-queryen har allerede filtreret på pris ($5–50), market cap,
+        # børs, 30-dages volumen og ATR. Vi bruger listen direkte (som ORB gør)
+        # i stedet for at re-tjekke priser via IBKR-snapshots ved opstart.
+        self.universe = list(raw_tickers)
         self._status("scanning",
-                     f"{len(self.universe)} tickers passerede pris-filter "
-                     f"(${UNIVERSE_PRICE_MIN}-${UNIVERSE_PRICE_MAX})")
+                     f"{len(self.universe)} tickers fra TradingView Intraday "
+                     f"Volatility (stoler 100% på screeneren)")
 
         if not self.universe:
-            self._status("error", "Ingen tickers efter pris-filter — afbryder")
+            self._status("error", "Ingen tickers fra scanneren — afbryder")
             self.status = StrategyStatus.ERROR
             return
 
         await self.log_universe(
             self.universe,
             meta = {
-                "raw_count":   len(raw_tickers),
-                "open_prices": {t: p for t, p in passed},
-                "price_min":   UNIVERSE_PRICE_MIN,
-                "price_max":   UNIVERSE_PRICE_MAX,
+                "raw_count": len(raw_tickers),
+                "price_min": UNIVERSE_PRICE_MIN,
+                "price_max": UNIVERSE_PRICE_MAX,
+                "source":    "tv_intraday_volatility",
             },
         )
 
@@ -585,25 +533,43 @@ class Confluence2Live(BaseStrategy):
             self._status("orb_ready",
                          f"⚠ Forensics-setup fejlede ({e}) — algoritmen kører videre uden")
 
-    async def _scan_filtered_gainers(self, top_n: int) -> list[str]:
+    async def _scan_volatility_universe(self, top_n: int) -> list[str]:
         """
-        Hent top-N gainers via TradingView's screener API (samme kilde som K1).
-        Returnerer liste af symboler (max top_n stk). Tom liste hvis API fejler.
+        Hent K2's univers via TradingViews "Intraday Volatility"-screener.
+
+        IKKE længere top-gainers (som gav elendige kandidater) — i stedet
+        mellem-/large-cap aktier med høj ugentlig ATR: likvide navne der
+        bevæger sig nok intraday til at impuls-setuppet giver mening.
+        Filtrene (pris/mkt-cap/børs/avg-vol/ATR) kommer fra confluence2.config
+        og matcher Sørens screener. Returnerer symboler sorteret efter seneste
+        dagsændring (faldende). Tom liste hvis API fejler.
         """
-        from strategies.confluence.tv_scanner import fetch_tv_top_gainers
+        from strategies.confluence.tv_scanner import fetch_tv_intraday_volatility
         import asyncio as _asyncio
 
         try:
             loop = _asyncio.get_event_loop()
             results = await _asyncio.wait_for(
-                loop.run_in_executor(None, fetch_tv_top_gainers, top_n),
+                loop.run_in_executor(
+                    None,
+                    lambda: fetch_tv_intraday_volatility(
+                        top_n       = top_n,
+                        price_min   = UNIVERSE_PRICE_MIN,
+                        price_max   = UNIVERSE_PRICE_MAX,
+                        mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
+                        mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
+                        min_avg_vol = UNIVERSE_MIN_VOLUME,
+                        atr_pct_min = UNIVERSE_ATR_PCT_MIN,
+                        exchanges   = UNIVERSE_EXCHANGES,
+                    ),
+                ),
                 timeout=15.0,
             )
         except _asyncio.TimeoutError:
-            logger.error("TV-screener timeout")
+            logger.error("TV-screener (volatility) timeout")
             return []
         except Exception as e:
-            logger.error(f"TV-screener fejl: {e}")
+            logger.error(f"TV-screener (volatility) fejl: {e}")
             return []
 
         tickers = [symbol for symbol, _, _, _ in results]

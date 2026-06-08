@@ -150,6 +150,124 @@ def fetch_tv_top_gainer_symbols(top_n: int = UNIVERSE_TOP_N) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────────────
+# "Intraday Volatility"-screener (Konfluens 2)
+# ─────────────────────────────────────────────────────────────────
+# Replikerer Sørens TradingView "Intraday Volatility"-screener 1:1. I stedet
+# for top-gainers (som gav elendige kandidater til K2) filtrerer vi på
+# mellem-/large-cap aktier med høj ugentlig ATR — dvs. likvide navne der
+# bevæger sig nok intraday til at K2's impuls-setup giver mening.
+#
+# Feltnavnene er VERIFICERET empirisk mod TradingViews API (juni 2026):
+#   - average_volume_30d_calc  = "Avg vol 30D"
+#   - market_cap_basic         = "Mkt cap"
+#   - ATRP|1W                  = "ATR % (14)" på 1-uges timeframe  ← den svære
+#   - exchange ∈ NASDAQ/NYSE/AMEX/CBOE  (TV bundter "NYSE Arca" under AMEX —
+#     fx UEC; 'NYSE ARCA'/'CBOE' som koder giver 0 almindelige aktier)
+#   - type ∈ stock/dr           (dr = depositary receipts/ADR'er som SKM, NOK,
+#     ASX, BILI — de er med i Sørens screener, så vi filtrerer dem IKKE fra)
+
+# Default-filtre — matcher screenshottets screener nøjagtigt.
+VOL_EXCHANGES     = ["NASDAQ", "NYSE", "AMEX", "CBOE"]
+VOL_PRICE_MIN     = 5.0
+VOL_PRICE_MAX     = 50.0
+VOL_MKT_CAP_MIN   = 5_000_000_000      # 5 B
+VOL_MKT_CAP_MAX   = 1_000_000_000_000  # 1 T
+VOL_MIN_AVG_VOL   = 500_000            # Avg vol 30D > 500k
+VOL_ATR_PCT_MIN   = 5.0                # ATR(14) 1W > 5%
+VOL_TOP_N         = 25
+
+
+def fetch_tv_intraday_volatility(
+    top_n:        int   = VOL_TOP_N,
+    price_min:    float = VOL_PRICE_MIN,
+    price_max:    float = VOL_PRICE_MAX,
+    mkt_cap_min:  float = VOL_MKT_CAP_MIN,
+    mkt_cap_max:  float = VOL_MKT_CAP_MAX,
+    min_avg_vol:  int   = VOL_MIN_AVG_VOL,
+    atr_pct_min:  float = VOL_ATR_PCT_MIN,
+    exchanges:    Optional[list[str]] = None,
+) -> list[tuple[str, float, float, int]]:
+    """
+    Hent "Intraday Volatility"-universet fra TradingView screener API.
+
+    Returnerer liste af tuples: (symbol, price, change_pct, volume), sorteret
+    efter seneste dagsændring (change %) FALDENDE — samme rækkefølge som
+    kolonnen i Sørens screener.
+
+    Filtre (alle server-side hos TradingView):
+      - US-aktier på NASDAQ/NYSE/AMEX/CBOE (AMEX dækker TV's "NYSE Arca")
+      - pris price_min ≤ close ≤ price_max
+      - market cap mkt_cap_min ≤ cap ≤ mkt_cap_max
+      - 30-dages gennemsnitsvolumen > min_avg_vol
+      - ATR(14) på 1-uges timeframe > atr_pct_min (%)
+      - type stock eller dr (depositary receipts/ADR'er er med, som i screeneren)
+
+    Tom liste hvis biblioteket mangler eller API'et fejler.
+    """
+    try:
+        from tradingview_screener import Query, col
+    except ImportError:
+        logger.error("tradingview-screener er ikke installeret. "
+                     "Kør: pip install tradingview-screener")
+        return []
+
+    exch = exchanges if exchanges is not None else VOL_EXCHANGES
+
+    try:
+        _, df = (
+            Query()
+            .select('name', 'close', 'change', 'volume',
+                    'average_volume_30d_calc', 'market_cap_basic',
+                    'exchange', 'ATRP|1W')
+            .where(
+                col('close').between(price_min, price_max),
+                col('market_cap_basic').between(mkt_cap_min, mkt_cap_max),
+                col('exchange').isin(exch),
+                col('average_volume_30d_calc') > min_avg_vol,
+                col('ATRP|1W') > atr_pct_min,
+                col('type').isin(['stock', 'dr']),
+            )
+            .order_by('change', ascending=False)
+            .limit(top_n)
+            .get_scanner_data()
+        )
+    except Exception as e:
+        logger.error(f"TV intraday-volatility query fejlede: {e}")
+        return []
+
+    if df is None or df.empty:
+        return []
+
+    results = []
+    for _, row in df.iterrows():
+        # 'ticker' er fx "NASDAQ:GLXY" — vi vil have kun "GLXY"
+        ticker_full = row.get('ticker', '')
+        symbol = ticker_full.split(':')[-1] if ':' in ticker_full else ticker_full
+        if not symbol:
+            continue
+
+        # Filtrer warrants/units (typisk længere symboler eller med suffix)
+        if len(symbol) > 5 or any(c in symbol for c in ['.', '/', '-']):
+            continue
+
+        try:
+            price  = float(row.get('close', 0))
+            change = float(row.get('change', 0))
+            volume = int(row.get('volume', 0))
+        except (ValueError, TypeError):
+            continue
+
+        results.append((symbol, price, change, volume))
+
+    logger.info(f"TV intraday-volatility returnerede {len(results)} kandidater "
+                f"(pris ${price_min}-${price_max}, mkt-cap "
+                f"${mkt_cap_min/1e9:.0f}B-${mkt_cap_max/1e12:.0f}T, "
+                f"avg-vol >{min_avg_vol:,}, ATR-1W >{atr_pct_min}%): "
+                f"{', '.join(t[0] for t in results)}")
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────
 # Standalone test
 # ─────────────────────────────────────────────────────────────────
 

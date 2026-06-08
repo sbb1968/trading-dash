@@ -122,8 +122,17 @@ SESSION_START_HHMM = (9, 30)
 SESSION_END_HHMM   = (16, 0)
 MINTICK            = 0.01
 
-# Universe-filtre (genbruger K1's tankegang — justér efter behov)
-UNIVERSE_PRICE_MIN = 2.0
-UNIVERSE_PRICE_MAX = 50.0
-UNIVERSE_MIN_VOLUME = 500_000
-UNIVERSE_TOP_N      = 25
+# ── Universe-filtre — "Intraday Volatility"-screener ─────────────
+# K2 bruger IKKE længere top-gainers (gav elendige kandidater). I stedet
+# replikeres Sørens TradingView "Intraday Volatility"-screener: mellem-/large-
+# cap aktier med høj ugentlig ATR — likvide navne der bevæger sig nok intraday
+# til at impuls-setuppet giver mening. Se fetch_tv_intraday_volatility i
+# strategies/confluence/tv_scanner.py (feltnavne verificeret mod TV's API).
+UNIVERSE_PRICE_MIN    = 5.0
+UNIVERSE_PRICE_MAX    = 50.0
+UNIVERSE_MIN_VOLUME   = 500_000               # 30-dages gennemsnitsvolumen
+UNIVERSE_TOP_N        = 25
+UNIVERSE_MKT_CAP_MIN  = 5_000_000_000         # 5 B
+UNIVERSE_MKT_CAP_MAX  = 1_000_000_000_000     # 1 T
+UNIVERSE_ATR_PCT_MIN  = 5.0                    # ATR(14) 1W > 5%
+UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE", "AMEX", "CBOE"]  # AMEX = TV's "NYSE Arca"
