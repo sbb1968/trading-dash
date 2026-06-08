@@ -64,12 +64,14 @@ def calc_rsi_from_closes(closes: list[float], period: int = 14) -> float:
     return 100 - (100 / (1 + gains / losses))
 
 
-def _get_params(context: dict) -> tuple[float, float, int, bool]:
+def _get_params(context: dict) -> tuple[float, float, int, bool, bool]:
     """
-    Hent (vol_mult, rsi_max, retest_timeout_sec, enable_shorts) fra context.
+    Hent (vol_mult, rsi_max, retest_timeout_sec, enable_shorts, require_retest)
+    fra context.
 
     Hvis context['config'] er en VariantConfig bruges den. Ellers falder vi
-    tilbage paa module-level constants (long-only, bagudkompatibel).
+    tilbage paa module-level constants (long-only, require_retest=True for
+    bagudkompatibilitet).
     """
     config = context.get("config")
     if isinstance(config, VariantConfig):
@@ -78,8 +80,9 @@ def _get_params(context: dict) -> tuple[float, float, int, bool]:
             config.rsi_max,
             config.retest_timeout_sec,
             config.enable_shorts,
+            config.require_retest,
         )
-    return float(VOL_MULT), float(RSI_MAX), int(RETEST_TIMEOUT_SEC), False
+    return float(VOL_MULT), float(RSI_MAX), int(RETEST_TIMEOUT_SEC), False, True
 
 
 class MomentumORBEntry:
@@ -147,7 +150,7 @@ class MomentumORBEntry:
         orb_high = context["orb_high"]
         orb_low  = context["orb_low"]
         avg_vol  = context["avg_vol"]
-        vol_mult, rsi_max, retest_timeout_sec, enable_shorts = _get_params(context)
+        vol_mult, rsi_max, retest_timeout_sec, enable_shorts, require_retest = _get_params(context)
 
         vol_ok = avg_vol > 0 and bar.volume >= avg_vol * vol_mult
 
@@ -157,6 +160,18 @@ class MomentumORBEntry:
 
             # Long breakout
             if bar.close > orb_high and vol_ok and rsi < rsi_max:
+                if not require_retest:
+                    # Direkte-breakout (originalens adfærd): entry MED DET SAMME,
+                    # spring BREAKOUT_DETECTED/AWAITING_RETEST helt over.
+                    self._ticker_state[ticker] = STATE_DONE_FOR_DAY
+                    self._ticker_side[ticker]  = "long"
+                    return EntrySignal(
+                        ticker=ticker,
+                        entry_price=bar.close,
+                        entry_time=bar.timestamp,
+                        side="long",
+                        metadata={"orb_high": orb_high, "orb_low": orb_low},
+                    )
                 self._ticker_state[ticker]  = STATE_BREAKOUT_DETECTED
                 self._ticker_side[ticker]   = "long"
                 self._breakout_time[ticker] = bar.timestamp
@@ -167,6 +182,16 @@ class MomentumORBEntry:
                     and bar.close < orb_low
                     and vol_ok
                     and rsi > (100.0 - rsi_max)):
+                if not require_retest:
+                    self._ticker_state[ticker] = STATE_DONE_FOR_DAY
+                    self._ticker_side[ticker]  = "short"
+                    return EntrySignal(
+                        ticker=ticker,
+                        entry_price=bar.close,
+                        entry_time=bar.timestamp,
+                        side="short",
+                        metadata={"orb_high": orb_high, "orb_low": orb_low},
+                    )
                 self._ticker_state[ticker]  = STATE_BREAKOUT_DETECTED
                 self._ticker_side[ticker]   = "short"
                 self._breakout_time[ticker] = bar.timestamp

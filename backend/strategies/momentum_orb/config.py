@@ -36,6 +36,7 @@ ENTRY-FELTER (nye, flyttet fra module-level constants):
 
 from __future__ import annotations
 from dataclasses import dataclass
+from datetime import time as dtime
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,17 @@ class VariantConfig:
     # symmetrisk i exit-engine. Default False sa eksisterende varianter er
     # uændrede long-only.
     enable_shorts: bool = False
+
+    # ── Entry-sti + per-variant tider ─────────────────────────
+    # require_retest=False → direkte breakout-entry (originalens adfærd): entry
+    #   sker straks ved breakout uden at vente på pullback/bounce.
+    # trade_end_time → per-variant force-close. Default 15:55 = nuværende
+    #   TRADE_END_TIME (backtest); live-loopet force-lukker SENEST her (men ikke
+    #   senere end module-level MARKET_CLOSE, så eksisterende live-adfærd holder).
+    # entry_end_time → per-variant entry-cutoff. Default 11:00 = nuværende ENTRY_END.
+    require_retest: bool  = True
+    trade_end_time: dtime = dtime(15, 55)
+    entry_end_time: dtime = dtime(11, 0)
 
 
 # De 5 oprindelige varianter fra opdraget — låst design
@@ -127,9 +139,30 @@ VARIANTS: dict[str, VariantConfig] = {
         trail_distance_pct=0.005,        # 0.5% under highest_high — meget stramt
         enable_shorts=True,              # 2026-05-17: ogsa shorts ved ORB Low break
     ),
+    # ── ORB Classic — revert til den oprindelige PROFITABLE version ─────
+    # Reproducerer originalen 1:1: direkte breakout (ingen retest), fast
+    # −2% stop / +4% target, ingen BE/trail, vol 1.5x, exit 10:30 ET.
+    # Oprindeligt: 67 handler, win 50,7%, PF 1,62 (samme meme-data i data/).
+    # SKAL revalideres før live — LIVE_VARIANT_KEY peger IKKE på den.
+    "orb_classic": VariantConfig(
+        name              = "ORB Classic (original: direkte breakout, -2%/+4%, exit 10:30)",
+        stop_mode         = "fixed_pct",
+        fixed_stop_pct    = 0.02,            # −2%
+        target_pct        = 0.04,            # +4%
+        breakeven_enabled = False,           # ingen BE
+        trail_enabled     = False,           # ingen trail
+        vol_mult          = 1.5,             # original volumen-krav
+        rsi_max           = 80,
+        orb_end_minutes   = 14,              # ORB-vindue 09:30–09:44
+        enable_shorts     = False,
+        require_retest    = False,           # ← direkte breakout
+        trade_end_time    = dtime(10, 30),   # ← exit 10:30 ET (originalens nøgletræk)
+        entry_end_time    = dtime(10, 30),   # ← ingen nye entries efter 10:30
+    ),
 }
 
-# Aktiv variant for live trading — ændr her efter sweep har vist en vinder
+# Aktiv variant for live trading — ændr her efter sweep har vist en vinder.
+# BEVIDST UÆNDRET: orb_classic skal revalideres før den må gå live.
 LIVE_VARIANT_KEY = "all_winner"
 
 # ── Strategi-konstanter (IKKE variant-specifikke) ─────────────

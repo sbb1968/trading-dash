@@ -333,8 +333,11 @@ class MomentumORBExit:
         state: ExitState = position.state
         side = position.side
 
-        # 1. Force-close
-        if bar.time_et >= TRADE_END_TIME:
+        # 1. Force-close — per-variant tid (fallback til module-level 15:55 så
+        #    eksisterende varianter er uændrede). orb_classic force-lukker 10:30.
+        config = self._config(variant_key)
+        force_close_time = getattr(config, "trade_end_time", TRADE_END_TIME)
+        if bar.time_et >= force_close_time:
             return ExitDecision(exit_price=bar.close, reason=REASON_FORCE_CLOSE)
 
         if side == "long":

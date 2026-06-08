@@ -644,21 +644,28 @@ class MomentumORB(BaseStrategy):
                 now_et = datetime.now(ET)
                 t      = now_et.time()
 
+                # Per-variant tider (fallback til module-level for eksisterende
+                # varianter). Force-close sker SENEST ved variantens trade_end_time,
+                # men aldrig senere end MARKET_CLOSE — så eksisterende live-adfærd
+                # (15:00) er uændret, mens orb_classic force-lukker 10:30.
+                _variant     = VARIANTS[self._variant_key]
+                _entry_end   = getattr(_variant, "entry_end_time", ENTRY_END)
+                _force_close = min(MARKET_CLOSE, getattr(_variant, "trade_end_time", MARKET_CLOSE))
+
                 if t < TRADE_START:
                     self._status("orb_ready", "Venter på handelsvindue — starter kl. 09:45 ET")
                     await asyncio.sleep(15)
                     continue
 
-                # Efter ENTRY_END (11:00 ET): stop nye entries, men lad
-                # eksisterende positioner køre videre til exit-regler triggrer
-                # eller markedet lukker (15:00 ET).
-                entries_allowed = t < ENTRY_END
+                # Efter entry-cutoff: stop nye entries, men lad eksisterende
+                # positioner køre videre til exit-regler triggrer eller force-close.
+                entries_allowed = t < _entry_end
 
-                # Markedsluk — luk alle positioner som backup
-                if t >= MARKET_CLOSE:
+                # Markedsluk / force-close — luk alle positioner som backup
+                if t >= _force_close:
                     if self._positions:
                         self._status("trading", "Markedet lukker — lukker alle positioner")
-                        await self._close_all("market_close 15:00")
+                        await self._close_all(f"market_close {_force_close.strftime('%H:%M')}")
                     wins   = sum(1 for tr in self.trades if tr["pnl"] > 0)
                     losses = sum(1 for tr in self.trades if tr["pnl"] <= 0)
                     self._status("done",
