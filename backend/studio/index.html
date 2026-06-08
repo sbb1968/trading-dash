@@ -737,6 +737,12 @@
             border: 1px solid rgba(45, 212, 191, 0.4);
         }
 
+        .pill-rev {
+            background: rgba(250, 204, 21, 0.18);
+            color: #fde047;
+            border: 1px solid rgba(250, 204, 21, 0.4);
+        }
+
         .pill-manuel {
             background: rgba(251, 146, 60, 0.18);
             color: #fdba74;
@@ -1570,9 +1576,10 @@
         // Placeret tidligt fordi Journal-render (buildStrategiOptions) ligger
         // før den oprindelige placering — const er ikke hoisted.
         const STRATEGY_META = {
-            "Momentum ORB": { docs: "momentum_orb", pill: "pill-orb" },
-            "Konfluens":    { docs: "confluence",   pill: "pill-konfl" },
-            "Konfluens 2":  { docs: "confluence2",  pill: "pill-konfl2" },
+            "Momentum ORB":     { docs: "momentum_orb", pill: "pill-orb" },
+            "Konfluens":        { docs: "confluence",   pill: "pill-konfl" },
+            "Konfluens 2":      { docs: "confluence2",  pill: "pill-konfl2" },
+            "Europa-reversion": { docs: null,           pill: "pill-rev" },
         };
 
         // Byg <option>-liste til strategi-filtre ud fra STRATEGY_META — den
@@ -1658,6 +1665,7 @@
             if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
             if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
             if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+            if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
             if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
             return `<span class="pill" style="background:#333;color:#aaa;">${source || "?"}</span>`;
         };
@@ -1840,6 +1848,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2046,6 +2055,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source || "—"}</span>`;
             };
@@ -2388,6 +2398,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2587,6 +2598,7 @@
                 if (src === "Momentum ORB") return `<span class="pill pill-orb">Momentum ORB</span>`;
                 if (src === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (src === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
+                if (src === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
                 if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
             };

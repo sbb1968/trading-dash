@@ -342,6 +342,20 @@ async def startup():
         confluence2._broadcast_fn = broadcast_algo_sync
         print(f"[Server] Konfluens 2 registreret — capital per handel: ${confluence2_config.max_position_size:.0f}")
 
+        # ── Registrér Europa-reversion (futures mean-reversion, EU-session) ──
+        from algo_europa_reversion import EuropaReversionLive
+
+        europa_rev_config = StrategyConfig(
+            max_loss_per_trade  = 170.0,   # ~1% af ~$17k konto (justér til faktisk equity)
+            max_daily_loss      = 400.0,
+            max_open_positions  = 2,       # MES + M2K
+            max_position_size   = 2000.0,  # defensivt; futures sizer på kontrakter (§2)
+        )
+        europa_rev = EuropaReversionLive(strategy_manager.get_ibkr(), config=europa_rev_config)
+        strategy_manager.register(europa_rev)
+        europa_rev._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] Europa-reversion registreret — futures MES/M2K, EU-session")
+
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
     asyncio.create_task(start_finnhub_feed())
@@ -694,7 +708,7 @@ async def websocket_algo(websocket: WebSocket):
     # LiveAlgo.tsx vil modtage flere algo_status-beskeder; hver med 'strategy'-felt
     # så frontenden kan adskille dem. Bagudkompatibilitet: hvis ingen ekstra
     # strategier er registreret, sender vi som før (uden strategy-felt).
-    for strat_name in ("Momentum ORB", "Konfluens", "Konfluens 2"):
+    for strat_name in ("Momentum ORB", "Konfluens", "Konfluens 2", "Europa-reversion"):
         strat = strategy_manager._strategies.get(strat_name)
         if strat and strat.status == StrategyStatus.RUNNING:
             status  = "trading"

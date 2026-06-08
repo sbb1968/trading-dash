@@ -29,6 +29,20 @@ TWS_HOST       = "127.0.0.1"
 TWS_PORT_PAPER = 7497
 TWS_PORT_LIVE  = 7496
 
+# ── Futures-understøttelse ────────────────────────────────────
+# Symboler her behandles som Future-kontrakter (front-måned) i stedet for
+# Stock. Tilføj nye futures-instrumenter ved at registrere deres børs her.
+# Multiplikatoren (kontraktstørrelse pr. prispoint) bor i strategien der
+# sizer — connection-laget behøver kun børsen for at kvalificere kontrakten.
+FUTURES_EXCHANGE = {
+    "MES": "CME",   # Micro E-mini S&P 500
+    "M2K": "CME",   # Micro E-mini Russell 2000
+}
+
+def is_future_symbol(ticker: str) -> bool:
+    """True hvis ticker skal handles som en Future-kontrakt (ikke Stock)."""
+    return ticker in FUTURES_EXCHANGE
+
 
 class IBKRConnection:
     """
@@ -45,6 +59,11 @@ class IBKRConnection:
         # ib.isConnected() så vi aldrig rapporterer en stale forbindelse
         # som levende (fx når TWS lukker forbindelsen om natten).
         self._connect_attempted = False
+
+        # Cache af kvalificerede front-måned-futures (symbol → qualified
+        # Future-kontrakt). Tømmes/genopfriskes ved roll via qualify_future(
+        # ..., force_refresh=True) — strategien gør det ved dagsstart.
+        self._future_cache: dict = {}
 
     @property
     def connected(self) -> bool:
@@ -109,6 +128,95 @@ class IBKRConnection:
             logger.info("Afbrudt fra IBKR")
         self._connect_attempted = False
 
+    # ── Futures-kontrakter ────────────────────────────────────
+    async def qualify_future(self, symbol: str, force_refresh: bool = False):
+        """
+        Kvalificér og returnér FRONT-MÅNED-kontrakten for et futures-symbol
+        (fx "MES" → den nærmeste ikke-udløbne MES-kontrakt).
+
+        Vi bruger reqContractDetailsAsync på en under-specificeret Future
+        (kun symbol+børs) for at få ALLE noterede måneder, og vælger den med
+        den nærmeste lastTradeDate ≥ i dag. De returnerede kontrakter er fuldt
+        kvalificerede (conId sat), så de kan bruges direkte til ordrer.
+
+        Resultatet caches pr. symbol. Kald med force_refresh=True ved dagsstart
+        så vi ruller til en ny front-måned uden genstart. Returnerer None hvis
+        kontrakten ikke kan kvalificeres (kalderen må håndtere det).
+
+        BEVIDST: vi kvalificerer en konkret Future — IKKE en ContFuture.
+        ContFuture kan bruges til data, men en ordre på en ContFuture udløser
+        IBKR-fejl 10339 ("order references a continuous contract").
+        """
+        if not self.connected:
+            return None
+        if not force_refresh and symbol in self._future_cache:
+            return self._future_cache[symbol]
+
+        try:
+            from ib_async import Future
+            exchange = FUTURES_EXCHANGE.get(symbol, "CME")
+            base = Future(symbol=symbol, exchange=exchange, currency="USD")
+            details = await asyncio.wait_for(
+                self.ib.reqContractDetailsAsync(base),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"qualify_future({symbol}): reqContractDetails timeout")
+            return None
+        except Exception as e:
+            logger.error(f"qualify_future({symbol}): {e}")
+            return None
+
+        if not details:
+            logger.error(f"qualify_future({symbol}): ingen kontrakt-detaljer fra IBKR")
+            return None
+
+        import datetime as _dt
+        today_str = _dt.datetime.now().strftime("%Y%m%d")
+        candidates = []
+        for cd in details:
+            c = cd.contract
+            exp = (c.lastTradeDateOrContractMonth or "").strip()
+            if len(exp) == 6:        # "YYYYMM" → sammenlign mod månedens slutning
+                exp = exp + "31"
+            if len(exp) >= 8 and exp[:8] >= today_str:
+                candidates.append((exp[:8], c))
+
+        if not candidates:
+            logger.error(f"qualify_future({symbol}): ingen ikke-udløbne kontrakter")
+            return None
+
+        candidates.sort(key=lambda x: x[0])   # nærmeste expiry = front-måned
+        front = candidates[0][1]
+        self._future_cache[symbol] = front
+        logger.info(
+            f"qualify_future({symbol}) → front-måned "
+            f"{front.lastTradeDateOrContractMonth} "
+            f"(localSymbol={front.localSymbol}, conId={front.conId})"
+        )
+        return front
+
+    async def _resolve_contract(self, ticker: str):
+        """
+        Returnér en KVALIFICERET kontrakt for ticker.
+
+        Futures-symboler (MES/M2K) resolves til front-måned-Future via
+        qualify_future; alt andet behandles som en US-aktie (SMART/USD).
+        Bruges af get_historical_bars, get_snapshot og place_paper_order så
+        futures og aktier deler ét kontrakt-resolutionspunkt.
+        """
+        if is_future_symbol(ticker):
+            fut = await self.qualify_future(ticker)
+            if fut is None:
+                raise ValueError(f"Kunne ikke kvalificere futures-kontrakt for {ticker}")
+            return fut
+        contract = Stock(ticker, "SMART", "USD")
+        await asyncio.wait_for(
+            self.ib.qualifyContractsAsync(contract),
+            timeout=10.0,
+        )
+        return contract
+
     # ── Konto ─────────────────────────────────────────────────
     def get_account_summary(self) -> dict:
         """Henter konto-oversigt fra cached data."""
@@ -136,8 +244,14 @@ class IBKRConnection:
         duration:     str = "1 D",
         bar_size:     str = "5 mins",
         what_to_show: str = "MIDPOINT",
+        use_rth:      Optional[bool] = None,
     ) -> list[dict]:
         """Henter historiske OHLCV bars. Brug MIDPOINT uden for handelstid.
+
+        use_rth: None (default) → True for aktier, False for futures. Futures
+        som MES/M2K handler næsten døgnet rundt, og den europæiske session
+        (02–08 ET) ligger UDEN for US RTH — useRTH=True ville returnere en tom
+        liste der. Send eksplicit True/False for at overstyre auto-valget.
 
         VIGTIGT: Begge TWS-kald er pakket i asyncio.wait_for med timeout.
         Uden timeout kan reqHistoricalDataAsync hænge for evigt hvis TWS
@@ -151,11 +265,9 @@ class IBKRConnection:
         if not self.connected:
             return []
         try:
-            contract = Stock(ticker, "SMART", "USD")
-            await asyncio.wait_for(
-                self.ib.qualifyContractsAsync(contract),
-                timeout=10.0,
-            )
+            contract = await self._resolve_contract(ticker)
+            effective_rth = use_rth if use_rth is not None \
+                            else (not is_future_symbol(ticker))
             bars = await asyncio.wait_for(
                 self.ib.reqHistoricalDataAsync(
                     contract,
@@ -163,7 +275,7 @@ class IBKRConnection:
                     durationStr    = duration,
                     barSizeSetting = bar_size,
                     whatToShow     = what_to_show,
-                    useRTH         = True,
+                    useRTH         = effective_rth,
                     formatDate     = 1,
                 ),
                 timeout=15.0,
@@ -196,11 +308,7 @@ class IBKRConnection:
         if not self.connected:
             return None
         try:
-            contract = Stock(ticker, "SMART", "USD")
-            await asyncio.wait_for(
-                self.ib.qualifyContractsAsync(contract),
-                timeout=10.0,
-            )
+            contract = await self._resolve_contract(ticker)
             tickers = await asyncio.wait_for(
                 self.ib.reqTickersAsync(contract),
                 timeout=10.0,
@@ -285,14 +393,11 @@ class IBKRConnection:
         if not self.paper:
             raise ValueError("Brug kun place_paper_order på paper trading konto!")
         try:
-            contract = Stock(ticker, "SMART", "USD")
-            # Kun kvalificering har timeout — selve ordrelægningen (placeOrder)
-            # er synkron og røres IKKE, så vi aldrig afbryder en ordre der er
-            # på vej igennem.
-            await asyncio.wait_for(
-                self.ib.qualifyContractsAsync(contract),
-                timeout=10.0,
-            )
+            # Kontrakt-resolution (inkl. kvalificering) har timeout — selve
+            # ordrelægningen (placeOrder) er synkron og røres IKKE, så vi
+            # aldrig afbryder en ordre der er på vej igennem. Futures-symboler
+            # (MES/M2K) resolves til front-måned-Future via _resolve_contract.
+            contract = await self._resolve_contract(ticker)
             order = MarketOrder(action, quantity) if order_type == "MKT" \
                     else LimitOrder(action, quantity, limit_price)
             if source:
