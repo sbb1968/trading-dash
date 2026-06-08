@@ -224,6 +224,11 @@
         .journal-table th,
         .journal-table td {
             white-space: nowrap;
+            padding: 12px 9px;   /* strammere end standard så alle kolonner passer på én linje */
+        }
+        .journal-table th {
+            vertical-align: bottom;   /* 2-linje-headers (ENTRY / TID) flugter forneden */
+            line-height: 1.2;
         }
 
         tbody tr:hover {
@@ -1313,8 +1318,8 @@
 
             sel.onchange = () => {
                 selectedSource = sel.value;   // "" = lokal, ellers source_id
-                // Analyse = fleet board (alle maskiner) — påvirkes ikke af kildevalg.
-                if (currentPage !== "analysis") {
+                // Status = fleet board (alle maskiner) — påvirkes ikke af kildevalg.
+                if (currentPage !== "status") {
                     switchPage(currentPage || "oversigt");
                 }
             };
@@ -1593,9 +1598,11 @@
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
 
             if (page === "oversigt") showOversigt();
-            else if (page === "status") showStatus();
+            // Byttet om: Status-fanen viser fleet-boardet (alle maskiner),
+            // Analyse-fanen viser denne maskines system-status.
+            else if (page === "status") showAnalysis();
             else if (page === "account") showAccount();
-            else if (page === "analysis") showAnalysis();
+            else if (page === "analysis") showStatus();
             else if (page === "dagsrapport") renderDagsrapport();
             else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
@@ -2410,10 +2417,7 @@
                             <td>${date}</td>
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td>
-                                <div><strong style="font-size:16px;">${t.symbol}</strong></div>
-                                <div style="margin-top:4px;">${sourcePill(t.source)}</div>
-                            </td>
+                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -2464,14 +2468,14 @@
                         <thead>
                             <tr>
                                 <th>Dato</th>
-                                <th>Entry-tid</th>
-                                <th>Exit-tid</th>
+                                <th>Entry<br>tid</th>
+                                <th>Exit<br>tid</th>
                                 <th>Symbol</th>
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
-                                <th style="text-align:right;">Entry-pris</th>
-                                <th style="text-align:right;">Kostpris</th>
-                                <th style="text-align:right;">Exit-pris</th>
+                                <th style="text-align:right;">Entry<br>pris</th>
+                                <th style="text-align:right;">Kost<br>pris</th>
+                                <th style="text-align:right;">Exit<br>pris</th>
                                 <th style="text-align:right;">P&L</th>
                                 <th style="padding-left:24px;">Årsag</th>
                             </tr>
@@ -3177,7 +3181,7 @@
             content.innerHTML = `
                 <div class="card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                        <h2 style="margin:0; font-size:18px;">Analyse — alle maskiner</h2>
+                        <h2 style="margin:0; font-size:18px;">Status — alle maskiner</h2>
                         <button id="analysis-refresh" style="background:#1a4a8a; border:1px solid #4a9eff; color:#fff; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:13px;">
                             ↻ Opdater
                         </button>
@@ -3221,34 +3225,34 @@
                 </div>
             `;
 
-            // Kald alle peers parallelt — 4 sek timeout per maskine
-            const results = await Promise.all(
-                analysisPeers.map(p => fetchPeerData(p))
-            );
+            // Tailscale-status (pålidelig 'tændt') fra algoserveren + /health pr.
+            // maskine, parallelt. Tailscale ved om maskinen er på netværket selvom
+            // dens trading-backend ikke kører.
+            const [tsRes, results] = await Promise.all([
+                fetch("/fleet/network").then(r => r.json()).catch(() => ({ ok: false, machines: {} })),
+                Promise.all(analysisPeers.map(p => fetchPeerData(p))),
+            ]);
+            const tsMap = (tsRes && tsRes.ok) ? (tsRes.machines || {}) : {};
 
-            renderAnalysisTable(results);
+            renderAnalysisTable(results, tsMap);
         }
 
         async function fetchPeerData(peer) {
             const result = {
                 peer: peer,
-                machineOn: false,   // er maskinen tændt / nåelig på netværket?
                 backendUp: false,   // kører trading-backenden (uvicorn)?
                 health: null,
                 error: null,
             };
 
-            // Poll /health. Tre udfald skelnes:
-            //   svar (200/4xx) → maskine TÆNDT + backend KØRER
-            //   hurtig fejl    → maskine TÆNDT, men backend svarer ikke (connection refused)
-            //   timeout (4 s)  → maskine IKKE tændt / ikke nåelig på netværket
+            // Poll /health → svarer trading-backenden? ('Tændt'-status kommer fra
+            // Tailscale, ikke herfra — fetch kan ikke skelne backend-nede fra slukket.)
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 4000);
                 const res = await fetch(`${peer.url}/health`, { signal: controller.signal });
                 clearTimeout(timeoutId);
 
-                result.machineOn = true;
                 result.backendUp = true;   // den svarede overhovedet → backend kører
                 if (res.ok) {
                     result.health = await res.json();
@@ -3256,31 +3260,52 @@
                     result.error = `HTTP ${res.status}`;
                 }
             } catch (e) {
-                if (e.name === "AbortError") {
-                    result.machineOn = false;   // timeout → maskinen er slukket / ikke nåelig
-                    result.error = "Timeout";
-                } else {
-                    result.machineOn = true;    // hurtig fejl (connection refused) → tændt, backend nede
-                    result.error = "Backend nede";
-                }
+                result.error = e.name === "AbortError" ? "Timeout" : "Ingen forbindelse";
             }
             return result;
         }
 
-        function renderAnalysisTable(results) {
+        function renderAnalysisTable(results, tsMap = {}) {
             const body = document.getElementById("analysis-body");
+
+            // Pænt sidst-set-tidspunkt (kun hvis gyldigt)
+            const fmtLastSeen = (iso) => {
+                if (!iso) return "";
+                const d = new Date(iso);
+                if (isNaN(d) || d.getFullYear() < 2000) return "";
+                return d.toLocaleString("da-DK", { day: "2-digit", month: "2-digit",
+                                                   hour: "2-digit", minute: "2-digit" });
+            };
 
             const rows = results.map(r => {
                 const machineCell = `<td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host || "—"}</span></td>`;
 
-                // Status = er maskinen tændt? · Backend = kører trading-backenden?
-                const statusCell = r.machineOn
+                const ts = tsMap[(r.peer.host || "").toLowerCase()] || null;
+
+                // Status = er maskinen tændt? Pålideligt fra Tailscale (på tailnet),
+                // eller hvis backenden svarer (så er den åbenlyst tændt).
+                const isOn = r.backendUp || (ts ? ts.online : false);
+                const statusCell = isOn
                     ? `<span class="status-dot online"></span> Tændt`
                     : `<span class="status-dot offline"></span> Ikke tændt`;
+
+                // Tailscale = er maskinen logget på tailnet?
+                let tsCell;
+                if (!ts) {
+                    tsCell = `<span class="muted">Ukendt</span>`;
+                } else if (ts.online) {
+                    tsCell = `<span class="status-dot online"></span> Online`;
+                } else {
+                    const seen = fmtLastSeen(ts.last_seen);
+                    tsCell = `<span class="status-dot offline"></span> Offline`
+                           + (seen ? `<br><span style="font-size:11px; color:#777;">sidst set ${seen}</span>` : "");
+                }
+
+                // Backend = kører trading-backenden (uvicorn)?
                 const backendCell = r.backendUp
                     ? `<span class="status-dot online"></span> Kører`
-                    : (r.machineOn ? `<span class="status-dot warn"></span> Nede`
-                                   : `<span class="muted">—</span>`);
+                    : (isOn ? `<span class="status-dot warn"></span> Nede`
+                            : `<span class="muted">—</span>`);
 
                 // Uden /health-svar kender vi ikke drifts-forudsætningerne
                 if (!r.health) {
@@ -3288,6 +3313,7 @@
                         <tr>
                             ${machineCell}
                             <td>${statusCell}</td>
+                            <td>${tsCell}</td>
                             <td>${backendCell}</td>
                             <td colspan="5" class="muted">—</td>
                         </tr>
@@ -3313,6 +3339,7 @@
                     <tr>
                         ${machineCell}
                         <td>${statusCell}</td>
+                        <td>${tsCell}</td>
                         <td>${backendCell}</td>
                         <td>${ibkr}</td>
                         <td>${scheduled}</td>
@@ -3329,6 +3356,7 @@
                         <tr style="border-bottom:1px solid #333; text-align:left;">
                             <th style="padding:10px 8px;">Maskine</th>
                             <th style="padding:10px 8px;">Status</th>
+                            <th style="padding:10px 8px;">Tailscale</th>
                             <th style="padding:10px 8px;">Backend</th>
                             <th style="padding:10px 8px;">IBKR</th>
                             <th style="padding:10px 8px;">Scheduleret</th>
@@ -3802,8 +3830,9 @@
 
         async function showStatus() {
             await loadStatusData();
+            // Ligger nu under Analyse-fanen (page-id "analysis") efter ombytningen.
             statusTimer = setInterval(() => {
-                if (currentPage === "status") loadStatusData();
+                if (currentPage === "analysis") loadStatusData();
             }, 5000);
         }
 

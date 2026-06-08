@@ -1909,6 +1909,64 @@ async def get_machines():
         })
     return {"machines": out}
 
+@app.get("/fleet/network")
+async def fleet_network():
+    """Tailscale-status pr. maskine — 'online' = på tailnet = maskinen er tændt.
+
+    Dette er UAFHÆNGIGT af om trading-backenden kører: Tailscale ved om en
+    maskine er forbundet til netværket, også når uvicorn ikke kører. Bruges af
+    Analyse-fanen til en pålidelig 'tændt'-status (fetch til /health kan ikke
+    skelne 'backend nede' fra 'maskine slukket' over Tailscale).
+
+    Ingen auth — kun maskinnavne/online-flag, intet hemmeligt (som /peers).
+    """
+    import shutil
+    ts = shutil.which("tailscale") or r"C:\Program Files\Tailscale\tailscale.exe"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            ts, "status", "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+        if proc.returncode != 0:
+            return {"ok": False, "error": stderr.decode("utf-8", "replace").strip()
+                    or f"tailscale exit {proc.returncode}", "machines": {}}
+        data = json.loads(stdout.decode("utf-8", "replace"))
+    except FileNotFoundError:
+        return {"ok": False, "error": "tailscale CLI ikke fundet", "machines": {}}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "machines": {}}
+
+    out: dict = {}
+
+    def add(node: dict, force_online: bool = False):
+        if not node:
+            return
+        rec = {
+            "online":    True if force_online else bool(node.get("Online")),
+            "last_seen": node.get("LastSeen"),
+            "ip":        (node.get("TailscaleIPs") or [None])[0],
+            "os":        node.get("OS"),
+        }
+        # Match på både HostName og første DNS-label, små bogstaver — så
+        # peers.json's host (fx "win11sbb") rammer uanset Tailscale-navngivning.
+        names = set()
+        hn = (node.get("HostName") or "").lower()
+        if hn:
+            names.add(hn)
+        dns = (node.get("DNSName") or "").lower().rstrip(".")
+        if dns:
+            names.add(dns.split(".")[0])
+        for n in names:
+            out[n] = rec
+
+    add(data.get("Self"), force_online=True)   # Self (denne maskine) er pr. def. online
+    for peer in (data.get("Peer") or {}).values():
+        add(peer)
+
+    return {"ok": True, "machines": out}
+
 @app.get("/internal-key", dependencies=[Depends(require_studio_auth)])
 async def get_internal_key():
     """Giver den autentificerede Studio-browser den fælles interne nøgle,
