@@ -31,7 +31,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, time as dtime
 from math import floor
-from statistics import pstdev
 from typing import Optional
 
 import pytz
@@ -39,31 +38,22 @@ import pytz
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
 
+# Strategi-logik + parametre bor i pakken (delt sandhedskilde med backtesten
+# meanrev_backtest.py, så live og backtest aldrig divergerer). Wrapperen
+# håndterer kun IBKR, sizing, broadcast og reconcile.
+from strategies.europa_reversion import EuropaReversionStrategy, rule
+from strategies.europa_reversion.config import (
+    SESSION_START_ET, SESSION_END_ET, FORCE_CLOSE_ET, LAST_SESSION_BAR_ET,
+    LOOKBACK, BAR_SIZE, BAR_MINUTES, INSTRUMENTS, RISK_PCT, MULTIPLIER,
+)
+
 logger = logging.getLogger(__name__)
 
-# ── Konstanter (alle navngivne så de er nemme at ændre/sweep'e) ────────────
+# ── Tidszone ──────────────────────────────────────────────────
 ET = pytz.timezone("America/New_York")
 
-SESSION_START_ET = dtime(2, 0)    # europæisk session åbner 02:00 ET
-SESSION_END_ET   = dtime(8, 0)    # lukker 08:00 ET (= 14:00 dansk)
-FORCE_CLOSE_ET   = dtime(7, 55)   # tvangsluk-klokkeslæt (sidste sikre bar før 08:00)
-
-LOOKBACK         = 30             # bars til MA/std (Søren vil kunne prøve 40 — ét tal-skift)
-ENTRY_Z          = 2.0
-EXIT_Z           = 0.5
-STOP_Z           = 3.5
-BAR_SIZE         = "15 mins"
-BAR_MINUTES      = 15             # afledt af BAR_SIZE — bruges til "er baren færdig?"-tjek
-INSTRUMENTS      = ["MES", "M2K"] # IKKE MNQ (mean-reverter ikke pålideligt — se SPEC)
-RISK_PCT         = 0.01           # 1% af konto-equity pr. handel
-
-# Kontrakt-multiplikatorer ($ pr. prispoint). VERIFICÉR mod IBKR ved første
-# live-kvalificering. MES og M2K er begge $5/point.
-MULTIPLIER = {
-    "MES": 5.0,
-    "M2K": 5.0,
-}
-
+# ── Operationelle konstanter (wrapper-specifikke — IKKE strategi-reglen,
+#    som bor i strategies/europa_reversion/) ──────────────────────────────
 # Loop-frekvens. 15-min bars, så vi behøver ikke polle hyppigt; 20 sek giver
 # prompt reaktion uden at hamre IBKR.
 LOOP_SLEEP_SECONDS = 20
@@ -79,10 +69,6 @@ CONNECT_RETRY_DELAY = 10
 
 HEARTBEAT_INTERVAL_SEC = 300
 
-# Den sidste 15-min slot der stadig regnes som "i sessionen" (08:00 − 15 min).
-# Bruges som bar-baseret tvangsluk-backstop ved siden af det tidsbaserede.
-LAST_SESSION_BAR_ET = dtime(7, 45)
-
 
 @dataclass
 class Bar:
@@ -94,23 +80,6 @@ class Bar:
     volume:    float
 
 
-def _compute_z(closes: list[float]):
-    """
-    z-score over en sekvens af closes — SPEJLER meanrev_backtest.zscore 1:1.
-
-    Returnerer (z, std) hvor std er population-std (pstdev) i prisenheder, så
-    sizing kan bruge den samme std som z'et beregnes med. None hvis std ≤ 0
-    eller seneste close ≤ 0 (ingen brugbart signal).
-    """
-    if len(closes) < 2:
-        return None
-    ma = sum(closes) / len(closes)
-    sd = pstdev(closes)
-    if sd <= 0 or closes[-1] <= 0:
-        return None
-    return (closes[-1] - ma) / sd, sd
-
-
 class EuropaReversionLive(BaseStrategy):
     """
     Live-wrapper for Europa-reversion. Følger BaseStrategy-interfacet så
@@ -120,6 +89,10 @@ class EuropaReversionLive(BaseStrategy):
     def __init__(self, conn: IBKRConnection, config: Optional[StrategyConfig] = None):
         super().__init__(config)
         self.conn = conn
+
+        # Strategi-facade fra pakken — al beslutningslogik (z-regel) delegeres
+        # hertil, så live og backtest deler præcis samme kode.
+        self._strategy = EuropaReversionStrategy()
 
         # Fast univers (vises i status-dict via base.get_status_dict)
         self.universe: list[str] = list(INSTRUMENTS)
@@ -144,18 +117,18 @@ class EuropaReversionLive(BaseStrategy):
     # BaseStrategy interface — properties
     # -------------------------------------------------------------
 
+    # Navn/beskrivelse/aktivklasse delegeres til pakke-strategien (én kilde).
     @property
     def name(self) -> str:
-        return "Europa-reversion"
+        return self._strategy.name
 
     @property
     def description(self) -> str:
-        return ("Mean-reversion på index-micro futures (MES/M2K) i den "
-                "europæiske session (02–08 ET)")
+        return self._strategy.description
 
     @property
     def asset_class(self) -> str:
-        return "futures"
+        return self._strategy.asset_class
 
     # -------------------------------------------------------------
     # Pre-flight (§1)
@@ -571,7 +544,7 @@ class EuropaReversionLive(BaseStrategy):
             hist.append(bar)
             self._last_bar_processed[sym] = bar.timestamp
             if len(hist) >= LOOKBACK:
-                res = _compute_z([b.close for b in hist[-LOOKBACK:]])
+                res = rule.compute_z([b.close for b in hist[-LOOKBACK:]])
                 if res is not None:
                     z, sd = res
                     await self._evaluate_bar(sym, bar, z, sd)
@@ -606,19 +579,9 @@ class EuropaReversionLive(BaseStrategy):
                 await self._close(sym, bar.close, "session_end")
                 return
 
-            exit_now, reason = False, ""
-            if side == "long":
-                if z >= -EXIT_Z:
-                    exit_now, reason = True, "revert"
-                elif z <= -STOP_Z:
-                    exit_now, reason = True, "stop"
-            else:  # short
-                if z <= EXIT_Z:
-                    exit_now, reason = True, "revert"
-                elif z >= STOP_Z:
-                    exit_now, reason = True, "stop"
-
-            if exit_now:
+            # Exit-beslutning fra den delte regel (revert/stop), samme som backtest.
+            reason = rule.exit_reason(side, z)
+            if reason:
                 await self._close(sym, bar.close, reason)
             return
 
@@ -631,10 +594,11 @@ class EuropaReversionLive(BaseStrategy):
             return
         if self.stats.open_positions >= self.config.max_open_positions:
             return
-        if abs(z) < ENTRY_Z:
-            return
 
-        side = "short" if z >= ENTRY_Z else "long"
+        # Entry-beslutning fra den delte regel (None hvis |z| < ENTRY_Z).
+        side = rule.entry_side(z)
+        if side is None:
+            return
         await self._open(sym, side, bar, sd)
 
     # -------------------------------------------------------------
@@ -655,7 +619,7 @@ class EuropaReversionLive(BaseStrategy):
         equity = account.get("net_liquidation", 0) or 0
         risk_dollars = RISK_PCT * equity if equity > 0 else self.config.max_loss_per_trade
 
-        stop_dist = (STOP_Z - ENTRY_Z) * sd          # = 1.5 × std, i prispoint
+        stop_dist = rule.stop_distance(sd)           # (STOP_Z − ENTRY_Z) × std, i prispoint
         per_contract_risk = stop_dist * mult
         if per_contract_risk <= 0:
             return 0, stop_dist, per_contract_risk

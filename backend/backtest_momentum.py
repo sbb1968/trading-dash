@@ -298,6 +298,17 @@ def main():
         return
 
     strategy = get_strategy(strategy_key)
+
+    # Nogle strategier er ikke OHLC-engine-baserede (fx Europa-reversion, der er
+    # en ren z-score-regel på 15-min futures). De har ingen variant-sweep/entry-
+    # exit-engines og backtestes med deres eget værktøj — redirigér i stedet for
+    # at crashe på manglende .variants.
+    if not hasattr(strategy, "variants"):
+        print(f"\n⚠ {strategy.name} backtestes ikke med backtest_momentum.py "
+              f"(den er ikke OHLC-engine-baseret).")
+        print("   Brug i stedet:  python meanrev_backtest.py")
+        return
+
     print(f"\n🔬 Backtester strategi: {strategy.name}")
     print(f"   {strategy.description}\n")
 

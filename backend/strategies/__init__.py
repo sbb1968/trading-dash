@@ -12,12 +12,16 @@ Når en ny strategi tilføjes:
 from strategies.momentum_orb import MomentumORBStrategy
 from strategies.confluence import ConfluenceStrategy
 from strategies.confluence2 import Confluence2Strategy
+from strategies.europa_reversion import EuropaReversionStrategy
 
 # Registry: key → Strategy-klasse (ikke instans — instantieres ved brug)
 STRATEGY_REGISTRY = {
-    "momentum_orb": MomentumORBStrategy,
-    "confluence":   ConfluenceStrategy,
-    "confluence2":  Confluence2Strategy,
+    "momentum_orb":     MomentumORBStrategy,
+    "confluence":       ConfluenceStrategy,
+    "confluence2":      Confluence2Strategy,
+    # Europa-reversion er ikke OHLC-engine-baseret (ren z-score-regel); den
+    # backtestes med meanrev_backtest.py, ikke den generiske backtest_momentum.py.
+    "europa_reversion": EuropaReversionStrategy,
 }
 
 
