@@ -582,13 +582,13 @@ class EuropaReversionLive(BaseStrategy):
 
             # Bar-baseret tvangsluk-backstop: sessionens sidste bar lukker altid.
             if bar_t >= LAST_SESSION_BAR_ET:
-                await self._close(sym, bar.close, "session_end")
+                await self._close(sym, bar.close, "session_end", z)
                 return
 
             # Exit-beslutning fra den delte regel (revert/stop), samme som backtest.
             reason = rule.exit_reason(side, z)
             if reason:
-                await self._close(sym, bar.close, reason)
+                await self._close(sym, bar.close, reason, z)
             return
 
         # ── Flad: vurdér entry (kun i sessionen, ikke tæt på sessions-slut) ──
@@ -605,7 +605,7 @@ class EuropaReversionLive(BaseStrategy):
         side = rule.entry_side(z)
         if side is None:
             return
-        await self._open(sym, side, bar, sd)
+        await self._open(sym, side, bar, sd, z)
 
     # -------------------------------------------------------------
     # Sizing (§2) — kontrakt-baseret, 1% risiko
@@ -649,7 +649,7 @@ class EuropaReversionLive(BaseStrategy):
     # Open / Close — ordre-håndtering
     # -------------------------------------------------------------
 
-    async def _open(self, sym: str, side: str, bar: Bar, sd: float):
+    async def _open(self, sym: str, side: str, bar: Bar, sd: float, z: float):
         if self.stats.open_positions >= self.config.max_open_positions:
             return
 
@@ -728,10 +728,11 @@ class EuropaReversionLive(BaseStrategy):
                 shares        = contracts,
                 entry_price   = entry_price,
                 entry_time    = entry_time,
-                entry_reason  = f"Europa-reversion {side} (z-entry)",
+                entry_reason  = f"Europa-reversion {side} (z={z:+.2f})",
                 current_stop  = stop_price,
                 current_stage = "initial",
                 payload       = {
+                    "entry_z":           round(z, 4),
                     "std":               round(sd, 4),
                     "multiplier":        mult,
                     "stop_distance_pts": round(stop_dist, 4),
@@ -760,7 +761,8 @@ class EuropaReversionLive(BaseStrategy):
         self._status("trading",
                      f"📈 {sym}: {verb} {contracts}× @ ${entry_price:.2f}")
 
-    async def _close(self, sym: str, price: float, reason: str):
+    async def _close(self, sym: str, price: float, reason: str, z: float = None):
+        # z = z-værdi ved exit (None ved ikke-regel-luk, fx _close_all).
         pos = self._positions.get(sym)
         if pos is None:
             return
@@ -846,7 +848,8 @@ class EuropaReversionLive(BaseStrategy):
                 exit_time   = datetime.now(ET),
                 exit_reason = reason,
                 pnl         = pnl,
-                payload     = {"multiplier": mult, "contracts": contracts},
+                payload     = {"exit_z": round(z, 4) if z is not None else None,
+                               "multiplier": mult, "contracts": contracts},
             )
 
         # Broadcast (LiveAlgo: "sell" = long-luk, "buy_cover" = short-luk)
