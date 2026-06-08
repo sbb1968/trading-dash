@@ -16,6 +16,7 @@ import {
 } from "./layouts";
 import { TradeJournal } from "./TradeJournal";
 import { LiveAlgo } from "./LiveAlgo";
+import { LiveLogProvider } from "./LiveLogContext";
 import { AlertsWindow } from "./Alertspanel";
 import { MarketOverview } from "./MarketOverview";
 import { AccountPanel } from "./AccountPanel";
@@ -1371,6 +1372,7 @@ function App() {
   };
 
   return (
+    <LiveLogProvider>
     <div className="app">
       {/* Top bar — kun status, INGEN nyhedsbånd */}
       <div className="top-bar" style={{ justifyContent: "flex-end" }}>
@@ -1499,6 +1501,7 @@ function App() {
         <OrderResultToast result={lastOrderResult} onClose={clearLastOrderResult} />
       )}
     </div>
+    </LiveLogProvider>
   );
 }
 
