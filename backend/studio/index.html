@@ -216,7 +216,11 @@
         }
 
         /* Journal-tabellen har mange kolonner — hold hver celle på én linje
-           (dato, exit-tid, symbol+pill og P&L+% må ikke ombryde). */
+           (dato, exit-tid og P&L+% må ikke ombryde). width:auto så tabellen
+           kun fylder sit indhold (ingen tom/anderledes-farvet zone i højre side). */
+        .journal-table {
+            width: auto;
+        }
         .journal-table th,
         .journal-table td {
             white-space: nowrap;
@@ -1015,6 +1019,7 @@
         }
         .status-dot.online  { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.6); }
         .status-dot.offline { background: #666; }
+        .status-dot.warn    { background: #ffb84a; box-shadow: 0 0 6px rgba(255,184,74,0.6); }
 
         /* Genbrug af .table-rules — disse override'es allerede ovenfor.
            Behold dem her for kompatibilitet med eksisterende Analyse-side. */
@@ -2405,7 +2410,10 @@
                             <td>${date}</td>
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}</td>
+                            <td>
+                                <div><strong style="font-size:16px;">${t.symbol}</strong></div>
+                                <div style="margin-top:4px;">${sourcePill(t.source)}</div>
+                            </td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -2451,7 +2459,7 @@
                     </div>
                 </div>
 
-                <div class="card" style="padding:0;">
+                <div class="card" style="padding:0; width:fit-content; max-width:100%; overflow-x:auto;">
                     <table class="journal-table">
                         <thead>
                             <tr>
@@ -2465,7 +2473,7 @@
                                 <th style="text-align:right;">Kostpris</th>
                                 <th style="text-align:right;">Exit-pris</th>
                                 <th style="text-align:right;">P&L</th>
-                                <th>Årsag</th>
+                                <th style="padding-left:24px;">Årsag</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
@@ -3224,33 +3232,38 @@
         async function fetchPeerData(peer) {
             const result = {
                 peer: peer,
-                online: false,
+                machineOn: false,   // er maskinen tændt / nåelig på netværket?
+                backendUp: false,   // kører trading-backenden (uvicorn)?
                 health: null,
-                account: null,
                 error: null,
             };
 
-            // Hent /health (ingen auth nødvendig)
+            // Poll /health. Tre udfald skelnes:
+            //   svar (200/4xx) → maskine TÆNDT + backend KØRER
+            //   hurtig fejl    → maskine TÆNDT, men backend svarer ikke (connection refused)
+            //   timeout (4 s)  → maskine IKKE tændt / ikke nåelig på netværket
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 4000);
                 const res = await fetch(`${peer.url}/health`, { signal: controller.signal });
                 clearTimeout(timeoutId);
 
+                result.machineOn = true;
+                result.backendUp = true;   // den svarede overhovedet → backend kører
                 if (res.ok) {
                     result.health = await res.json();
-                    result.online = true;
                 } else {
                     result.error = `HTTP ${res.status}`;
                 }
             } catch (e) {
-                result.error = e.name === "AbortError" ? "Timeout" : "Offline";
-                return result;
+                if (e.name === "AbortError") {
+                    result.machineOn = false;   // timeout → maskinen er slukket / ikke nåelig
+                    result.error = "Timeout";
+                } else {
+                    result.machineOn = true;    // hurtig fejl (connection refused) → tændt, backend nede
+                    result.error = "Backend nede";
+                }
             }
-
-            // Hent /account/snapshot (kræver auth — kun hvis online og IBKR forbundet)
-            // Note: vi har ikke token til REMOTE backends endnu — det kommer senere
-            // For nu viser vi kun de data /health giver os
             return result;
         }
 
@@ -3258,29 +3271,54 @@
             const body = document.getElementById("analysis-body");
 
             const rows = results.map(r => {
-                if (!r.online) {
+                const machineCell = `<td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host || "—"}</span></td>`;
+
+                // Status = er maskinen tændt? · Backend = kører trading-backenden?
+                const statusCell = r.machineOn
+                    ? `<span class="status-dot online"></span> Tændt`
+                    : `<span class="status-dot offline"></span> Ikke tændt`;
+                const backendCell = r.backendUp
+                    ? `<span class="status-dot online"></span> Kører`
+                    : (r.machineOn ? `<span class="status-dot warn"></span> Nede`
+                                   : `<span class="muted">—</span>`);
+
+                // Uden /health-svar kender vi ikke drifts-forudsætningerne
+                if (!r.health) {
                     return `
                         <tr>
-                            <td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host || "—"}</span></td>
-                            <td><span class="status-dot offline"></span> ${r.error || "Offline"}</td>
+                            ${machineCell}
+                            <td>${statusCell}</td>
+                            <td>${backendCell}</td>
                             <td colspan="5" class="muted">—</td>
                         </tr>
                     `;
                 }
 
                 const h = r.health;
-                const ibkr = h.ibkr_connected ? "✓" : "—";
-                const algo = h.algo_running ? "▶ Kører" : "—";
+                const ibkr = h.ibkr_connected
+                    ? `<span style="color:#4ade80;">✓ Forbundet</span>`
+                    : `<span class="status-dot warn"></span> Afbrudt`;
+                // Scheduleret auto-strategi — kun algoserveren auto-starter (fx ORB 09:44 ET);
+                // workstation kører manuelt.
+                const scheduled = h.scheduled
+                    ? `${h.scheduled.strategy} · ${h.scheduled.et_time} ET`
+                    : `<span class="muted">Manuel</span>`;
+                const nextRun   = (h.scheduled && h.next_start) ? h.next_start : "—";
+                const tradingDay = (h.is_trading_day == null) ? "—"
+                                 : (h.is_trading_day ? "Ja" : `<span class="muted">Nej</span>`);
+                const konto = (h.paper_trading == null) ? "—"
+                            : (h.paper_trading ? "Paper" : `<span style="color:#ffb84a;">Live</span>`);
 
                 return `
                     <tr>
-                        <td><strong>${r.peer.name}</strong><br><span style="font-size:11px; color:#666;">${r.peer.host}</span></td>
-                        <td><span class="status-dot online"></span> Online</td>
+                        ${machineCell}
+                        <td>${statusCell}</td>
+                        <td>${backendCell}</td>
                         <td>${ibkr}</td>
-                        <td>${algo}</td>
-                        <td>${h.clients ?? "—"}</td>
-                        <td>${h.journal_events ?? "—"}</td>
-                        <td style="font-size:11px; color:#888;">${h.time ? new Date(h.time).toLocaleTimeString("da-DK") : "—"}</td>
+                        <td>${scheduled}</td>
+                        <td style="font-size:12px; color:#cfcfcf;">${nextRun}</td>
+                        <td>${tradingDay}</td>
+                        <td>${konto}</td>
                     </tr>
                 `;
             }).join("");
@@ -3291,11 +3329,12 @@
                         <tr style="border-bottom:1px solid #333; text-align:left;">
                             <th style="padding:10px 8px;">Maskine</th>
                             <th style="padding:10px 8px;">Status</th>
+                            <th style="padding:10px 8px;">Backend</th>
                             <th style="padding:10px 8px;">IBKR</th>
-                            <th style="padding:10px 8px;">Algo</th>
-                            <th style="padding:10px 8px;">Clients</th>
-                            <th style="padding:10px 8px;">Journal</th>
-                            <th style="padding:10px 8px;">Sidst kontaktet</th>
+                            <th style="padding:10px 8px;">Scheduleret</th>
+                            <th style="padding:10px 8px;">Næste kørsel</th>
+                            <th style="padding:10px 8px;">Handelsdag</th>
+                            <th style="padding:10px 8px;">Konto</th>
                         </tr>
                     </thead>
                     <tbody>

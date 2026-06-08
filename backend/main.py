@@ -1624,6 +1624,17 @@ async def market_conditions_endpoint():
 # ── Health ────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
+    # Scheduler-data — bruges af Analyse-fanen til at vise foudsætningerne
+    # for at ORB kører (scheduleret strategi, næste kørsel, handelsdag).
+    # Kun algoserveren auto-starter strategier; workstation kører manuelt.
+    sched = algo_scheduler.status_dict if algo_scheduler else None
+    scheduled = None
+    if sched and identity.instance_role == "algoserver":
+        start_job = next((j for j in sched["jobs"] if j["name"] == "start_algo"), None)
+        scheduled = {
+            "strategy": "Momentum ORB",
+            "et_time":  start_job["et_time"] if start_job else "09:44",
+        }
     return {
         "status":           "ok",
         "clients":          len(connected_clients),
@@ -1635,6 +1646,13 @@ async def health():
         "threshold":        alert_engine.threshold,
         "journal_events":   await journal.count_events(),
         "time":             datetime.now().isoformat(),
+        # ── Analyse-fanen: drifts-forudsætninger ──
+        "role":             identity.instance_role,
+        "paper_trading":    identity.paper_trading,
+        "scheduled":        scheduled,                         # None = manuel (workstation)
+        "next_start":       sched["next_start"]     if sched else None,
+        "is_trading_day":   sched["is_trading_day"] if sched else None,
+        "scheduler_running": sched["running"]        if sched else False,
     }
 
 # ── /status — Komplet system-snapshot for autonom drift ───────
