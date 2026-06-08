@@ -26,6 +26,7 @@ import notifier
 logger = logging.getLogger(__name__)
 
 ET = pytz.timezone("America/New_York")
+DK = pytz.timezone("Europe/Copenhagen")   # dansk tid — til dual-visning (ET / DK) i UI
 
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
@@ -282,11 +283,14 @@ class AlgoScheduler:
 
     @property
     def status_dict(self) -> dict:
+        nxt = self._next_scheduled_start()
         return {
             "running":        self._running,
             "now_et":         now_et().strftime("%Y-%m-%d %H:%M:%S"),
             "is_trading_day": is_trading_day(now_et().date()),
-            "next_start":     self._next_scheduled_start().strftime("%Y-%m-%d %H:%M ET"),
+            "next_start":     nxt.strftime("%Y-%m-%d %H:%M ET"),
+            # Samme tidspunkt i dansk tid (korrekt DST via pytz) — til UI-dual-visning.
+            "next_start_dk":  nxt.astimezone(DK).strftime("%Y-%m-%d %H:%M"),
             "jobs": [
                 {
                     "name":        j.name,

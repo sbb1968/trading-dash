@@ -3418,9 +3418,11 @@
                 // Scheduleret auto-strategi — kun algoserveren auto-starter (fx ORB 09:44 ET);
                 // workstation kører manuelt.
                 const scheduled = h.scheduled
-                    ? `${h.scheduled.strategy} · ${h.scheduled.et_time} ET`
+                    ? `${h.scheduled.strategy} · ${h.scheduled.et_time} ET${h.scheduled.dk_time ? ` <span class="muted">/ ${h.scheduled.dk_time} DK</span>` : ""}`
                     : `<span class="muted">Manuel</span>`;
-                const nextRun   = (h.scheduled && h.next_start) ? h.next_start : "—";
+                const nextRun   = (h.scheduled && h.next_start)
+                    ? `${h.next_start}${h.next_start_dk ? ` <span class="muted">/ ${h.next_start_dk.split(" ").slice(-1)[0]} DK</span>` : ""}`
+                    : "—";
                 const tradingDay = (h.is_trading_day == null) ? "—"
                                  : (h.is_trading_day ? "Ja" : `<span class="muted">Nej</span>`);
                 const konto = (h.paper_trading == null) ? "—"
@@ -3990,7 +3992,7 @@
                             <div style="font-size:18px; font-weight:600; margin-top:6px;">
                                 ${dot(schedRunning, "Kører", "Stoppet")}
                             </div>
-                            <div class="muted-text" style="margin-top:4px;">Næste ORB-start: ${sched.next_start || "—"}</div>
+                            <div class="muted-text" style="margin-top:4px;">Næste ORB-start: ${sched.next_start ? `${sched.next_start}${sched.next_start_dk ? ` / ${sched.next_start_dk.split(" ").slice(-1)[0]} DK` : ""}` : "—"}</div>
                         </div>
                         <div>
                             <div class="stat-label">Algoritme</div>

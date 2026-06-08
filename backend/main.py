@@ -1645,9 +1645,13 @@ async def health():
     scheduled = None
     if sched and identity.instance_role == "algoserver":
         start_job = next((j for j in sched["jobs"] if j["name"] == "start_algo"), None)
+        # Dansk tid for start_algo = tidsdelen af next_start_dk (samme job, næste kørsel).
+        next_dk = sched.get("next_start_dk")
+        dk_time = next_dk.split(" ")[-1] if next_dk else None
         scheduled = {
             "strategy": "Momentum ORB",
             "et_time":  start_job["et_time"] if start_job else "09:44",
+            "dk_time":  dk_time,                # fx "15:44" — så UI kan vise "09:44 ET / 15:44 DK"
         }
     return {
         "status":           "ok",
@@ -1665,6 +1669,7 @@ async def health():
         "paper_trading":    identity.paper_trading,
         "scheduled":        scheduled,                         # None = manuel (workstation)
         "next_start":       sched["next_start"]     if sched else None,
+        "next_start_dk":    sched.get("next_start_dk") if sched else None,
         "is_trading_day":   sched["is_trading_day"] if sched else None,
         "scheduler_running": sched["running"]        if sched else False,
     }
