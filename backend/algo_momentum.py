@@ -865,6 +865,7 @@ class MomentumORB(BaseStrategy):
                     current_target= state.target,
                     current_stage = str(getattr(state, "stage", "")) or None,
                     trail_stop    = getattr(state, "trail_stop", None),
+                    current_price = price,   # seneste pris → live urealiseret P&L i Studio
                 )
 
             # Tjek exit

@@ -67,6 +67,15 @@ class Journal:
         await self._db.executescript(schema_sql)
         await self._db.commit()
 
+        # Idempotent migration: skema-ændringer rammer kun NYE db'er (CREATE
+        # TABLE IF NOT EXISTS), så eksisterende db'er får nye kolonner her.
+        for col_ddl in ("current_price REAL",):
+            try:
+                await self._db.execute(f"ALTER TABLE trades ADD COLUMN {col_ddl}")
+                await self._db.commit()
+            except Exception:
+                pass  # kolonnen findes allerede
+
         logger.info(f"[Journal] Klar — db: {self.db_path}")
 
     async def close(self) -> None:
@@ -435,6 +444,7 @@ class Journal:
         current_target: Optional[float] = None,
         current_stage:  Optional[str]  = None,
         trail_stop:     Optional[float] = None,
+        current_price:  Optional[float] = None,
     ) -> bool:
         """
         Opdater live position-state mens en trade er åben.
@@ -464,6 +474,9 @@ class Journal:
         if trail_stop is not None:
             sets.append("trail_stop = ?")
             params.append(trail_stop)
+        if current_price is not None:
+            sets.append("current_price = ?")
+            params.append(current_price)
 
         if not sets:
             return True  # ingenting at opdatere — ikke en fejl

@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS trades (
     current_target  REAL,                        -- aktuelt target-niveau (NULL i trailing-stage)
     current_stage   TEXT,                        -- "initial", "breakeven", "trailing"
     trail_stop      REAL,                        -- trail-stop niveau hvis stage=trailing
+    current_price   REAL,                        -- seneste pris strategien har set (live urealiseret P&L)
 
     -- Metadata
     notes           TEXT,                        -- fri tekst, manuelle handler bruger primært dette

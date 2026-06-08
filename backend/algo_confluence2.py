@@ -871,10 +871,11 @@ class Confluence2Live(BaseStrategy):
                 state = position.state
                 stage = "trailing" if state.trail_stop > state.impulse_low else "initial"
                 await self._journal.update_trade_state(
-                    trade_id     = trade_id,
-                    current_stop = state.trail_stop,
-                    current_stage= stage,
-                    trail_stop   = state.trail_stop,
+                    trade_id      = trade_id,
+                    current_stop  = state.trail_stop,
+                    current_stage = stage,
+                    trail_stop    = state.trail_stop,
+                    current_price = new_bar.close,   # seneste pris → live urealiseret P&L i Studio
                 )
 
             decision = self._strategy.exit.check_exit_bar(

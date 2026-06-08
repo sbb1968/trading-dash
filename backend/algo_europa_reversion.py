@@ -574,6 +574,12 @@ class EuropaReversionLive(BaseStrategy):
             pos = self._positions[sym]
             side = pos["side"]
 
+            # Skriv seneste pris til trades-tabel → live urealiseret P&L i Studio
+            # (uafhængigt af IBKR-snapshottet).
+            trade_id = pos.get("trade_id")
+            if trade_id and self._journal:
+                await self._journal.update_trade_state(trade_id=trade_id, current_price=bar.close)
+
             # Bar-baseret tvangsluk-backstop: sessionens sidste bar lukker altid.
             if bar_t >= LAST_SESSION_BAR_ET:
                 await self._close(sym, bar.close, "session_end")

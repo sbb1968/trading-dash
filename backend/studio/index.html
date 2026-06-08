@@ -1840,10 +1840,16 @@
         // Urealiseret P&L beregnes HER paa frontenden ud fra entry/antal/side +
         // aktuel pris — saa den opdaterer saa laenge der findes en live pris,
         // uafhaengigt af om backend naaede at udfylde pr-position pnl.
+        // Aktuel pris foretraekkes fra journalen (p.current_price) — strategien
+        // skriver den hver cyklus mens den koerer, saa vi ikke afhaenger af det
+        // separate (og ustabile) IBKR-snapshot. Falder tilbage til snapshottets
+        // last_price hvis strategien ikke koerer / endnu ikke har skrevet en pris.
         function computePositionView(p, snapByTicker) {
             const sym       = (p.symbol || "").toUpperCase();
             const live      = snapByTicker[sym] || null;
-            const lastPrice = (live && live.last_price != null) ? live.last_price : null;
+            const lastPrice = (p.current_price != null) ? p.current_price
+                            : (live && live.last_price != null) ? live.last_price
+                            : null;
             const entry     = (p.entry_price != null) ? p.entry_price : null;
             const shares    = (p.shares != null) ? p.shares : null;
             const totalCost = (entry != null && shares != null) ? entry * shares : null;

@@ -34,7 +34,7 @@ _TRADE_COLUMNS = (
     "exit_time_utc, exit_time_et, exit_price, exit_reason, "
     "pnl, pnl_pct, duration_sec, "
     "capital_used, "
-    "current_stop, current_target, current_stage, trail_stop, "
+    "current_stop, current_target, current_stage, trail_stop, current_price, "
     "notes, payload_json"
 )
 
