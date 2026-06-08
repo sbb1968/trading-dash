@@ -215,6 +215,13 @@
             font-weight: 700;
         }
 
+        /* Journal-tabellen har mange kolonner — hold hver celle på én linje
+           (dato, exit-tid, symbol+pill og P&L+% må ikke ombryde). */
+        .journal-table th,
+        .journal-table td {
+            white-space: nowrap;
+        }
+
         tbody tr:hover {
             background: rgba(255,255,255,0.04);
         }
@@ -2367,7 +2374,7 @@
 
             // ── Rækker ───────────────────────────────────────
             const rows = trades.length === 0
-                ? `<tr><td colspan="10" class="empty">Ingen handler matcher filtrene</td></tr>`
+                ? `<tr><td colspan="11" class="empty">Ingen handler matcher filtrene</td></tr>`
                 : trades.map(t => {
                     const date = t.entry_time_et
                         ? t.entry_time_et.substring(0, 10)
@@ -2402,6 +2409,7 @@
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
+                            <td class="num">${(t.entry_price != null && t.shares != null) ? fmtMoney(t.entry_price * t.shares) : "—"}</td>
                             <td class="num">${exitCell}</td>
                             <td class="num">${pnlCell}</td>
                             <td>${reasonPill(t.exit_reason)}</td>
@@ -2444,7 +2452,7 @@
                 </div>
 
                 <div class="card" style="padding:0;">
-                    <table>
+                    <table class="journal-table">
                         <thead>
                             <tr>
                                 <th>Dato</th>
@@ -2454,6 +2462,7 @@
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
                                 <th style="text-align:right;">Entry-pris</th>
+                                <th style="text-align:right;">Kostpris</th>
                                 <th style="text-align:right;">Exit-pris</th>
                                 <th style="text-align:right;">P&L</th>
                                 <th>Årsag</th>
