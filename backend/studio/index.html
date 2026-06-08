@@ -1828,6 +1828,54 @@
             `;
         }
 
+        // ── Delt position-beregning — desktop OG mobil bruger denne, saa de
+        //    ALTID viser praecis de samme tal ────────────────────────────
+        function buildSnapByTicker(snap) {
+            const m = {};
+            if (snap && snap.ok && snap.positions) {
+                for (const sp of snap.positions) if (sp.ticker) m[sp.ticker.toUpperCase()] = sp;
+            }
+            return m;
+        }
+        // Urealiseret P&L beregnes HER paa frontenden ud fra entry/antal/side +
+        // aktuel pris — saa den opdaterer saa laenge der findes en live pris,
+        // uafhaengigt af om backend naaede at udfylde pr-position pnl.
+        function computePositionView(p, snapByTicker) {
+            const sym       = (p.symbol || "").toUpperCase();
+            const live      = snapByTicker[sym] || null;
+            const lastPrice = (live && live.last_price != null) ? live.last_price : null;
+            const entry     = (p.entry_price != null) ? p.entry_price : null;
+            const shares    = (p.shares != null) ? p.shares : null;
+            const totalCost = (entry != null && shares != null) ? entry * shares : null;
+            let unrPnl = null, unrPct = null;
+            if (lastPrice != null && entry != null && shares != null && entry !== 0) {
+                const dir = (p.side === "short") ? -1 : 1;
+                unrPnl = (lastPrice - entry) * shares * dir;
+                unrPct = ((lastPrice - entry) / entry) * 100 * dir;
+            }
+            return {
+                p, sym, live, lastPrice, entry, shares, totalCost, unrPnl, unrPct,
+                source: p.source, side: p.side,
+                entryTime: p.entry_time_et ? p.entry_time_et.substring(11, 16) + " ET" : "—",
+                stop:      (p.current_stop   != null) ? p.current_stop   : null,
+                target:    (p.current_target != null) ? p.current_target : null,
+                trailStop: (p.trail_stop     != null) ? p.trail_stop     : null,
+                stage:     p.current_stage || null,
+            };
+        }
+        // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
+        // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
+        function sumUnrealized(views, snap) {
+            const c = views.filter(v => v.unrPnl != null);
+            if (c.length > 0) return c.reduce((a, v) => a + v.unrPnl, 0);
+            if (snap && snap.ok && snap.unrealized_pnl != null) return snap.unrealized_pnl;
+            return null;
+        }
+        function sortOpenPositions(positions) {
+            return [...(positions || [])].sort((a, b) =>
+                (b.entry_time_et || "").localeCompare(a.entry_time_et || ""));
+        }
+
         function renderOversigt(today, open, snap) {
             const summary = today.summary || {};
             const todaysTrades = today.trades || [];
@@ -1871,49 +1919,37 @@
                 weekday: "long", year: "numeric", month: "long", day: "numeric"
             }) : "i dag";
 
-            // ── Åbne positioner-tabel ────────────────────────
-            // Urealiseret P&L pr. position hentes fra live-snapshot (snap),
-            // præcis som mobil-versionen — journalen selv har ikke live-tallet.
-            const snapByTicker = {};
-            if (snap && snap.ok && snap.positions) {
-                for (const sp of snap.positions) {
-                    if (sp.ticker) snapByTicker[sp.ticker.toUpperCase()] = sp;
-                }
-            }
-            const openRows = openPositions.length === 0
-                ? `<tr><td colspan="9" class="empty">Ingen åbne positioner</td></tr>`
-                : openPositions.map(p => {
-                    const stage = p.current_stage || "—";
-                    const targetCell = p.current_stage === "trailing"
-                        ? (p.trail_stop != null
-                            ? `<span style="color:#7ec0ff;font-weight:600;">↗ ${fmtMoney(p.trail_stop)}</span>`
+            // ── Åbne positioner-tabel (delt beregning med mobil) ──────
+            const snapByTicker = buildSnapByTicker(snap);
+            const openViews    = sortOpenPositions(openPositions).map(p => computePositionView(p, snapByTicker));
+            const headerUnr    = sumUnrealized(openViews, snap);
+            const openRows = openViews.length === 0
+                ? `<tr><td colspan="10" class="empty">Ingen åbne positioner</td></tr>`
+                : openViews.map(v => {
+                    const p = v.p;
+                    const targetCell = v.stage === "trailing"
+                        ? (v.trailStop != null
+                            ? `<span style="color:#7ec0ff;font-weight:600;">↗ ${fmtMoney(v.trailStop)}</span>`
                             : "—")
-                        : (p.current_target != null ? fmtMoney(p.current_target) : "—");
-                    const entryTime = p.entry_time_et
-                        ? p.entry_time_et.substring(11, 16) + " ET"
-                        : "—";
-                    const live      = snapByTicker[(p.symbol || "").toUpperCase()] || null;
-                    const lastPrice = live && live.last_price != null ? live.last_price : null;
-                    const unrPnl    = live && live.pnl != null ? live.pnl : null;
-                    const unrPct    = live && live.pnl_pct != null ? live.pnl_pct : null;
-                    // Aktuel pris ("Nu") — altid den live pris så afvigelsen fra
-                    // entry er synlig.
-                    const lastCell = lastPrice != null
-                        ? `<span style="color:#7ec0ff;">${fmtMoney(lastPrice)}</span>`
-                        : `<span class="muted">—</span>`;
-                    const pctText = unrPct != null
-                        ? ` <span style="font-size:11px;opacity:.75;">(${unrPct >= 0 ? "+" : ""}${unrPct.toFixed(2)}%)</span>`
+                        : (v.target != null ? fmtMoney(v.target) : "—");
+                    // Aktuel pris ("Nu") — altid den live pris så afvigelsen fra entry er synlig.
+                    const lastCell = v.lastPrice != null
+                        ? `<span style="color:#7ec0ff;">${fmtMoney(v.lastPrice)}</span>`
+                        : `<span class="muted">afventer</span>`;
+                    const pctText = v.unrPct != null
+                        ? ` <span style="font-size:11px;opacity:.75;">(${v.unrPct >= 0 ? "+" : ""}${v.unrPct.toFixed(2)}%)</span>`
                         : "";
-                    const pnlCell = unrPnl != null
-                        ? `<span class="${cls(unrPnl)}" style="font-weight:700;">${fmtMoneySigned(unrPnl)}${pctText}</span>`
+                    const pnlCell = v.unrPnl != null
+                        ? `<span class="${cls(v.unrPnl)}" style="font-weight:700;">${fmtMoneySigned(v.unrPnl)}${pctText}</span>`
                         : `<span class="muted">—</span>`;
                     return `
                         <tr class="row-open">
-                            <td>${entryTime}</td>
-                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(p.source)}</td>
-                            <td>${sidePill(p.side)}</td>
-                            <td class="num">${p.shares}</td>
-                            <td class="num">${fmtMoney(p.entry_price)}</td>
+                            <td>${v.entryTime}</td>
+                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}</td>
+                            <td>${sidePill(v.side)}</td>
+                            <td class="num">${v.shares != null ? v.shares : "—"}</td>
+                            <td class="num">${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</td>
+                            <td class="num">${v.entry != null ? fmtMoney(v.entry) : "—"}</td>
                             <td class="num">${lastCell}</td>
                             <td class="num">${p.current_stop != null ? fmtMoney(p.current_stop) : "—"}</td>
                             <td class="num">${targetCell}</td>
@@ -1979,13 +2015,11 @@
                         </div>
                         <div class="hero-pnl">
                             <div class="hero-pnl-label">Urealiseret P&L</div>
-                            <div class="hero-pnl-value ${snap && snap.ok ? cls(snap.unrealized_pnl) : 'muted'}">${snap && snap.ok ? fmtMoneySigned(snap.unrealized_pnl) : '—'}</div>
+                            <div class="hero-pnl-value ${headerUnr != null ? cls(headerUnr) : 'muted'}">${headerUnr != null ? fmtMoneySigned(headerUnr) : '—'}</div>
                             <div class="hero-pnl-meta">
-                                ${snap && snap.ok
-                                    ? (snap.positions && snap.positions.length > 0
-                                        ? `${snap.positions.length} ${snap.positions.length === 1 ? 'åben position' : 'åbne positioner'}`
-                                        : 'Ingen åbne positioner')
-                                    : 'Konto-data utilgængelig'}
+                                ${openViews.length > 0
+                                    ? `${openViews.length} ${openViews.length === 1 ? 'åben position' : 'åbne positioner'}`
+                                    : 'Ingen åbne positioner'}
                             </div>
                         </div>
                     </div>
@@ -2017,7 +2051,8 @@
                                 <th>Symbol</th>
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
-                                <th style="text-align:right;">Entry</th>
+                                <th style="text-align:right;">Kostpris</th>
+                                <th style="text-align:right;">Køb</th>
                                 <th style="text-align:right;">Nu</th>
                                 <th style="text-align:right;">Stop</th>
                                 <th style="text-align:right;">Target / Trail</th>
@@ -2093,71 +2128,57 @@
                 ? `${tradesCount}H · ${wins}V/${losses}T · ${winRate.toFixed(0)}%`
                 : "Ingen handler";
 
-            // ── Urealiseret P&L blok ─────────────────────────
+            // ── Delt beregning: PRAECIS samme tal og felter som desktop ──
+            const snapByTicker = buildSnapByTicker(snap);
+            const openViews    = sortOpenPositions((open && open.positions) ? open.positions : [])
+                                    .map(p => computePositionView(p, snapByTicker));
+            const headerUnr    = sumUnrealized(openViews, snap);
+
+            // ── Urealiseret P&L blok (= sum af linjerne, som desktop) ────
             const hasSnap   = snap && snap.ok;
-            const unrPnl    = hasSnap ? snap.unrealized_pnl : null;
-            const unrClass  = !hasSnap ? "muted"
-                            : unrPnl > 0 ? "positive"
-                            : unrPnl < 0 ? "negative" : "muted";
-            const unrText   = !hasSnap ? "—" : fmtMoneySigned(unrPnl);
-            const posCount  = hasSnap && snap.positions ? snap.positions.length : 0;
+            const unrClass  = headerUnr == null ? "muted"
+                            : headerUnr > 0 ? "positive"
+                            : headerUnr < 0 ? "negative" : "muted";
+            const unrText   = headerUnr == null ? "—" : fmtMoneySigned(headerUnr);
+            const posCount  = openViews.length;
             const unrMeta   = !hasSnap ? "Ingen forbindelse"
                             : posCount === 0 ? "0 åbne"
                             : posCount === 1 ? "1 åben"
                             : `${posCount} åbne`;
 
-            // ── Åbne positioner ──────────────────────────────
-            // Struktur (strategi, retning, antal, købstid, entry, total købspris)
-            // kommer fra journalen (open.positions). KUN aktuel pris + urealiseret
-            // P&L flettes ind fra snapshot — det eneste live-tal journalen ikke har.
-            const snapByTicker = {};
-            if (hasSnap && snap.positions) {
-                for (const sp of snap.positions) {
-                    if (sp.ticker) snapByTicker[sp.ticker.toUpperCase()] = sp;
-                }
-            }
-            const journalOpen = (open && open.positions) ? open.positions : [];
-            const sortedOpen = [...journalOpen].sort((a, b) =>
-                (b.entry_time_et || "").localeCompare(a.entry_time_et || ""));
-
-            const positionCards = sortedOpen.length === 0
+            const positionCards = openViews.length === 0
                 ? `<div class="empty" style="padding:16px; font-size:13px;">Ingen åbne positioner</div>`
-                : sortedOpen.map(p => {
-                    const sym       = (p.symbol || "").toUpperCase();
-                    const live      = snapByTicker[sym] || null;
-                    const lastPrice = live && live.last_price != null ? live.last_price : null;
-                    const unrPnl    = live && live.pnl     != null ? live.pnl     : null;
-                    const unrPct    = live && live.pnl_pct != null ? live.pnl_pct : null;
-                    const totalCost = (p.entry_price != null && p.shares != null)
-                        ? p.entry_price * p.shares : null;
-
-                    const pnlClass = unrPnl == null ? "muted"
-                                   : unrPnl > 0 ? "positive"
-                                   : unrPnl < 0 ? "negative" : "muted";
-                    const cardClass = unrPnl == null ? ""
-                                    : unrPnl > 0 ? "win"
-                                    : unrPnl < 0 ? "loss" : "";
-                    const entryTime = p.entry_time_et
-                        ? p.entry_time_et.substring(11, 16) + " ET" : "—";
-                    const pctText = unrPct != null
-                        ? `${unrPct >= 0 ? "+" : ""}${unrPct.toFixed(2)}%` : "—";
+                : openViews.map(v => {
+                    const pnlClass = v.unrPnl == null ? "muted"
+                                   : v.unrPnl > 0 ? "positive"
+                                   : v.unrPnl < 0 ? "negative" : "muted";
+                    const cardClass = v.unrPnl == null ? ""
+                                    : v.unrPnl > 0 ? "win"
+                                    : v.unrPnl < 0 ? "loss" : "";
+                    const pctText = v.unrPct != null
+                        ? `${v.unrPct >= 0 ? "+" : ""}${v.unrPct.toFixed(2)}%` : "—";
+                    const lastText = v.lastPrice != null ? fmtMoney(v.lastPrice) : "afventer";
+                    const targetText = v.stage === "trailing" && v.trailStop != null
+                        ? "↗ " + fmtMoney(v.trailStop)
+                        : (v.target != null ? fmtMoney(v.target) : "—");
 
                     return `
                         <div class="mobile-pos-card ${cardClass}">
                             <div class="mobile-pos-left">
                                 <div class="mobile-pos-tickerline">
-                                    <span class="mobile-pos-ticker">${sym}</span>
-                                    ${sourcePill(p.source)}
-                                    ${sidePill(p.side)}
+                                    <span class="mobile-pos-ticker">${v.sym}</span>
+                                    ${sourcePill(v.source)}
+                                    ${sidePill(v.side)}
                                 </div>
-                                <div class="mobile-pos-meta">${entryTime} · ${p.shares} stk · ${totalCost != null ? fmtMoney(totalCost) : "—"}</div>
+                                <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</div>
                                 <div class="mobile-pos-prices">
-                                    <span>Køb ${p.entry_price != null ? fmtMoney(p.entry_price) : "—"}</span>
-                                    <span class="mobile-pos-last">Nu ${lastPrice != null ? fmtMoney(lastPrice) : "—"}</span>
+                                    <span>Køb ${v.entry != null ? fmtMoney(v.entry) : "—"}</span>
+                                    <span class="mobile-pos-last">Nu ${lastText}</span>
                                 </div>
+                                <div class="mobile-pos-meta">Stop ${v.stop != null ? fmtMoney(v.stop) : "—"} · Target ${targetText}</div>
                             </div>
                             <div class="mobile-pos-right">
-                                <div class="mobile-pos-pnl ${pnlClass}">${unrPnl != null ? fmtMoneySigned(unrPnl) : "—"}</div>
+                                <div class="mobile-pos-pnl ${pnlClass}">${v.unrPnl != null ? fmtMoneySigned(v.unrPnl) : "—"}</div>
                                 <div class="mobile-pos-pct ${pnlClass}">${pctText}</div>
                             </div>
                         </div>
@@ -2225,7 +2246,7 @@
                         </div>
                     </div>
 
-                    <div class="section-title">Åbne positioner (${sortedOpen.length})</div>
+                    <div class="section-title">Åbne positioner (${openViews.length})</div>
                     <div class="mobile-pos-list">
                         ${positionCards}
                     </div>
