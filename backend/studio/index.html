@@ -1844,11 +1844,13 @@
         // skriver den hver cyklus mens den koerer, saa vi ikke afhaenger af det
         // separate (og ustabile) IBKR-snapshot. Falder tilbage til snapshottets
         // last_price hvis strategien ikke koerer / endnu ikke har skrevet en pris.
+        // Kontrakt-multiplikatorer ($ pr. prispoint) for futures. Aktier = 1.
+        // ÉN sandhedskilde i frontenden — TILFØJ nye futures her NÅR de tilføjes
+        // til config.py's MULTIPLIER (ellers vises de med mult 1 = forkert P&L).
+        // Holdes i sync med backend\strategies\europa_reversion\config.py.
+        const FUTURES_MULT = { MES: 5, M2K: 5 };
+
         function computePositionView(p, snapByTicker) {
-            // Kontrakt-multiplikatorer ($ pr. prispoint) for futures. Aktier = 1.
-            // TILFØJ nye futures her NÅR de tilføjes til config.py's MULTIPLIER —
-            // ellers vises de med multiplikator 1 (= forkert P&L for det instrument).
-            const FUTURES_MULT = { MES: 5, M2K: 5 };
             const sym       = (p.symbol || "").toUpperCase();
             const live      = snapByTicker[sym] || null;
             const lastPrice = (p.current_price != null) ? p.current_price
@@ -1875,13 +1877,15 @@
             };
         }
         // Synligt multiplikator-maerke for futures (fx ×5) — saa det er TYDELIGT
-        // at kostpris og P&L er ganget med kontrakt-multiplikatoren. Tomt for aktier.
-        function multBadge(v) {
-            if (!v || v.mult === 1) return "";
-            return `<span title="Futures-kontrakt: $${v.mult}/point — kostpris og P&L er ganget med ${v.mult}" `
+        // at kostpris/P&L er ganget med kontrakt-multiplikatoren. Tomt for aktier.
+        // Tager et SYMBOL, saa baade aabne positioner OG lukkede handler kan bruge det.
+        function multBadge(symbol) {
+            const mult = FUTURES_MULT[(symbol || "").toUpperCase()] || 1;
+            if (mult === 1) return "";
+            return `<span title="Futures-kontrakt: $${mult}/point — kostpris og P&L er ganget med ${mult}" `
                  + `style="font-size:10px;font-weight:700;color:#fde047;background:rgba(250,204,21,0.12);`
                  + `border:1px solid rgba(250,204,21,0.4);border-radius:3px;padding:1px 5px;margin-left:6px;">`
-                 + `×${v.mult}</span>`;
+                 + `×${mult}</span>`;
         }
         // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
         // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
@@ -1982,7 +1986,7 @@
                     return `
                         <tr class="row-open">
                             <td>${v.entryTime}</td>
-                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}${multBadge(v)}</td>
+                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}${multBadge(v.sym)}</td>
                             <td>${sidePill(v.side)}</td>
                             <td class="num">${v.shares != null ? v.shares : "—"}</td>
                             <td class="num">${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</td>
@@ -2020,7 +2024,7 @@
                         <tr class="${rowClass}">
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}</td>
+                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}${multBadge(t.symbol)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -2207,7 +2211,7 @@
                                     <span class="mobile-pos-ticker">${v.sym}</span>
                                     ${sourcePill(v.source)}
                                     ${sidePill(v.side)}
-                                    ${multBadge(v)}
+                                    ${multBadge(v.sym)}
                                 </div>
                                 <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</div>
                                 <div class="mobile-pos-prices">
@@ -2251,6 +2255,7 @@
                                     <span class="mobile-trade-ticker">${t.symbol}</span>
                                     ${sourcePill(t.source)}
                                     ${sidePill(t.side)}
+                                    ${multBadge(t.symbol)}
                                 </div>
                                 <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk</div>
                                 <div class="mobile-pos-prices">
@@ -2526,7 +2531,7 @@
                             <td>${date}</td>
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}</td>
+                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}${multBadge(t.symbol)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -3537,7 +3542,7 @@
                 ? `<tr><td colspan="5" class="empty">Ingen data</td></tr>`
                 : data.per_ticker.map(t => `
                     <tr>
-                        <td><strong>${t.symbol}</strong></td>
+                        <td><strong>${t.symbol}</strong>${multBadge(t.symbol)}</td>
                         <td class="num">${t.trades}</td>
                         <td class="num">${t.wins}</td>
                         <td class="num">${fmtPct(t.win_rate)}</td>
@@ -3552,7 +3557,7 @@
                     return `
                         <tr>
                             <td>${time}</td>
-                            <td><strong>${t.symbol}</strong></td>
+                            <td><strong>${t.symbol}</strong>${multBadge(t.symbol)}</td>
                             <td class="num">${t.quantity}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
                             <td class="num">${fmtMoney(t.exit_price)}</td>
