@@ -1845,6 +1845,10 @@
         // separate (og ustabile) IBKR-snapshot. Falder tilbage til snapshottets
         // last_price hvis strategien ikke koerer / endnu ikke har skrevet en pris.
         function computePositionView(p, snapByTicker) {
+            // Kontrakt-multiplikatorer ($ pr. prispoint) for futures. Aktier = 1.
+            // TILFØJ nye futures her NÅR de tilføjes til config.py's MULTIPLIER —
+            // ellers vises de med multiplikator 1 (= forkert P&L for det instrument).
+            const FUTURES_MULT = { MES: 5, M2K: 5 };
             const sym       = (p.symbol || "").toUpperCase();
             const live      = snapByTicker[sym] || null;
             const lastPrice = (p.current_price != null) ? p.current_price
@@ -1852,15 +1856,16 @@
                             : null;
             const entry     = (p.entry_price != null) ? p.entry_price : null;
             const shares    = (p.shares != null) ? p.shares : null;
-            const totalCost = (entry != null && shares != null) ? entry * shares : null;
+            const mult      = FUTURES_MULT[sym] || 1;
+            const totalCost = (entry != null && shares != null) ? entry * shares * mult : null;
             let unrPnl = null, unrPct = null;
             if (lastPrice != null && entry != null && shares != null && entry !== 0) {
                 const dir = (p.side === "short") ? -1 : 1;
-                unrPnl = (lastPrice - entry) * shares * dir;
+                unrPnl = (lastPrice - entry) * shares * mult * dir;
                 unrPct = ((lastPrice - entry) / entry) * 100 * dir;
             }
             return {
-                p, sym, live, lastPrice, entry, shares, totalCost, unrPnl, unrPct,
+                p, sym, live, lastPrice, entry, shares, mult, totalCost, unrPnl, unrPct,
                 source: p.source, side: p.side,
                 entryTime: p.entry_time_et ? p.entry_time_et.substring(11, 16) + " ET" : "—",
                 stop:      (p.current_stop   != null) ? p.current_stop   : null,
@@ -1868,6 +1873,15 @@
                 trailStop: (p.trail_stop     != null) ? p.trail_stop     : null,
                 stage:     p.current_stage || null,
             };
+        }
+        // Synligt multiplikator-maerke for futures (fx ×5) — saa det er TYDELIGT
+        // at kostpris og P&L er ganget med kontrakt-multiplikatoren. Tomt for aktier.
+        function multBadge(v) {
+            if (!v || v.mult === 1) return "";
+            return `<span title="Futures-kontrakt: $${v.mult}/point — kostpris og P&L er ganget med ${v.mult}" `
+                 + `style="font-size:10px;font-weight:700;color:#fde047;background:rgba(250,204,21,0.12);`
+                 + `border:1px solid rgba(250,204,21,0.4);border-radius:3px;padding:1px 5px;margin-left:6px;">`
+                 + `×${v.mult}</span>`;
         }
         // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
         // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
@@ -1968,7 +1982,7 @@
                     return `
                         <tr class="row-open">
                             <td>${v.entryTime}</td>
-                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}</td>
+                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}${multBadge(v)}</td>
                             <td>${sidePill(v.side)}</td>
                             <td class="num">${v.shares != null ? v.shares : "—"}</td>
                             <td class="num">${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</td>
@@ -2193,6 +2207,7 @@
                                     <span class="mobile-pos-ticker">${v.sym}</span>
                                     ${sourcePill(v.source)}
                                     ${sidePill(v.side)}
+                                    ${multBadge(v)}
                                 </div>
                                 <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</div>
                                 <div class="mobile-pos-prices">
