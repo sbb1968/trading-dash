@@ -64,6 +64,11 @@ export interface Position {
 // ── Strategy Manager Status (fra /ws/strategy) ────────────────
 export type StrategyStatusEnum = "idle" | "running" | "paused" | "stopped" | "error";
 
+// Skrinlagte strategier: backend-koden og historiske journaler bevares, men
+// de skjules fra frontenden (dropdowns + strategi-side). Fjern fra dette set
+// hvis en strategi tages i brug igen.
+const SKRINLAGTE_STRATEGIER = new Set(["Momentum ORB", "Konfluens"]);
+
 export interface StrategyInfo {
   name:         string;
   description:  string;
@@ -168,7 +173,7 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
   }
 
   function handleManagerStatus(msg: ManagerStatusMsg) {
-    setStrategies(msg.strategies);
+    setStrategies(msg.strategies.filter(s => !SKRINLAGTE_STRATEGIER.has(s.name)));
     setRisk(msg.risk);
   }
 

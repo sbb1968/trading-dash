@@ -1344,7 +1344,7 @@
 
             sel.innerHTML =
                 `<option value="">${selfLabel}</option>` +
-                others.map(m => `<option value="${m.source_id}">${m.name} (arkiv)</option>`).join("");
+                others.map(m => `<option value="${m.source_id}">${m.name}</option>`).join("");
 
             sel.onchange = () => {
                 selectedSource = sel.value;   // "" = lokal, ellers source_id
@@ -1582,13 +1582,20 @@
             "Europa-reversion": { docs: null,           pill: "pill-rev" },
         };
 
+        // Skrinlagte strategier: bevares i STRATEGY_META så historiske
+        // journal-rækker stadig får pill/docs, men skjules fra dropdowns og
+        // strategi-siden. Fjern herfra hvis en strategi tages i brug igen.
+        const SKRINLAGTE_STRATEGIER = new Set(["Momentum ORB", "Konfluens"]);
+
         // Byg <option>-liste til strategi-filtre ud fra STRATEGY_META — den
         // eneste sandhedskilde. allLabel er teksten på "alle"-valget ("Alle
         // strategier" i Journal, "Alle" i Log). "manual"/"Manuel" tilføjes
         // eksplicit da den ikke står i STRATEGY_META.
         function buildStrategiOptions(selectedVal, allLabel) {
             const items = [["", allLabel]]
-                .concat(Object.keys(STRATEGY_META).map(k => [k, k]))
+                .concat(Object.keys(STRATEGY_META)
+                    .filter(k => !SKRINLAGTE_STRATEGIER.has(k))
+                    .map(k => [k, k]))
                 .concat([["manual", "Manuel"]]);
             return items.map(([val, label]) =>
                 `<option value="${val}" ${val === (selectedVal || "") ? "selected" : ""}>${label}</option>`
@@ -1665,7 +1672,7 @@
             if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
             if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
             if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
-            if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
+            if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
             if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
             return `<span class="pill" style="background:#333;color:#aaa;">${source || "?"}</span>`;
         };
@@ -1947,7 +1954,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
-                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2192,7 +2199,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
-                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source || "—"}</span>`;
             };
@@ -2530,7 +2537,7 @@
                 if (source === "Momentum ORB") return `<span class="pill pill-orb">ORB</span>`;
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
-                if (source === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
+                if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2751,7 +2758,7 @@
                 if (src === "Momentum ORB") return `<span class="pill pill-orb">Momentum ORB</span>`;
                 if (src === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (src === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
-                if (src === "Europa-reversion") return `<span class="pill pill-rev">Reversion</span>`;
+                if (src === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
                 if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
             };
@@ -3165,7 +3172,8 @@
         }
 
         function renderStrategies(data) {
-            const strategies = data.strategies || [];
+            const strategies = (data.strategies || [])
+                .filter(s => !SKRINLAGTE_STRATEGIER.has(s.name));
             const ibkrBadge = data.ibkr_connected
                 ? '<span style="color:#4ade80;">● IBKR forbundet</span>'
                 : '<span style="color:#f87171;">● IBKR ikke forbundet</span>';
@@ -3868,7 +3876,7 @@
             if (source) params.set("source", source);
 
             try {
-                const res = await fetch(`/journal/events?${params.toString()}`);
+                const res = await authFetch(`/journal/events?${params.toString()}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 logEntries = (data.events || []).map(ev => {
