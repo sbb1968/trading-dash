@@ -1849,6 +1849,12 @@
         // til config.py's MULTIPLIER (ellers vises de med mult 1 = forkert P&L).
         // Holdes i sync med backend\strategies\europa_reversion\config.py.
         const FUTURES_MULT = { MES: 5, M2K: 5 };
+        // Investeret kapital (margin) pr. handel ($). DISPLAY-konstant — hold i
+        // sync med strategiens faktiske positionsstørrelse i Python. Står ÉT sted.
+        const POSITION_SIZE = 1000;
+        function multForSymbol(sym) {
+            return FUTURES_MULT[(sym || "").toUpperCase()] || 1;
+        }
 
         function computePositionView(p, snapByTicker) {
             const sym       = (p.symbol || "").toUpperCase();
@@ -1858,16 +1864,20 @@
                             : null;
             const entry     = (p.entry_price != null) ? p.entry_price : null;
             const shares    = (p.shares != null) ? p.shares : null;
-            const mult      = FUTURES_MULT[sym] || 1;
+            const mult      = multForSymbol(sym);
             const totalCost = (entry != null && shares != null) ? entry * shares * mult : null;
-            let unrPnl = null, unrPct = null;
+            const marginCost = POSITION_SIZE;
+            let unrPnl = null, unrPct = null, marginPnl = null, marginPct = null;
             if (lastPrice != null && entry != null && shares != null && entry !== 0) {
                 const dir = (p.side === "short") ? -1 : 1;
-                unrPnl = (lastPrice - entry) * shares * mult * dir;
-                unrPct = ((lastPrice - entry) / entry) * 100 * dir;
+                unrPnl    = (lastPrice - entry) * shares * mult * dir;
+                unrPct    = ((lastPrice - entry) / entry) * 100 * dir;
+                marginPnl = unrPnl;
+                marginPct = marginCost > 0 ? (unrPnl / marginCost) * 100 : null;
             }
             return {
                 p, sym, live, lastPrice, entry, shares, mult, totalCost, unrPnl, unrPct,
+                marginCost, marginPnl, marginPct,
                 source: p.source, side: p.side,
                 entryTime: p.entry_time_et ? p.entry_time_et.substring(11, 16) + " ET" : "—",
                 stop:      (p.current_stop   != null) ? p.current_stop   : null,
@@ -1965,7 +1975,7 @@
             const openViews    = sortOpenPositions(openPositions).map(p => computePositionView(p, snapByTicker));
             const headerUnr    = sumUnrealized(openViews, snap);
             const openRows = openViews.length === 0
-                ? `<tr><td colspan="10" class="empty">Ingen åbne positioner</td></tr>`
+                ? `<tr><td colspan="13" class="empty">Ingen åbne positioner</td></tr>`
                 : openViews.map(v => {
                     const p = v.p;
                     const targetCell = v.stage === "trailing"
@@ -1983,6 +1993,13 @@
                     const pnlCell = v.unrPnl != null
                         ? `<span class="${cls(v.unrPnl)}" style="font-weight:700;">${fmtMoneySigned(v.unrPnl)}${pctText}</span>`
                         : `<span class="muted">—</span>`;
+                    const mCostCell = v.marginCost != null ? fmtMoney(v.marginCost) : "—";
+                    const mPnlCell = v.marginPnl != null
+                        ? `<span class="${cls(v.marginPnl)}" style="font-weight:700;">${fmtMoneySigned(v.marginPnl)}</span>`
+                        : `<span class="muted">—</span>`;
+                    const mPctCell = v.marginPct != null
+                        ? `<span class="${cls(v.marginPct)}" style="font-weight:700;">${v.marginPct >= 0 ? "+" : ""}${v.marginPct.toFixed(2)}%</span>`
+                        : `<span class="muted">—</span>`;
                     return `
                         <tr class="row-open">
                             <td>${v.entryTime}</td>
@@ -1995,13 +2012,16 @@
                             <td class="num">${p.current_stop != null ? fmtMoney(p.current_stop) : "—"}</td>
                             <td class="num">${targetCell}</td>
                             <td class="num">${pnlCell}</td>
+                            <td class="num">${mCostCell}</td>
+                            <td class="num">${mPnlCell}</td>
+                            <td class="num">${mPctCell}</td>
                         </tr>
                     `;
                 }).join("");
 
             // ── Dagens handler-tabel ─────────────────────────
             const tradeRows = todaysTrades.length === 0
-                ? `<tr><td colspan="8" class="empty">Ingen handler i dag</td></tr>`
+                ? `<tr><td colspan="13" class="empty">Ingen handler i dag</td></tr>`
                 : todaysTrades.map(t => {
                     const entryTime = t.entry_time_et
                         ? t.entry_time_et.substring(11, 16) + " ET"
@@ -2010,8 +2030,23 @@
                         ? t.exit_time_et.substring(11, 16) + " ET"
                         : `<span class="open-indicator">Åben</span>`;
                     const exitCell = t.exit_price != null ? fmtMoney(t.exit_price) : "—";
+                    const dir  = (t.side === "short") ? -1 : 1;
+                    const mult = multForSymbol(t.symbol);
+                    const notional = (t.entry_price != null && t.shares != null) ? t.entry_price * t.shares * mult : null;
+                    const pricePct = (t.exit_price != null && t.entry_price != null && t.entry_price !== 0)
+                        ? ((t.exit_price - t.entry_price) / t.entry_price) * 100 * dir : null;
+                    const marginPct = (t.pnl != null) ? (t.pnl / POSITION_SIZE) * 100 : null;
+                    const pctSpan = pricePct != null
+                        ? ` <span class="${cls(t.pnl)}" style="font-size:11px;font-weight:600;">(${pricePct >= 0 ? "+" : ""}${pricePct.toFixed(2)}%)</span>`
+                        : "";
                     const pnlCell = t.pnl != null
+                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>${pctSpan}`
+                        : `<span class="muted">—</span>`;
+                    const mPnlCell = t.pnl != null
                         ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>`
+                        : `<span class="muted">—</span>`;
+                    const mPctCell = marginPct != null
+                        ? `<span class="${cls(marginPct)}" style="font-weight:700;">${marginPct >= 0 ? "+" : ""}${marginPct.toFixed(2)}%</span>`
                         : `<span class="muted">—</span>`;
 
                     // Farv rækken efter resultat
@@ -2028,8 +2063,13 @@
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
+                            <td class="num">${notional != null ? fmtMoney(notional) : "—"}</td>
                             <td class="num">${exitCell}</td>
-                            <td class="num">${pnlCell}${reasonPill(t.exit_reason)}</td>
+                            <td class="num">${pnlCell}</td>
+                            <td class="num">${fmtMoney(POSITION_SIZE)}</td>
+                            <td class="num">${mPnlCell}</td>
+                            <td class="num">${mPctCell}</td>
+                            <td>${reasonPill(t.exit_reason)}</td>
                         </tr>
                     `;
                 }).join("");
@@ -2099,6 +2139,9 @@
                                 <th style="text-align:right;">Stop</th>
                                 <th style="text-align:right;">Target / Trail</th>
                                 <th style="text-align:right;">P&L</th>
+                                <th style="text-align:right;">Margin-kostpris</th>
+                                <th style="text-align:right;">Margin-P&L</th>
+                                <th style="text-align:right;">Margin-P&L %</th>
                             </tr>
                         </thead>
                         <tbody>${openRows}</tbody>
@@ -2116,8 +2159,13 @@
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
                                 <th style="text-align:right;">Entry-pris</th>
+                                <th style="text-align:right;">Kostpris</th>
                                 <th style="text-align:right;">Exit-pris</th>
                                 <th style="text-align:right;">P&L</th>
+                                <th style="text-align:right;">Margin-kostpris</th>
+                                <th style="text-align:right;">Margin-P&L</th>
+                                <th style="text-align:right;">Margin-P&L %</th>
+                                <th style="padding-left:24px;">Årsag</th>
                             </tr>
                         </thead>
                         <tbody>${tradeRows}</tbody>
@@ -2213,7 +2261,7 @@
                                     ${sidePill(v.side)}
                                     ${multBadge(v.sym)}
                                 </div>
-                                <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</div>
+                                <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"} · Margin ${fmtMoney(v.marginCost)}</div>
                                 <div class="mobile-pos-prices">
                                     <span>Køb ${v.entry != null ? fmtMoney(v.entry) : "—"}</span>
                                     <span class="mobile-pos-last">Nu ${lastText}</span>
@@ -2223,6 +2271,7 @@
                             <div class="mobile-pos-right">
                                 <div class="mobile-pos-pnl ${pnlClass}">${v.unrPnl != null ? fmtMoneySigned(v.unrPnl) : "—"}</div>
                                 <div class="mobile-pos-pct ${pnlClass}">${pctText}</div>
+                                <div class="mobile-pos-pct ${pnlClass}">margin ${v.marginPct != null ? (v.marginPct >= 0 ? "+" : "") + v.marginPct.toFixed(2) + "%" : "—"}</div>
                             </div>
                         </div>
                     `;
@@ -2247,6 +2296,10 @@
                         ? t.exit_time_et.substring(11, 16) + " ET" : "—";
                     const pctText = t.pnl_pct != null
                         ? `${t.pnl_pct >= 0 ? "+" : ""}${t.pnl_pct.toFixed(2)}%` : "—";
+                    const _mMult = multForSymbol(t.symbol);
+                    const _mNotional = (t.entry_price != null && t.shares != null) ? t.entry_price * t.shares * _mMult : null;
+                    const marginPctText = t.pnl != null
+                        ? `${(t.pnl / POSITION_SIZE * 100) >= 0 ? "+" : ""}${(t.pnl / POSITION_SIZE * 100).toFixed(2)}%` : "—";
 
                     return `
                         <div class="mobile-trade-card ${cardClass}">
@@ -2257,7 +2310,7 @@
                                     ${sidePill(t.side)}
                                     ${multBadge(t.symbol)}
                                 </div>
-                                <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk</div>
+                                <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk · Kostpris ${_mNotional != null ? fmtMoney(_mNotional) : "—"} · Margin ${fmtMoney(POSITION_SIZE)}</div>
                                 <div class="mobile-pos-prices">
                                     <span>Køb ${fmtMoney(t.entry_price)}</span>
                                     <span class="mobile-pos-sell">Salg ${t.exit_price != null ? fmtMoney(t.exit_price) : "—"}</span>
@@ -2266,6 +2319,7 @@
                             <div class="mobile-trade-right">
                                 <div class="mobile-trade-pnl ${pnlClass}">${fmtMoneySigned(t.pnl)}</div>
                                 <div class="mobile-trade-pct ${pnlClass}">${pctText}</div>
+                                <div class="mobile-trade-pct ${pnlClass}">margin ${marginPctText}</div>
                             </div>
                         </div>
                     `;
@@ -2500,7 +2554,7 @@
 
             // ── Rækker ───────────────────────────────────────
             const rows = trades.length === 0
-                ? `<tr><td colspan="11" class="empty">Ingen handler matcher filtrene</td></tr>`
+                ? `<tr><td colspan="14" class="empty">Ingen handler matcher filtrene</td></tr>`
                 : trades.map(t => {
                     const date = t.entry_time_et
                         ? t.entry_time_et.substring(0, 10)
@@ -2520,8 +2574,23 @@
                     const pctStr = pctVal != null
                         ? ` <span style="font-size:12px;font-weight:400;opacity:0.85;">(${pctVal >= 0 ? "+" : ""}${pctVal.toFixed(2)}%)</span>`
                         : "";
+                    const _dir  = (t.side === "short") ? -1 : 1;
+                    const _mult = multForSymbol(t.symbol);
+                    const _notional = (t.entry_price != null && t.shares != null) ? t.entry_price * t.shares * _mult : null;
+                    const _pricePct = (t.exit_price != null && t.entry_price != null && t.entry_price !== 0)
+                        ? ((t.exit_price - t.entry_price) / t.entry_price) * 100 * _dir : null;
+                    const _marginPct = (t.pnl != null) ? (t.pnl / POSITION_SIZE) * 100 : null;
+                    const pctSpan = _pricePct != null
+                        ? ` <span class="${cls(t.pnl)}" style="font-size:12px;font-weight:600;">(${_pricePct >= 0 ? "+" : ""}${_pricePct.toFixed(2)}%)</span>`
+                        : "";
                     const pnlCell = t.pnl != null
-                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>${pctStr}`
+                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>${pctSpan}`
+                        : `<span class="muted">—</span>`;
+                    const mPnlCell = t.pnl != null
+                        ? `<span class="${cls(t.pnl)}" style="font-weight:700;">${fmtMoneySigned(t.pnl)}</span>`
+                        : `<span class="muted">—</span>`;
+                    const mPctCell = _marginPct != null
+                        ? `<span class="${cls(_marginPct)}" style="font-weight:700;">${_marginPct >= 0 ? "+" : ""}${_marginPct.toFixed(2)}%</span>`
                         : `<span class="muted">—</span>`;
                     const rowClass = t.pnl == null ? "row-open"
                                    : t.pnl > 0    ? "row-positive"
@@ -2535,9 +2604,12 @@
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
-                            <td class="num">${(t.entry_price != null && t.shares != null) ? fmtMoney(t.entry_price * t.shares) : "—"}</td>
+                            <td class="num">${_notional != null ? fmtMoney(_notional) : "—"}</td>
                             <td class="num">${exitCell}</td>
                             <td class="num">${pnlCell}</td>
+                            <td class="num">${fmtMoney(POSITION_SIZE)}</td>
+                            <td class="num">${mPnlCell}</td>
+                            <td class="num">${mPctCell}</td>
                             <td>${reasonPill(t.exit_reason)}</td>
                         </tr>
                     `;
@@ -2593,6 +2665,9 @@
                                 <th style="text-align:right;">Kost<br>pris</th>
                                 <th style="text-align:right;">Exit<br>pris</th>
                                 <th style="text-align:right;">P&L</th>
+                                <th style="text-align:right;">Margin<br>kostpris</th>
+                                <th style="text-align:right;">Margin<br>P&L</th>
+                                <th style="text-align:right;">Margin<br>P&L %</th>
                                 <th style="padding-left:24px;">Årsag</th>
                             </tr>
                         </thead>
