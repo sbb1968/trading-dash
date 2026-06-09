@@ -298,7 +298,7 @@ export function LiveAlgo() {
   // Live-state læses fra provideren (overlever vinduets remount/reload)
   const {
     log, connected, status, message, totalPnl, positions, trades,
-    universe, strategies, risk, startStrategy, stopStrategy,
+    universe, strategies, risk, startStrategy, stopStrategy, clearLog,
   } = useLiveLog();
 
   // View-state (lokal — nulstilling er harmløs)
@@ -534,7 +534,26 @@ export function LiveAlgo() {
 
         {/* Højre kolonne: log */}
         <div style={card({ display: "flex", flexDirection: "column", overflow: "hidden" })}>
-          {sectionTitle("📝", "Live log")}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            {sectionTitle("📝", "Live log")}
+            <button
+              onClick={clearLog}
+              disabled={log.length === 0}
+              title="Tøm live-loggen (påvirker ikke journalen eller handler)"
+              style={{
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-subtle)",
+                color: "var(--text-secondary)",
+                borderRadius: 3,
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "3px 10px",
+                cursor: log.length === 0 ? "default" : "pointer",
+                opacity: log.length === 0 ? 0.5 : 1,
+                flexShrink: 0,
+              }}
+            >🗑 Ryd log</button>
+          </div>
           <div
             ref={logRef}
             style={{
