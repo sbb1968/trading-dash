@@ -143,10 +143,14 @@ class AlgoScheduler:
         self._running = False
         self._task    = None
 
+        # ORB udfaset 2026-06-10. start_algo (ORB-start 09:44 ET), pre_flight_check
+        # og daily_summary var alle bundet til ORB og er fjernet fra planen.
+        # reset_daily er generisk (nulstiller RiskManager-tællere ved midnat ET) og
+        # beholdes. Når Europa-reversion skal auto-starte, tilføjes et nyt job her
+        # (02:00 ET / 08:00 DK), og /health-blokken i main.py opdateres tilsvarende.
+        # Metoderne _job_preflight / _job_start_algo / _job_daily_summary efterlades
+        # urørte (døde, men harmløse) for at holde diffen lille.
         self._jobs = [
-            ScheduledJob("pre_flight_check",  dtime( 9, 30), self._job_preflight),
-            ScheduledJob("start_algo",        dtime( 9, 44), self._job_start_algo),
-            ScheduledJob("daily_summary",     dtime(10, 35), self._job_daily_summary),
             ScheduledJob("reset_daily",       dtime( 0,  5), self._job_reset_daily),
         ]
 

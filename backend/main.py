@@ -1645,14 +1645,18 @@ async def health():
     scheduled = None
     if sched and identity.instance_role == "algoserver":
         start_job = next((j for j in sched["jobs"] if j["name"] == "start_algo"), None)
-        # Dansk tid for start_algo = tidsdelen af next_start_dk (samme job, næste kørsel).
-        next_dk = sched.get("next_start_dk")
-        dk_time = next_dk.split(" ")[-1] if next_dk else None
-        scheduled = {
-            "strategy": "Momentum ORB",
-            "et_time":  start_job["et_time"] if start_job else "09:44",
-            "dk_time":  dk_time,                # fx "15:44" — så UI kan vise "09:44 ET / 15:44 DK"
-        }
+        # Kun udfyld hvis et auto-start-job faktisk findes. ORB blev fjernet
+        # 2026-06-10, så start_job er None og scheduled forbliver None (Analyse
+        # viser "ingen planlagt strategi"). Når et nyt auto-start-job tilføjes,
+        # opdateres "strategy"-labelen her til den nye strategi.
+        if start_job:
+            next_dk = sched.get("next_start_dk")
+            dk_time = next_dk.split(" ")[-1] if next_dk else None
+            scheduled = {
+                "strategy": "Momentum ORB",
+                "et_time":  start_job["et_time"],
+                "dk_time":  dk_time,            # fx "15:44" — så UI kan vise "09:44 ET / 15:44 DK"
+            }
     return {
         "status":           "ok",
         "clients":          len(connected_clients),
