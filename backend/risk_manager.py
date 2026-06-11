@@ -23,6 +23,13 @@ class RiskConfig:
     max_total_positions:     int   = 50        # Samlet positionsloft (bagstopper)
     nlv_emergency_threshold: float = 5000.0    # Nødstop hvis NLV falder hertil
     block_duplicate_tickers: bool  = False     # Strategier MÅ dele samme ticker
+    # GLOBAL daglig tab-mur: summerer ALLE strategiers P&L mod ét loft og standser
+    # hele kontoen. DEAKTIVERET under udvikling (2026-06-11) — vi vil have
+    # per-strategi-grænserne (StrategyConfig.max_daily_loss, håndhævet i
+    # BaseStrategy.request_order) isolere strategierne, så den enes tab aldrig
+    # spærrer den anden. Sæt True igen FØR rigtige penge, og vælg da et passende
+    # daily_loss_limit som ren konto-bagstopper.
+    global_daily_limit_enabled: bool = False
 
 
 @dataclass
@@ -94,13 +101,17 @@ class RiskManager:
         if self._emergency_active:
             return False, "Nødstop er aktivt — alle ordrer blokeret"
 
-        if self._daily_limit_hit:
-            return False, f"Daglig tab-grænse nået (${self.config.daily_loss_limit})"
+        # GLOBAL daglig tab-mur — kun aktiv hvis eksplicit slået til. Deaktiveret
+        # under udvikling, så fx reversions tab ikke spærrer K2. Per-strategi-
+        # grænsen håndhæves uafhængigt i BaseStrategy.request_order.
+        if self.config.global_daily_limit_enabled:
+            if self._daily_limit_hit:
+                return False, f"Daglig tab-grænse nået (${self.config.daily_loss_limit})"
 
-        if self._total_pnl_today <= -self.config.daily_loss_limit:
-            self._daily_limit_hit = True
-            await self._trigger_daily_limit_stop()
-            return False, f"Daglig tab-grænse overskredet: ${self._total_pnl_today:.2f}"
+            if self._total_pnl_today <= -self.config.daily_loss_limit:
+                self._daily_limit_hit = True
+                await self._trigger_daily_limit_stop()
+                return False, f"Daglig tab-grænse overskredet: ${self._total_pnl_today:.2f}"
 
         estimated_value = order.quantity * (order.limit_price or 10.0)
         strat = order.strategy_name
@@ -175,7 +186,9 @@ class RiskManager:
 
         await self._broadcast_risk_update()
 
-        if self._total_pnl_today <= -self.config.daily_loss_limit and not self._daily_limit_hit:
+        if (self.config.global_daily_limit_enabled
+                and self._total_pnl_today <= -self.config.daily_loss_limit
+                and not self._daily_limit_hit):
             self._daily_limit_hit = True
             await self._trigger_daily_limit_stop()
 

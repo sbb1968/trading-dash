@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""
+meanrev_backtest.py
+═══════════════════
+Backtester den konkrete mean-reversion-regel som forudsætningstesten åbnede for:
+index/rente/metal-futures der mean-reverter i den EUROPÆISKE session (02–08 ET
+≈ 08–14 dansk tid). Det her er make-or-break — det afgør om reversionen er ÆGTE
+(overlever spænd) eller bare bid-ask-bounce (dør når vi betaler spændet).
+
+Regel (defaults — IKKE optimeret; sweep kommer kun hvis defaults er lovende):
+  • z = (close − MA20) / std20, beregnet på sammenhængende 15-min bars.
+  • ENTRY (kun i sessionen, kun på likvide bars): |z| ≥ entry_z (2.0).
+      z ≥ +entry_z → SHORT (vædder på fald mod gennemsnittet)
+      z ≤ −entry_z → LONG  (vædder på stigning mod gennemsnittet)
+  • EXIT (hvad end først): tilbage til gennemsnittet (|z| ≤ exit_z, 0.5) ·
+      stop hvis stræk fortsætter (|z| ≥ stop_z, 3.5) · tvangsluk ved sessions-slut
+      (intraday — holder ALDRIG over sessionen).
+  • Én position pr. instrument ad gangen.
+
+OMKOSTNINGS-SENSITIVITET er kernen: P&L vises ved 0/1/2/3 bp rundtur. For
+index-micros (MES/MNQ) er realistisk rundtur ~1.5–2 bp (1 tick spænd + kommission).
+HVIS edgen forsvinder ved 2 bp = bounce-artefakt. HVIS den holder = ægte.
+
+Plus OUT-OF-SAMPLE-split (in-sample først, OOS sidst) og handler/dag.
+
+Rent offline på de høstede 15-min CSV'er. Kun stdlib. Ingen IBKR.
+
+Brug (på Sørens workstation):
+    python meanrev_backtest.py
+    python meanrev_backtest.py --only MES
+    python meanrev_backtest.py --session european --entry-z 2.0 --exit-z 0.5 --stop-z 3.5
+    python meanrev_backtest.py --sweep            # let parametersweep (efter defaults)
+
+Output i ./meanrev_backtest_output/: summary.txt
+
+Placering: C:\\Projects\\trading_dash\\backend\\meanrev_backtest.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+# Den validerede z-regel bor nu i pakken (delt med live-wrapperen
+# algo_europa_reversion.py, så backtest og live aldrig divergerer). Denne
+# backtest delegerer al beslutningslogik hertil.
+from strategies.europa_reversion.rule import (
+    compute_z as _rule_compute_z,
+    entry_side as _rule_entry_side,
+    exit_reason as _rule_exit_reason,
+)
+
+OUTPUT_DIRNAME = "meanrev_backtest_output"
+BAR_SECONDS = 900  # 15 min
+
+SESSIONS = {
+    "asiatisk":   list(range(18, 24)) + list(range(0, 2)),
+    "europaeisk": [2, 3, 4, 5, 6, 7],
+    "amerikansk": [9, 10, 11, 12, 13, 14, 15],
+}
+DEFAULT_INSTR = ["MES", "MNQ", "M2K"]
+COST_LEVELS_BP = [0.0, 1.0, 2.0, 3.0]   # rundtur i basispunkter
+
+
+@dataclass
+class Bar:
+    ts: datetime
+    close: float
+    volume: float
+
+
+@dataclass
+class Trade:
+    entry_ts: datetime
+    exit_ts: datetime
+    side: str          # "long" | "short"
+    entry: float
+    exit: float
+    reason: str
+    bars_held: int
+
+    def gross_pct(self):
+        if self.entry <= 0:
+            return 0.0
+        raw = (self.exit - self.entry) / self.entry * 100.0
+        return raw if self.side == "long" else -raw
+
+    def net_pct(self, cost_bp):
+        return self.gross_pct() - cost_bp * 0.01   # 1 bp = 0.01 %
+
+
+def session_of(hour):
+    for name, hours in SESSIONS.items():
+        if hour in hours:
+            return name
+    return None
+
+
+def load_15min(path):
+    out = []
+    with path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            ts_raw = row["timestamp"]
+            if "T" not in ts_raw:
+                return []
+            try:
+                out.append(Bar(datetime.fromisoformat(ts_raw), float(row["close"]),
+                               float(row.get("volume", 0) or 0)))
+            except (ValueError, KeyError):
+                continue
+    return sorted(out, key=lambda b: b.ts)
+
+
+def contiguous(bars, i, lookback):
+    """Er de seneste lookback+1 bars (i−lookback..i) alle 15-min sammenhængende?"""
+    if i - lookback < 0:
+        return False
+    for k in range(i - lookback + 1, i + 1):
+        if (bars[k].ts - bars[k - 1].ts).total_seconds() != BAR_SECONDS:
+            return False
+    return True
+
+
+def zscore(bars, i, lookback):
+    """z over de seneste lookback closes — delegerer til den delte regel
+    (strategies.europa_reversion.rule.compute_z). Returnerer float eller None."""
+    closes = [b.close for b in bars[i - lookback + 1:i + 1]]
+    res = _rule_compute_z(closes)
+    return res[0] if res else None
+
+
+def last_in_session(bars, i, session):
+    if i + 1 >= len(bars):
+        return True
+    nxt = bars[i + 1]
+    if session_of(nxt.ts.hour) != session:
+        return True
+    if (nxt.ts - bars[i].ts).total_seconds() != BAR_SECONDS:
+        return True
+    return False
+
+
+def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol):
+    """Returnér liste af Trade. Intraday: tvangsluk ved sessions-slut."""
+    trades = []
+    pos = None  # dict: side, entry, entry_ts, entry_i
+    n = len(bars)
+    for i in range(lookback, n):
+        bar = bars[i]
+        # ── styr åben position ──
+        if pos is not None:
+            z = zscore(bars, i, lookback) if contiguous(bars, i, lookback) else None
+            exit_now, reason = False, ""
+            if z is not None:
+                r = _rule_exit_reason(pos["side"], z, exit_z, stop_z)
+                if r:
+                    exit_now, reason = True, r
+            if not exit_now and last_in_session(bars, i, session):
+                exit_now, reason = True, "session_end"
+            if exit_now:
+                trades.append(Trade(pos["entry_ts"], bar.ts, pos["side"], pos["entry"],
+                                    bar.close, reason, i - pos["entry_i"]))
+                pos = None
+        # ── ny entry (kun hvis flad) ──
+        if pos is None and session_of(bar.ts.hour) == session:
+            if (min_vol is None or bar.volume >= min_vol) and contiguous(bars, i, lookback):
+                z = zscore(bars, i, lookback)
+                if z is not None and not last_in_session(bars, i, session):
+                    side = _rule_entry_side(z, entry_z)
+                    if side == "short":
+                        pos = {"side": "short", "entry": bar.close, "entry_ts": bar.ts, "entry_i": i}
+                    elif side == "long":
+                        pos = {"side": "long", "entry": bar.close, "entry_ts": bar.ts, "entry_i": i}
+    return trades
+
+
+def stats(trades, cost_bp):
+    pnls = [t.net_pct(cost_bp) for t in trades]
+    n = len(pnls)
+    if n == 0:
+        return dict(n=0, wr=0, avg=0, sum=0, pf=0, worst=0)
+    wins = [p for p in pnls if p > 0]
+    gl = -sum(p for p in pnls if p < 0)
+    gw = sum(wins)
+    pf = gw / gl if gl > 0 else (float("inf") if gw > 0 else 0)
+    return dict(n=n, wr=100 * len(wins) / n, avg=sum(pnls) / n, sum=sum(pnls), pf=pf, worst=min(pnls))
+
+
+def fmt_pf(pf):
+    return "inf" if pf == float("inf") else f"{pf:.2f}"
+
+
+def date_span_split(trades, frac):
+    if not trades:
+        return [], []
+    dates = sorted(t.entry_ts.date() for t in trades)
+    cut = dates[min(len(dates) - 1, int(len(dates) * frac))]
+    insample = [t for t in trades if t.entry_ts.date() <= cut]
+    oos = [t for t in trades if t.entry_ts.date() > cut]
+    return insample, oos
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Mean-reversion backtest (session-gated, intraday)")
+    ap.add_argument("--data-dir", default="data_harvest")
+    ap.add_argument("--only", default=None, help="kommasepareret; default index-micros MES,MNQ,M2K")
+    ap.add_argument("--session", default="europaeisk", choices=list(SESSIONS.keys()))
+    ap.add_argument("--lookback", type=int, default=20)
+    ap.add_argument("--entry-z", type=float, default=2.0)
+    ap.add_argument("--exit-z", type=float, default=0.5)
+    ap.add_argument("--stop-z", type=float, default=3.5)
+    ap.add_argument("--min-vol-pct", type=float, default=50.0)
+    ap.add_argument("--oos-split", type=float, default=0.6)
+    ap.add_argument("--cost-read-bp", type=float, default=2.0, help="omkostning til OOS-aflæsning")
+    ap.add_argument("--sweep", action="store_true")
+    args = ap.parse_args()
+
+    data_dir = Path(args.data_dir)
+    if not data_dir.is_absolute():
+        data_dir = Path.cwd() / data_dir
+    out_dir = Path.cwd() / OUTPUT_DIRNAME
+    out_dir.mkdir(exist_ok=True)
+    instruments = [s.strip().upper() for s in args.only.split(",")] if args.only else DEFAULT_INSTR
+    lines = []
+
+    def emit(s=""):
+        print(s, flush=True)
+        lines.append(s)
+
+    emit("=" * 78)
+    emit("  MEAN-REVERSION BACKTEST — z-score, session-gated, intraday")
+    emit("=" * 78)
+    emit(f"Data: {data_dir}   session: {args.session}   instrumenter: {', '.join(instruments)}")
+    emit(f"Regel: entry |z|≥{args.entry_z}  exit |z|≤{args.exit_z}  stop |z|≥{args.stop_z}  "
+         f"lookback={args.lookback}  (DEFAULTS, ikke optimeret)")
+    emit("Omkostning vist ved 0/1/2/3 bp rundtur. Forsvinder edge ved ~2 bp = bounce-artefakt.")
+    emit("")
+
+    if not data_dir.exists():
+        emit(f"Mappen {data_dir} findes ikke.")
+        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        return 1
+
+    if args.sweep:
+        emit("── PARAMETERSWEEP (entry_z × exit_z × lookback), aflæst ved "
+             f"{args.cost_read_bp:.0f} bp rundtur ──")
+        for label in instruments:
+            p = data_dir / f"{label}_15min.csv"
+            if not p.exists():
+                continue
+            bars = load_15min(p)
+            pos = sorted(b.volume for b in bars if b.volume > 0)
+            thr = pos[min(len(pos) - 1, int(len(pos) * args.min_vol_pct / 100))] if pos else None
+            if thr is not None and thr <= 0:
+                thr = None
+            emit(f"\n  {label}:")
+            emit(f"     {'entry_z':>8}{'exit_z':>8}{'lookbk':>8}{'n':>6}{'WR%':>7}{'sum%':>9}{'PF':>7}")
+            for ez in (1.5, 2.0, 2.5):
+                for xz in (0.0, 0.5, 1.0):
+                    for lb in (15, 20, 30):
+                        tr = run_backtest(bars, args.session, lb, ez, xz, args.stop_z, thr)
+                        s = stats(tr, args.cost_read_bp)
+                        emit(f"     {ez:>8.1f}{xz:>8.1f}{lb:>8}{s['n']:>6}{s['wr']:>7.0f}"
+                             f"{s['sum']:>9.1f}{fmt_pf(s['pf']):>7}")
+        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        emit(f"\nFil: {out_dir / 'summary.txt'}")
+        return 0
+
+    portfolio = []  # (label, trades, thr)
+    for label in instruments:
+        p = data_dir / f"{label}_15min.csv"
+        if not p.exists():
+            emit(f"── {label}: ingen fil ({p.name}) — springer over\n")
+            continue
+        bars = load_15min(p)
+        if len(bars) < args.lookback + 50:
+            emit(f"── {label}: for få bars ({len(bars)})\n")
+            continue
+        pos = sorted(b.volume for b in bars if b.volume > 0)
+        thr = pos[min(len(pos) - 1, int(len(pos) * args.min_vol_pct / 100))] if pos else None
+        if thr is not None and thr <= 0:
+            thr = None
+        trades = run_backtest(bars, args.session, args.lookback, args.entry_z,
+                              args.exit_z, args.stop_z, thr)
+        portfolio.append((label, trades, thr))
+
+        days = len({t.entry_ts.date() for t in trades}) or 1
+        avg_hold = sum(t.bars_held for t in trades) / len(trades) if trades else 0
+        reasons = defaultdict(int)
+        for t in trades:
+            reasons[t.reason] += 1
+        emit("─" * 78)
+        emit(f"  {label}   (handler={len(trades)}, {len(trades)/days:.1f}/dag, "
+             f"snit-hold={avg_hold:.1f} bars, vol-tærskel={'ingen' if thr is None else int(thr)})")
+        emit("─" * 78)
+        emit(f"     exit-mix: " + "  ".join(f"{k}={v}" for k, v in sorted(reasons.items(), key=lambda x: -x[1])))
+        emit(f"     {'rundtur':>8}{'n':>6}{'WR%':>7}{'snit%':>9}{'sum%':>9}{'PF':>7}{'værst%':>9}")
+        for c in COST_LEVELS_BP:
+            s = stats(trades, c)
+            emit(f"     {c:>6.0f}bp{s['n']:>6}{s['wr']:>7.0f}{s['avg']:>9.3f}"
+                 f"{s['sum']:>9.1f}{fmt_pf(s['pf']):>7}{s['worst']:>9.2f}")
+        # OOS-split ved aflæsnings-omkostning
+        ins, oos = date_span_split(trades, args.oos_split)
+        si, so = stats(ins, args.cost_read_bp), stats(oos, args.cost_read_bp)
+        emit(f"     OOS @ {args.cost_read_bp:.0f}bp:  in-sample n={si['n']} sum={si['sum']:+.1f}% "
+             f"PF={fmt_pf(si['pf'])}  |  out-of-sample n={so['n']} sum={so['sum']:+.1f}% PF={fmt_pf(so['pf'])}")
+        emit("")
+
+    # samlet portefølje-dom
+    all_trades = [t for _, tr, _ in portfolio for t in tr]
+    if all_trades:
+        emit("─" * 78)
+        emit("  SAMLET (alle instrumenter)")
+        emit("─" * 78)
+        emit(f"     {'rundtur':>8}{'n':>6}{'WR%':>7}{'snit%':>9}{'sum%':>9}{'PF':>7}")
+        for c in COST_LEVELS_BP:
+            s = stats(all_trades, c)
+            emit(f"     {c:>6.0f}bp{s['n']:>6}{s['wr']:>7.0f}{s['avg']:>9.3f}{s['sum']:>9.1f}{fmt_pf(s['pf']):>7}")
+        emit("")
+
+    emit("─" * 78)
+    emit("  DOM")
+    emit("─" * 78)
+    emit("  ÆGTE edge: PF > 1 ved ~2 bp rundtur OG holder i out-of-sample.")
+    emit("  BOUNCE-artefakt: PF kollapser mod 1 mellem 0 og 2 bp (spændet æder reversionen).")
+    emit("  Overlever den 2 bp + OOS → design er bekræftet; så sweeper vi + regime-splitter.")
+    emit("  (Defaults er ikke optimeret — et positivt resultat her er konservativt.)")
+    emit("")
+    (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+    emit(f"Fil: {out_dir / 'summary.txt'}")
+    emit("→ Send mig summary.txt.")
+    (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

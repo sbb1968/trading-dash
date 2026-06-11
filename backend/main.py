@@ -304,7 +304,7 @@ async def startup():
 
         momentum_config = StrategyConfig(
             max_loss_per_trade  = 100.0,
-            max_daily_loss      = 150.0,
+            max_daily_loss      = 300.0,     # var 150.0
             max_open_positions  = 3,
             max_position_size   = 1000.0,    # Capital per handel
         )
@@ -319,7 +319,7 @@ async def startup():
 
         confluence_config = StrategyConfig(
             max_loss_per_trade  = 150.0,     # Lidt løsere end ORB
-            max_daily_loss      = 250.0,
+            max_daily_loss      = 300.0,     # var 250.0
             max_open_positions  = 3,
             max_position_size   = 1000.0,    # Samme kapital pr. trade som ORB
         )
@@ -333,7 +333,7 @@ async def startup():
 
         confluence2_config = StrategyConfig(
             max_loss_per_trade  = 150.0,
-            max_daily_loss      = 250.0,
+            max_daily_loss      = 300.0,     # var 250.0
             max_open_positions  = 3,
             max_position_size   = 1000.0,
         )
@@ -347,7 +347,7 @@ async def startup():
 
         europa_rev_config = StrategyConfig(
             max_loss_per_trade  = 170.0,   # ~1% af ~$17k konto (justér til faktisk equity)
-            max_daily_loss      = 400.0,
+            max_daily_loss      = 300.0,   # var 400.0
             max_open_positions  = 2,       # MES + M2K
             max_position_size   = 2000.0,  # defensivt; futures sizer på kontrakter (§2)
         )
