@@ -34,13 +34,33 @@ QUIET_HOURS_ET        = (22, 6) # send ikke beskeder mellem 22:00 og 06:00 ET
 MAX_OFFLINE_ALERTS    = 2       # send max 2 push'er per offline-periode (ingen spam)
 REMINDER_DELAY_MIN    = 5       # minutter mellem alert #1 og alert #2
 
+# ── DATA-LIVENESS KONFIG (fang "forbundet men datablind") ──────
+# Den eksisterende probe tjekker forbindelsen (port 7497). Disse tjekker DATA:
+# tid siden sidste bar_evaluation i journalen. Forbindelsen kan leve mens
+# HMDS-datafarmen er død — det er præcis det her fanger.
+JOURNAL_DB            = "trading_dash.db"   # relativ til backend/ (uvicorn-cwd)
+DATA_BLIND_SEC        = 240     # >4 min uden bar_evaluation i session = datablind
+STRATEGY_ALIVE_SEC    = 120     # backend har skrevet ET event indenfor 2 min = loop lever
+DATA_REMINDER_MIN     = 5       # minutter mellem datablind-alert #1 og #2
+DATA_MAX_ALERTS       = 2       # max push'er per datablind-periode (ingen spam)
+SESSION_OPEN_ET       = (9, 30) # US RTH start
+SESSION_CLOSE_ET      = (16, 0) # US RTH slut
+
+# Auto-recovery er OPT-IN og som standard SLÅET FRA. Når True kalder watchdogen
+# KUN on_data_blind-callbacken (wired i main.py) — den dræber aldrig selv Gateway.
+DATA_AUTO_RECOVER          = False
+DATA_RECOVER_AFTER_SEC     = 300   # vent 5 min datablind før recovery forsøges
+DATA_RECOVER_COOLDOWN_MIN  = 15    # mindst 15 min mellem recovery-forsøg
+DATA_RECOVER_MAX_PER_DAY   = 3
+
 
 class TWSWatchdog:
     """
     Overvåger TWS-forbindelsen og notificerer Iben hvis den falder.
     """
 
-    def __init__(self, on_status_change: Optional[Callable] = None):
+    def __init__(self, on_status_change: Optional[Callable] = None,
+                 on_data_blind: Optional[Callable] = None):
         self._running         = False
         self._task            = None
         self._was_online      = None     # None = uvist, True/False = sidste kendte
@@ -48,6 +68,16 @@ class TWSWatchdog:
         self._on_status       = on_status_change   # callback (online: bool) → broadcastes til UI
         self._last_alert_at   = None
         self._alerts_sent     = 0        # tæller offline-alerts i denne offline-periode
+
+        # ── Data-liveness state (datablind-detektion) ──
+        self._on_data_blind        = on_data_blind   # async callback til OPT-IN recovery
+        self._data_was_live        = None            # None=uvist, True/False=sidste kendte
+        self._data_blind_since      = None
+        self._data_alerts_sent     = 0
+        self._last_data_alert_at   = None
+        self._last_recover_at      = None
+        self._recover_count_today  = 0
+        self._recover_count_date   = None
 
     # ─────────────────────────────────────────────────────────
     # Start / Stop
@@ -75,6 +105,12 @@ class TWSWatchdog:
             try:
                 online = await self._check_tws()
                 await self._handle_status(online)
+                # Data-liveness: fang "forbundet men datablind" (isoleret, så en
+                # data-tjek-fejl aldrig vælter forbindelses-tjekken).
+                try:
+                    await self._handle_data_status()
+                except Exception as e:
+                    logger.debug(f"[Watchdog] Data-tjek fejl: {e}")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -108,6 +144,155 @@ class TWSWatchdog:
             return False
         finally:
             sock.close()
+
+    # ─────────────────────────────────────────────────────────
+    # Data-liveness — "forbundet men datablind"
+    # ─────────────────────────────────────────────────────────
+
+    def _in_session(self) -> bool:
+        """True i US RTH (man-fre, 09:30-16:00 ET)."""
+        import pytz
+        et = datetime.now(pytz.timezone("America/New_York"))
+        if et.weekday() >= 5:
+            return False
+        o_h, o_m = SESSION_OPEN_ET
+        c_h, c_m = SESSION_CLOSE_ET
+        mins = et.hour * 60 + et.minute
+        return (o_h * 60 + o_m) <= mins < (c_h * 60 + c_m)
+
+    def _read_data_marks(self):
+        """
+        Læs journalen READ-ONLY: sekunder siden seneste bar_evaluation (data-puls)
+        og sekunder siden seneste event overhovedet (backend-loop lever).
+        Returnerer (sec_since_bareval, sec_since_any_event); None hvis ukendt.
+        Åbner/lukker forbindelsen pr. kald, så vi ALDRIG pinner WAL'en.
+        """
+        import sqlite3
+        from datetime import timezone
+        try:
+            con = sqlite3.connect(f"file:{JOURNAL_DB}?mode=ro", uri=True, timeout=2)
+        except sqlite3.OperationalError:
+            return None, None
+        try:
+            now = datetime.now(timezone.utc)
+
+            def age(sql):
+                row = con.execute(sql).fetchone()
+                if not row or not row[0]:
+                    return None
+                try:
+                    ts = datetime.fromisoformat(str(row[0]))
+                except ValueError:
+                    return None
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                return (now - ts).total_seconds()
+
+            bareval = age("SELECT MAX(ts_utc) FROM events WHERE event_type='bar_evaluation'")
+            anyev   = age("SELECT MAX(ts_utc) FROM events")
+            return bareval, anyev
+        finally:
+            con.close()
+
+    async def _handle_data_status(self):
+        # Kun relevant i åben US-session
+        if not self._in_session():
+            if self._data_was_live is False:
+                self._data_was_live    = None
+                self._data_blind_since = None
+                self._data_alerts_sent = 0
+            return
+
+        sec_bareval, sec_any = self._read_data_marks()
+        # Kan vi ikke læse, eller har ingen strategi skrevet noget for nylig
+        # (pulsen er forældet), antager vi "ingen strategi kører" → ingen alarm.
+        if sec_bareval is None or sec_any is None or sec_any > STRATEGY_ALIVE_SEC:
+            return
+
+        data_live = sec_bareval <= DATA_BLIND_SEC
+
+        if data_live:
+            if self._data_was_live is False:
+                # ── Data er tilbage ──
+                blind_min = ((datetime.now() - self._data_blind_since).total_seconds() / 60.0
+                             if self._data_blind_since else 0)
+                logger.info(f"[Watchdog] ✅ Datafeed tilbage efter ~{blind_min:.0f} min datablind")
+                if self._data_alerts_sent > 0:
+                    try:
+                        await notifier.send(
+                            message  = f"Datafeed er tilbage efter ~{blind_min:.0f} min. K2 evaluerer igen.",
+                            title    = "✅ Data tilbage",
+                            priority = 3,
+                            tags     = "white_check_mark",
+                        )
+                    except Exception as e:
+                        logger.debug(f"[Watchdog] recovery-push fejl: {e}")
+            self._data_was_live      = True
+            self._data_blind_since   = None
+            self._data_alerts_sent   = 0
+            self._last_data_alert_at = None
+            return
+
+        # ── DATABLIND (forbundet, men ingen friske bars) ──
+        if self._data_blind_since is None:
+            self._data_blind_since = datetime.now()
+        blind_sec = (datetime.now() - self._data_blind_since).total_seconds()
+
+        # Alert #1
+        if self._data_alerts_sent == 0:
+            logger.warning(f"[Watchdog] ⚠ DATABLIND — {sec_bareval:.0f}s uden bar_evaluation "
+                           f"(loop lever, data død)")
+            try:
+                await notifier.send(
+                    message  = f"K2 er DATABLIND — forbundet, men ingen kurser i "
+                               f"{sec_bareval/60:.0f}+ min. Genstart Gateway + backend.",
+                    title    = "⚠ Datafeed nede",
+                    priority = 5,
+                    tags     = "warning",
+                )
+            except Exception as e:
+                logger.debug(f"[Watchdog] datablind-push fejl: {e}")
+            self._last_data_alert_at = datetime.now()
+            self._data_alerts_sent  += 1
+
+        # Reminder (alert #2)
+        elif (self._data_alerts_sent < DATA_MAX_ALERTS and self._last_data_alert_at
+              and (datetime.now() - self._last_data_alert_at) > timedelta(minutes=DATA_REMINDER_MIN)):
+            logger.warning(f"[Watchdog] ⚠ Stadig datablind efter ~{blind_sec/60:.0f} min")
+            try:
+                await notifier.send(
+                    message  = f"K2 stadig datablind efter ~{blind_sec/60:.0f} min. Sidste påmindelse.",
+                    title    = "⏰ Datafeed stadig nede",
+                    priority = 5,
+                    tags     = "alarm_clock",
+                )
+            except Exception as e:
+                logger.debug(f"[Watchdog] datablind-reminder fejl: {e}")
+            self._last_data_alert_at = datetime.now()
+            self._data_alerts_sent  += 1
+
+        # ── OPT-IN auto-recovery (default FRA — kalder kun din callback) ──
+        if DATA_AUTO_RECOVER and self._on_data_blind and blind_sec >= DATA_RECOVER_AFTER_SEC:
+            today = datetime.now().date()
+            if self._recover_count_date != today:
+                self._recover_count_date  = today
+                self._recover_count_today = 0
+            cooldown_ok = (self._last_recover_at is None
+                           or (datetime.now() - self._last_recover_at)
+                           > timedelta(minutes=DATA_RECOVER_COOLDOWN_MIN))
+            if cooldown_ok and self._recover_count_today < DATA_RECOVER_MAX_PER_DAY:
+                logger.warning(f"[Watchdog] Auto-recovery: kalder on_data_blind "
+                               f"(forsøg {self._recover_count_today + 1}/{DATA_RECOVER_MAX_PER_DAY})")
+                self._last_recover_at      = datetime.now()
+                self._recover_count_today += 1
+                try:
+                    result = self._on_data_blind()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as e:
+                    logger.exception(f"[Watchdog] on_data_blind fejl: {e}")
+
+        self._data_was_live = False
 
     # ─────────────────────────────────────────────────────────
     # Status-håndtering
@@ -200,9 +385,12 @@ class TWSWatchdog:
     @property
     def status_dict(self) -> dict:
         return {
-            "tws_online": self._was_online is True,
-            "fails":      self._fail_count,
-            "last_alert": self._last_alert_at.isoformat() if self._last_alert_at else None,
+            "tws_online":       self._was_online is True,
+            "fails":            self._fail_count,
+            "last_alert":       self._last_alert_at.isoformat() if self._last_alert_at else None,
+            "data_live":        self._data_was_live is True,
+            "data_blind_since": self._data_blind_since.isoformat() if self._data_blind_since else None,
+            "data_alerts":      self._data_alerts_sent,
         }
 
 
