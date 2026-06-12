@@ -29,6 +29,12 @@ Placering: C:\\projects\\trading_dash\\backend\\washout_portfolio_sim.py
 
 from __future__ import annotations
 
+import asyncio
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 import argparse
 import csv
 import json
@@ -118,6 +124,67 @@ def get_day_bars(backend, ticker, d):
     if not _TICKER_HAS_FILE.get(ticker):
         return None
     return _TICKER_BARS[ticker].get(d.isoformat(), [])
+
+
+def cache_covers(backend, ticker, d):
+    """Ren fil-tjek: findes en ikke-tom cache-fil hvis interval dækker d?
+    Bruges til at finde manglende FØR fetch — uden at poisone parse-once-cachen."""
+    cdir = backend / CACHE_DIRNAME
+    if not cdir.exists():
+        return False
+    for p in cdir.glob(f"{ticker}_*_1min.csv"):
+        if p.stat().st_size <= 40:
+            continue
+        pr = _parse_cache_range(p.name)
+        if pr and pr[1] <= d <= pr[2]:
+            return True
+    return False
+
+
+async def fetch_missing(backend, missing, host, port, client_id):
+    """Hent manglende (ticker, dag) 1-min RTH-bars → per-dag CSV (afprøvet mønster)."""
+    from ib_async import IB, Stock
+    ib = IB()
+    await ib.connectAsync(host, port, clientId=client_id, timeout=15)
+    try:
+        for k, (ticker, d) in enumerate(missing, 1):
+            print(f"  [{k}/{len(missing)}] henter {ticker} {d} ...", flush=True)
+            contract = Stock(ticker, "SMART", "USD")
+            try:
+                await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=10)
+            except Exception:
+                contract = Stock(ticker, "SMART", "USD", primaryExchange="NASDAQ")
+                try:
+                    await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=10)
+                except Exception:
+                    continue
+            end_dt = datetime(d.year, d.month, d.day, 16, 0)
+            if ET is not None:
+                end_dt = end_dt.replace(tzinfo=ET)
+            try:
+                raw = await asyncio.wait_for(ib.reqHistoricalDataAsync(
+                    contract, endDateTime=end_dt, durationStr="1 D",
+                    barSizeSetting="1 min", whatToShow="TRADES", useRTH=True, formatDate=2),
+                    timeout=20)
+            except Exception as e:
+                if "different IP" in str(e) or "session is connected" in str(e):
+                    print("AFBRUDT: TWS-session fra anden IP. Kør i sikkert vindue.")
+                    break
+                continue
+            p = backend / CACHE_DIRNAME / f"{ticker}_{d}_{d}_1min.csv"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["timestamp", "open", "high", "low", "close", "volume"])
+                for b in raw:
+                    ts = b.date
+                    if isinstance(ts, datetime) and ET is not None:
+                        ts = ts.astimezone(ET) if ts.tzinfo else ts.replace(tzinfo=ET)
+                    w.writerow([ts.isoformat(), b.open, b.high, b.low, b.close, b.volume or 0])
+            await asyncio.sleep(1.2)
+    finally:
+        ib.disconnect()
+
 
 
 def _first_of_month(d):
@@ -275,6 +342,11 @@ def main():
     ap.add_argument("--priority", choices=["washout", "runup", "time"], default="washout",
                     help="valg blandt samtidige signaler (washout-dybde / runup / først)")
     ap.add_argument("--open-until", default="10:30", help="åbningsvindue-grænse ET (HH:MM)")
+    ap.add_argument("--fetch", action="store_true",
+                    help="hent manglende bars fra IBKR før analyse (kør i sikkert vindue)")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=7497)
+    ap.add_argument("--client-id", type=int, default=36)
     ap.add_argument("--lookback", type=int, default=DEFAULTS["lookback"])
     ap.add_argument("--min-runup", type=float, default=DEFAULTS["min_runup"])
     ap.add_argument("--washout", type=float, default=DEFAULTS["washout"])
@@ -319,6 +391,28 @@ def main():
         emit("Ingen perioder. Brug --universe-file eller sørg for bar_cache.")
         (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
         return 1
+
+    # hent manglende bars FØR analyse (ren fil-tjek — poisoner ikke parse-once-cachen)
+    if args.fetch:
+        missing = set()
+        for _, data in jobs:
+            for d_str, tickers in data.items():
+                try:
+                    d = date_cls.fromisoformat(d_str)
+                except ValueError:
+                    continue
+                for t in tickers:
+                    if not cache_covers(backend, t, d):
+                        missing.add((t, d))
+        missing = sorted(missing)
+        if missing:
+            emit(f"Henter {len(missing)} manglende ticker-dage fra IBKR "
+                 f"(client-id {args.client_id}) ...")
+            asyncio.run(fetch_missing(backend, missing, args.host, args.port, args.client_id))
+            emit("")
+        else:
+            emit("--fetch: intet manglede i cache.")
+            emit("")
 
     for label, data in jobs:
         by_day = scan_period(backend, data, params)
