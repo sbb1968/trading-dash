@@ -117,3 +117,11 @@ backend/data/backtest_confluence2_*.csv
 backend/replication_tmp/
 backend/archives/
 backend/test_ollama.py
+# --- runtime caches & analyse-output (algoserver) ---
+backend/daily_cache/
+backend/futures_cache/
+backend/data_harvest/
+backend/*_output/
+backend/Claude_screener_*.csv
+backend/account.yaml.backup_*
+backend/account_yaml.txt
