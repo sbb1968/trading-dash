@@ -435,12 +435,6 @@ CORE_COLUMNS = [
 def build_trade_row(con, tr) -> dict:
     """Én flad dict pr. handel: kerne-felter + strategi-payload + entry/exit-snapshot."""
     row: dict = {}
-    for c in CORE_COLUMNS:
-        if c in ("entry_time_dk", "exit_time_dk"):
-            continue
-        row[c] = tr[c] if c in tr.keys() else None
-    row["entry_time_dk"] = dansk(tr["entry_time_utc"], full=True)
-    row["exit_time_dk"] = dansk(tr["exit_time_utc"], full=True)
 
     # Strategi-specifik payload (entry_z, std, contracts, ...)
     flatten("tp_", p(tr), row)
@@ -451,6 +445,16 @@ def build_trade_row(con, tr) -> dict:
         flatten("entry_", entry, row)
     if exit_:
         flatten("exit_", exit_, row)
+
+    # Kerne SIDST — den kanoniske trades-række vinder over snapshottets egne
+    # scalars (snapshottets time_et/price er bar-tid/-pris og ville ellers
+    # overskrive de præcise fyld-værdier i entry_time_et/entry_price).
+    for c in CORE_COLUMNS:
+        if c in ("entry_time_dk", "exit_time_dk"):
+            continue
+        row[c] = tr[c] if c in tr.keys() else None
+    row["entry_time_dk"] = dansk(tr["entry_time_utc"], full=True)
+    row["exit_time_dk"] = dansk(tr["exit_time_utc"], full=True)
     return row
 
 
