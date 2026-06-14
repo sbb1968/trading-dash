@@ -76,7 +76,7 @@
         main {
             flex: 1;
             padding: 32px;
-            max-width: 1200px;
+            max-width: min(1800px, 95vw);   /* var 1200px — for smalt til Journal-tabellen; brug skærmbredden så de brede tabeller ikke scroller */
             width: 100%;
             margin: 0 auto;
         }
@@ -114,6 +114,9 @@
         }
 
         /* Markdown-styling for strategi-dokumentation */
+        /* Prosa kappes ved en læsbar linjelængde — så Dagsrapport ikke bliver
+           ekstremt brede tekstlinjer nu hvor main bruger hele skærmbredden. */
+        .markdown-body { max-width: 880px; }
         .markdown-body h1 {
             font-size: 22px; color: #4a9eff;
             margin: 8px 0 14px; border-bottom: 2px solid #333; padding-bottom: 8px;
