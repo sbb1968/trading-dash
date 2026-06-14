@@ -1703,7 +1703,7 @@
             if (!reason) return "";
             const cls2 = ["target","trail","stop","force_close","manual"].includes(reason)
                 ? `pill-reason-${reason}` : "";
-            return `<span class="pill ${cls2}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+            return `<span class="pill ${cls2}" style="margin-left:6px;font-size:11px;">${reasonText(reason)}</span>`;
         };
 
         function drFmtSummary(s) {
@@ -1882,6 +1882,18 @@
         function multForSymbol(sym) {
             return FUTURES_MULT[(sym || "").toUpperCase()] || 1;
         }
+        // Exit-årsag → begreb vi kender (vist i ÅRSAG-kolonnen). Ukendte koder vises råt.
+        const REASON_LABELS = {
+            revert:        "take-profit",   // mean-reversion: prisen vendte til target
+            target:        "take-profit",
+            stop:          "stop-loss",
+            session_end:   "session_end",
+            session_close: "session_end",   // K2/ORB tvangsluk ved sessionsslut
+            trail:         "trailing-stop",
+            signal_exit:   "signal-exit",
+            manual:        "manuel",
+        };
+        const reasonText = reason => reason ? (REASON_LABELS[reason] || reason) : "";
 
         function computePositionView(p, snapByTicker) {
             const sym       = (p.symbol || "").toUpperCase();
@@ -1919,10 +1931,10 @@
         function multBadge(symbol) {
             const mult = FUTURES_MULT[(symbol || "").toUpperCase()] || 1;
             if (mult === 1) return "";
-            return `<span title="Futures-kontrakt: $${mult}/point — kostpris og P&L er ganget med ${mult}" `
+            return `<span title="Futures-kontrakt: $${mult} pr. indekspoint (kontrakt-multiplikator). Eksponering = pris × ${mult} × antal kontrakter. IKKE gearing." `
                  + `style="font-size:10px;font-weight:700;color:#fde047;background:rgba(250,204,21,0.12);`
                  + `border:1px solid rgba(250,204,21,0.4);border-radius:3px;padding:1px 5px;margin-left:6px;">`
-                 + `×${mult}</span>`;
+                 + `$${mult}/pt</span>`;
         }
         // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
         // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
@@ -1989,7 +2001,7 @@
                 if (!reason) return "";
                 const cls = ["target","trail","stop","force_close","manual"].includes(reason)
                     ? `pill-reason-${reason}` : "";
-                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reasonText(reason)}</span>`;
             };
 
             // Vis dato pænt
@@ -2565,7 +2577,7 @@
                 if (!reason) return "";
                 const cls = ["target","trail","stop","force_close","manual"].includes(reason)
                     ? `pill-reason-${reason}` : "";
-                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reason}</span>`;
+                return `<span class="pill ${cls}" style="margin-left:6px;font-size:11px;">${reasonText(reason)}</span>`;
             };
 
             // ── Summary over HELE det filtrerede sæt (fra backenden) ──
@@ -2578,7 +2590,7 @@
 
             // ── Rækker ───────────────────────────────────────
             const rows = trades.length === 0
-                ? `<tr><td colspan="14" class="empty">Ingen handler matcher filtrene</td></tr>`
+                ? `<tr><td colspan="13" class="empty">Ingen handler matcher filtrene</td></tr>`
                 : trades.map(t => {
                     const date = t.entry_time_et
                         ? t.entry_time_et.substring(0, 10)
@@ -2628,7 +2640,6 @@
                             <td class="num">${fmtMoney(t.entry_price)}</td>
                             <td class="num">${_notional != null ? fmtMoney(_notional) : "—"}</td>
                             <td class="num">${exitCell}</td>
-                            <td class="num">${pnlCell}</td>
                             <td class="num">${fmtMoney(POSITION_SIZE)}</td>
                             <td class="num">${mPnlCell}</td>
                             <td class="num">${mPctCell}</td>
@@ -2684,12 +2695,11 @@
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
                                 <th style="text-align:right;">Entry<br>pris</th>
-                                <th style="text-align:right;">Kost<br>pris</th>
+                                <th style="text-align:right;">Eksponering</th>
                                 <th style="text-align:right;">Exit<br>pris</th>
+                                <th style="text-align:right;">Risiko-<br>budget</th>
                                 <th style="text-align:right;">P&L</th>
-                                <th style="text-align:right;">Margin<br>kostpris</th>
-                                <th style="text-align:right;">Margin<br>P&L</th>
-                                <th style="text-align:right;">Margin<br>P&L %</th>
+                                <th style="text-align:right;">P&L %</th>
                                 <th style="padding-left:24px;">Årsag</th>
                             </tr>
                         </thead>
@@ -2899,7 +2909,7 @@
                                 </div>
                                 <div class="detail-row">
                                     <div class="detail-label">Grund</div>
-                                    <div class="detail-value">${trade.exit_reason || "—"}</div>
+                                    <div class="detail-value">${reasonText(trade.exit_reason) || "—"}</div>
                                 </div>
                                 <div class="detail-row">
                                     <div class="detail-label">Varighed</div>
