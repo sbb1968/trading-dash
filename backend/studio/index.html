@@ -1543,6 +1543,23 @@
         };
         const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString("da-DK") : "—";
         const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("da-DK") : "—";
+        // Handelstider: dansk lokaltid FØRST, ET i parentes — fx "11:15 (05:15 ET)".
+        // Dansk beregnes fra UTC-ankeret (entry_time_utc er ISO med +00:00) og
+        // timeZone pinnes til Europe/Copenhagen, så visningen er korrekt uanset
+        // browserens tidszone OG i ugerne hvor US/EU-sommertid er ude af sync.
+        const _dkFromUtc = utcIso => utcIso
+            ? new Date(utcIso).toLocaleTimeString("da-DK",
+                { timeZone: "Europe/Copenhagen", hour: "2-digit", minute: "2-digit" })
+            : null;
+        const _etHHMM = etIso => etIso ? etIso.substring(11, 16) + " ET" : null;
+        // Samlet celle: dansk primært + ET muted i parentes. Falder tilbage til
+        // ET alene hvis UTC mangler, og til "—" hvis intet tidspunkt findes.
+        const fmtTradeTime = (etIso, utcIso) => {
+            const dk = _dkFromUtc(utcIso), et = _etHHMM(etIso);
+            if (!dk && !et) return "—";
+            if (!dk) return et;
+            return `${dk} <span class="muted">(${et || "ET"})</span>`;
+        };
         const cls = v => {
             if (v === null || v === undefined || v === 0) return "muted";
             return v > 0 ? "positive" : "negative";
@@ -1886,7 +1903,7 @@
                 p, sym, live, lastPrice, entry, shares, mult, totalCost, unrPnl, unrPct,
                 marginCost, marginPnl, marginPct,
                 source: p.source, side: p.side,
-                entryTime: p.entry_time_et ? p.entry_time_et.substring(11, 16) + " ET" : "—",
+                entryTime: fmtTradeTime(p.entry_time_et, p.entry_time_utc),
                 stop:      (p.current_stop   != null) ? p.current_stop   : null,
                 target:    (p.current_target != null) ? p.current_target : null,
                 trailStop: (p.trail_stop     != null) ? p.trail_stop     : null,
@@ -2030,11 +2047,9 @@
             const tradeRows = todaysTrades.length === 0
                 ? `<tr><td colspan="13" class="empty">Ingen handler i dag</td></tr>`
                 : todaysTrades.map(t => {
-                    const entryTime = t.entry_time_et
-                        ? t.entry_time_et.substring(11, 16) + " ET"
-                        : "—";
+                    const entryTime = fmtTradeTime(t.entry_time_et, t.entry_time_utc);
                     const exitTime = t.exit_time_et
-                        ? t.exit_time_et.substring(11, 16) + " ET"
+                        ? fmtTradeTime(t.exit_time_et, t.exit_time_utc)
                         : `<span class="open-indicator">Åben</span>`;
                     const exitCell = t.exit_price != null ? fmtMoney(t.exit_price) : "—";
                     const dir  = (t.side === "short") ? -1 : 1;
@@ -2297,10 +2312,9 @@
                                    : t.pnl < 0 ? "negative" : "muted";
                     const cardClass = t.pnl > 0 ? "win"
                                     : t.pnl < 0 ? "loss" : "";
-                    const entryTime = t.entry_time_et
-                        ? t.entry_time_et.substring(11, 16) : "—";
+                    const entryTime = fmtTradeTime(t.entry_time_et, t.entry_time_utc);
                     const exitTime  = t.exit_time_et
-                        ? t.exit_time_et.substring(11, 16) + " ET" : "—";
+                        ? fmtTradeTime(t.exit_time_et, t.exit_time_utc) : "—";
                     const pctText = t.pnl_pct != null
                         ? `${t.pnl_pct >= 0 ? "+" : ""}${t.pnl_pct.toFixed(2)}%` : "—";
                     const _mMult = multForSymbol(t.symbol);
@@ -2566,11 +2580,9 @@
                     const date = t.entry_time_et
                         ? t.entry_time_et.substring(0, 10)
                         : "—";
-                    const entryTime = t.entry_time_et
-                        ? t.entry_time_et.substring(11, 16) + " ET"
-                        : "—";
+                    const entryTime = fmtTradeTime(t.entry_time_et, t.entry_time_utc);
                     const exitTime = t.exit_time_et
-                        ? t.exit_time_et.substring(11, 16) + " ET"
+                        ? fmtTradeTime(t.exit_time_et, t.exit_time_utc)
                         : `<span class="open-indicator">Åben</span>`;
                     const exitCell = t.exit_price != null ? fmtMoney(t.exit_price) : "—";
                     // %-afkast: brug gemt pnl_pct, ellers beregn fra pnl/indskudt kapital.
@@ -2777,14 +2789,9 @@
                 ? trade.exit_time_et.substring(11, 16) + " ET"
                 : `<span class="open-indicator">Åben</span>`;
 
-            // Dansk tid — beregn fra UTC
-            const danskTime = (utcIso) => {
-                if (!utcIso) return null;
-                const d = new Date(utcIso);
-                return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
-            };
-            const entryTimeDansk = danskTime(trade.entry_time_utc);
-            const exitTimeDansk  = danskTime(trade.exit_time_utc);
+            // Dansk tid — beregn fra UTC (Europe/Copenhagen, DST-korrekt).
+            const entryTimeDansk = _dkFromUtc(trade.entry_time_utc);
+            const exitTimeDansk  = _dkFromUtc(trade.exit_time_utc);
 
             // ── Varighed ─────────────────────────────────────
             const durationStr = trade.duration_sec != null
@@ -2847,7 +2854,7 @@
                         <div class="detail-grid">
                             <div class="detail-row">
                                 <div class="detail-label">Tid</div>
-                                <div class="detail-value">${entryTimeET}${entryTimeDansk ? ` <span class="muted-text">(${entryTimeDansk} dansk)</span>` : ""}</div>
+                                <div class="detail-value">${entryTimeDansk ? `${entryTimeDansk} <span class="muted-text">(${entryTimeET})</span>` : entryTimeET}</div>
                             </div>
                             <div class="detail-row">
                                 <div class="detail-label">Pris</div>
@@ -2881,7 +2888,7 @@
                             <div class="detail-grid">
                                 <div class="detail-row">
                                     <div class="detail-label">Tid</div>
-                                    <div class="detail-value">${exitTimeET}${exitTimeDansk ? ` <span class="muted-text">(${exitTimeDansk} dansk)</span>` : ""}</div>
+                                    <div class="detail-value">${exitTimeDansk ? `${exitTimeDansk} <span class="muted-text">(${exitTimeET})</span>` : exitTimeET}</div>
                                 </div>
                                 <div class="detail-row">
                                     <div class="detail-label">Pris</div>
