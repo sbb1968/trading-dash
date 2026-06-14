@@ -53,6 +53,14 @@ from strategies.europa_reversion.rule import (
     entry_side as _rule_entry_side,
     exit_reason as _rule_exit_reason,
 )
+# Låste live-parametre — config.py er sandhedskilden. Exit-z-sweepet pinner ALT
+# undtagen exit_z hertil, så et resultat kan overføres direkte til live-reglen.
+from strategies.europa_reversion.config import (
+    LOOKBACK as CFG_LOOKBACK,
+    ENTRY_Z as CFG_ENTRY_Z,
+    STOP_Z as CFG_STOP_Z,
+    INSTRUMENTS as CFG_INSTRUMENTS,
+)
 
 OUTPUT_DIRNAME = "meanrev_backtest_output"
 BAR_SECONDS = 900  # 15 min
@@ -194,6 +202,14 @@ def fmt_pf(pf):
     return "inf" if pf == float("inf") else f"{pf:.2f}"
 
 
+def exit_z_grid(lo, hi, step):
+    """Float-sikker liste af exit_z-værdier i [lo, hi] med given step (2 decimaler)."""
+    if step <= 0:
+        return [round(lo, 2)]
+    n = int(round((hi - lo) / step))
+    return [round(lo + k * step, 2) for k in range(n + 1)]
+
+
 def date_span_split(trades, frac):
     if not trades:
         return [], []
@@ -217,6 +233,12 @@ def main():
     ap.add_argument("--oos-split", type=float, default=0.6)
     ap.add_argument("--cost-read-bp", type=float, default=2.0, help="omkostning til OOS-aflæsning")
     ap.add_argument("--sweep", action="store_true")
+    ap.add_argument("--exit-z-sweep", action="store_true",
+                    help="isoleret exit_z-sweep, pinnet til live-config "
+                         "(lookback/entry_z/stop_z/instrumenter fra config.py)")
+    ap.add_argument("--exit-z-min", type=float, default=-0.5)
+    ap.add_argument("--exit-z-max", type=float, default=0.5)
+    ap.add_argument("--exit-z-step", type=float, default=0.1)
     args = ap.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -224,7 +246,12 @@ def main():
         data_dir = Path.cwd() / data_dir
     out_dir = Path.cwd() / OUTPUT_DIRNAME
     out_dir.mkdir(exist_ok=True)
-    instruments = [s.strip().upper() for s in args.only.split(",")] if args.only else DEFAULT_INSTR
+    if args.only:
+        instruments = [s.strip().upper() for s in args.only.split(",")]
+    elif args.exit_z_sweep:
+        instruments = list(CFG_INSTRUMENTS)   # pinnet til live (MES, M2K — IKKE MNQ)
+    else:
+        instruments = list(DEFAULT_INSTR)
     lines = []
 
     def emit(s=""):
@@ -235,8 +262,12 @@ def main():
     emit("  MEAN-REVERSION BACKTEST — z-score, session-gated, intraday")
     emit("=" * 78)
     emit(f"Data: {data_dir}   session: {args.session}   instrumenter: {', '.join(instruments)}")
-    emit(f"Regel: entry |z|≥{args.entry_z}  exit |z|≤{args.exit_z}  stop |z|≥{args.stop_z}  "
-         f"lookback={args.lookback}  (DEFAULTS, ikke optimeret)")
+    if args.exit_z_sweep:
+        emit(f"Regel: entry |z|≥{CFG_ENTRY_Z}  stop |z|≥{CFG_STOP_Z}  lookback={CFG_LOOKBACK}  "
+             f"(pinnet til live-config; exit_z sweepes)")
+    else:
+        emit(f"Regel: entry |z|≥{args.entry_z}  exit |z|≤{args.exit_z}  stop |z|≥{args.stop_z}  "
+             f"lookback={args.lookback}  (DEFAULTS, ikke optimeret)")
     emit("Omkostning vist ved 0/1/2/3 bp rundtur. Forsvinder edge ved ~2 bp = bounce-artefakt.")
     emit("")
 
@@ -268,6 +299,89 @@ def main():
                              f"{s['sum']:>9.1f}{fmt_pf(s['pf']):>7}")
         (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
         emit(f"\nFil: {out_dir / 'summary.txt'}")
+        return 0
+
+    if args.exit_z_sweep:
+        lb, ez, sz = CFG_LOOKBACK, CFG_ENTRY_Z, CFG_STOP_Z
+        cost = args.cost_read_bp
+        xs = exit_z_grid(args.exit_z_min, args.exit_z_max, args.exit_z_step)
+
+        emit("── EXIT-Z-SWEEP (isoleret — kun exit_z varierer) ──")
+        emit(f"   Pinnet: lookback={lb}  entry_z={ez}  stop_z={sz}  "
+             f"instrumenter={', '.join(instruments)}")
+        emit(f"   exit_z: {xs[0]:+.2f} … {xs[-1]:+.2f}  (step {args.exit_z_step:.2f}, {len(xs)} værdier)")
+        emit(f"   Aflæst ved {cost:.0f} bp rundtur (sum0% = 0 bp).  "
+             f"Lavere exit_z = hold længere; 0.00 = luk ved middel.")
+        emit("")
+
+        # indlæs bars + vol-tærskel pr. instrument én gang
+        loaded = []  # (label, bars, thr)
+        for label in instruments:
+            p = data_dir / f"{label}_15min.csv"
+            if not p.exists():
+                emit(f"   {label}: ingen fil ({p.name}) — springer over")
+                continue
+            bars = load_15min(p)
+            if len(bars) < lb + 50:
+                emit(f"   {label}: for få bars ({len(bars)}) — springer over")
+                continue
+            vols = sorted(b.volume for b in bars if b.volume > 0)
+            thr = vols[min(len(vols) - 1, int(len(vols) * args.min_vol_pct / 100))] if vols else None
+            if thr is not None and thr <= 0:
+                thr = None
+            loaded.append((label, bars, thr))
+
+        if not loaded:
+            emit("   Ingen brugbare instrument-filer.")
+            (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+            return 1
+
+        # kør hvert exit_z én gang, saml portefølje-trades på tværs af instrumenter
+        rows = []  # (xz, trades)
+        for xz in xs:
+            tr = []
+            for _label, bars, thr in loaded:
+                tr.extend(run_backtest(bars, args.session, lb, ez, xz, sz, thr))
+            rows.append((xz, tr))
+
+        emit("  A. Headline (samlet portefølje)")
+        emit(f"     {'exit_z':>7}{'n':>6}{'WR%':>7}{'sum0%':>9}{'sum%':>9}{'PF':>7}{'værst%':>9}")
+        for xz, tr in rows:
+            s0, s = stats(tr, 0.0), stats(tr, cost)
+            emit(f"     {xz:>+7.2f}{s['n']:>6}{s['wr']:>7.0f}{s0['sum']:>9.1f}"
+                 f"{s['sum']:>9.1f}{fmt_pf(s['pf']):>7}{s['worst']:>9.2f}")
+        emit("")
+
+        emit(f"  B. Robusthed: in-sample vs OOS (split {args.oos_split:.0%}, ved {cost:.0f} bp)")
+        emit(f"     {'exit_z':>7}{'IS_n':>6}{'IS_sum%':>9}{'IS_PF':>7}"
+             f"{'OOS_n':>7}{'OOS_sum%':>10}{'OOS_PF':>8}")
+        for xz, tr in rows:
+            ins, oos = date_span_split(tr, args.oos_split)
+            si, so = stats(ins, cost), stats(oos, cost)
+            emit(f"     {xz:>+7.2f}{si['n']:>6}{si['sum']:>9.1f}{fmt_pf(si['pf']):>7}"
+                 f"{so['n']:>7}{so['sum']:>10.1f}{fmt_pf(so['pf']):>8}")
+        emit("")
+
+        emit("  C. Exit-mix (andel af handler)")
+        emit(f"     {'exit_z':>7}{'revert%':>9}{'stop%':>8}{'sess%':>8}")
+        for xz, tr in rows:
+            n = len(tr) or 1
+            rc = defaultdict(int)
+            for t in tr:
+                rc[t.reason] += 1
+            emit(f"     {xz:>+7.2f}{100*rc['revert']/n:>9.0f}"
+                 f"{100*rc['stop']/n:>8.0f}{100*rc['session_end']/n:>8.0f}")
+        emit("")
+
+        emit("  LÆSNING (anti-overfit):")
+        emit("   • Vælg IKKE bare den højeste sum/PF i tabel A.")
+        emit("   • Kig efter et PLATEAU der holder i BÅDE in-sample og OOS (tabel B).")
+        emit("   • Driver exit-mix mod overvejende session_end ved lav exit_z (tabel C),")
+        emit("     er 'gevinsten' bare at vente på tvangsluk — ikke en ægte target-forbedring.")
+        emit("   • Bekræft en kandidat med fuldt cost-sweep:  --exit-z <værdi>")
+        emit("")
+        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        emit(f"Fil: {out_dir / 'summary.txt'}")
         return 0
 
     portfolio = []  # (label, trades, thr)
