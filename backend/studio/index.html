@@ -2611,6 +2611,12 @@
                     const _dir  = (t.side === "short") ? -1 : 1;
                     const _mult = multForSymbol(t.symbol);
                     const _notional = (t.entry_price != null && t.shares != null) ? t.entry_price * t.shares * _mult : null;
+                    // Faktisk risiko brugt = afstand entry→stop × $/point × kontrakter.
+                    // ≤ risiko-budgettet (kontrakter rundes ned). Det reelle "hvor meget af
+                    // budgettet gik til denne position", i stedet for det flade max.
+                    const _risikoBrugt = (t.current_stop != null && t.entry_price != null && t.shares != null)
+                        ? Math.abs(t.entry_price - t.current_stop) * _mult * t.shares
+                        : null;
                     const _pricePct = (t.exit_price != null && t.entry_price != null && t.entry_price !== 0)
                         ? ((t.exit_price - t.entry_price) / t.entry_price) * 100 * _dir : null;
                     const _marginPct = (t.pnl != null) ? (t.pnl / POSITION_SIZE) * 100 : null;
@@ -2640,7 +2646,7 @@
                             <td class="num">${fmtMoney(t.entry_price)}</td>
                             <td class="num">${_notional != null ? fmtMoney(_notional) : "—"}</td>
                             <td class="num">${exitCell}</td>
-                            <td class="num">${fmtMoney(POSITION_SIZE)}</td>
+                            <td class="num">${_risikoBrugt != null ? fmtMoney(_risikoBrugt) : "—"}</td>
                             <td class="num">${mPnlCell}</td>
                             <td class="num">${mPctCell}</td>
                             <td>${reasonPill(t.exit_reason)}</td>
@@ -2697,7 +2703,7 @@
                                 <th style="text-align:right;">Entry<br>pris</th>
                                 <th style="text-align:right;">Eksponering</th>
                                 <th style="text-align:right;">Exit<br>pris</th>
-                                <th style="text-align:right;">Risiko-<br>budget</th>
+                                <th style="text-align:right;">Risiko<br>($)</th>
                                 <th style="text-align:right;">P&L</th>
                                 <th style="text-align:right;">P&L %</th>
                                 <th style="padding-left:24px;">Årsag</th>
