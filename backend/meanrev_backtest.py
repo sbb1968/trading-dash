@@ -221,6 +221,14 @@ def date_span_split(trades, frac):
 
 
 def main():
+    # Tving UTF-8 på stdout — headerne emitter ≥/≤/— der ellers crasher en
+    # cp1252-konsol (fx når output pipes). Guard: ældre/uddelte streams mangler
+    # reconfigure.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+
     ap = argparse.ArgumentParser(description="Mean-reversion backtest (session-gated, intraday)")
     ap.add_argument("--data-dir", default="data_harvest")
     ap.add_argument("--only", default=None, help="kommasepareret; default index-micros MES,MNQ,M2K")
