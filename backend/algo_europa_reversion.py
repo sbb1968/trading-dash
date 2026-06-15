@@ -37,6 +37,10 @@ import pytz
 
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
+# Delt forensik-opsamling — samme modul K2 bruger. De generiske builders beregner
+# indikatorerne (RSI/MACD/BB/VWAP/EMA) via compute_all og samler tape/depth,
+# strategi-agnostisk. EUREVERSION lægger sin egen bånd/z-blok oveni.
+from trade_forensics import build_entry_snapshot, build_exit_snapshot
 
 # Strategi-logik + parametre bor i pakken (delt sandhedskilde med backtesten
 # meanrev_backtest.py, så live og backtest aldrig divergerer). Wrapperen
@@ -44,7 +48,7 @@ from ibkr_connect import IBKRConnection
 from strategies.europa_reversion import EuropaReversionStrategy, rule
 from strategies.europa_reversion.config import (
     SESSION_START_ET, SESSION_END_ET, FORCE_CLOSE_ET, LAST_SESSION_BAR_ET,
-    LOOKBACK, BAR_SIZE, BAR_MINUTES, INSTRUMENTS, RISK_PCT, MULTIPLIER,
+    LOOKBACK, ENTRY_Z, BAR_SIZE, BAR_MINUTES, INSTRUMENTS, RISK_PCT, MULTIPLIER,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,10 @@ class EuropaReversionLive(BaseStrategy):
         # Hver: {side, entry_price, contracts, multiplier, entry_time,
         #        stop_price, std, reserved, trade_id}
         self._positions: dict[str, dict] = {}
+        # MFE/MAE pr. symbol (pris) — spejler K2. Init ved entry, opdateres pr.
+        # bar i _evaluate_bar, pop'es ved exit og gemmes i exit-forensikken.
+        self._mfe: dict[str, float] = {}
+        self._mae: dict[str, float] = {}
 
         # Legacy-felter UI/journal forventer
         self.trades:    list[dict] = []
@@ -574,6 +582,14 @@ class EuropaReversionLive(BaseStrategy):
             pos = self._positions[sym]
             side = pos["side"]
 
+            # MFE/MAE-tracking (spejler K2) + gem seneste z, så session_end-luk
+            # via _close_all også kan registrere exit_z (var tom før).
+            if sym in self._mfe:
+                self._mfe[sym] = max(self._mfe[sym], bar.high)
+            if sym in self._mae:
+                self._mae[sym] = min(self._mae[sym], bar.low)
+            pos["last_z"] = z
+
             # Skriv seneste pris til trades-tabel → live urealiseret P&L i Studio
             # (uafhængigt af IBKR-snapshottet).
             trade_id = pos.get("trade_id")
@@ -719,6 +735,12 @@ class EuropaReversionLive(BaseStrategy):
         except Exception as e:
             logger.warning(f"[Europa-reversion] kunne ikke registrere ordre hos tracker: {e}")
 
+        # Bånd-kontekst (reversionens pendant til K2's indikatorer):
+        # z = (close − mean)/sd  ⇒  mean = close − z·sd.
+        mean       = entry_price - z * sd
+        upper_band = mean + ENTRY_Z * sd
+        lower_band = mean - ENTRY_Z * sd
+
         # Trades-tabel
         if self._journal:
             trade_id = await self._journal.log_trade_open(
@@ -734,6 +756,9 @@ class EuropaReversionLive(BaseStrategy):
                 payload       = {
                     "entry_z":           round(z, 4),
                     "std":               round(sd, 4),
+                    "mean":              round(mean, 4),
+                    "upper_band":        round(upper_band, 4),
+                    "lower_band":        round(lower_band, 4),
                     "multiplier":        mult,
                     "stop_distance_pts": round(stop_dist, 4),
                     "contracts":         contracts,
@@ -741,6 +766,45 @@ class EuropaReversionLive(BaseStrategy):
             )
             if trade_id:
                 self._positions[sym]["trade_id"] = trade_id
+
+        # MFE/MAE-tracking start (spejler K2).
+        self._mfe[sym] = entry_price
+        self._mae[sym] = entry_price
+
+        # Entry-forensik via den delte builder → samme CSV-kolonner som K2
+        # (entry_indicators_*, entry_tape_*, entry_depth_*). Vi tilføjer en
+        # reversion-blok (bånd/z) som EUREVERSIONs pendant til K2's setup.
+        # FAIL-SAFE: forensik må ALDRIG vælte handlen (spejler journalens regel).
+        try:
+            snap = build_entry_snapshot(
+                ticker       = sym,
+                entry_price  = entry_price,
+                entry_time   = entry_time,
+                shares       = contracts,
+                bars         = self._bar_history.get(sym, []),
+                context      = {},            # ingen ORB-kontekst for en reverter
+                tape_buffer  = None,          # ingen tape/depth (se note nedenfor)
+                variant_name = self.name,
+            )
+            snap["reversion"] = {
+                "entry_z":           round(z, 4),
+                "mean":              round(mean, 4),
+                "std":               round(sd, 4),
+                "upper_band":        round(upper_band, 4),
+                "lower_band":        round(lower_band, 4),
+                "stop_price":        round(stop_price, 4),
+                "stop_distance_pts": round(stop_dist, 4),
+                "contracts":         contracts,
+            }
+            if self._journal:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "trade_forensics",
+                    symbol     = sym,
+                    payload    = snap,
+                )
+        except Exception as e:
+            logger.warning(f"[Europa-reversion] entry-forensik fejlede for {sym}: {e}")
 
         # Broadcast (LiveAlgo: "buy" = long-åbning, "sell_short" = short-åbning)
         if self._broadcast_fn:
@@ -839,6 +903,11 @@ class EuropaReversionLive(BaseStrategy):
         }
         self.trades.append(trade)
 
+        # MFE/MAE pop (spejler K2) — gemmes i payload (samme tp_*_excursion-
+        # kolonner som K2) og i exit-forensikken.
+        mfe = self._mfe.pop(sym, None)
+        mae = self._mae.pop(sym, None)
+
         # Trades-tabel
         trade_id = pos.get("trade_id")
         if trade_id and self._journal:
@@ -848,9 +917,42 @@ class EuropaReversionLive(BaseStrategy):
                 exit_time   = datetime.now(ET),
                 exit_reason = reason,
                 pnl         = pnl,
-                payload     = {"exit_z": round(z, 4) if z is not None else None,
-                               "multiplier": mult, "contracts": contracts},
+                payload     = {
+                    "exit_z":                  round(z, 4) if z is not None else None,
+                    "multiplier":              mult,
+                    "contracts":               contracts,
+                    "max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
+                    "max_adverse_excursion":   round(mae, 4) if mae is not None else None,
+                },
             )
+
+        # Exit-forensik via den delte builder → samme CSV-kolonner som K2
+        # (exit_indicators_*, exit_tape_*, exit_trade_metrics_*). FAIL-SAFE.
+        try:
+            snap = build_exit_snapshot(
+                ticker       = sym,
+                entry_price  = entry,
+                exit_price   = price,
+                entry_time   = pos["entry_time"],
+                exit_time    = datetime.now(ET),
+                shares       = contracts,
+                pnl          = pnl,
+                reason       = reason,
+                bars         = self._bar_history.get(sym, []),
+                context      = {},
+                tape_buffer  = None,
+                variant_name = self.name,
+            )
+            snap["reversion"] = {"exit_z": round(z, 4) if z is not None else None}
+            if self._journal:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "trade_forensics",
+                    symbol     = sym,
+                    payload    = snap,
+                )
+        except Exception as e:
+            logger.warning(f"[Europa-reversion] exit-forensik fejlede for {sym}: {e}")
 
         # Broadcast (LiveAlgo: "sell" = long-luk, "buy_cover" = short-luk)
         if self._broadcast_fn:
@@ -873,7 +975,9 @@ class EuropaReversionLive(BaseStrategy):
             pos = self._positions[sym]
             snap = await self.conn.get_snapshot(sym)
             price = (snap.get("last") if snap else None) or pos["entry_price"]
-            await self._close(sym, price, reason)
+            # Giv seneste kendte z videre (sat i _evaluate_bar), så session_end-luk
+            # også får exit_z. Var None før → tp_exit_z tom i CSV'en.
+            await self._close(sym, price, reason, pos.get("last_z"))
 
     # -------------------------------------------------------------
     # Hjælper
