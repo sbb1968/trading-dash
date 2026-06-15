@@ -98,28 +98,13 @@ class EuropaReversionLive(BaseStrategy):
         # hertil, så live og backtest deler præcis samme kode.
         self._strategy = EuropaReversionStrategy()
 
-        # Fast univers (vises i status-dict via base.get_status_dict)
+        # Fast univers (override af base-default []). Resten af den fælles state
+        # (_bar_history, _last_bar_processed, _positions, trades, total_pnl,
+        # _loop_task, _mfe, _mae, _tape_buffer) sættes nu i BaseStrategy.__init__.
+        # Positions-dict pr. instrument:
+        #   {side, entry_price, contracts, multiplier, entry_time,
+        #    stop_price, std, reserved, trade_id}
         self.universe: list[str] = list(INSTRUMENTS)
-
-        # Bar-historie pr. instrument (warmup + live), og sidst-behandlede
-        # bar-tid pr. instrument (dedup — vi evaluerer kun FÆRDIGE bars én gang).
-        self._bar_history:        dict[str, list[Bar]]    = {}
-        self._last_bar_processed: dict[str, datetime]     = {}
-
-        # Åbne positioner pr. instrument. Én pr. instrument ad gangen.
-        # Hver: {side, entry_price, contracts, multiplier, entry_time,
-        #        stop_price, std, reserved, trade_id}
-        self._positions: dict[str, dict] = {}
-        # MFE/MAE pr. symbol (pris) — spejler K2. Init ved entry, opdateres pr.
-        # bar i _evaluate_bar, pop'es ved exit og gemmes i exit-forensikken.
-        self._mfe: dict[str, float] = {}
-        self._mae: dict[str, float] = {}
-
-        # Legacy-felter UI/journal forventer
-        self.trades:    list[dict] = []
-        self.total_pnl: float      = 0.0
-
-        self._loop_task: Optional[asyncio.Task] = None
 
     # -------------------------------------------------------------
     # BaseStrategy interface — properties
@@ -330,30 +315,7 @@ class EuropaReversionLive(BaseStrategy):
     # Status broadcast (samme format som ORB/K1/K2)
     # -------------------------------------------------------------
 
-    def _status(self, status: str, message: str):
-        msg = {
-            "type":      "algo_status",
-            "strategy":  self.name,
-            "status":    status,
-            "message":   message,
-            "total_pnl": round(self.total_pnl, 2),
-            "positions": self.stats.open_positions,
-            "trades":    len(self.trades),
-            "time":      datetime.now(ET).strftime("%H:%M:%S"),
-        }
-        if self._broadcast_fn:
-            self._broadcast_fn(msg)
-        logger.info(f"[Europa-reversion][{status}] {message}")
-
-        if self._journal:
-            try:
-                asyncio.create_task(self._journal.log_event(
-                    source     = self.name,
-                    event_type = "status",
-                    payload    = {"status": status, "message": message},
-                ))
-            except Exception as e:
-                logger.error(f"[{self.name}] _status journal-skriv fejlede: {e}")
+    # _status() er løftet til BaseStrategy (Trin 1).
 
     # -------------------------------------------------------------
     # Warmup-forberedelse
@@ -507,18 +469,7 @@ class EuropaReversionLive(BaseStrategy):
             logger.exception(f"[Europa-reversion] _trading_loop crashede: {e}")
             raise
 
-    async def _reconnect(self) -> bool:
-        for attempt in range(1, MAX_CONNECT_RETRIES + 1):
-            try:
-                self.conn.disconnect()
-                await asyncio.sleep(2)
-                if await self.conn.connect():
-                    return True
-            except Exception as e:
-                logger.error(f"[Europa-reversion] genforbindelsesforsøg {attempt} fejlede: {e}")
-            if attempt < MAX_CONNECT_RETRIES:
-                await asyncio.sleep(CONNECT_RETRY_DELAY)
-        return False
+    # _reconnect() er løftet til BaseStrategy (Trin 1).
 
     # -------------------------------------------------------------
     # Instrument-check — bar-dedup + z-regel (spejler backtest)
@@ -983,12 +934,4 @@ class EuropaReversionLive(BaseStrategy):
     # Hjælper
     # -------------------------------------------------------------
 
-    async def _broadcast_async(self, msg: dict):
-        """Send broadcast — håndtér både sync og async broadcast_fn (spejler K2)."""
-        if not self._broadcast_fn:
-            return
-        import inspect
-        if inspect.iscoroutinefunction(self._broadcast_fn):
-            await self._broadcast_fn(msg)
-        else:
-            self._broadcast_fn(msg)
+    # _broadcast_async() er løftet til BaseStrategy (Trin 1).

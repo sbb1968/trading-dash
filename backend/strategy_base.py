@@ -11,8 +11,14 @@ from datetime import datetime
 from typing import Optional
 import asyncio
 import logging
+import pytz
 
 logger = logging.getLogger(__name__)
+
+# ── Fælles konstanter (løftet — identiske i alle wrappers) ───────────────────
+ET = pytz.timezone("America/New_York")
+MAX_CONNECT_RETRIES = 3
+CONNECT_RETRY_DELAY = 10   # sekunder mellem genforbindelsesforsøg
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +106,27 @@ class BaseStrategy(ABC):
         # så vi KUN logger når begrundelsen ændrer sig. Nulstilles dagligt
         # via reset_diagnostics().
         self._last_rejection: dict[str, str] = {}
+
+        # ── Fælles wrapper-state (løftet fra de enkelte strategier — Trin 1) ──
+        # Alle live-wrappers deler disse. Strategi-specifik state sættes i den
+        # enkelte wrappers __init__ EFTER super().__init__() og kan overskrive
+        # defaults her (fx universe).
+        self.conn = None                                    # IBKRConnection (sættes af wrapper)
+        self._strategy = None                               # pakke-strategien (beslutningslogik)
+        self.universe: list[str] = []                       # symboler der overvåges
+        self._bar_history: dict[str, list] = {}             # symbol → bars (warmup + live)
+        self._last_bar_processed: dict[str, datetime] = {}  # symbol → sidst-behandlede bar-tid
+        self._positions: dict = {}                          # symbol → position (repr. pr. strategi)
+        self.trades: list[dict] = []                        # lukkede handler i dag
+        self.total_pnl: float = 0.0
+        self._loop_task: Optional[asyncio.Task] = None
+
+        # Forensik-state — så ALLE strategier (også fremtidige) kan opsamle
+        # MFE/MAE og tape uden at duplikere det. K2 brugte allerede disse.
+        self._tape_buffer = None
+        self._mfe: dict[str, float] = {}                    # symbol → max favorable excursion (pris)
+        self._mae: dict[str, float] = {}                    # symbol → max adverse excursion (pris)
+
     # -----------------------------------------------------------------------
     # Abstrakte metoder
     # -----------------------------------------------------------------------
@@ -138,6 +165,60 @@ class BaseStrategy(ABC):
     # -----------------------------------------------------------------------
     # Ordre-flow
     # -----------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------
+    # Fælles wrapper-hjælpere (løftet fra de enkelte strategier — Trin 1)
+    # -----------------------------------------------------------------------
+
+    def _status(self, status: str, message: str):
+        msg = {
+            "type":      "algo_status",
+            "strategy":  self.name,
+            "status":    status,
+            "message":   message,
+            "total_pnl": round(self.total_pnl, 2),
+            "positions": self.stats.open_positions,
+            "trades":    len(self.trades),
+            "time":      datetime.now(ET).strftime("%H:%M:%S"),
+        }
+        if self._broadcast_fn:
+            self._broadcast_fn(msg)
+        logger.info(f"[{self.name}][{status}] {message}")
+
+        # Gem også til journal så pre-flight-trin, universe og status-beskeder
+        # kan ses i historik-loggen bagefter (ikke kun live via broadcast).
+        if self._journal:
+            try:
+                asyncio.create_task(self._journal.log_event(
+                    source     = self.name,
+                    event_type = "status",
+                    payload    = {"status": status, "message": message},
+                ))
+            except Exception as e:
+                logger.error(f"[{self.name}] _status journal-skriv fejlede: {e}")
+
+    async def _reconnect(self) -> bool:
+        for attempt in range(1, MAX_CONNECT_RETRIES + 1):
+            try:
+                self.conn.disconnect()
+                await asyncio.sleep(2)
+                if await self.conn.connect():
+                    return True
+            except Exception as e:
+                logger.error(f"[{self.name}] genforbindelsesforsøg {attempt} fejlede: {e}")
+            if attempt < MAX_CONNECT_RETRIES:
+                await asyncio.sleep(CONNECT_RETRY_DELAY)
+        return False
+
+    async def _broadcast_async(self, msg: dict):
+        """Send broadcast — håndtér både sync og async broadcast_fn."""
+        if not self._broadcast_fn:
+            return
+        import inspect
+        if inspect.iscoroutinefunction(self._broadcast_fn):
+            await self._broadcast_fn(msg)
+        else:
+            self._broadcast_fn(msg)
 
     async def request_order(self, order: OrderRequest) -> bool:
         if self._risk_manager is None:

@@ -143,31 +143,12 @@ class Confluence2Live(BaseStrategy):
         except Exception:
             self._market_close = MARKET_CLOSE
 
-        # Universe og pre-computed indikator-context pr. ticker
-        self.universe:        list[str]                  = []
+        # K2-specifik state (fælles state — universe, _bar_history,
+        # _last_bar_processed, _positions, trades, total_pnl, _loop_task,
+        # _tape_buffer, _mfe, _mae — sættes nu i BaseStrategy.__init__).
         self._contexts:       dict[str, dict]            = {}    # ticker → session context
-        self._bar_history:    dict[str, list[Bar]]       = {}    # ticker → bars (warmup + live)
-
-        # Position-tracking — bruger strategy.exit's Position-objekter
-        self._positions:      dict[str, Position]        = {}
-
-        # Tracker hvilken bar-tid vi sidst har behandlet pr. ticker, så vi ikke
-        # behandler samme bar to gange (vi poller hvert 15s men en 1-min bar
-        # ankommer kun hvert minut).
-        self._last_bar_processed: dict[str, datetime]    = {}
-
-        # ── Trade Forensics ──────────────────────────────────
-        self._tape_buffer: Optional[TapeBuffer] = None
-        self._mfe: dict[str, float] = {}  # ticker → max favorable excursion (pris)
-        self._mae: dict[str, float] = {}  # ticker → max adverse excursion (pris)
-
-        # Legacy-felter UI/journal forventer
-        self._position_data:  dict[str, dict]            = {}
-        self.trades:          list[dict]                 = []
-        self.total_pnl:       float                      = 0.0
-
+        self._position_data:  dict[str, dict]            = {}    # legacy UI/journal
         self._position_size_pct: float                   = 1.0
-        self._loop_task: Optional[asyncio.Task]          = None
 
         # Lag C-diagnostik: aggregeret statistik for dagen. K2 har 7 bricks.
         self._diag_max_score:     dict[str, int]         = {}
@@ -360,32 +341,7 @@ class Confluence2Live(BaseStrategy):
     # Status broadcast — samme format som ORB/K1
     # -------------------------------------------------------------
 
-    def _status(self, status: str, message: str):
-        msg = {
-            "type":      "algo_status",
-            "strategy":  self.name,
-            "status":    status,
-            "message":   message,
-            "total_pnl": round(self.total_pnl, 2),
-            "positions": self.stats.open_positions,
-            "trades":    len(self.trades),
-            "time":      datetime.now(ET).strftime("%H:%M:%S"),
-        }
-        if self._broadcast_fn:
-            self._broadcast_fn(msg)
-        logger.info(f"[Konfluens 2][{status}] {message}")
-
-        # Gem også til journal så pre-flight-trin, universe og status-beskeder
-        # kan ses i historik-loggen bagefter (ikke kun live via broadcast).
-        if self._journal:
-            try:
-                asyncio.create_task(self._journal.log_event(
-                    source     = self.name,
-                    event_type = "status",
-                    payload    = {"status": status, "message": message},
-                ))
-            except Exception as e:
-                logger.error(f"[{self.name}] _status journal-skriv fejlede: {e}")
+    # _status() er løftet til BaseStrategy (Trin 1).
 
     # -------------------------------------------------------------
     # Universe-forberedelse
@@ -778,19 +734,7 @@ class Confluence2Live(BaseStrategy):
         except Exception as e:
             logger.exception(f"Kunne ikke skrive daily_diagnostics: {e}")
 
-    async def _reconnect(self) -> bool:
-        for attempt in range(1, MAX_CONNECT_RETRIES + 1):
-            try:
-                self.conn.disconnect()
-                await asyncio.sleep(2)
-                ok = await self.conn.connect()
-                if ok:
-                    return True
-            except Exception as e:
-                logger.error(f"Genforbindelsesforsøg {attempt} fejlede: {e}")
-            if attempt < MAX_CONNECT_RETRIES:
-                await asyncio.sleep(CONNECT_RETRY_DELAY)
-        return False
+    # _reconnect() er løftet til BaseStrategy (Trin 1).
 
     # -------------------------------------------------------------
     # Ticker check — delegerer til strategiens entry og exit
@@ -1263,15 +1207,7 @@ class Confluence2Live(BaseStrategy):
     # Hjælpere
     # -------------------------------------------------------------
 
-    async def _broadcast_async(self, msg: dict):
-        """Send broadcast — håndtér både sync og async broadcast_fn."""
-        if not self._broadcast_fn:
-            return
-        import inspect
-        if inspect.iscoroutinefunction(self._broadcast_fn):
-            await self._broadcast_fn(msg)
-        else:
-            self._broadcast_fn(msg)
+    # _broadcast_async() er løftet til BaseStrategy (Trin 1).
 
     async def _log(self, message: str, level: str = "info"):
         """Log til journal OG broadcast til UI (Live Log)."""
