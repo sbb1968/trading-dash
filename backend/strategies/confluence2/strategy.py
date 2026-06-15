@@ -163,6 +163,13 @@ class Confluence2Entry:
         if ev.get("status") != "signal":
             return None
 
+        # min-R-gate (deep-dive 2026-06-12): spring setups over hvor impuls-low
+        # ligger for tæt på entry — de skrabes ellers af ren støj. R = entry −
+        # impuls-low = bar.close − bar.low. Default min_r_pct=0.0 → ingen effekt.
+        if cfg.min_r_pct > 0.0 and bar.close > 0:
+            if (bar.close - bar.low) / bar.close < cfg.min_r_pct:
+                return None
+
         return EntrySignal(
             ticker=ticker,
             entry_price=bar.close,          # færdig bars close — IKKE intrabar
@@ -172,6 +179,7 @@ class Confluence2Entry:
                 "impulse_low": bar.low,
                 "impulse_high": bar.high,
                 "impulse_close": bar.close,
+                "atr": ev.get("atr"),       # til ATR-gulv i open_position
                 "score": ev.get("score"),
                 "bricks": ev.get("short_form"),
             },
@@ -195,6 +203,15 @@ class Confluence2Exit:
         cfg = VARIANTS[variant_key]
         entry = signal.entry_price
         impulse_low = float(signal.metadata.get("impulse_low", entry))
+
+        # ATR-gulv (deep-dive 2026-06-12): udvid et for tæt stop, så det aldrig er
+        # tættere på entry end stop_atr_floor_mult × ATR. For en long er et LAVERE
+        # stop bredere → vi tager det laveste (videste) af de to. Default 0.0 → FRA.
+        if cfg.stop_atr_floor_mult > 0.0:
+            atr = signal.metadata.get("atr")
+            if atr and atr > 0:
+                impulse_low = min(impulse_low, entry - cfg.stop_atr_floor_mult * atr)
+
         R = max(entry - impulse_low, 0.0)
         target = (entry + cfg.target_r * R) if (cfg.exit_mode == "target_r" and R > 0) else None
 

@@ -63,6 +63,12 @@ class Confluence2VariantConfig:
     force_close_hhmm: tuple[int, int] = (15, 45)   # luk alt (matcher K1/ORB)
     min_warmup_bars: int = 25      # færre 1-min bars end dette → spring over
 
+    # ── Stop-eksperimenter (deep-dive 2026-06-12) ──────────────
+    # Begge default 0.0 = FRA → A_impulse_low og alle eksisterende varianter er
+    # fuldstændig uændrede. Kun de nye A_minR_* / A_atrfloor_*-varianter sætter dem.
+    min_r_pct: float = 0.0            # >0: afvis entry hvis (entry − impuls_low)/entry < dette
+    stop_atr_floor_mult: float = 0.0  # >0: gulv stoppet ved entry − dette × ATR (udvid tætte stops)
+
 
 # ── Varianter: de fire exit-arketyper fra analysen ───────────────
 # Entry-parametrene er ens på tværs; KUN exit varierer, så vi isolerer
@@ -108,6 +114,47 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
         name="D3: +3R target + impuls-low stop",
         exit_mode="target_r",
         target_r=3.0,
+    ),
+
+    # ── Deep-dive 2026-06-12: stop-gulv mod sub-støj-stop (alle = A + ét greb) ──
+    # (1) min-R-gate: spring setups over hvor impuls-low ligger for tæt på entry.
+    "A_minR_02": Confluence2VariantConfig(
+        name="A+minR 0,2%: impuls-low, kræv R ≥ 0,2% af pris",
+        exit_mode="impulse_low", catastrophe_stop=False, min_r_pct=0.002,
+    ),
+    "A_minR_03": Confluence2VariantConfig(
+        name="A+minR 0,3%: impuls-low, kræv R ≥ 0,3% af pris",
+        exit_mode="impulse_low", catastrophe_stop=False, min_r_pct=0.003,
+    ),
+    "A_minR_05": Confluence2VariantConfig(
+        name="A+minR 0,5%: impuls-low, kræv R ≥ 0,5% af pris",
+        exit_mode="impulse_low", catastrophe_stop=False, min_r_pct=0.005,
+    ),
+    "A_minR_075": Confluence2VariantConfig(
+        name="A+minR 0,75%: impuls-low, kræv R ≥ 0,75% af pris",
+        exit_mode="impulse_low", catastrophe_stop=False, min_r_pct=0.0075,
+    ),
+    "A_minR_10": Confluence2VariantConfig(
+        name="A+minR 1,0%: impuls-low, kræv R ≥ 1,0% af pris",
+        exit_mode="impulse_low", catastrophe_stop=False, min_r_pct=0.010,
+    ),
+
+    # (2) ATR-gulv: behold ALLE setups, men udvid et for tæt stop til k × ATR.
+    "A_atrfloor_05": Confluence2VariantConfig(
+        name="A+ATR-gulv 0,5×: stop = min(impuls-low, entry − 0,5×ATR)",
+        exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=0.5,
+    ),
+    "A_atrfloor_10": Confluence2VariantConfig(
+        name="A+ATR-gulv 1,0×: stop = min(impuls-low, entry − 1,0×ATR)",
+        exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=1.0,
+    ),
+    "A_atrfloor_15": Confluence2VariantConfig(
+        name="A+ATR-gulv 1,5×: stop = min(impuls-low, entry − 1,5×ATR)",
+        exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=1.5,
+    ),
+    "A_atrfloor_20": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0×: stop = min(impuls-low, entry − 2,0×ATR)",
+        exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=2.0,
     ),
 }
 
