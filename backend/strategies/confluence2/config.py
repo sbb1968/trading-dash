@@ -156,6 +156,21 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
         name="A+ATR-gulv 2,0×: stop = min(impuls-low, entry − 2,0×ATR)",
         exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=2.0,
     ),
+
+    # ── Udvidet ATR-gulv-grid (2026-06-15): PF steg monotont til 2,0× (gitterkant),
+    # så vi udvider til konvergens for at finde PF-toppen, ikke en kant. ──
+    "A_atrfloor_25": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,5x", exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=2.5,
+    ),
+    "A_atrfloor_30": Confluence2VariantConfig(
+        name="A+ATR-gulv 3,0x", exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=3.0,
+    ),
+    "A_atrfloor_40": Confluence2VariantConfig(
+        name="A+ATR-gulv 4,0x", exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=4.0,
+    ),
+    "A_atrfloor_50": Confluence2VariantConfig(
+        name="A+ATR-gulv 5,0x", exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=5.0,
+    ),
 }
 
 # Live-variant: A_impulse_low. Valgt efter validering på maj (in-sample,
