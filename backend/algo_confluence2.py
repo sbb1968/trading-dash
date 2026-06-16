@@ -277,65 +277,161 @@ class Confluence2Live(BaseStrategy):
             await self._close_all("strategi stoppet")
 
     async def _reconcile_orphans(self) -> None:
-        """Observér og rapportér afvigelser mellem journal og IBKR ved opstart.
+        """Scoped, journal-spor-styret oprydning af K2's EGNE spøgelser ved opstart.
 
-        LUKKER INTET. K2 deler IBKR-konto med de øvrige strategier, så en blind
-        flatten ville kunne lukke en anden strategis position. I stedet
-        sammenligner vi journalens forventede nettoposition pr. symbol mod
-        IBKR's faktiske (via position_ledger) og rapporterer tre slags
-        afvigelser:
+        K2 deler IBKR-konto, så vi lukker ALDRIG blindt — en blind flatten kunne
+        ramme en anden strategis position. I stedet starter vi fra K2's EGNE åbne
+        journal-rows (source=self.name). Ved opstart har K2 endnu ikke åbnet noget
+        (self._positions tom, loop'et ikke startet), så enhver åben K2-row er pr.
+        definition et levn fra en tidligere session — et spøgelse efter en genstart
+        eller en force-close-ordre der aldrig fyldte. Pr. row:
 
-          - divergence:    journal og IBKR uenige om antal
-          - ibkr_only:     IBKR holder noget journalen ikke kender
-          - journal_only:  journalen har en åben handel IBKR ikke holder
-                           (typisk en ordre der aldrig fyldte)
+          - IBKR holder samme vej, |net| ≥ vores antal → luk PRÆCIS K2's andel
+            (orderRef=self.name), bogfør reconcile_flatten.
+          - IBKR flad i symbolet                       → fantom (fyldte nok aldrig):
+            bogfør row lukket til entry (nul-P&L), INGEN ordre.
+          - IBKR uenig om retning/antal                → inkonsistent (måske anden
+            strategi): observe-only, rør den IKKE.
 
-        Afvigelser kræver manuel vurdering — vi bogfører ikke og lukker ikke.
-        Kører best-effort: en fejl her må ikke blokere dagens handel.
+        Til sidst logges IBKR-positioner UDEN K2-journal-spor observe-only (anden
+        strategi/manuel) — aldrig rørt.
+
+        Delt-aktiv-sikker: holder to strategier samme ticker, lukker vi kun den
+        mængde K2's row angiver (vores andel af nettoet), ikke hele IBKR-nettoet.
+
+        Best-effort: en fejl her må ikke blokere dagens handel.
         """
         if self.conn is None or not self.conn.connected:
             self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
             return
 
+        # K2's egne åbne journal-rows = kandidater til oprydning.
+        open_rows = []
+        try:
+            from trade_queries import list_trades
+            db = getattr(self._journal, "_db", None) if self._journal else None
+            if db is not None:
+                open_rows = await list_trades(db, status="open", source=self.name)
+        except Exception as e:
+            logger.error(f"[Konfluens 2] reconciliation: list_trades fejlede: {e}")
+            return
+
+        # IBKR's faktiske positioner pr. ticker (netto).
         try:
             ibkr_positions = self.conn.get_positions()
         except Exception as e:
             logger.error(f"[Konfluens 2] reconciliation: kunne ikke hente IBKR-positioner: {e}")
             return
+        ibkr_by_ticker = {
+            (p.get("ticker") or "").upper(): (p.get("position") or 0)
+            for p in ibkr_positions if p.get("position")
+        }
 
-        try:
-            import position_ledger as pl
-            db_path = self._journal.db_path if self._journal else None
-            report = pl.reconcile_against_ibkr(db_path, ibkr_positions)
-        except Exception as e:
-            logger.error(f"[Konfluens 2] reconciliation: rapport fejlede: {e}")
+        cleaned = 0
+        k2_tickers: set[str] = set()
+        for row in open_rows:
+            sym = (row.get("symbol") or "").upper()
+            if not sym:
+                continue
+            k2_tickers.add(sym)
+
+            shares = int(abs(row.get("shares") or 0))
+            side   = (row.get("side") or "").lower()
+            sign   = 1 if side == "long" else -1
+            if shares <= 0:
+                continue
+
+            net = ibkr_by_ticker.get(sym, 0)
+
+            if net == 0:
+                # Fantom: journalen åben, IBKR flad → ordren fyldte nok aldrig.
+                await self._reconcile_mark_closed(sym, row)
+                cleaned += 1
+                continue
+
+            net_sign = 1 if net > 0 else -1
+            if net_sign != sign or abs(net) < shares:
+                # Inkonsistent — rør den IKKE (kan være en anden strategi).
+                await self._log(
+                    f"🔎 {sym}: K2-journal siger {side} {shares}, IBKR holder "
+                    f"{net:+d} — inkonsistent, observe-only (rører den IKKE)",
+                    level="warning")
+                continue
+
+            # Luk PRÆCIS K2's andel, ikke hele nettoet.
+            await self._reconcile_close(sym, row, shares, sign)
+            cleaned += 1
+
+        # Observability: IBKR-positioner uden K2-journal-spor (anden strategi/manuel).
+        for sym, net in ibkr_by_ticker.items():
+            if net and sym not in k2_tickers:
+                await self._log(
+                    f"🔎 {sym} ({net:+d}) holdes i IBKR uden K2-journal-spor — "
+                    f"observe-only (anden strategi eller manuel handel)", level="warning")
+
+        if cleaned:
+            self._status("started",
+                         f"Reconciliation: ryddede {cleaned} gammel/gamle K2-position(er) op")
+        else:
+            self._status("started", "Reconciliation: ingen K2-spøgelser at rydde op")
+
+    async def _reconcile_close(self, sym: str, row: dict, shares: int, sign: int) -> None:
+        """Luk K2's andel af et gammelt åbent symbol og bogfør reconcile_flatten.
+        Tæller IKKE med i dagens handels-statistik (rører ikke self.trades/self.stats).
+        Spejler EUREVERSIONs _reconcile_close, men aktie-P&L (ingen multiplier)."""
+        close_action = "SELL" if sign > 0 else "BUY"
+        entry = row.get("entry_price") or 0.0
+        snap  = await self.conn.get_snapshot(sym)
+        exit_price = (snap.get("last") if snap else None) or entry or 0.0
+
+        result = await self.conn.place_paper_order(sym, close_action, shares, source=self.name)
+        if not result:
+            await self._log(
+                f"⚠ Kunne ikke lukke gammel position {sym} — luk den manuelt i TWS",
+                level="warning")
             return
 
-        n_div  = len(report["divergence"])
-        n_ibkr = len(report["ibkr_only"])
-        n_jrnl = len(report["journal_only"])
+        fill = result.get("avg_fill")
+        if fill and fill > 0:
+            exit_price = fill
 
-        if not (n_div or n_ibkr or n_jrnl):
-            self._status("started", "Reconciliation: journal og IBKR stemmer overens")
-            return
+        pnl = (exit_price - entry) * shares * sign if (entry and exit_price) else 0.0
 
-        self._status("started",
-                     f"⚠ Reconciliation: afvigelser fundet — "
-                     f"{n_div} divergens, {n_ibkr} kun-i-IBKR, {n_jrnl} kun-i-journal "
-                     f"(LUKKER INTET — kræver manuel vurdering)")
+        trade_id = row.get("trade_id")
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id    = trade_id,
+                exit_price  = exit_price,
+                exit_time   = datetime.now(ET),
+                exit_reason = "reconcile_flatten",
+                pnl         = pnl,
+                payload     = {"reconcile": True},
+            )
 
-        for d in report["divergence"]:
-            await self._log(
-                f"🔎 Reconciliation-divergens: {d['symbol']} — "
-                f"journal={d['journal']} vs IBKR={d['ibkr']}", level="warning")
-        for o in report["ibkr_only"]:
-            await self._log(
-                f"🔎 Reconciliation: {o['symbol']} holdes i IBKR ({o['ibkr']}) "
-                f"men journalen kender den ikke", level="warning")
-        for j in report["journal_only"]:
-            await self._log(
-                f"🔎 Reconciliation: {j['symbol']} står åben i journalen ({j['journal']}) "
-                f"men IBKR holder den ikke (fyldte ordren aldrig?)", level="warning")
+        await self._log(
+            f"♻ Gammel åben K2-position {sym} ({'long' if sign > 0 else 'short'} "
+            f"{shares}) lukket @ ${exit_price:.2f} (reconcile) | P&L: ${pnl:+.2f}")
+        self._status("started", f"Gammel åben position {sym} er lukket (reconcile)")
+
+    async def _reconcile_mark_closed(self, sym: str, row: dict) -> None:
+        """Journalen har en åben K2-row men IBKR er flad i symbolet → ordren fyldte
+        nok aldrig. Bogfør row'en lukket til entry (nul-P&L) så spøgelset forsvinder.
+        INGEN ordre sendes (intet at lukke). P&L kan ikke rekonstrueres når IBKR er
+        flad — nul er det ærlige 'ved ikke'-default."""
+        trade_id = row.get("trade_id")
+        entry = row.get("entry_price") or 0.0
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id    = trade_id,
+                exit_price  = entry,
+                exit_time   = datetime.now(ET),
+                exit_reason = "reconcile_phantom",
+                pnl         = 0.0,
+                payload     = {"reconcile": True, "phantom": True},
+            )
+        await self._log(
+            f"🧹 {sym}: K2-journal stod åben men IBKR er flad — bogført lukket "
+            f"(fantom, nul-P&L), ingen ordre sendt", level="warning")
 
     # -------------------------------------------------------------
     # Status broadcast — samme format som ORB/K1
