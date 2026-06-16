@@ -375,12 +375,13 @@ class IBKRConnection:
     # ── Ordre ─────────────────────────────────────────────────
     async def place_paper_order(
         self,
-        ticker:      str,
-        action:      str,
-        quantity:    float,
-        order_type:  str   = "MKT",
-        limit_price: float = 0,
-        source:      str   = "",
+        ticker:         str,
+        action:         str,
+        quantity:       float,
+        order_type:     str   = "MKT",
+        limit_price:    float = 0,
+        source:         str   = "",
+        await_fill_sec: float = 0,
     ) -> Optional[dict]:
         """Sender en ordre til paper trading kontoen.
 
@@ -403,7 +404,23 @@ class IBKRConnection:
             if source:
                 order.orderRef = source
             trade = self.ib.placeOrder(contract, order)
-            await asyncio.sleep(1)
+
+            # await_fill_sec=0 (default): bevarer hidtidig adfærd — vent 1 sek
+            # uanset (entries og alle nuværende kaldere er UÆNDREDE). >0: poll
+            # Trade-objektet (opdateres live af ib_async) til ordren er fyldt
+            # eller terminal, op til await_fill_sec. Bruges ved lukke-/force-
+            # close-ordrer hvor BEKRÆFTET fyldning er nødvendig.
+            if await_fill_sec and await_fill_sec > 0:
+                _waited = 0.0
+                _TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+                while _waited < await_fill_sec:
+                    await asyncio.sleep(0.5)
+                    _waited += 0.5
+                    _st = trade.orderStatus
+                    if (_st.filled or 0) >= quantity or _st.status in _TERMINAL:
+                        break
+            else:
+                await asyncio.sleep(1)
             return {
                 "ticker":    ticker,
                 "action":    action,

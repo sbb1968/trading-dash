@@ -111,6 +111,14 @@ BAR_EVAL_MIN_SCORE = 0
 # Heartbeat-interval i sekunder. 300 = hvert 5. minut.
 HEARTBEAT_INTERVAL_SEC = 300
 
+# ── Force-close-robusthed ──────────────────────────────────────
+# Ved market-close venter vi på BEKRÆFTET fyldning før vi bogfører en lukning,
+# og genforsøger ufyldte. Budgettet skal passe inden for runway'en fra
+# force_close (15:45 ET) til markedslukning (16:00 ET) — ~15 min, rigeligt.
+CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
+FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger
+FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem genforsøg
+
 # Fallback (ikke brugt i normal drift — kun hvis scanner fejler komplet)
 FALLBACK_UNIVERSE: list[str] = []
 
@@ -1172,7 +1180,12 @@ class Confluence2Live(BaseStrategy):
         shares   = position.shares
 
         # ── Send luknings-ordren FØR vi bogfører noget ──────────────────
-        close_result = await self.conn.place_paper_order(ticker, "SELL", shares, source=self.name)
+        # await_fill_sec: vent på BEKRÆFTET fyldning (1-sek-vinduet er for kort
+        # til tynde aktier/halts).
+        close_result = await self.conn.place_paper_order(
+            ticker, "SELL", shares, source=self.name,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+        )
         if not close_result:
             logger.error(
                 f"[Konfluens 2] _close({ticker}): SELL-ordre kunne IKKE sendes "
@@ -1180,6 +1193,21 @@ class Confluence2Live(BaseStrategy):
             )
             self._status("trading",
                          f"⚠ {ticker}: lukkeordre ikke sendt — position forbliver åben")
+            return
+
+        # ── Bekræft fyldning FØR vi popper + bogfører ───────────────────
+        # Hvis ordren ikke er (fuldt) fyldt — halt, tynd likviditet, eller afgivet
+        # for sent — bogfører vi IKKE og popper IKKE. Positionen forbliver åben
+        # (og åben-i-journal), så _close_all kan genforsøge, og hvad der ikke
+        # fyldes fanges af opstarts-oprydningen næste session. Det er netop dét
+        # der forhindrer et spøgelse hvor journalen siger 'lukket' mens IBKR
+        # stadig holder positionen.
+        filled = close_result.get("filled") or 0
+        if filled < shares:
+            await self._log(
+                f"⚠ {ticker}: SELL ikke bekræftet fyldt "
+                f"(status={close_result.get('status')}, filled={filled}/{shares}) "
+                f"— beholder position åben, genforsøger", level="warning")
             return
 
         fill = close_result.get("avg_fill")
@@ -1291,13 +1319,42 @@ class Confluence2Live(BaseStrategy):
             logger.exception(f"Forensics (exit) for {ticker} fejlede: {e}")
 
     async def _close_all(self, reason: str):
-        """Luk alle åbne positioner (typisk ved market close eller stop)."""
-        tickers = list(self._positions.keys())
-        for ticker in tickers:
-            position = self._positions[ticker]
-            snap = await self.conn.get_snapshot(ticker)
-            price = (snap.get("last") if snap else None) or position.entry_price
-            await self._close(ticker, price, reason)
+        """Luk alle åbne positioner med fill-verifikation + genforsøg.
+
+        Hver position lukkes via _close, som nu KUN bogfører ved bekræftet
+        fyldning og ellers beholder positionen åben. Vi genforsøger de der ikke
+        blev bekræftet lukket, op til FORCE_CLOSE_MAX_ATTEMPTS gange — afgørende
+        ved market-close, hvor loop'et bagefter stopper uden flere forsøg. Det
+        der STADIG ikke kan lukkes (fx et halt) forbliver åbent i journalen og
+        ryddes ved næste opstarts-reconciliation.
+        """
+        for attempt in range(1, FORCE_CLOSE_MAX_ATTEMPTS + 1):
+            tickers = list(self._positions.keys())
+            if not tickers:
+                return
+            for ticker in tickers:
+                position = self._positions.get(ticker)
+                if position is None:
+                    continue
+                snap = await self.conn.get_snapshot(ticker)
+                price = (snap.get("last") if snap else None) or position.entry_price
+                await self._close(ticker, price, reason)
+
+            if not self._positions:
+                return
+            if attempt < FORCE_CLOSE_MAX_ATTEMPTS:
+                await self._log(
+                    f"⚠ {len(self._positions)} position(er) ikke bekræftet lukket "
+                    f"(forsøg {attempt}/{FORCE_CLOSE_MAX_ATTEMPTS}) — genforsøger om "
+                    f"{FORCE_CLOSE_RETRY_DELAY}s", level="warning")
+                await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
+
+        if self._positions:
+            await self._log(
+                f"⛔ {len(self._positions)} position(er) kunne IKKE bekræftes lukket "
+                f"efter {FORCE_CLOSE_MAX_ATTEMPTS} forsøg — bevaret åbne i journalen, "
+                f"ryddes ved næste opstart (luk dem evt. manuelt i TWS nu)",
+                level="warning")
 
     # -------------------------------------------------------------
     # Hjælpere

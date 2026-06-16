@@ -1,0 +1,319 @@
+"""
+test_k2_close_robusthed.py
+──────────────────────────
+Samlet test af de to K2-ændringer der deployer SAMMEN:
+  - scoped reconcile-oprydning (_reconcile_orphans)  — commit b78c474
+  - robust force-close (await_fill_sec + fill-verifikation + retry)
+
+Mock-baseret, ingen TWS. Kør i backend-mappen:
+    python test_k2_close_robusthed.py
+
+Sektioner:
+  A — _reconcile_orphans: 6 scenarier + fail-safe (scoped flatten, delt-aktiv-sikker)
+  B — place_paper_order(await_fill_sec): poll til fyldning / terminal
+  C — _close bogfører KUN ved bekræftet fyldning (filled >= shares)
+  D — _close_all genforsøger ufyldte lukninger op til FORCE_CLOSE_MAX_ATTEMPTS
+
+Stilen spejler test_reconcile_observation.py (PASS/FAIL, SystemExit(1) ved fejl).
+"""
+
+import asyncio
+import types
+from datetime import datetime
+
+import ibkr_connect
+import algo_confluence2 as k2mod
+import trade_queries
+
+# Neutralisér exit-forensik på den fyldte sti (testen fokuserer på pop + bogføring;
+# forensik er allerede dækket andetsteds og kræver fuld bar-historik).
+k2mod.build_confluence_exit_snapshot = lambda **kw: {}
+
+
+# ── PASS/FAIL ──────────────────────────────────────────────────
+def check(name, cond, detail=""):
+    if cond:
+        print(f"  PASS  {name}")
+    else:
+        print(f"  FAIL  {name}  {detail}")
+        raise SystemExit(1)
+
+
+# Retry-/poll-løkker må ikke bruge rigtig tid i testen.
+async def _noop_sleep(*a, **k):
+    return None
+asyncio.sleep = _noop_sleep
+
+
+# ── Mocks ──────────────────────────────────────────────────────
+class MockConn:
+    """Registrerer ALLE place_paper_order-kald i order_calls."""
+    def __init__(self, order_ret=None, positions=None, last=10.0):
+        self.connected = True
+        self.order_calls = []
+        self._order_ret = order_ret            # dict | callable(call_idx)->dict | None
+        self._positions = positions or []
+        self._last = last
+
+    def get_positions(self):
+        return self._positions
+
+    async def get_snapshot(self, ticker):
+        return {"last": self._last}
+
+    async def place_paper_order(self, ticker, action, quantity, source="",
+                                await_fill_sec=0, **kw):
+        self.order_calls.append((ticker, action, quantity))
+        r = self._order_ret
+        return r(len(self.order_calls)) if callable(r) else r
+
+
+class MockJournal:
+    def __init__(self):
+        self._db = object()          # truthy sentinel
+        self.db_path = ":memory:"
+        self.closes = []             # liste af exit_reason
+
+    async def log_trade_close(self, **kw):
+        self.closes.append(kw.get("exit_reason"))
+
+    async def log_event(self, **kw):
+        pass
+
+    async def log_trade_open(self, **kw):
+        pass
+
+
+def install_list_trades(rows, raise_exc=False):
+    """_reconcile_orphans gør `from trade_queries import list_trades` ved kald,
+    så vi monkeypatcher modulets navn."""
+    async def _lt(db, **kw):
+        if raise_exc:
+            raise RuntimeError("boom")
+        return rows
+    trade_queries.list_trades = _lt
+
+
+def make_algo(conn, journal):
+    """K2-instans uden fuld __init__ — kun det reconcile/_close rører."""
+    algo = k2mod.Confluence2Live.__new__(k2mod.Confluence2Live)
+    algo.conn = conn
+    algo._journal = journal
+    algo._strategy = types.SimpleNamespace(name="Konfluens 2")
+    algo._broadcast_fn = None
+    algo._positions = {}
+    algo._position_data = {}
+    algo._contexts = {}
+    algo._bar_history = {}
+    algo._variant_key = k2mod.LIVE_VARIANT_KEY
+    algo._tape_buffer = None
+    algo._mfe = {}
+    algo._mae = {}
+    algo.trades = []
+    algo.total_pnl = 0.0
+    algo._status = lambda *a, **k: None
+    async def _log(msg, level="info"):
+        return None
+    algo._log = _log
+    # Stub den FYLDTE stis P&L-hook (ingen base-stats i testen).
+    algo.record_position_closed = lambda ticker, price: 50.0
+    return algo
+
+
+def mk_position(shares=100, entry=5.0):
+    return types.SimpleNamespace(
+        shares=shares, entry_price=entry,
+        entry_time=datetime(2026, 6, 16, 15, 30, 0),
+        metadata={"trade_id": "t1"})
+
+
+def row(symbol, side, shares, entry=5.0):
+    return {"symbol": symbol, "side": side, "shares": shares,
+            "entry_price": entry, "trade_id": f"{symbol}-1"}
+
+
+FILLED = {"filled": 100, "avg_fill": 5.10, "status": "Filled", "order_id": None}
+
+
+# ── SEKTION A — _reconcile_orphans ─────────────────────────────
+def section_A():
+    print("\nSektion A — _reconcile_orphans (scoped flatten)")
+
+    async def run(open_rows, ibkr_pos, raise_list=False):
+        conn = MockConn(order_ret=FILLED, positions=ibkr_pos)
+        journal = MockJournal()
+        algo = make_algo(conn, journal)
+        install_list_trades(open_rows, raise_exc=raise_list)
+        await algo._reconcile_orphans()
+        return conn.order_calls, journal.closes
+
+    # A1 ghost-match: AAA long 100, IBKR +100 → SELL 100, reconcile_flatten
+    o, c = asyncio.run(run([row("AAA", "long", 100)], [{"ticker": "AAA", "position": 100}]))
+    check("A1 ghost-match → SELL AAA 100", o == [("AAA", "SELL", 100)], o)
+    check("A1 bogført reconcile_flatten", c == ["reconcile_flatten"], c)
+
+    # A2 delt aktiv: BBB long 100, IBKR +150 → SELL 100 (IKKE 150)
+    o, c = asyncio.run(run([row("BBB", "long", 100)], [{"ticker": "BBB", "position": 150}]))
+    check("A2 delt aktiv → SELL BBB 100 (ikke 150)", o == [("BBB", "SELL", 100)], o)
+
+    # A3 fremmed: ingen K2-row, IBKR holder CCC → 0 ordrer
+    o, c = asyncio.run(run([], [{"ticker": "CCC", "position": 200}]))
+    check("A3 fremmed position → 0 ordrer", o == [], o)
+    check("A3 ingen close bogført", c == [], c)
+
+    # A4 fantom: DDD long 100, IBKR flad → 0 ordrer, reconcile_phantom
+    o, c = asyncio.run(run([row("DDD", "long", 100)], []))
+    check("A4 fantom → 0 ordrer", o == [], o)
+    check("A4 bogført reconcile_phantom", c == ["reconcile_phantom"], c)
+
+    # A5 inkonsistent retning: EEE long 100, IBKR -100 → 0 ordrer
+    o, c = asyncio.run(run([row("EEE", "long", 100)], [{"ticker": "EEE", "position": -100}]))
+    check("A5 inkonsistent retning → 0 ordrer", o == [], o)
+    check("A5 ingen close bogført", c == [], c)
+
+    # A6 utilstrækkeligt netto: FFF long 100, IBKR +40 → 0 ordrer
+    o, c = asyncio.run(run([row("FFF", "long", 100)], [{"ticker": "FFF", "position": 40}]))
+    check("A6 |net|<antal → 0 ordrer", o == [], o)
+
+    # A7 fail-safe: list_trades kaster → returnerer uden at kaste, 0 ordrer
+    try:
+        o, c = asyncio.run(run([row("GGG", "long", 100)],
+                               [{"ticker": "GGG", "position": 100}], raise_list=True))
+        ok = (o == [])
+    except Exception:
+        ok = False
+    check("A7 fail-safe: exception i list_trades vælter ikke, 0 ordrer", ok)
+
+
+# ── SEKTION B — place_paper_order(await_fill_sec) ──────────────
+class FakeStatus:
+    def __init__(self, fill_after, quantity, price):
+        self._reads = 0
+        self._fill_after = fill_after     # int | None (None = fyldes aldrig)
+        self.q = quantity
+        self.p = price
+        self._status = "Submitted"
+
+    @property
+    def status(self):
+        return self._status
+
+    @property
+    def filled(self):
+        self._reads += 1
+        if self._fill_after is not None and self._reads >= self._fill_after:
+            self._status = "Filled"
+            return self.q
+        return 0
+
+    @property
+    def avgFillPrice(self):
+        return self.p if self._status == "Filled" else 0
+
+
+def make_conn_B(fake_status):
+    conn = ibkr_connect.IBKRConnection.__new__(ibkr_connect.IBKRConnection)
+    conn._connect_attempted = True       # connected-property læser denne + ib.isConnected()
+    conn.paper = True
+    async def _resolve(ticker):
+        return types.SimpleNamespace(symbol=ticker)
+    conn._resolve_contract = _resolve
+    class MockIB:
+        def isConnected(self):
+            return True
+        def placeOrder(self, contract, order):
+            order.orderId = 1
+            return types.SimpleNamespace(order=order, orderStatus=fake_status)
+    conn.ib = MockIB()
+    return conn
+
+
+def section_B():
+    print("\nSektion B — place_paper_order(await_fill_sec)")
+
+    # B1 default (await_fill_sec=0): ingen poll, returnerer status (uændret adfærd)
+    fs = FakeStatus(fill_after=0, quantity=100, price=5.1)
+    conn = make_conn_B(fs)
+    res = asyncio.run(conn.place_paper_order("AAA", "SELL", 100, source="Konfluens 2", await_fill_sec=0))
+    check("B1 await_fill_sec=0 returnerer dict", isinstance(res, dict), res)
+    check("B1 ingen poll-løkke (få reads)", fs._reads <= 2, fs._reads)
+
+    # B2 fyldes undervejs: bryder tidligt, filled == quantity
+    fs = FakeStatus(fill_after=3, quantity=100, price=5.1)
+    conn = make_conn_B(fs)
+    res = asyncio.run(conn.place_paper_order("AAA", "SELL", 100, source="Konfluens 2", await_fill_sec=8))
+    check("B2 fyldes undervejs → filled==quantity", res["filled"] == 100, res)
+    check("B2 brød tidligt (ikke alle opslag)", fs._reads < 16, fs._reads)
+
+    # B3 fyldes aldrig: timeout-graceful, filled=0, ingen exception
+    fs = FakeStatus(fill_after=None, quantity=100, price=5.1)
+    conn = make_conn_B(fs)
+    res = asyncio.run(conn.place_paper_order("AAA", "SELL", 100, source="Konfluens 2", await_fill_sec=4))
+    check("B3 fyldes aldrig → filled==0, ingen exception", res["filled"] == 0, res)
+
+
+# ── SEKTION C — _close fill-verifikation ───────────────────────
+def section_C():
+    print("\nSektion C — _close bogfører kun ved bekræftet fyldning")
+
+    def setup(order_ret):
+        conn = MockConn(order_ret=order_ret, last=5.05)
+        journal = MockJournal()
+        algo = make_algo(conn, journal)
+        algo._positions["AAA"] = mk_position(100, 5.0)
+        return algo, conn, journal
+
+    # C1 fyldt → popper + bogfører exit_reason="test", total_pnl opdateret
+    algo, conn, journal = setup({"filled": 100, "avg_fill": 5.10, "status": "Filled"})
+    asyncio.run(algo._close("AAA", 5.05, "test"))
+    check("C1 fyldt → AAA popped", "AAA" not in algo._positions, list(algo._positions))
+    check("C1 fyldt → log_trade_close exit_reason=test", journal.closes == ["test"], journal.closes)
+    check("C1 fyldt → total_pnl opdateret", algo.total_pnl == 50.0, algo.total_pnl)
+
+    # C2 ikke fyldt (dict, filled=0) → IKKE popped, INGEN close, ingen exception
+    algo, conn, journal = setup({"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    asyncio.run(algo._close("AAA", 5.05, "test"))
+    check("C2 ufyldt → AAA STADIG åben", "AAA" in algo._positions, list(algo._positions))
+    check("C2 ufyldt → INGEN log_trade_close", journal.closes == [], journal.closes)
+
+    # C3 ikke sendt (None) → uændret: ikke popped, ingen close
+    algo, conn, journal = setup(None)
+    asyncio.run(algo._close("AAA", 5.05, "test"))
+    check("C3 None → AAA STADIG åben", "AAA" in algo._positions, list(algo._positions))
+    check("C3 None → INGEN log_trade_close", journal.closes == [], journal.closes)
+
+
+# ── SEKTION D — _close_all genforsøger ─────────────────────────
+def section_D():
+    print("\nSektion D — _close_all genforsøger ufyldte lukninger")
+
+    # D1 fyldes på 3. forsøg → til sidst lukket, 3 ordrer
+    def ret_d1(idx):
+        return {"filled": 0, "status": "Submitted"} if idx < 3 \
+            else {"filled": 100, "avg_fill": 5.10, "status": "Filled"}
+    conn = MockConn(order_ret=ret_d1, last=5.05)
+    journal = MockJournal()
+    algo = make_algo(conn, journal)
+    algo._positions["AAA"] = mk_position(100, 5.0)
+    asyncio.run(algo._close_all("market_close"))
+    check("D1 fyldes på 3. forsøg → AAA lukket", "AAA" not in algo._positions, list(algo._positions))
+    check("D1 place_paper_order kaldt 3 gange", len(conn.order_calls) == 3, conn.order_calls)
+
+    # D2 fyldes aldrig → AAA stadig åben, kaldt FORCE_CLOSE_MAX_ATTEMPTS gange
+    conn = MockConn(order_ret={"filled": 0, "status": "Submitted"}, last=5.05)
+    journal = MockJournal()
+    algo = make_algo(conn, journal)
+    algo._positions["AAA"] = mk_position(100, 5.0)
+    asyncio.run(algo._close_all("market_close"))
+    check("D2 fyldes aldrig → AAA STADIG åben", "AAA" in algo._positions, list(algo._positions))
+    check(f"D2 kaldt {k2mod.FORCE_CLOSE_MAX_ATTEMPTS} gange (= MAX_ATTEMPTS)",
+          len(conn.order_calls) == k2mod.FORCE_CLOSE_MAX_ATTEMPTS, conn.order_calls)
+
+
+if __name__ == "__main__":
+    print("Samlet test: K2 reconcile-oprydning + robust force-close")
+    section_A()
+    section_B()
+    section_C()
+    section_D()
+    print("\nALLE TESTS BESTÅET ✓")
