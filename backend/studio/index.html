@@ -1905,14 +1905,19 @@
             const shares    = (p.shares != null) ? p.shares : null;
             const mult      = multForSymbol(sym);
             const totalCost = (entry != null && shares != null) ? entry * shares * mult : null;
-            const marginCost = POSITION_SIZE;
+            // Margin-kostpris = IBKR's FAKTISKE margin (kun futures, kun hvis backend har
+            // skrevet den i payload). Tom for aktier OG for futures uden margin-felt.
+            const marginCost = (mult !== 1 && p.payload && p.payload.init_margin != null)
+                ? p.payload.init_margin : null;
             let unrPnl = null, unrPct = null, marginPnl = null, marginPct = null;
             if (lastPrice != null && entry != null && shares != null && entry !== 0) {
                 const dir = (p.side === "short") ? -1 : 1;
                 unrPnl    = (lastPrice - entry) * shares * mult * dir;
                 unrPct    = ((lastPrice - entry) / entry) * 100 * dir;
                 marginPnl = unrPnl;
-                marginPct = marginCost > 0 ? (unrPnl / marginCost) * 100 : null;
+                // Margin-% normaliseres mod risiko-budgettet ($1.000), IKKE mod den
+                // faktiske margin — så %/R er sammenligneligt på tværs af handler.
+                marginPct = (POSITION_SIZE > 0) ? (unrPnl / POSITION_SIZE) * 100 : null;
             }
             return {
                 p, sym, live, lastPrice, entry, shares, mult, totalCost, unrPnl, unrPct,
@@ -2046,7 +2051,7 @@
                     const pnlCell = v.unrPnl != null
                         ? `<span class="${cls(v.unrPnl)}" style="font-weight:700;">${fmtMoneySigned(v.unrPnl)}${pctText}</span>`
                         : `<span class="muted">—</span>`;
-                    const mCostCell = v.marginCost != null ? fmtMoney(v.marginCost) : "—";
+                    const mCostCell = v.marginCost != null ? fmtMoney(v.marginCost) : "";
                     const mPnlCell = v.marginPnl != null
                         ? `<span class="${cls(v.marginPnl)}" style="font-weight:700;">${fmtMoneySigned(v.marginPnl)}</span>`
                         : `<span class="muted">—</span>`;
@@ -2117,7 +2122,7 @@
                             <td class="num">${notional != null ? fmtMoney(notional) : "—"}</td>
                             <td class="num">${exitCell}</td>
                             <td class="num">${pnlCell}</td>
-                            <td class="num">${fmtMoney(POSITION_SIZE)}</td>
+                            <td class="num"></td>
                             <td class="num">${mPnlCell}</td>
                             <td class="num">${mPctCell}</td>
                             <td>${reasonPill(t.exit_reason)}</td>
@@ -2312,7 +2317,7 @@
                                     ${sidePill(v.side)}
                                     ${multBadge(v.sym, v.lastPrice != null ? v.lastPrice : v.entry)}
                                 </div>
-                                <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"} · Margin ${fmtMoney(v.marginCost)}</div>
+                                <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}${v.marginCost != null ? " · Margin " + fmtMoney(v.marginCost) : ""}</div>
                                 <div class="mobile-pos-prices">
                                     <span>Køb ${v.entry != null ? fmtMoney(v.entry) : "—"}</span>
                                     <span class="mobile-pos-last">Nu ${lastText}</span>
@@ -2360,7 +2365,7 @@
                                     ${sidePill(t.side)}
                                     ${multBadge(t.symbol, t.entry_price)}
                                 </div>
-                                <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk · Kostpris ${_mNotional != null ? fmtMoney(_mNotional) : "—"} · Margin ${fmtMoney(POSITION_SIZE)}</div>
+                                <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk · Kostpris ${_mNotional != null ? fmtMoney(_mNotional) : "—"}</div>
                                 <div class="mobile-pos-prices">
                                     <span>Køb ${fmtMoney(t.entry_price)}</span>
                                     <span class="mobile-pos-sell">Salg ${t.exit_price != null ? fmtMoney(t.exit_price) : "—"}</span>

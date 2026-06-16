@@ -631,6 +631,9 @@ class EuropaReversionLive(BaseStrategy):
         action = "BUY" if side == "long" else "SELL"
         mult   = MULTIPLIER.get(sym, 5.0)
 
+        # IBKR's faktiske initial-margin denne ordre binder (KUN display, fejl-sikker → None).
+        init_margin = await self.conn.what_if_init_margin(sym, action, contracts)
+
         order = OrderRequest(
             strategy_name=self.name,
             ticker=sym,
@@ -670,6 +673,7 @@ class EuropaReversionLive(BaseStrategy):
             "stop_price":  stop_price,
             "std":         sd,
             "reserved":    reserved,
+            "init_margin": init_margin,
             "trade_id":    None,
         }
         self.stats.open_positions = len(self._positions)
@@ -713,6 +717,7 @@ class EuropaReversionLive(BaseStrategy):
                     "multiplier":        mult,
                     "stop_distance_pts": round(stop_dist, 4),
                     "contracts":         contracts,
+                    "init_margin":       round(init_margin, 2) if init_margin is not None else None,
                 },
             )
             if trade_id:

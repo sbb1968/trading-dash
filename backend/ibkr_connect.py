@@ -441,6 +441,34 @@ class IBKRConnection:
             logger.error(f"Ordre fejl {ticker}: {e}")
             return None
 
+    async def what_if_init_margin(
+        self,
+        ticker:      str,
+        action:      str,
+        quantity:    float,
+        order_type:  str   = "MKT",
+        limit_price: float = 0,
+    ) -> Optional[float]:
+        """IBKR's INITIAL-margin (USD) som DENNE ordre ville binde — via en whatIf-ordre
+        (ingen rigtig ordre sendes). KUN til display. Fuldstændig fejl-sikker: enhver
+        fejl/timeout → None (kalderen viser så ingen margin). Må ALDRIG kaste videre —
+        en margin-forespørgsel må aldrig kunne påvirke en handel."""
+        if not self.connected:
+            return None
+        try:
+            contract = await self._resolve_contract(ticker)
+            order = MarketOrder(action, quantity) if order_type == "MKT" \
+                    else LimitOrder(action, quantity, limit_price)
+            state = await asyncio.wait_for(
+                self.ib.whatIfOrderAsync(contract, order), timeout=5)
+            raw = getattr(state, "initMarginChange", None) if state else None
+            if raw in (None, ""):
+                return None
+            return abs(float(raw))
+        except Exception as e:
+            logger.warning(f"[whatIf] init-margin kunne ikke beregnes for {ticker}: {e}")
+            return None
+
 
 # ── Singleton ─────────────────────────────────────────────────
 _connection: Optional[IBKRConnection] = None
