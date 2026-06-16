@@ -302,7 +302,8 @@ class BuyTheDipLive(BaseStrategy):
             try:
                 t = json.loads(pj).get("tickers", [])
                 if t:
-                    tickers = [str(x).upper() for x in t]   # seneste ikke-tomme vinder
+                    # seneste ikke-tomme vinder; upper-case + dedup (bevar rækkefølge)
+                    tickers = list(dict.fromkeys(str(x).upper() for x in t))
             except Exception:
                 continue
         return tickers
@@ -369,11 +370,7 @@ class BuyTheDipLive(BaseStrategy):
                         if res is not None:
                             candidates.append(res)
                     # Entries efter dybeste dip først, op til frie pladser.
-                    candidates.sort(key=lambda c: -c[1]["dip_depth"])
-                    for ticker, setup, bar in candidates:
-                        if self.stats.open_positions >= self.config.max_open_positions:
-                            break
-                        await self._open(ticker, setup, bar)
+                    await self._open_candidates(candidates)
                     consecutive_errors = 0
                 except Exception as e:
                     consecutive_errors += 1
@@ -481,6 +478,15 @@ class BuyTheDipLive(BaseStrategy):
             return None
         setup = dict(wo)            # dip_low, ref_high, dip_depth
         return (ticker, setup, bar)
+
+    async def _open_candidates(self, candidates):
+        """Åbn entry-kandidater efter DYBESTE dip_depth først, op til
+        max_open_positions (to-fase-concurrency). candidates: liste af
+        (ticker, setup, bar)."""
+        for ticker, setup, bar in sorted(candidates, key=lambda c: -c[1]["dip_depth"]):
+            if self.stats.open_positions >= self.config.max_open_positions:
+                break
+            await self._open(ticker, setup, bar)
 
     # -------------------------------------------------------------
     # Open — risiko-baseret sizing + notional-loft + forensik
