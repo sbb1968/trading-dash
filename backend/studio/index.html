@@ -1928,13 +1928,27 @@
         // Synligt multiplikator-maerke for futures (fx ×5) — saa det er TYDELIGT
         // at kostpris/P&L er ganget med kontrakt-multiplikatoren. Tomt for aktier.
         // Tager et SYMBOL, saa baade aabne positioner OG lukkede handler kan bruge det.
-        function multBadge(symbol) {
+        // Futures-maerke ved siden af symbolet. MED en pris: vis GEARING (×N) =
+        // notionel eksponering pr. kontrakt (pris × mult) / display-budget
+        // (POSITION_SIZE). Ved nuvaerende niveauer MES ≈ ×37, M2K ≈ ×15. UDEN pris
+        // (aggregat-tabeller): fald tilbage til kontrakt-multiplikatoren ($N/pt).
+        // Tomt for aktier (mult === 1).
+        function multBadge(symbol, price) {
             const mult = FUTURES_MULT[(symbol || "").toUpperCase()] || 1;
             if (mult === 1) return "";
-            return `<span title="Futures-kontrakt: $${mult} pr. indekspoint (kontrakt-multiplikator). Eksponering = pris × ${mult} × antal kontrakter. IKKE gearing." `
-                 + `style="font-size:10px;font-weight:700;color:#fde047;background:rgba(250,204,21,0.12);`
-                 + `border:1px solid rgba(250,204,21,0.4);border-radius:3px;padding:1px 5px;margin-left:6px;">`
-                 + `$${mult}/pt</span>`;
+            const badgeStyle = `style="font-size:10px;font-weight:700;color:#fde047;`
+                 + `background:rgba(250,204,21,0.12);border:1px solid rgba(250,204,21,0.4);`
+                 + `border-radius:3px;padding:1px 5px;margin-left:6px;"`;
+            if (price != null && price > 0) {
+                const lev    = (price * mult) / POSITION_SIZE;
+                const levTxt = "×" + (lev >= 10 ? Math.round(lev) : lev.toFixed(1));
+                return `<span title="Gearing: hver kontrakt styrer pris × $${mult} i notionel `
+                     + `eksponering — ${levTxt} gange display-budgettet ($${POSITION_SIZE}). `
+                     + `Futures er staerkt gearede." ${badgeStyle}>${levTxt}</span>`;
+            }
+            // Ingen pris: behold kontrakt-multiplikator-maerket.
+            return `<span title="Futures-kontrakt: $${mult} pr. indekspoint `
+                 + `(kontrakt-multiplikator)." ${badgeStyle}>$${mult}/pt</span>`;
         }
         // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
         // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
@@ -2042,7 +2056,7 @@
                     return `
                         <tr class="row-open">
                             <td>${v.entryTime}</td>
-                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}${multBadge(v.sym)}</td>
+                            <td><strong style="font-size:16px;">${p.symbol}</strong> ${sourcePill(v.source)}${multBadge(v.sym, v.lastPrice != null ? v.lastPrice : v.entry)}</td>
                             <td>${sidePill(v.side)}</td>
                             <td class="num">${v.shares != null ? v.shares : "—"}</td>
                             <td class="num">${v.totalCost != null ? fmtMoney(v.totalCost) : "—"}</td>
@@ -2096,7 +2110,7 @@
                         <tr class="${rowClass}">
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}${multBadge(t.symbol)}</td>
+                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}${multBadge(t.symbol, t.entry_price)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -2296,7 +2310,7 @@
                                     <span class="mobile-pos-ticker">${v.sym}</span>
                                     ${sourcePill(v.source)}
                                     ${sidePill(v.side)}
-                                    ${multBadge(v.sym)}
+                                    ${multBadge(v.sym, v.lastPrice != null ? v.lastPrice : v.entry)}
                                 </div>
                                 <div class="mobile-pos-meta">${v.entryTime} · ${v.shares != null ? v.shares : "—"} stk · Kostpris ${v.totalCost != null ? fmtMoney(v.totalCost) : "—"} · Margin ${fmtMoney(v.marginCost)}</div>
                                 <div class="mobile-pos-prices">
@@ -2344,7 +2358,7 @@
                                     <span class="mobile-trade-ticker">${t.symbol}</span>
                                     ${sourcePill(t.source)}
                                     ${sidePill(t.side)}
-                                    ${multBadge(t.symbol)}
+                                    ${multBadge(t.symbol, t.entry_price)}
                                 </div>
                                 <div class="mobile-trade-time">${entryTime} → ${exitTime} · ${t.shares} stk · Kostpris ${_mNotional != null ? fmtMoney(_mNotional) : "—"} · Margin ${fmtMoney(POSITION_SIZE)}</div>
                                 <div class="mobile-pos-prices">
@@ -2640,7 +2654,7 @@
                             <td>${date}</td>
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}${multBadge(t.symbol)}</td>
+                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}${multBadge(t.symbol, t.entry_price)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
