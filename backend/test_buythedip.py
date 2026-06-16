@@ -387,7 +387,7 @@ def section_F():
           [x.get("exit_reason") for x in c] == ["reconcile_flatten"], c)
 
     # F2: fremmed position uden BuyTheDip-spor → observe-only, INGEN ordre
-    o, c = asyncio.run(run_reconcile([], [{"ticker": "ZZZ", "position": 50}]))
+    o, c = asyncio.run(run_reconcile([], [{"ticker": "ZZZ", "position": 50.0}]))
     check("F2 fremmed → 0 ordrer", o == [], o)
 
     # F3: force-close fill-verifikation — ufyldt → bevares åben, INGEN close

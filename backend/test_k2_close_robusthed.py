@@ -157,7 +157,7 @@ def section_A():
     check("A2 delt aktiv → SELL BBB 100 (ikke 150)", o == [("BBB", "SELL", 100)], o)
 
     # A3 fremmed: ingen K2-row, IBKR holder CCC → 0 ordrer
-    o, c = asyncio.run(run([], [{"ticker": "CCC", "position": 200}]))
+    o, c = asyncio.run(run([], [{"ticker": "CCC", "position": 200.0}]))
     check("A3 fremmed position → 0 ordrer", o == [], o)
     check("A3 ingen close bogført", c == [], c)
 
@@ -167,12 +167,12 @@ def section_A():
     check("A4 bogført reconcile_phantom", c == ["reconcile_phantom"], c)
 
     # A5 inkonsistent retning: EEE long 100, IBKR -100 → 0 ordrer
-    o, c = asyncio.run(run([row("EEE", "long", 100)], [{"ticker": "EEE", "position": -100}]))
+    o, c = asyncio.run(run([row("EEE", "long", 100)], [{"ticker": "EEE", "position": -100.0}]))
     check("A5 inkonsistent retning → 0 ordrer", o == [], o)
     check("A5 ingen close bogført", c == [], c)
 
     # A6 utilstrækkeligt netto: FFF long 100, IBKR +40 → 0 ordrer
-    o, c = asyncio.run(run([row("FFF", "long", 100)], [{"ticker": "FFF", "position": 40}]))
+    o, c = asyncio.run(run([row("FFF", "long", 100)], [{"ticker": "FFF", "position": 40.0}]))
     check("A6 |net|<antal → 0 ordrer", o == [], o)
 
     # A7 fail-safe: list_trades kaster → returnerer uden at kaste, 0 ordrer

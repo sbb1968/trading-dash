@@ -362,7 +362,7 @@ class Confluence2Live(BaseStrategy):
                 # Inkonsistent — rør den IKKE (kan være en anden strategi).
                 await self._log(
                     f"🔎 {sym}: K2-journal siger {side} {shares}, IBKR holder "
-                    f"{net:+d} — inkonsistent, observe-only (rører den IKKE)",
+                    f"{net:+.0f} — inkonsistent, observe-only (rører den IKKE)",
                     level="warning")
                 continue
 
@@ -374,7 +374,7 @@ class Confluence2Live(BaseStrategy):
         for sym, net in ibkr_by_ticker.items():
             if net and sym not in k2_tickers:
                 await self._log(
-                    f"🔎 {sym} ({net:+d}) holdes i IBKR uden K2-journal-spor — "
+                    f"🔎 {sym} ({net:+.0f}) holdes i IBKR uden K2-journal-spor — "
                     f"observe-only (anden strategi eller manuel handel)", level="warning")
 
         if cleaned:

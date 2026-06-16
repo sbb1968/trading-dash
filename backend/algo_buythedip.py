@@ -207,14 +207,14 @@ class BuyTheDipLive(BaseStrategy):
             if net_sign != sign or abs(net) < shares:
                 await self._log(
                     f"🔎 {sym}: BuyTheDip-journal siger {side} {shares}, IBKR holder "
-                    f"{net:+d} — inkonsistent, observe-only (rører den IKKE)", level="warning")
+                    f"{net:+.0f} — inkonsistent, observe-only (rører den IKKE)", level="warning")
                 continue
             await self._reconcile_close(sym, row, shares, sign)
             cleaned += 1
         for sym, net in ibkr_by_ticker.items():
             if net and sym not in own:
                 await self._log(
-                    f"🔎 {sym} ({net:+d}) holdes i IBKR uden BuyTheDip-journal-spor — "
+                    f"🔎 {sym} ({net:+.0f}) holdes i IBKR uden BuyTheDip-journal-spor — "
                     f"observe-only (anden strategi eller manuel handel)", level="warning")
         self._status("started",
                      f"Reconciliation: ryddede {cleaned} gammel/gamle BuyTheDip-position(er) op"
