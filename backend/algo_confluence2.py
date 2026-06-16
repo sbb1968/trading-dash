@@ -733,7 +733,8 @@ class Confluence2Live(BaseStrategy):
 
                 if t < SESSION_START:
                     self._status("orb_ready",
-                                 f"Venter på handelsvindue — starter kl. {SESSION_START.strftime('%H:%M')} ET")
+                                 f"Venter på handelsvindue — starter kl. {SESSION_START.strftime('%H:%M')} ET",
+                                 persist=False)
                     await asyncio.sleep(LOOP_SLEEP_SECONDS)
                     continue
 
@@ -756,7 +757,8 @@ class Confluence2Live(BaseStrategy):
                 self._status("trading",
                              f"Overvåger {len(self.universe)} aktier — "
                              f"{now_et.strftime('%H:%M:%S')} ET | "
-                             f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
+                             f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}",
+                             persist=False)
 
                 if (now_et - _last_heartbeat).total_seconds() >= HEARTBEAT_INTERVAL_SEC:
                     _last_heartbeat = now_et
@@ -770,7 +772,8 @@ class Confluence2Live(BaseStrategy):
 
                 if self._position_size_pct == 0.0:
                     self._status("orb_ready",
-                                 "🔴 Ingen handel i dag — markedsforholdene er ikke til stede")
+                                 "🔴 Ingen handel i dag — markedsforholdene er ikke til stede",
+                                 persist=False)
                     await asyncio.sleep(60)
                     continue
 

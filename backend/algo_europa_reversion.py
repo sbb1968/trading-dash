@@ -408,7 +408,8 @@ class EuropaReversionLive(BaseStrategy):
                 if t < SESSION_START_ET:
                     self._status("orb_ready",
                                  f"Venter på EU-session — starter kl. "
-                                 f"{SESSION_START_ET.strftime('%H:%M')} ET")
+                                 f"{SESSION_START_ET.strftime('%H:%M')} ET",
+                                 persist=False)
                     await asyncio.sleep(LOOP_SLEEP_SECONDS)
                     continue
 
@@ -430,7 +431,8 @@ class EuropaReversionLive(BaseStrategy):
                 self._status("trading",
                              f"Overvåger {len(INSTRUMENTS)} instrumenter — "
                              f"{now_et.strftime('%H:%M:%S')} ET | "
-                             f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}")
+                             f"Positioner: {self.stats.open_positions}/{self.config.max_open_positions}",
+                             persist=False)
 
                 if (now_et - _last_heartbeat).total_seconds() >= HEARTBEAT_INTERVAL_SEC:
                     _last_heartbeat = now_et

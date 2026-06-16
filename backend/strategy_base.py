@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 MAX_CONNECT_RETRIES = 3
 CONNECT_RETRY_DELAY = 10   # sekunder mellem genforbindelsesforsøg
+# Hvor ofte en rutine-status (persist=False) MÅ skrives til events-historikken.
+# Live-broadcastet er uændret hyppigt; kun DB-rækkerne throttles, så loopets
+# "Venter"/"Overvåger"-tick ikke fylder events-tabellen med en række hver ~20s.
+STATUS_PERSIST_THROTTLE_SEC = 300   # 5 min — samme kadence som diagnostics_heartbeat
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +174,7 @@ class BaseStrategy(ABC):
     # Fælles wrapper-hjælpere (løftet fra de enkelte strategier — Trin 1)
     # -----------------------------------------------------------------------
 
-    def _status(self, status: str, message: str):
+    def _status(self, status: str, message: str, persist: bool = True):
         msg = {
             "type":      "algo_status",
             "strategy":  self.name,
@@ -187,7 +191,21 @@ class BaseStrategy(ABC):
 
         # Gem også til journal så pre-flight-trin, universe og status-beskeder
         # kan ses i historik-loggen bagefter (ikke kun live via broadcast).
+        # persist=True (default): skriv ALTID — pre-flight, universe, status-
+        # overgange, handler, fejl. persist=False: rutine-tick fra trading-loopet
+        # ("Venter"/"Overvåger"/"ingen handel") der ellers skrev en række hver ~20s;
+        # broadcastes stadig live ovenfor, men DB-historikken throttles PR. status-
+        # nøgle til hvert STATUS_PERSIST_THROTTLE_SEC, så fx "Overvåger" (trading) og
+        # en ventebesked (orb_ready) ikke skygger for hinanden.
         if self._journal:
+            if not persist:
+                if not hasattr(self, "_status_throttle"):
+                    self._status_throttle = {}
+                _now  = datetime.now(ET)
+                _last = self._status_throttle.get(status)
+                if _last is not None and (_now - _last).total_seconds() < STATUS_PERSIST_THROTTLE_SEC:
+                    return
+                self._status_throttle[status] = _now
             try:
                 asyncio.create_task(self._journal.log_event(
                     source     = self.name,
