@@ -2,11 +2,11 @@
 algo_buythedip.py
 ─────────────────
 Live trading-wrapper for "BuyTheDip" — long-only intradag mean-reversion der køber
-washout-bunden efter en impuls og rider reclaim'en. K2's komplement: K2 køber
+dip-bunden efter en impuls og rider bounce'en. K2's komplement: K2 køber
 impuls-TOPPEN, BuyTheDip køber DYKKET-bouncen (0/3 tab på K2's tabsdage i validering).
 
 Entry/exit-logikken er den validerede regel fra june_correlation.scan_trade, live-
-tilpasset: detektér washout på FÆRDIGE 1-min bars, entr på reclaim-barens LUK (lidt
+tilpasset: detektér dip på FÆRDIGE 1-min bars, entr på bounce-barens LUK (lidt
 mere konservativt end backtestens open-entry — paper er dommeren).
 
 Strukturelt spejler den Confluence2Live (samme delte konto, samme universmotor):
@@ -47,7 +47,7 @@ FORCE_CLOSE_ET = dtime(15, 55)   # tvangsluk-backstop før 16:00-lukning
 # ── Validerede strategi-parametre (june_correlation DEFAULTS) ──
 LOOKBACK      = 20
 MIN_RUNUP_PCT = 3.0    # impuls: (ref_high−ref_low)/ref_low ≥ dette
-WASHOUT_PCT   = 1.5    # washout: bar.low ≤ ref_high·(1−dette/100)
+DIP_PCT   = 1.5    # dip: bar.low ≤ ref_high·(1−dette/100)
 TARGET_PCT    = 2.0    # target = entry × (1 + dette/100)
 
 # ── Sizing (DEPLOY-valg — backtesten var %-baseret; TUN på paper) ──
@@ -64,7 +64,7 @@ UNIVERSE_WAIT_MIN        = 10   # giv K2 op til så mange min til at publicere u
 
 
 class BuyTheDipLive(BaseStrategy):
-    """Live-wrapper for BuyTheDip (washout-reclaim, long-only, paper)."""
+    """Live-wrapper for BuyTheDip (buy-the-dip, long-only, paper)."""
 
     def __init__(self, conn: IBKRConnection, config: Optional[StrategyConfig] = None):
         super().__init__(config)
@@ -72,13 +72,13 @@ class BuyTheDipLive(BaseStrategy):
         # Beslutningslogik bor i denne fil (ingen pakke-strategi som K2/EUREVERSION).
         self._strategy = None
 
-        # Per-ticker washout-state: None | {"washout_low", "ref_high"}. Sat når en
-        # washout detekteres; ryddes ved reclaim-entry (eller ny dag).
-        self._washout: dict[str, dict] = {}
+        # Per-ticker dip-state: None | {"dip_low", "ref_high"}. Sat når en
+        # dip detekteres; ryddes ved bounce-entry (eller ny dag).
+        self._dip_state: dict[str, dict] = {}
         # Tickers der allerede har taget (eller forsøgt) dagens ene setup → ingen genentry.
         self._done_today: set[str] = set()
         # Positions-dict pr. ticker: {side, entry_price, shares, stop, target,
-        #   entry_time, trade_id, wo_depth, ref_high, washout_low}.
+        #   entry_time, trade_id, dip_depth, ref_high, dip_low}.
         self._positions: dict[str, dict] = {}
 
         # Diagnostik (Lag C)
@@ -96,7 +96,7 @@ class BuyTheDipLive(BaseStrategy):
 
     @property
     def description(self) -> str:
-        return ("Long-only intradag washout-reclaim (køber dykket-bouncen efter en "
+        return ("Long-only intradag buy-the-dip (køber dykket-bouncen efter en "
                 "impuls). K2-komplement. Forbruger K2's univers. Paper.")
 
     @property
@@ -143,7 +143,7 @@ class BuyTheDipLive(BaseStrategy):
         if self._loop_task and not self._loop_task.done():
             logger.warning("[BuyTheDip] _trading_loop kører allerede — afbryder ny start")
             return
-        self._status("started", "Algoritme starter — BuyTheDip (washout-reclaim)")
+        self._status("started", "Algoritme starter — BuyTheDip (buy-the-dip)")
         await self._reconcile_orphans()
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
@@ -308,7 +308,7 @@ class BuyTheDipLive(BaseStrategy):
         return tickers
 
     # -------------------------------------------------------------
-    # Trading-loop (to-fase: exits, så entries efter washout-dybde-prioritet)
+    # Trading-loop (to-fase: exits, så entries efter dip-dybde-prioritet)
     # -------------------------------------------------------------
     async def _trading_loop(self):
         self._status("trading", "Overvåger markedet — venter på 1-min bars...")
@@ -368,8 +368,8 @@ class BuyTheDipLive(BaseStrategy):
                         res = await self._check_ticker(ticker, allow_entries)
                         if res is not None:
                             candidates.append(res)
-                    # Entries efter dybeste washout først, op til frie pladser.
-                    candidates.sort(key=lambda c: -c[1]["wo_depth"])
+                    # Entries efter dybeste dip først, op til frie pladser.
+                    candidates.sort(key=lambda c: -c[1]["dip_depth"])
                     for ticker, setup, bar in candidates:
                         if self.stats.open_positions >= self.config.max_open_positions:
                             break
@@ -397,7 +397,7 @@ class BuyTheDipLive(BaseStrategy):
 
     async def _check_ticker(self, ticker: str, allow_entries: bool):
         """Hent seneste færdige bar; håndtér exit på åben position; ellers detektér
-        setup (returnér (ticker, setup, bar) hvis reclaim-entry er klar)."""
+        setup (returnér (ticker, setup, bar) hvis bounce-entry er klar)."""
         new_bar = await self._fetch_latest_bar(ticker)
         if new_bar is None:
             return None
@@ -409,12 +409,12 @@ class BuyTheDipLive(BaseStrategy):
         self._diag_eval_count += 1
 
         # Forensik/watchdog: log hver bar-evaluering.
-        wo = self._washout.get(ticker)
+        wo = self._dip_state.get(ticker)
         status = ("holding" if ticker in self._positions
-                  else "washout_pending" if wo else "scanning")
+                  else "dip_pending" if wo else "scanning")
         await self.log_bar_evaluation(
             ticker=ticker, bar_time_et=new_bar.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            status=status, score=int(wo["wo_depth"]) if wo and "wo_depth" in wo else None)
+            status=status, score=int(wo["dip_depth"]) if wo and "dip_depth" in wo else None)
 
         if ticker in self._positions:
             await self._check_exit(ticker, new_bar)
@@ -449,15 +449,15 @@ class BuyTheDipLive(BaseStrategy):
             return None
 
     # -------------------------------------------------------------
-    # Detektion — washout → reclaim (validerede scan_trade-regel, streaming)
+    # Detektion — dip → bounce (validerede scan_trade-regel, streaming)
     # -------------------------------------------------------------
     def _detect(self, ticker: str, bar: Bar):
-        """Returnér (ticker, setup, bar) hvis DENNE bar er reclaim'en efter en washout,
-        ellers None. Sætter washout-state når en washout først detekteres."""
+        """Returnér (ticker, setup, bar) hvis DENNE bar er bounce'en efter en dip,
+        ellers None. Sætter dip-state når en dip først detekteres."""
         hist = self._bar_history.get(ticker, [])
         if len(hist) < LOOKBACK:
             return None
-        wo = self._washout.get(ticker)
+        wo = self._dip_state.get(ticker)
         if wo is None:
             window = hist[-LOOKBACK:]
             ref_high = max(b.high for b in window)
@@ -466,20 +466,20 @@ class BuyTheDipLive(BaseStrategy):
                 return None
             if (ref_high - ref_low) / ref_low * 100.0 < MIN_RUNUP_PCT:
                 return None
-            # Er DENNE bar en washout (lav nok under impuls-toppen)?
-            if bar.low > ref_high * (1 - WASHOUT_PCT / 100.0):
+            # Er DENNE bar en dip (lav nok under impuls-toppen)?
+            if bar.low > ref_high * (1 - DIP_PCT / 100.0):
                 return None
-            washout_low = min(b.low for b in window)
-            self._washout[ticker] = {
-                "washout_low": washout_low, "ref_high": ref_high,
-                "wo_depth": (ref_high - washout_low) / ref_high * 100.0,
+            dip_low = min(b.low for b in window)
+            self._dip_state[ticker] = {
+                "dip_low": dip_low, "ref_high": ref_high,
+                "dip_depth": (ref_high - dip_low) / ref_high * 100.0,
             }
             self._diag_setups += 1
-            return None   # reclaim er en SENERE bar
-        # Washout afventer reclaim: første grønne bar (close > forrige close).
+            return None   # bounce er en SENERE bar
+        # Dip afventer bounce: første grønne bar (close > forrige close).
         if len(hist) < 2 or bar.close <= hist[-2].close:
             return None
-        setup = dict(wo)            # washout_low, ref_high, wo_depth
+        setup = dict(wo)            # dip_low, ref_high, dip_depth
         return (ticker, setup, bar)
 
     # -------------------------------------------------------------
@@ -488,23 +488,23 @@ class BuyTheDipLive(BaseStrategy):
     async def _open(self, ticker: str, setup: dict, bar: Bar):
         if ticker in self._positions or ticker in self._done_today:
             return
-        entry = bar.close                       # live: entr på reclaim-barens LUK
-        stop  = setup["washout_low"]
+        entry = bar.close                       # live: entr på bounce-barens LUK
+        stop  = setup["dip_low"]
         risk_per_share = entry - stop
         if risk_per_share <= 0 or entry <= 0:
             self._done_today.add(ticker)
-            self._washout.pop(ticker, None)
+            self._dip_state.pop(ticker, None)
             return
         shares = int(min(RISK_BUDGET_USD / risk_per_share, NOTIONAL_CAP_USD / entry))
         if shares < 1:
             self._done_today.add(ticker)
-            self._washout.pop(ticker, None)
+            self._dip_state.pop(ticker, None)
             return
 
         order = OrderRequest(
             strategy_name=self.name, ticker=ticker, action="BUY", quantity=shares,
             order_type="MKT", asset_class="equity",
-            reason=f"BuyTheDip reclaim wo_depth={setup['wo_depth']:.1f}%")
+            reason=f"BuyTheDip bounce dip_depth={setup['dip_depth']:.1f}%")
         if self._risk_manager:
             if not await self.request_order(order):
                 return
@@ -532,22 +532,22 @@ class BuyTheDipLive(BaseStrategy):
             trade_id = await self._journal.log_trade_open(
                 source=self.name, symbol=ticker, side="long", shares=shares,
                 entry_price=entry, entry_time=entry_time,
-                entry_reason=f"BuyTheDip reclaim (wo_depth={setup['wo_depth']:.1f}%)",
+                entry_reason=f"BuyTheDip bounce (dip_depth={setup['dip_depth']:.1f}%)",
                 current_stop=stop, current_target=target, current_stage="initial",
-                payload={"wo_depth": round(setup["wo_depth"], 4),
+                payload={"dip_depth": round(setup["dip_depth"], 4),
                          "ref_high": round(setup["ref_high"], 4),
-                         "washout_low": round(stop, 4),
+                         "dip_low": round(stop, 4),
                          "risk_per_share": round(risk_per_share, 4)})
 
         self._positions[ticker] = {
             "side": "long", "entry_price": entry, "shares": shares,
             "stop": stop, "target": target, "entry_time": entry_time,
-            "trade_id": trade_id, "wo_depth": setup["wo_depth"],
-            "ref_high": setup["ref_high"], "washout_low": stop,
+            "trade_id": trade_id, "dip_depth": setup["dip_depth"],
+            "ref_high": setup["ref_high"], "dip_low": stop,
         }
         self.stats.open_positions = len(self._positions)
         self._done_today.add(ticker)
-        self._washout.pop(ticker, None)
+        self._dip_state.pop(ticker, None)
         self._mfe[ticker] = entry
         self._mae[ticker] = entry
         self._diag_entries += 1
@@ -559,8 +559,8 @@ class BuyTheDipLive(BaseStrategy):
                 bars=self._bar_history.get(ticker, []), context={}, tape_buffer=None,
                 variant_name=self.name)
             snap["buythedip"] = {
-                "wo_depth": round(setup["wo_depth"], 4), "ref_high": round(setup["ref_high"], 4),
-                "washout_low": round(stop, 4), "target": round(target, 4),
+                "dip_depth": round(setup["dip_depth"], 4), "ref_high": round(setup["ref_high"], 4),
+                "dip_low": round(stop, 4), "target": round(target, 4),
                 "risk_per_share": round(risk_per_share, 4)}
             if self._journal:
                 await self._journal.log_event(source=self.name, event_type="trade_forensics",
@@ -574,7 +574,7 @@ class BuyTheDipLive(BaseStrategy):
                 "ticker": ticker, "price": entry, "shares": shares,
                 "time": entry_time.strftime("%H:%M:%S")})
         await self._log(f"📉➡️📈 {ticker}: BUY {shares} @ ${entry:.2f} "
-                        f"(stop ${stop:.2f}, target ${target:.2f}, wo {setup['wo_depth']:.1f}%)")
+                        f"(stop ${stop:.2f}, target ${target:.2f}, wo {setup['dip_depth']:.1f}%)")
 
     # -------------------------------------------------------------
     # Exit
@@ -651,7 +651,7 @@ class BuyTheDipLive(BaseStrategy):
                 exit_reason=reason, pnl=pnl,
                 payload={"max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
                          "max_adverse_excursion":   round(mae, 4) if mae is not None else None,
-                         "wo_depth": round(pos.get("wo_depth", 0), 4)})
+                         "dip_depth": round(pos.get("dip_depth", 0), 4)})
 
         try:
             snap = build_exit_snapshot(
@@ -659,7 +659,7 @@ class BuyTheDipLive(BaseStrategy):
                 entry_time=pos["entry_time"], exit_time=exit_time, shares=shares,
                 pnl=pnl, reason=reason, bars=self._bar_history.get(ticker, []),
                 context={}, tape_buffer=None, variant_name=self.name)
-            snap["buythedip"] = {"reason": reason, "wo_depth": round(pos.get("wo_depth", 0), 4)}
+            snap["buythedip"] = {"reason": reason, "dip_depth": round(pos.get("dip_depth", 0), 4)}
             if self._journal:
                 await self._journal.log_event(source=self.name, event_type="trade_forensics",
                                               symbol=ticker, payload=snap)
