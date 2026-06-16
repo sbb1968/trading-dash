@@ -173,11 +173,20 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
     ),
 }
 
-# Live-variant: A_impulse_low. Valgt efter validering på maj (in-sample,
-# portefølje-PF 2,85/3,01) OG april (out-of-sample, PF 1,83/1,69), begge med
-# lav drawdown og robust på tværs af fifo/priority signalvalg. De øvrige
-# varianter (B/C/D) overlevede ikke slippage + positions-loft og er kun ref.
-LIVE_VARIANT_KEY = "A_impulse_low"
+# Live-variant: A_atrfloor_20 — impuls-low-stop med ATR-gulv på 2,0× ATR. Gulvet
+# udvider et for tæt stop (stop = min(impuls-low, entry − 2,0×ATR)), så normal støj
+# ikke skraber os ud før bevægelsen udfolder sig. Valgt efter validering på
+# anker-universet (historical_universe april+maj, 100% cache): slår tidligere
+# live-variant A_impulse_low på portefølje-PF i BEGGE måneder ved 2¢ slippage
+# (maj 2,44/2,57 vs 2,37/2,36 · april 2,07/1,84 vs 1,62/1,49), med bedre maxDD og
+# højere win rate (44%/38% vs 38%/30%). Udvidet ATR-gulv-sweep (0,5×→5,0×)
+# bekræftede 2,0× som den ROBUSTE værdi, ikke en højere: forbi 2,0× kommer
+# PF-gevinsten i stigende grad fra at bære positioner til sessionsluk (exit-mix
+# vipper mod hold-til-luk — stop binder kun ~50% ved 3,0×, 27-37% ved 5,0×), og
+# aprils OOS-PF topper ~3,0× og FALDER ved 4,0× → uvalideret regime-risiko uden en
+# bear/choppy måned. A_impulse_low + øvrige (B/C/D, A_minR_*, A_atrfloor 0,5–5,0×)
+# bevares som dokumenterede backtest-referencer.
+LIVE_VARIANT_KEY = "A_atrfloor_20"
 
 # ── Strategi-konstanter (ikke variant-specifikke) ─────────────
 SESSION_START_HHMM = (9, 30)
