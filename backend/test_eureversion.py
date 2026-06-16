@@ -90,6 +90,7 @@ class MockJournal:
         self.events = []
         self.opens = []
         self.closes = []
+        self.state_updates = []
         self._tid = 0
 
     async def log_event(self, source, event_type, payload, symbol=None):
@@ -104,7 +105,7 @@ class MockJournal:
         self.closes.append(kw)
 
     async def update_trade_state(self, **kw):
-        pass
+        self.state_updates.append(kw)
 
     def ev(self, etype):
         return [e for e in self.events if e[0] == etype]
@@ -324,6 +325,58 @@ def section_F():
     check("F3 fremmed instrument-klasse (AAPL) → usynlig, 0 ordrer", o == [], o)
 
 
+# ── G — gates + vindue + reconcile-edge ────────────────────────
+def section_G():
+    print("\nSektion G — gates (max_open, vindue) + reconcile-edge")
+
+    # A4-gate: open_positions ≥ max_open → _open springer over (ingen entry)
+    a = make_algo(MockConn(equity=100000.0), MockJournal(), max_open=2)
+    a.stats.open_positions = 2
+    asyncio.run(a._open("MES", "long", mk(3, 0, 5000.0), sd=4.0, z=-2.5))
+    check("G/A4 max_open nået → ingen entry", "MES" not in a._positions, list(a._positions))
+
+    # G1: bar UDEN for EU-sessionen (12:00 ET) + flad + |z|≥entry → ingen entry
+    a = make_algo(MockConn(equity=100000.0), MockJournal())
+    asyncio.run(a._evaluate_bar("MES", mk(12, 0, 5000.0), z=-2.5, sd=4.0))
+    check("G1 uden for session → ingen entry", "MES" not in a._positions, list(a._positions))
+
+    # C2: _close_all lukker åbne positioner
+    a, conn, j = _algo_with_pos("long", 5000.0)
+    asyncio.run(a._close_all("session_end"))
+    check("C2 _close_all lukker positionen", "MES" not in a._positions, list(a._positions))
+    check("C2 lukke-ordre sendt", any(o[1] == "SELL" for o in conn.orders), conn.orders)
+
+    # E3: IBKR flad (ingen futures-positioner) → reconcile rører intet (ingen ordre)
+    conn = MockConn(positions=[])
+    a = make_algo(conn, MockJournal())
+    trade_queries.list_trades = lambda db, **kw: _ret(
+        [{"symbol": "MES", "side": "long", "shares": 2, "trade_id": "t1"}])
+    asyncio.run(a._reconcile_orphans())
+    check("E3 IBKR flad → 0 ordrer (intet at lukke)", conn.orders == [], conn.orders)
+
+
+# ── H — live P&L + hold + bar_evaluation-status ────────────────
+def section_H():
+    print("\nSektion H — live P&L (update_trade_state) + hold + bar_evaluation")
+
+    # H1 + B4: åben position, z i hold-zone (long z=−1.0 → exit_reason None) →
+    #   position FORBLIVER åben OG update_trade_state kaldes med bar.close.
+    a, conn, j = _algo_with_pos("long", 5000.0)
+    asyncio.run(a._evaluate_bar("MES", mk(3, 0, 5003.0), z=-1.0, sd=4.0))
+    check("B4 hold-zone (z=−1.0) → position forbliver åben", "MES" in a._positions)
+    check("H1 update_trade_state(current_price=bar.close) kaldt",
+          j.state_updates and j.state_updates[-1].get("current_price") == 5003.0, j.state_updates)
+
+    # F1 (KENDT HUL): EUREVERSION emitterer IKKE bar_evaluation → usynlig for
+    # datablind-watchdoggen. Vi LÅSER den nuværende adfærd (Trin 2 må ikke ændre
+    # den utilsigtet) og flagger den i rapporten som et separat fix.
+    a, conn, j = _algo_with_pos("long", 5000.0)
+    for px in (5001.0, 5002.0, 5003.0):
+        asyncio.run(a._evaluate_bar("MES", mk(3, 0, px), z=-1.0, sd=4.0))
+    check("F1 (baseline) EUREVERSION emitterer p.t. INGEN bar_evaluation [KENDT HUL]",
+          j.ev("bar_evaluation") == [], j.ev("bar_evaluation"))
+
+
 if __name__ == "__main__":
     print("Test: Europa-reversion (adfærds-lås + Trin 2 regressions-gate)")
     section_A()
@@ -332,4 +385,6 @@ if __name__ == "__main__":
     section_D()
     section_E()
     section_F()
+    section_G()
+    section_H()
     print("\nALLE TESTS BESTÅET ✓")
