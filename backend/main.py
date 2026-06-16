@@ -356,6 +356,20 @@ async def startup():
         europa_rev._broadcast_fn = broadcast_algo_sync
         print(f"[Server] Europa-reversion registreret — futures MES/M2K, EU-session")
 
+        # ── Registrér BuyTheDip (washout-reclaim, K2-komplement, paper) ──
+        from algo_buythedip import BuyTheDipLive
+
+        buythedip_config = StrategyConfig(
+            max_loss_per_trade  = 150.0,
+            max_daily_loss      = 300.0,
+            max_open_positions  = 3,       # MAX_CONCURRENT
+            max_position_size   = 1000.0,  # = NOTIONAL_CAP_USD (sizer risiko-baseret)
+        )
+        buythedip = BuyTheDipLive(strategy_manager.get_ibkr(), config=buythedip_config)
+        strategy_manager.register(buythedip)
+        buythedip._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] BuyTheDip registreret — washout-reclaim, forbruger K2-univers")
+
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
     asyncio.create_task(start_finnhub_feed())
