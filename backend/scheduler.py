@@ -164,18 +164,10 @@ class AlgoScheduler:
         self._running = True
         self._task    = asyncio.create_task(self._loop())
 
-        # Log næste planlagte start
-        nxt = self._next_scheduled_start()
-        if self._instance_role == "algoserver":
-            logger.info(
-                f"[Scheduler] Startet (algoserver) — næste algo-start: "
-                f"{nxt.strftime('%Y-%m-%d %H:%M ET')}"
-            )
-        else:
-            logger.info(
-                f"[Scheduler] Startet ({self._instance_role}) — "
-                f"auto-start af algo deaktiveret, kør manuelt fra UI"
-            )
+        logger.info(
+            f"[Scheduler] Startet ({self._instance_role}) — "
+            f"reset_daily aktiv, ingen auto-start af strategier planlagt"
+        )
 
     async def stop(self):
         self._running = False

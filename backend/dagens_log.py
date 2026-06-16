@@ -2,12 +2,11 @@
 dagens_log.py — fuldt overblik over dagens journal-events + dyb per-handel-forensik.
 
 Brug:
-    python dagens_log.py                       # alle strategier, i dag (overblik + CSV)
+    python dagens_log.py                       # alle strategier, i dag
     python dagens_log.py Konfluens             # filtrer på én strategi
     python dagens_log.py Konfluens 2026-05-27  # specifik dato
     python dagens_log.py --forensics           # + dyb per-handel-forensik i terminalen
     python dagens_log.py 2026-06-12 --forensics
-    python dagens_log.py --no-csv              # spring CSV-eksporten over
 
 Strengt READ-ONLY (sqlite mode=ro) — sikker at køre ved siden af en kørende strategi.
 
@@ -24,20 +23,13 @@ Overblik (altid) viser i rækkefølge:
 
 --forensics: for HVER handel i trades-tabellen dumpes ALT vi gemmer — hele
 trades-rækken (priser, tider ET+dansk, P&L, risiko, stop) + det matchede
-entry- og exit-snapshot (indikatorer, setup, tape, depth, MFE/MAE) side om side,
-samt tilknyttede afvisninger/ordrer for symbolet.
-
-CSV (altid, medmindre --no-csv): én række pr. handel med SAMTLIGE felter fladet
-ud — kanonisk trades-data + strategi-payload + entry/exit-snapshot. Excel-venlig
-(dansk: ';'-separator, ','-decimal, UTF-8-BOM). Gemmes i dagens_log_output/ med
-tidsstempel i filnavnet. Forensics matches pr. (source, symbol, nærmeste tid).
+entry- og exit-snapshot (indikatorer, setup, tape, depth, MFE/MAE) side om side.
+Forensics matches pr. (source, symbol, nærmeste tid).
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import json
-import os
 import sqlite3
 import sys
 from collections import defaultdict
@@ -50,7 +42,6 @@ except Exception:                       # pragma: no cover
     _CPH = None
 
 DB_PATH = "trading_dash.db"
-OUT_DIRNAME = "dagens_log_output"
 
 # Match-tolerance når et forensics-snapshot kobles til en handel (sekunder).
 # Snapshottets time_et er bar-tidspunktet; handlens entry/exit ligger typisk
@@ -103,19 +94,6 @@ def _et_naive(s: str | None) -> datetime | None:
         return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
     except (ValueError, TypeError):
         return None
-
-
-def flatten(prefix: str, obj: dict, out: dict) -> None:
-    """Flad et (evt. nested) dict ud til 'prefix_key' = skalar. Lister/dicts på
-    bladniveau JSON-encodes som tekst (referencefelter til Excel)."""
-    for k, v in obj.items():
-        key = f"{prefix}{k}"
-        if isinstance(v, dict):
-            flatten(key + "_", v, out)
-        elif isinstance(v, list):
-            out[key] = json.dumps(v, ensure_ascii=False)
-        else:
-            out[key] = v
 
 
 def section(title: str) -> None:
@@ -420,79 +398,6 @@ def print_forensics(con, trades):
 
 
 # ─────────────────────────────────────────────────────────────────
-# CSV-eksport
-# ─────────────────────────────────────────────────────────────────
-CORE_COLUMNS = [
-    "trade_id", "source", "variant", "symbol", "side", "shares",
-    "entry_time_et", "entry_time_dk", "entry_price", "entry_reason",
-    "exit_time_et", "exit_time_dk", "exit_price", "exit_reason",
-    "pnl", "pnl_pct", "duration_sec", "capital_used",
-    "current_stop", "current_target", "trail_stop", "current_stage", "notes",
-    "account_id", "instance_id", "ibkr_account",
-]
-
-
-def build_trade_row(con, tr) -> dict:
-    """Én flad dict pr. handel: kerne-felter + strategi-payload + entry/exit-snapshot."""
-    row: dict = {}
-
-    # Strategi-specifik payload (entry_z, std, contracts, ...)
-    flatten("tp_", p(tr), row)
-
-    # Matchede snapshots
-    entry, exit_ = match_snapshots(con, tr)
-    if entry:
-        flatten("entry_", entry, row)
-    if exit_:
-        flatten("exit_", exit_, row)
-
-    # Kerne SIDST — den kanoniske trades-række vinder over snapshottets egne
-    # scalars (snapshottets time_et/price er bar-tid/-pris og ville ellers
-    # overskrive de præcise fyld-værdier i entry_time_et/entry_price).
-    for c in CORE_COLUMNS:
-        if c in ("entry_time_dk", "exit_time_dk"):
-            continue
-        row[c] = tr[c] if c in tr.keys() else None
-    row["entry_time_dk"] = dansk(tr["entry_time_utc"], full=True)
-    row["exit_time_dk"] = dansk(tr["exit_time_utc"], full=True)
-    return row
-
-
-def _fmt_cell(v, decimal_comma: bool) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, bool):
-        return "1" if v else "0"
-    if isinstance(v, float):
-        s = repr(v)
-        return s.replace(".", ",") if decimal_comma else s
-    return str(v)
-
-
-def write_csv(con, trades, date_filter, out_dir, delimiter=";", decimal_comma=True) -> str | None:
-    if not trades:
-        return None
-    os.makedirs(out_dir, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(out_dir, f"dagens_handler_{date_filter}_{stamp}.csv")
-
-    rows = [build_trade_row(con, tr) for tr in trades]
-
-    # Kolonne-rækkefølge: kerne først, så grupperet/sorteret resten (tp_, entry_, exit_).
-    seen = set(CORE_COLUMNS)
-    extra = sorted({k for r in rows for k in r if k not in seen},
-                   key=lambda k: (0 if k.startswith("tp_") else 1 if k.startswith("entry_") else 2, k))
-    header = CORE_COLUMNS + extra
-
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f, delimiter=delimiter)
-        w.writerow(header)
-        for r in rows:
-            w.writerow([_fmt_cell(r.get(c), decimal_comma) for c in header])
-    return path
-
-
-# ─────────────────────────────────────────────────────────────────
 # main
 # ─────────────────────────────────────────────────────────────────
 def main():
@@ -504,8 +409,6 @@ def main():
     ap = argparse.ArgumentParser(description="Dagens journal-overblik + per-handel-forensik (read-only)")
     ap.add_argument("args", nargs="*", help="valgfrit: strateginavn og/eller dato (YYYY-MM-DD)")
     ap.add_argument("--forensics", action="store_true", help="dyb per-handel-forensik i terminalen")
-    ap.add_argument("--no-csv", action="store_true", help="spring CSV-eksporten over")
-    ap.add_argument("--out-dir", default=OUT_DIRNAME, help="mappe til CSV (default dagens_log_output)")
     ns = ap.parse_args()
 
     strategy_filter = None
@@ -533,15 +436,6 @@ def main():
 
     if ns.forensics:
         print_forensics(con, trades)
-
-    if not ns.no_csv:
-        path = write_csv(con, trades, date_filter, ns.out_dir)
-        section("CSV-EKSPORT")
-        if path:
-            print(f"  {len(trades)} handler skrevet til:\n     {os.path.abspath(path)}")
-            print("  Format: ';'-separeret, ','-decimal, UTF-8-BOM — dobbeltklik åbner i dansk Excel.")
-        else:
-            print("  (ingen handler at eksportere)")
 
     return 0
 
