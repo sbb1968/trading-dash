@@ -43,8 +43,21 @@ DATA_BLIND_SEC        = 240     # >4 min uden bar_evaluation i session = databli
 STRATEGY_ALIVE_SEC    = 120     # backend har skrevet ET event indenfor 2 min = loop lever
 DATA_REMINDER_MIN     = 5       # minutter mellem datablind-alert #1 og #2
 DATA_MAX_ALERTS       = 2       # max push'er per datablind-periode (ingen spam)
-SESSION_OPEN_ET       = (9, 30) # US RTH start
+SESSION_OPEN_ET       = (9, 30) # US RTH start (K2 / BuyTheDip)
 SESSION_CLOSE_ET      = (16, 0) # US RTH slut
+
+# EUREVERSION-session (EU): 02:00–08:00 ET = 08:00–14:00 dansk. 15-min bars.
+EU_SESSION_OPEN_ET    = (2, 0)
+EU_SESSION_CLOSE_ET   = (8, 0)
+# EUREVERSIONs normale afstand mellem bar_evaluation ≈ 900s (15-min bar; sec_bareval er
+# MAX over BEGGE instrumenter, så enten MES eller M2K nulstiller den). DATA_BLIND_SEC=240
+# ville derfor melde "datablind" ved hver normal bar-gap → falsk-alarm-flod. 1200s = 900s
+# normal-gap + ~300s margin; kræver at BÅDE MES og M2K er tavse >20 min = ægte datablind.
+# Hæv til 1800 (= to manglende bars) hvis du vil være ekstra konservativ.
+DATA_BLIND_SEC_EU     = 1200
+# EU-alive-grænse > heartbeat-intervallet (300s), så EU-detektion er kontinuerlig som K2's
+# (hvor hyppig bar_evaluation holder sec_any lav). Se spec for begrundelse.
+STRATEGY_ALIVE_SEC_EU = 360
 
 # Auto-recovery er OPT-IN og som standard SLÅET FRA. Når True kalder watchdogen
 # KUN on_data_blind-callbacken (wired i main.py) — den dræber aldrig selv Gateway.
@@ -149,16 +162,25 @@ class TWSWatchdog:
     # Data-liveness — "forbundet men datablind"
     # ─────────────────────────────────────────────────────────
 
-    def _in_session(self) -> bool:
-        """True i US RTH (man-fre, 09:30-16:00 ET)."""
+    def _active_session(self) -> Optional[str]:
+        """Hvilken overvåget session er aktiv NU?
+        "US" (K2/BuyTheDip, 09:30-16:00 ET), "EU" (EUREVERSION, 02:00-08:00 ET),
+        eller None (ingen → overvåg ikke). Man-fre. Vinduerne overlapper ikke;
+        08:00-09:30 ET er bevidst dødt (ingen strategi handler der)."""
         import pytz
         et = datetime.now(pytz.timezone("America/New_York"))
         if et.weekday() >= 5:
-            return False
-        o_h, o_m = SESSION_OPEN_ET
-        c_h, c_m = SESSION_CLOSE_ET
+            return None
         mins = et.hour * 60 + et.minute
-        return (o_h * 60 + o_m) <= mins < (c_h * 60 + c_m)
+
+        def _within(open_et, close_et):
+            return (open_et[0] * 60 + open_et[1]) <= mins < (close_et[0] * 60 + close_et[1])
+
+        if _within(SESSION_OPEN_ET, SESSION_CLOSE_ET):
+            return "US"
+        if _within(EU_SESSION_OPEN_ET, EU_SESSION_CLOSE_ET):
+            return "EU"
+        return None
 
     def _read_data_marks(self):
         """
@@ -195,21 +217,34 @@ class TWSWatchdog:
             con.close()
 
     async def _handle_data_status(self):
-        # Kun relevant i åben US-session
-        if not self._in_session():
+        # Kun relevant i en overvåget session (US = K2/BuyTheDip, EU = EUREVERSION)
+        session = self._active_session()
+        if session is None:
             if self._data_was_live is False:
                 self._data_was_live    = None
                 self._data_blind_since = None
                 self._data_alerts_sent = 0
             return
 
+        # Session-bevidste grænser/etiket. EU har 15-min bars → meget længere tilladt
+        # gap end K2's 1-min cadence (ellers falsk alarm ved hver normal bar). EU-alive-
+        # grænsen > heartbeat (300s) → kontinuerlig EU-detektion som K2's.
+        if session == "EU":
+            blind_limit = DATA_BLIND_SEC_EU
+            alive_limit = STRATEGY_ALIVE_SEC_EU
+            strat_label = "EUREVERSION"
+        else:
+            blind_limit = DATA_BLIND_SEC
+            alive_limit = STRATEGY_ALIVE_SEC
+            strat_label = "K2"
+
         sec_bareval, sec_any = self._read_data_marks()
         # Kan vi ikke læse, eller har ingen strategi skrevet noget for nylig
         # (pulsen er forældet), antager vi "ingen strategi kører" → ingen alarm.
-        if sec_bareval is None or sec_any is None or sec_any > STRATEGY_ALIVE_SEC:
+        if sec_bareval is None or sec_any is None or sec_any > alive_limit:
             return
 
-        data_live = sec_bareval <= DATA_BLIND_SEC
+        data_live = sec_bareval <= blind_limit
 
         if data_live:
             if self._data_was_live is False:
@@ -220,7 +255,7 @@ class TWSWatchdog:
                 if self._data_alerts_sent > 0:
                     try:
                         await notifier.send(
-                            message  = f"Datafeed er tilbage efter ~{blind_min:.0f} min. K2 evaluerer igen.",
+                            message  = f"Datafeed er tilbage efter ~{blind_min:.0f} min. {strat_label} evaluerer igen.",
                             title    = "✅ Data tilbage",
                             priority = 3,
                             tags     = "white_check_mark",
@@ -244,7 +279,7 @@ class TWSWatchdog:
                            f"(loop lever, data død)")
             try:
                 await notifier.send(
-                    message  = f"K2 er DATABLIND — forbundet, men ingen kurser i "
+                    message  = f"{strat_label} er DATABLIND — forbundet, men ingen kurser i "
                                f"{sec_bareval/60:.0f}+ min. Genstart Gateway + backend.",
                     title    = "⚠ Datafeed nede",
                     priority = 5,
@@ -261,7 +296,7 @@ class TWSWatchdog:
             logger.warning(f"[Watchdog] ⚠ Stadig datablind efter ~{blind_sec/60:.0f} min")
             try:
                 await notifier.send(
-                    message  = f"K2 stadig datablind efter ~{blind_sec/60:.0f} min. Sidste påmindelse.",
+                    message  = f"{strat_label} stadig datablind efter ~{blind_sec/60:.0f} min. Sidste påmindelse.",
                     title    = "⏰ Datafeed stadig nede",
                     priority = 5,
                     tags     = "alarm_clock",
