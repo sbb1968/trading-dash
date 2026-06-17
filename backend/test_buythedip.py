@@ -10,7 +10,7 @@ Sektioner:
   B — concurrency + prioritet (to-fase, max 3, dybeste dip_depth)   ← højeste værdi
   C — sizing (min af risiko/notional + gulv)
   D — exit (stop / target / force-close)
-  E — universe-forbrug (K2's universe_selected)
+  E — univers (eget TV-volatility-scan, adskilt fra K2)
   F — isolation (scoped reconcile + fill-verifikation)
   G — vindue (ingen entry efter 10:30 ET)
   H — forensik-emission (bar_evaluation + trade_forensics)
@@ -119,6 +119,7 @@ def make_algo(conn, journal, max_open=3):
     a._diag_eval_count = 0
     a._diag_setups = 0
     a._diag_entries = 0
+    a._last_rejection = {}          # base Lag B-state (reset_diagnostics rører den)
     a.universe = []
     a.config = StrategyConfig(max_open_positions=max_open, max_position_size=1000.0)
     a.stats = StrategyStats()
@@ -321,49 +322,41 @@ def section_D():
     check("D3 SELL-ordre sendt", any(o[1] == "SELL" for o in conn.orders), conn.orders)
 
 
-# ── E — universe-forbrug ───────────────────────────────────────
-def _events_db(rows):
-    """Temp sqlite med events(ts_local, source, event_type, symbol, payload_json)."""
-    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    c = sqlite3.connect(path)
-    c.execute("CREATE TABLE events (ts_local TEXT, source TEXT, event_type TEXT, "
-              "symbol TEXT, payload_json TEXT)")
-    c.executemany("INSERT INTO events VALUES (?,?,?,?,?)", rows)
-    c.commit(); c.close()
-    return path
-
-
+# ── E — univers (EGET TV-scan, adskilt fra K2) ─────────────────
 def section_E():
-    print("\nSektion E — universe-forbrug")
-    today = datetime.now().isoformat()
+    print("\nSektion E — univers (eget TV-scan, adskilt fra K2)")
 
-    # E1: K2-univers i dag → upper-cased + dedupliceret
-    payload = json.dumps({"tickers": ["aapl", "MSFT", "aapl", "tsla"]})
-    path = _events_db([(today, "Konfluens 2", "universe_selected", None, payload)])
-    a = make_algo(MockConn(), MockJournal(db_path=path))
-    tickers = a._load_k2_universe()
-    check("E1 tickers upper+dedup", tickers == ["AAPL", "MSFT", "TSLA"], tickers)
-    os.unlink(path)
+    def with_scan(result):
+        """Byg algo hvor _scan_volatility_universe returnerer `result` (ingen netværk)."""
+        j = MockJournal()
+        a = make_algo(MockConn(), j)
+        async def _fake_scan(top_n):
+            return result
+        a._scan_volatility_universe = _fake_scan
+        return a, j
 
-    # E2: intet K2-univers → ingen handel, ingen exception, pæn log
-    path = _events_db([])
-    j = MockJournal(db_path=path)
-    a = make_algo(MockConn(), j)
+    # E1: eget scan → universe upper-cased + dedupliceret (screener-rækkefølge bevaret)
+    a, j = with_scan(["aapl", "MSFT", "aapl", "tsla"])
     asyncio.run(a._prepare_universe())
-    check("E2 intet univers → tom, ingen crash", a.universe == [], a.universe)
-    os.unlink(path)
+    check("E1 eget scan → universe upper+dedup", a.universe == ["AAPL", "MSFT", "TSLA"], a.universe)
 
-    # E3: BuyTheDip logger sit EGET universe_selected (source 'BuyTheDip')
-    payload = json.dumps({"tickers": ["NVDA", "AMD"]})
-    path = _events_db([(today, "Konfluens 2", "universe_selected", None, payload)])
-    j = MockJournal(db_path=path)
-    a = make_algo(MockConn(), j)
+    # E2: tomt scan (+ tom fallback) → tom universe, ingen handel, ingen crash
+    a, j = with_scan([])
+    asyncio.run(a._prepare_universe())
+    check("E2 tomt scan → tom universe, ingen crash", a.universe == [], a.universe)
+
+    # E3: BuyTheDip logger sit EGET universe_selected (source 'BuyTheDip') — eget scan,
+    #     IKKE forbrug af K2 (intet 'consumed_from'-felt mere).
+    a, j = with_scan(["NVDA", "AMD"])
     asyncio.run(a._prepare_universe())
     own = j.ev("universe_selected")
     check("E3 eget universe_selected logget (source BuyTheDip)",
           any(src == "BuyTheDip" and p.get("tickers") == ["NVDA", "AMD"]
               for (_, src, p) in own), own)
-    os.unlink(path)
+    check("E3 ingen K2-afhængighed (intet 'consumed_from')",
+          all("consumed_from" not in p for (_, _, p) in own), own)
+    check("E3 source-felt = tv_intraday_volatility",
+          any(p.get("source") == "tv_intraday_volatility" for (_, _, p) in own), own)
 
 
 # ── F — isolation ──────────────────────────────────────────────

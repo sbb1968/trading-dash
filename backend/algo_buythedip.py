@@ -9,11 +9,12 @@ Entry/exit-logikken er den validerede regel fra june_correlation.scan_trade, liv
 tilpasset: detektér dip på FÆRDIGE 1-min bars, entr på bounce-barens LUK (lidt
 mere konservativt end backtestens open-entry — paper er dommeren).
 
-Strukturelt spejler den Confluence2Live (samme delte konto, samme universmotor):
-scoped reconcile (rører kun egne journal-rows), robust force-close (bekræftet fyldning
-+ genforsøg), throttlet status, eksplicitte forensik-hooks. To bevidste forskelle:
-  - Universet FORBRUGES fra K2's publicerede universe_selected (ikke eget scan).
-  - Entries evalueres på FÆRDIGE bars (ikke forming bars).
+Strukturelt spejler den Confluence2Live (samme universmotor — EGET TradingView
+Intraday-Volatility-scan): scoped reconcile (rører kun egne journal-rows), robust
+force-close (bekræftet fyldning + genforsøg), throttlet status, eksplicitte forensik-
+hooks. Bevidst forskel: entries evalueres på FÆRDIGE bars (ikke forming bars).
+Strategierne er ellers HELT adskilte (eget scan, egen konto, egne parametre) — kun
+det globale tabsmax deles.
 
 PAPER-deployment (DUO509856, delt konto). Manuel start. Ikke kapital.
 
@@ -23,9 +24,7 @@ Placering: C:\\Projects\\trading_dash\\backend\\algo_buythedip.py
 """
 
 import asyncio
-import json
 import logging
-import sqlite3
 from datetime import datetime, time as dtime
 from typing import Optional
 
@@ -61,7 +60,22 @@ CLOSE_FILL_WAIT_SEC      = 8    # vent på bekræftet fyldning af lukke-ordre
 FORCE_CLOSE_MAX_ATTEMPTS = 4
 FORCE_CLOSE_RETRY_DELAY  = 4
 RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
-UNIVERSE_WAIT_MIN        = 10   # giv K2 op til så mange min til at publicere univers
+# ── Univers: BuyTheDip scanner sit EGET univers via TradingViews Intraday
+#    Volatility-screener — samme DELTE screener-helper som K2, men HELT adskilt:
+#    egne parametre, eget scan, INTET forbrug af K2's publicerede univers. Total
+#    strategi-adskillelse (på nær globalt tabsmax). Tuner du her, rører det ikke K2.
+#    Værdierne spejler p.t. K2's, men er BuyTheDips egne at justere uafhængigt. ──
+UNIVERSE_TOP_N        = 25
+UNIVERSE_PRICE_MIN    = 5.0
+UNIVERSE_PRICE_MAX    = 50.0
+UNIVERSE_MKT_CAP_MIN  = 5_000_000_000        # 5 B
+UNIVERSE_MKT_CAP_MAX  = 1_000_000_000_000    # 1 T
+UNIVERSE_MIN_VOLUME   = 500_000              # 30-dages gennemsnitsvolumen
+UNIVERSE_ATR_PCT_MIN  = 5.0                  # ATR(14) 1W > 5%
+UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE", "AMEX", "CBOE"]  # AMEX = TV's "NYSE Arca"
+MIN_UNIVERSE_SIZE     = 3                    # færre end dette → fallback/advarsel
+SCAN_TIMEOUT_SEC      = 15                   # TV-screener timeout pr. forsøg
+FALLBACK_UNIVERSE: list[str] = []            # tom = ingen handel hvis scan fejler
 
 
 class BuyTheDipLive(BaseStrategy):
@@ -98,7 +112,7 @@ class BuyTheDipLive(BaseStrategy):
     @property
     def description(self) -> str:
         return ("Long-only intradag buy-the-dip (køber dykket-bouncen efter en "
-                "impuls). K2-komplement. Forbruger K2's univers. Paper.")
+                "impuls). K2-komplement. Eget TV-volatility-scan. Paper.")
 
     @property
     def asset_class(self) -> str:
@@ -283,59 +297,96 @@ class BuyTheDipLive(BaseStrategy):
                         f"lukket (fantom, nul-P&L), ingen ordre sendt", level="warning")
 
     # -------------------------------------------------------------
-    # Universe — FORBRUG af K2's publicerede univers (LÅST)
+    # Universe — EGET scan (spejler K2, men helt adskilt)
     # -------------------------------------------------------------
     async def _prepare_universe(self) -> None:
-        """Hent K2's universe_selected for i dag (source 'Konfluens 2'). Logger
-        BuyTheDips EGET universe_selected til forensik (de navne vi faktisk loadede)."""
-        tickers = self._load_k2_universe()
-        waited = 0
-        while not tickers and waited < UNIVERSE_WAIT_MIN:
-            self._status("started",
-                         f"Venter på K2's univers ({waited}/{UNIVERSE_WAIT_MIN} min)...")
-            await asyncio.sleep(60)
-            waited += 1
-            tickers = self._load_k2_universe()
-        self.universe = tickers
-        if not tickers:
-            self._status("orb_ready",
-                         "Intet K2-univers fundet i dag — BuyTheDip handler ikke")
-        else:
-            self._status("started", f"Univers: {len(tickers)} K2-navne loadet")
-        # Eget universe_selected-event (forensik), source=self.name
-        if self._journal:
-            try:
-                await self._journal.log_event(
-                    source=self.name, event_type="universe_selected",
-                    payload={"tickers": tickers, "consumed_from": "Konfluens 2"})
-            except Exception as e:
-                logger.error(f"[BuyTheDip] kunne ikke logge universe_selected: {e}")
+        """Scan BuyTheDips EGET univers via TradingViews Intraday Volatility-screener.
 
-    def _load_k2_universe(self) -> list[str]:
-        """Read-only opslag i journalen efter K2's seneste universe_selected i dag."""
-        path = getattr(self._journal, "db_path", None) if self._journal else None
-        if not path:
-            return []
+        HELT adskilt fra K2: samme delte screener-helper, men egne parametre og eget
+        scan — BuyTheDip forbruger IKKE K2's publicerede univers (så strategierne kan
+        køre uafhængigt, på hver sin maskine/konto). Spejler K2's _prepare_universe.
+        """
+        self._status("scanning", "Scanner markedet efter dagens dip-kandidater...")
+
+        # Nulstil dagens diagnostik ved dagsstart (egne tællere + base-state).
+        self._diag_eval_count = 0
+        self._diag_setups     = 0
+        self._diag_entries    = 0
+        self.reset_diagnostics()
+
+        raw_tickers: list[str] = []
+        for attempt in range(1, 3):
+            raw_tickers = await self._scan_volatility_universe(UNIVERSE_TOP_N)
+            if len(raw_tickers) >= MIN_UNIVERSE_SIZE:
+                break
+            if attempt < 2:
+                self._status("scanning",
+                             f"Scanner returnerede {len(raw_tickers)} — prøver igen...")
+                await asyncio.sleep(3)
+
+        if len(raw_tickers) < MIN_UNIVERSE_SIZE and FALLBACK_UNIVERSE:
+            self._status("scanning",
+                         f"Scanner gav for få — bruger fallback ({len(FALLBACK_UNIVERSE)})")
+            raw_tickers = FALLBACK_UNIVERSE[:]
+
+        # Upper-case + dedup, bevar screenerens rækkefølge (sorteret efter dagsændring).
+        self.universe = list(dict.fromkeys(str(x).upper() for x in raw_tickers))
+
+        if not self.universe:
+            self._status("orb_ready",
+                         "Scanner returnerede 0 tickers — BuyTheDip handler ikke i dag")
+        else:
+            self._status("universe_ready",
+                         f"📋 Dagens univers — {len(self.universe)} aktier der potentielt "
+                         f"kan handles: {', '.join(self.universe)}")
+
+        # Eget universe_selected-event (source=self.name) via base-loggeren.
+        await self.log_universe(
+            self.universe,
+            meta={
+                "raw_count": len(raw_tickers),
+                "price_min": UNIVERSE_PRICE_MIN,
+                "price_max": UNIVERSE_PRICE_MAX,
+                "source":    "tv_intraday_volatility",
+            },
+        )
+
+    async def _scan_volatility_universe(self, top_n: int) -> list[str]:
+        """BuyTheDips EGET univers via TradingViews Intraday Volatility-screener.
+
+        Kalder den delte screener-helper (samme som K2), men med BuyTheDips EGNE
+        parametre. Returnerer symboler sorteret efter seneste dagsændring (faldende);
+        tom liste hvis API'et fejler/timeout. Spejler K2's _scan_volatility_universe 1:1.
+        """
+        from strategies.confluence.tv_scanner import fetch_tv_intraday_volatility
+        import asyncio as _asyncio
+
         try:
-            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
-            rows = con.execute(
-                "SELECT payload_json FROM events WHERE event_type='universe_selected' "
-                "AND source='Konfluens 2' AND date(ts_local)=date('now','localtime') "
-                "ORDER BY ts_local ASC").fetchall()
-            con.close()
-        except Exception as e:
-            logger.warning(f"[BuyTheDip] universe-opslag fejlede: {e}")
+            loop = _asyncio.get_event_loop()
+            results = await _asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: fetch_tv_intraday_volatility(
+                        top_n       = top_n,
+                        price_min   = UNIVERSE_PRICE_MIN,
+                        price_max   = UNIVERSE_PRICE_MAX,
+                        mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
+                        mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
+                        min_avg_vol = UNIVERSE_MIN_VOLUME,
+                        atr_pct_min = UNIVERSE_ATR_PCT_MIN,
+                        exchanges   = UNIVERSE_EXCHANGES,
+                    ),
+                ),
+                timeout=SCAN_TIMEOUT_SEC,
+            )
+        except _asyncio.TimeoutError:
+            logger.error("[BuyTheDip] TV-screener (volatility) timeout")
             return []
-        tickers: list[str] = []
-        for (pj,) in rows:
-            try:
-                t = json.loads(pj).get("tickers", [])
-                if t:
-                    # seneste ikke-tomme vinder; upper-case + dedup (bevar rækkefølge)
-                    tickers = list(dict.fromkeys(str(x).upper() for x in t))
-            except Exception:
-                continue
-        return tickers
+        except Exception as e:
+            logger.error(f"[BuyTheDip] TV-screener (volatility) fejl: {e}")
+            return []
+
+        return [symbol for symbol, _, _, _ in results]
 
     # -------------------------------------------------------------
     # Trading-loop (to-fase: exits, så entries efter dip-dybde-prioritet)
