@@ -368,28 +368,56 @@ def print_forensics(con, trades):
         if tp:
             print("  Strategi-data: " + "   ".join(f"{k}={v}" for k, v in tp.items()))
 
-        # Entry-snapshot
+        # Entry-snapshot — strategi-bevidst (K2 / Europa-reversion / BuyTheDip)
         if entry:
             print("  ── Entry-snapshot ──")
-            print(f"     Score/bricks: {_g(entry,'setup','entry_score', default='—')} / "
-                  f"{_g(entry,'setup','entry_bricks', default='—')}")
+            _setup = entry.get("setup")                       # Konfluens 2 — KUN hvis reel
+            if isinstance(_setup, dict) and (_setup.get("entry_score") is not None     # score/bricks (den
+                                             or _setup.get("entry_bricks") is not None):  # delte builder laver
+                print(f"     [K2] score/bricks {_g(entry,'setup','entry_score', default='—')} / "  # altid en tom
+                      f"{_g(entry,'setup','entry_bricks', default='—')}")                            # 'setup' for alle)
+                print(f"          rel.vol {_g(entry,'setup','rel_vol_last_bar', default='—')}   "
+                      f"ATR {_g(entry,'setup','atr', default='—')}   "
+                      f"risk/aktie {_g(entry,'setup','risk_per_share', default='—')}   "
+                      f"init-stop {_g(entry,'setup','initial_stop', default='—')}")
+            if isinstance(entry.get("reversion"), dict):      # Europa-reversion
+                print(f"     [EUREV] z {_g(entry,'reversion','entry_z', default='—')}   "
+                      f"mean {_g(entry,'reversion','mean', default='—')}   "
+                      f"std {_g(entry,'reversion','std', default='—')}")
+                print(f"            bånd {_g(entry,'reversion','lower_band', default='—')}.."
+                      f"{_g(entry,'reversion','upper_band', default='—')}   "
+                      f"stop {_g(entry,'reversion','stop_price', default='—')} "
+                      f"({_g(entry,'reversion','stop_distance_pts', default='—')} pt)   "
+                      f"{_g(entry,'reversion','contracts', default='—')} kontrakt(er)")
+            if isinstance(entry.get("buythedip"), dict):      # BuyTheDip
+                print(f"     [BTD] dip-dybde {_g(entry,'buythedip','dip_depth', default='—')}%   "
+                      f"ref-high {_g(entry,'buythedip','ref_high', default='—')}   "
+                      f"dip-low/stop {_g(entry,'buythedip','dip_low', default='—')}   "
+                      f"target {_g(entry,'buythedip','target', default='—')}")
+            # Indikatorer (alle strategier)
             print(f"     RSI14 {_g(entry,'indicators','rsi_14', default='—')}   "
                   f"MACD {_g(entry,'indicators','macd', default='—')}/{_g(entry,'indicators','macd_signal', default='—')}   "
                   f"VWAP-dist {_g(entry,'indicators','vwap_distance_pct', default='—')}%")
-            print(f"     Rel.vol {_g(entry,'setup','rel_vol_last_bar', default='—')}   "
-                  f"ATR {_g(entry,'setup','atr', default='—')}   risk/aktie {_g(entry,'setup','risk_per_share', default='—')}")
-            print(f"     Tape: aggressor {_g(entry,'tape','aggressor_ratio', default='—')}   "
-                  f"{_g(entry,'tape','trade_count', default='—')} trades   "
-                  f"største {_g(entry,'tape','largest_trade_size', default='—')} ({_g(entry,'tape','largest_trade_direction', default='—')})")
+            # Tape (kun hvis faktisk opsamlet — tom for futures/BTD i paper)
+            if _g(entry,'tape','trade_count') is not None:
+                print(f"     Tape: aggressor {_g(entry,'tape','aggressor_ratio', default='—')}   "
+                      f"{_g(entry,'tape','trade_count', default='—')} trades   "
+                      f"største {_g(entry,'tape','largest_trade_size', default='—')} "
+                      f"({_g(entry,'tape','largest_trade_direction', default='—')})")
         else:
             print("  ── Entry-snapshot: ingen (ikke bygget for denne strategi/handel) ──")
 
-        # Exit-snapshot
+        # Exit-snapshot — strategi-bevidst
         if exit_:
             print("  ── Exit-snapshot ──")
             print(f"     MFE {_g(exit_,'trade_metrics','max_favorable_excursion', default='—')}   "
                   f"MAE {_g(exit_,'trade_metrics','max_adverse_excursion', default='—')}   "
                   f"bars {_g(exit_,'trade_metrics','duration_bars', default='—')}")
+            if isinstance(exit_.get("reversion"), dict):      # Europa-reversion
+                print(f"     [EUREV] exit-z {_g(exit_,'reversion','exit_z', default='—')} "
+                      f"(≈0 = vendt til middel)")
+            if isinstance(exit_.get("buythedip"), dict):      # BuyTheDip
+                print(f"     [BTD] exit-grund {_g(exit_,'buythedip','reason', default='—')}")
             print(f"     RSI14 {_g(exit_,'indicators','rsi_14', default='—')}   "
                   f"MACD-hist {_g(exit_,'indicators','macd_hist', default='—')}   "
                   f"VWAP-dist {_g(exit_,'indicators','vwap_distance_pct', default='—')}%")
