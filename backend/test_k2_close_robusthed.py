@@ -139,8 +139,8 @@ FILLED = {"filled": 100, "avg_fill": 5.10, "status": "Filled", "order_id": None}
 def section_A():
     print("\nSektion A — _reconcile_orphans (scoped flatten)")
 
-    async def run(open_rows, ibkr_pos, raise_list=False):
-        conn = MockConn(order_ret=FILLED, positions=ibkr_pos)
+    async def run(open_rows, ibkr_pos, raise_list=False, order_ret=FILLED):
+        conn = MockConn(order_ret=order_ret, positions=ibkr_pos)
         journal = MockJournal()
         algo = make_algo(conn, journal)
         install_list_trades(open_rows, raise_exc=raise_list)
@@ -183,6 +183,39 @@ def section_A():
     except Exception:
         ok = False
     check("A7 fail-safe: exception i list_trades vælter ikke, 0 ordrer", ok)
+
+    # A8 reconcile-close UFYLDT: ghost-match men lukke-ordren fylder IKKE (filled=0)
+    #    → SELL afgivet, men INGEN reconcile_flatten (journal-row forbliver åben →
+    #    næste sessions reconcile genforsøger). Regressions-lås for spøgelses-hullet.
+    UNFILLED = {"filled": 0, "avg_fill": 0, "status": "Submitted", "order_id": None}
+    o, c = asyncio.run(run([row("HHH", "long", 100)],
+                           [{"ticker": "HHH", "position": 100}], order_ret=UNFILLED))
+    check("A8 ufyldt reconcile-luk → SELL forsøgt", o == [("HHH", "SELL", 100)], o)
+    check("A8 ufyldt → INGEN reconcile_flatten bogført (row forbliver åben)", c == [], c)
+
+    # A8b delvis fyldt (filled<shares) → også behold åben, ingen reconcile_flatten
+    PARTIAL = {"filled": 40, "avg_fill": 5.10, "status": "Submitted", "order_id": None}
+    o, c = asyncio.run(run([row("III", "long", 100)],
+                           [{"ticker": "III", "position": 100}], order_ret=PARTIAL))
+    check("A8b delvis fyldt → INGEN reconcile_flatten", c == [], c)
+
+    # A9 best-effort: en uventet fejl MIDT i per-row-løkken (her i _reconcile_close)
+    #    må IKKE propagere ud af _reconcile_orphans (float-bug'en 0dd96b8 gjorde
+    #    netop dét og dræbte loopet). Wrapper'en fanger → returnerer pænt.
+    async def run_raise_midloop():
+        conn = MockConn(order_ret=FILLED, positions=[{"ticker": "JJJ", "position": 100}])
+        algo = make_algo(conn, MockJournal())
+        install_list_trades([row("JJJ", "long", 100)])
+        async def _boom(*a, **k):
+            raise RuntimeError("uventet fejl midt i per-row-løkken")
+        algo._reconcile_close = _boom
+        await algo._reconcile_orphans()   # må IKKE kaste
+        return True
+    try:
+        ok = asyncio.run(run_raise_midloop())
+    except Exception:
+        ok = False
+    check("A9 best-effort: fejl i per-row-løkke propagerer IKKE", ok)
 
 
 # ── SEKTION B — place_paper_order(await_fill_sec) ──────────────

@@ -299,9 +299,9 @@ async def _ret(x):
 def section_F():
     print("\nSektion F — isolation (scoped reconcile: instrument-klasse + journal-spor)")
 
-    async def run(positions, rows):
-        conn = MockConn(positions=positions,
-                        order_ret={"filled": 2, "avg_fill": 5000.0, "status": "Filled"})
+    async def run(positions, rows,
+                  order_ret={"filled": 2, "avg_fill": 5000.0, "status": "Filled"}):
+        conn = MockConn(positions=positions, order_ret=order_ret)
         j = MockJournal()
         a = make_algo(conn, j)
         trade_queries.list_trades = lambda db, **kw: _ret(rows)
@@ -323,6 +323,35 @@ def section_F():
     # F3: instrument-klasse-guard — aktie (AAPL, ikke i INSTRUMENTS) er usynlig → 0 ordrer
     o, c = asyncio.run(run([{"ticker": "AAPL", "position": 100}], []))
     check("F3 fremmed instrument-klasse (AAPL) → usynlig, 0 ordrer", o == [], o)
+
+    # F4: reconcile-close UFYLDT (egen row, men lukke-ordren fylder ikke) → ordre
+    #     forsøgt, men INGEN reconcile_flatten (journal-row forbliver åben → næste
+    #     sessions reconcile genforsøger). Lås for reconcile-spøgelses-hullet.
+    rows = [{"symbol": "MES", "side": "long", "shares": 2, "contracts": 2,
+             "entry_price": 5000.0, "trade_id": "t1", "multiplier": 5.0}]
+    o, c = asyncio.run(run([{"ticker": "MES", "position": 2}], rows,
+                           order_ret={"filled": 0, "status": "Submitted"}))
+    check("F4 ufyldt reconcile-luk → lukke-ordre forsøgt", len(o) == 1 and o[0][0] == "MES", o)
+    check("F4 ufyldt → INGEN reconcile_flatten",
+          [x.get("exit_reason") for x in c] == [], c)
+
+    # F5: best-effort — en uventet fejl midt i per-row-løkken må IKKE propagere ud
+    #     af _reconcile_orphans (float-bug'en gjorde netop dét). Wrapper'en fanger.
+    async def run_raise_midloop():
+        conn = MockConn(positions=[{"ticker": "MES", "position": 2}],
+                        order_ret={"filled": 2, "avg_fill": 5000.0, "status": "Filled"})
+        a2 = make_algo(conn, MockJournal())
+        trade_queries.list_trades = lambda db, **kw: _ret(rows)
+        async def _boom(*a, **k):
+            raise RuntimeError("uventet fejl midt i per-row-løkken")
+        a2._reconcile_close = _boom
+        await a2._reconcile_orphans()   # må IKKE kaste
+        return True
+    try:
+        ok = asyncio.run(run_raise_midloop())
+    except Exception:
+        ok = False
+    check("F5 best-effort: fejl i per-row-løkke propagerer IKKE", ok)
 
 
 # ── G — gates + vindue + reconcile-edge ────────────────────────

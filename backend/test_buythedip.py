@@ -370,9 +370,9 @@ def section_E():
 def section_F():
     print("\nSektion F — isolation (scoped reconcile + fill-verifikation)")
 
-    async def run_reconcile(open_rows, positions):
-        conn = MockConn(order_ret={"filled": 100, "avg_fill": 5.1, "status": "Filled"},
-                        positions=positions)
+    async def run_reconcile(open_rows, positions,
+                            order_ret={"filled": 100, "avg_fill": 5.1, "status": "Filled"}):
+        conn = MockConn(order_ret=order_ret, positions=positions)
         j = MockJournal()
         a = make_algo(conn, j)
         trade_queries.list_trades = lambda db, **kw: _ret(open_rows)
@@ -402,6 +402,35 @@ def section_F():
     asyncio.run(a._close("S", 100.0, "stop"))
     check("F3 ufyldt → STADIG åben", "S" in a._positions, list(a._positions))
     check("F3 ufyldt → INGEN log_trade_close", a._journal.closes == [], a._journal.closes)
+
+    # F4: reconcile-close UFYLDT (ghost-match men lukke-ordren fylder ikke) → SELL
+    #     forsøgt, men INGEN reconcile_flatten (journal-row forbliver åben). Lås for
+    #     reconcile-spøgelses-hullet.
+    rows = [{"symbol": "BBB", "side": "long", "shares": 100, "entry_price": 5.0, "trade_id": "t1"}]
+    o, c = asyncio.run(run_reconcile(rows, [{"ticker": "BBB", "position": 100}],
+                                     order_ret={"filled": 0, "status": "Submitted"}))
+    check("F4 ufyldt reconcile-luk → SELL forsøgt", o == [("BBB", "SELL", 100)], o)
+    check("F4 ufyldt → INGEN reconcile_flatten",
+          [x.get("exit_reason") for x in c] == [], c)
+
+    # F5: best-effort — en uventet fejl midt i per-row-løkken må IKKE propagere ud
+    #     af _reconcile_orphans (float-bug'en gjorde netop dét). Wrapper'en fanger.
+    async def run_raise_midloop():
+        conn = MockConn(order_ret={"filled": 100, "avg_fill": 5.1, "status": "Filled"},
+                        positions=[{"ticker": "CCC", "position": 100}])
+        a2 = make_algo(conn, MockJournal())
+        trade_queries.list_trades = lambda db, **kw: _ret(
+            [{"symbol": "CCC", "side": "long", "shares": 100, "entry_price": 5.0, "trade_id": "t1"}])
+        async def _boom(*a, **k):
+            raise RuntimeError("uventet fejl midt i per-row-løkken")
+        a2._reconcile_close = _boom
+        await a2._reconcile_orphans()   # må IKKE kaste
+        return True
+    try:
+        ok = asyncio.run(run_raise_midloop())
+    except Exception:
+        ok = False
+    check("F5 best-effort: fejl i per-row-løkke propagerer IKKE", ok)
 
 
 async def _ret(x):

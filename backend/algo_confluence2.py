@@ -116,6 +116,7 @@ HEARTBEAT_INTERVAL_SEC = 300
 # og genforsøger ufyldte. Budgettet skal passe inden for runway'en fra
 # force_close (15:45 ET) til markedslukning (16:00 ET) — ~15 min, rigeligt.
 CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
+RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
 FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger
 FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem genforsøg
 
@@ -269,7 +270,14 @@ class Confluence2Live(BaseStrategy):
         # en blind flatten kunne lukke en anden strategis position. Vi
         # sammenligner blot journalens forventede nettoposition mod IBKR's
         # faktiske og rapporterer afvigelser.
-        await self._reconcile_orphans()
+        # Reconcile er best-effort OG tidsbegrænset: hverken en fejl (try/except i
+        # _reconcile_orphans) eller en hang (timeout her) må blokere handelsstarten.
+        try:
+            await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            logger.error(f"[Konfluens 2] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) "
+                         f"— springer over, fortsætter til handel")
+            self._status("started", "Reconciliation timeout — fortsætter til handel")
 
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
@@ -285,6 +293,16 @@ class Confluence2Live(BaseStrategy):
             await self._close_all("strategi stoppet")
 
     async def _reconcile_orphans(self) -> None:
+        """Best-effort wrapper: ENHVER fejl i reconcile fanges og blokerer ALDRIG
+        handelsstarten (float-bug'en 0dd96b8 propagerede tidligere herfra ud af
+        on_start og dræbte loopet). Selve logikken bor i _reconcile_orphans_impl."""
+        try:
+            await self._reconcile_orphans_impl()
+        except Exception as e:
+            logger.exception(f"[Konfluens 2] reconcile fejlede (best-effort, ignoreret): {e}")
+            self._status("started", "Reconciliation sprang fejlet over — fortsætter til handel")
+
+    async def _reconcile_orphans_impl(self) -> None:
         """Scoped, journal-spor-styret oprydning af K2's EGNE spøgelser ved opstart.
 
         K2 deler IBKR-konto, så vi lukker ALDRIG blindt — en blind flatten kunne
@@ -392,11 +410,25 @@ class Confluence2Live(BaseStrategy):
         snap  = await self.conn.get_snapshot(sym)
         exit_price = (snap.get("last") if snap else None) or entry or 0.0
 
-        result = await self.conn.place_paper_order(sym, close_action, shares, source=self.name)
+        result = await self.conn.place_paper_order(
+            sym, close_action, shares, source=self.name,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+        )
         if not result:
             await self._log(
                 f"⚠ Kunne ikke lukke gammel position {sym} — luk den manuelt i TWS",
                 level="warning")
+            return
+
+        # Bekræft fyldning FØR vi bogfører reconcile_flatten. Ufyldt → vi bogfører IKKE
+        # (journal-row forbliver åben), så NÆSTE sessions reconcile genforsøger i stedet
+        # for at skrive en falsk reconcile_flatten mens IBKR stadig holder positionen.
+        filled = result.get("filled") or 0
+        if filled < shares:
+            await self._log(
+                f"⚠ {sym}: reconcile-lukning IKKE bekræftet fyldt "
+                f"(status={result.get('status')}, filled={filled}/{shares}) "
+                f"— journal-row forbliver åben, luk evt. manuelt i TWS", level="warning")
             return
 
         fill = result.get("avg_fill")

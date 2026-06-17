@@ -60,6 +60,7 @@ HEARTBEAT_INTERVAL_SEC   = 300
 CLOSE_FILL_WAIT_SEC      = 8    # vent på bekræftet fyldning af lukke-ordre
 FORCE_CLOSE_MAX_ATTEMPTS = 4
 FORCE_CLOSE_RETRY_DELAY  = 4
+RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
 UNIVERSE_WAIT_MIN        = 10   # giv K2 op til så mange min til at publicere univers
 
 
@@ -144,7 +145,13 @@ class BuyTheDipLive(BaseStrategy):
             logger.warning("[BuyTheDip] _trading_loop kører allerede — afbryder ny start")
             return
         self._status("started", "Algoritme starter — BuyTheDip (buy-the-dip)")
-        await self._reconcile_orphans()
+        # Best-effort OG tidsbegrænset: hverken fejl eller hang må blokere starten.
+        try:
+            await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            logger.error(f"[BuyTheDip] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) "
+                         f"— springer over, fortsætter til handel")
+            self._status("started", "Reconciliation timeout — fortsætter til handel")
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
 
@@ -161,6 +168,15 @@ class BuyTheDipLive(BaseStrategy):
     # Scoped reconcile (spejler K2 b78c474 — long-only)
     # -------------------------------------------------------------
     async def _reconcile_orphans(self) -> None:
+        """Best-effort wrapper: ENHVER fejl i reconcile fanges og blokerer ALDRIG
+        handelsstarten. Selve logikken bor i _reconcile_orphans_impl."""
+        try:
+            await self._reconcile_orphans_impl()
+        except Exception as e:
+            logger.exception(f"[BuyTheDip] reconcile fejlede (best-effort, ignoreret): {e}")
+            self._status("started", "Reconciliation sprang fejlet over — fortsætter til handel")
+
+    async def _reconcile_orphans_impl(self) -> None:
         """Ryd KUN BuyTheDips egne spøgelser (source=self.name). Aldrig blind-flatten —
         delt konto. Ved opstart er self._positions tom, så enhver åben BuyTheDip-row er
         et levn. IBKR samme vej & |net|≥antal → luk vores andel (reconcile_flatten);
@@ -225,10 +241,23 @@ class BuyTheDipLive(BaseStrategy):
         entry = row.get("entry_price") or 0.0
         snap  = await self.conn.get_snapshot(sym)
         exit_price = (snap.get("last") if snap else None) or entry or 0.0
-        result = await self.conn.place_paper_order(sym, close_action, shares, source=self.name)
+        result = await self.conn.place_paper_order(
+            sym, close_action, shares, source=self.name,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+        )
         if not result:
             await self._log(f"⚠ Kunne ikke lukke gammel position {sym} — luk manuelt i TWS",
                             level="warning")
+            return
+        # Bekræft fyldning FØR vi bogfører reconcile_flatten. Ufyldt → vi bogfører IKKE
+        # (journal-row forbliver åben), så NÆSTE sessions reconcile genforsøger i stedet
+        # for at skrive en falsk reconcile_flatten mens IBKR stadig holder positionen.
+        filled = result.get("filled") or 0
+        if filled < shares:
+            await self._log(
+                f"⚠ {sym}: reconcile-lukning IKKE bekræftet fyldt "
+                f"(status={result.get('status')}, filled={filled}/{shares}) "
+                f"— journal-row forbliver åben, luk evt. manuelt i TWS", level="warning")
             return
         fill = result.get("avg_fill")
         if fill and fill > 0:
