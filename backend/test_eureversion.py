@@ -225,8 +225,8 @@ def section_C():
 
 
 # ── D — _evaluate_bar exit + _close ────────────────────────────
-def _algo_with_pos(side="long", entry=5000.0, contracts=5, mult=5.0):
-    conn = MockConn(equity=100000.0)
+def _algo_with_pos(side="long", entry=5000.0, contracts=5, mult=5.0, order_ret=None):
+    conn = MockConn(equity=100000.0, order_ret=order_ret)
     j = MockJournal()
     a = make_algo(conn, j)
     a._positions["MES"] = {
@@ -377,6 +377,80 @@ def section_H():
           j.ev("bar_evaluation") == [], j.ev("bar_evaluation"))
 
 
+# ── I — fyldnings-verificeret luk (M2K-spøgelses-fix) ──────────
+def section_I():
+    print("\nSektion I — fyldnings-verificeret luk (mirror K2 331f898)")
+
+    # I0: bekræftet fyldt (filled==contracts) → luk bogføres som hidtil (D-adfærd holder).
+    a, conn, j = _algo_with_pos("long", 5000.0,
+                                order_ret={"filled": 5, "avg_fill": 5010.0, "status": "Filled"})
+    asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
+    check("I0 fyldt (filled==contracts) → MES lukket", "MES" not in a._positions, list(a._positions))
+    check("I0 fyldt → log_trade_close bogført", len(j.closes) == 1, j.closes)
+
+    # I1: lukke-ordre IKKE bekræftet fyldt (filled=0, Submitted) → position FORBLIVER
+    #     åben, INGEN journal-close, _close popper IKKE. Dette er M2K-fix'en (16/6:
+    #     journal sagde 'lukket' mens IBKR holdt 10 kontrakter).
+    a, conn, j = _algo_with_pos("long", 5000.0,
+                                order_ret={"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
+    check("I1 ufyldt → MES FORBLIVER åben (popper IKKE)", "MES" in a._positions, list(a._positions))
+    check("I1 ufyldt → INGEN log_trade_close bogført", j.closes == [], j.closes)
+    check("I1 ufyldt → ingen handel tilføjet trades", a.trades == [], a.trades)
+
+    # I2: delvis fyldt (filled<contracts) → også behold åben (samme sikre retning).
+    a, conn, j = _algo_with_pos("long", 5000.0, contracts=10,
+                                order_ret={"filled": 4, "avg_fill": 5010.0, "status": "Submitted"})
+    asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
+    check("I2 delvis fyldt (4/10) → MES FORBLIVER åben", "MES" in a._positions, list(a._positions))
+    check("I2 delvis fyldt → INGEN log_trade_close", j.closes == [], j.closes)
+
+    # I3: _close passerer await_fill_sec=CLOSE_FILL_WAIT_SEC til place_paper_order.
+    captured = {}
+    a, conn, j = _algo_with_pos("long", 5000.0)
+    orig = conn.place_paper_order
+    async def _spy(sym, action, quantity, source="", await_fill_sec=0, **kw):
+        captured["await_fill_sec"] = await_fill_sec
+        return await orig(sym, action, quantity, source=source, await_fill_sec=await_fill_sec, **kw)
+    conn.place_paper_order = _spy
+    asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
+    check("I3 _close bruger await_fill_sec=CLOSE_FILL_WAIT_SEC",
+          captured.get("await_fill_sec") == eur.CLOSE_FILL_WAIT_SEC,
+          (captured.get("await_fill_sec"), eur.CLOSE_FILL_WAIT_SEC))
+
+    # I4: _close_all genforsøger en ufyldt lukning op til FORCE_CLOSE_MAX_ATTEMPTS
+    #     og forbliver åben hvis den ALDRIG fylder. (sleep gøres til no-op for fart.)
+    a, conn, j = _algo_with_pos("long", 5000.0,
+                                order_ret=lambda n: {"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    _real_sleep = asyncio.sleep
+    async def _no_sleep(*_a, **_k):
+        return None
+    asyncio.sleep = _no_sleep
+    try:
+        asyncio.run(a._close_all("session_end"))
+    finally:
+        asyncio.sleep = _real_sleep
+    check("I4 aldrig fyldt → MES STADIG åben efter _close_all", "MES" in a._positions, list(a._positions))
+    check(f"I4 forsøgte {eur.FORCE_CLOSE_MAX_ATTEMPTS}× (= MAX_ATTEMPTS)",
+          len([o for o in conn.orders if o[1] == "SELL"]) == eur.FORCE_CLOSE_MAX_ATTEMPTS,
+          [o for o in conn.orders if o[1] == "SELL"])
+
+    # I5: _close_all — ufyldt de første forsøg, fylder på sidste → lukkes (ingen spøgelse
+    #     når likviditeten omsider er der).
+    last = eur.FORCE_CLOSE_MAX_ATTEMPTS
+    a, conn, j = _algo_with_pos("long", 5000.0,
+                                order_ret=lambda n: ({"filled": 5, "avg_fill": 5010.0, "status": "Filled"}
+                                                     if n >= last else
+                                                     {"filled": 0, "avg_fill": 0, "status": "Submitted"}))
+    asyncio.sleep = _no_sleep
+    try:
+        asyncio.run(a._close_all("session_end"))
+    finally:
+        asyncio.sleep = _real_sleep
+    check("I5 fylder på sidste forsøg → MES lukket", "MES" not in a._positions, list(a._positions))
+    check("I5 → log_trade_close bogført", len(j.closes) == 1, j.closes)
+
+
 if __name__ == "__main__":
     print("Test: Europa-reversion (adfærds-lås + Trin 2 regressions-gate)")
     section_A()
@@ -387,4 +461,5 @@ if __name__ == "__main__":
     section_F()
     section_G()
     section_H()
+    section_I()
     print("\nALLE TESTS BESTÅET ✓")

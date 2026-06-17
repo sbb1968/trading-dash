@@ -73,6 +73,12 @@ CONNECT_RETRY_DELAY = 10
 
 HEARTBEAT_INTERVAL_SEC = 300
 
+# Fyldnings-verificeret luk (spejler K2 331f898). place_paper_order venter på
+# bekræftet fyldning af lukke-ordrer; ufyldt → vi popper IKKE positionen.
+CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
+FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger
+FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem _close_all-genforsøg
+
 
 @dataclass
 class Bar:
@@ -797,11 +803,27 @@ class EuropaReversionLive(BaseStrategy):
         close_action = "SELL" if side == "long" else "BUY"
 
         # Send luknings-ordren FØR vi bogfører noget.
-        result = await self.conn.place_paper_order(sym, close_action, contracts, source=self.name)
+        result = await self.conn.place_paper_order(
+            sym, close_action, contracts, source=self.name,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+        )
         if not result:
             logger.error(f"[Europa-reversion] _close({sym}): lukke-ordre kunne IKKE sendes "
                          f"— beholder position åben")
             self._status("trading", f"⚠ {sym}: lukkeordre ikke sendt — position forbliver åben")
+            return
+
+        # Bekræft fyldning FØR vi popper + bogfører. Ufyldt (halt / tynd likviditet /
+        # afgivet for sent) → vi popper IKKE og bogfører IKKE; positionen forbliver
+        # åben (og åben-i-journal), så næste bar / _close_all kan genforsøge. Netop dét
+        # forhindrer spøgelset hvor journalen siger 'lukket' mens IBKR holder positionen.
+        filled = result.get("filled") or 0
+        if filled < contracts:
+            logger.warning(f"[Europa-reversion] _close({sym}): lukke-ordre IKKE bekræftet fyldt "
+                           f"(status={result.get('status')}, filled={filled}/{contracts}) "
+                           f"— beholder position åben, genforsøger")
+            self._status("trading",
+                         f"⚠ {sym}: lukkeordre ikke bekræftet fyldt — position forbliver åben")
             return
 
         fill = result.get("avg_fill")
@@ -928,14 +950,38 @@ class EuropaReversionLive(BaseStrategy):
         self._status("trading", f"{emoji} {sym}: lukket @ ${price:.2f} | P&L: ${pnl:+.2f}")
 
     async def _close_all(self, reason: str):
-        """Luk alle åbne positioner (sessions-slut eller stop)."""
-        for sym in list(self._positions.keys()):
-            pos = self._positions[sym]
-            snap = await self.conn.get_snapshot(sym)
-            price = (snap.get("last") if snap else None) or pos["entry_price"]
-            # Giv seneste kendte z videre (sat i _evaluate_bar), så session_end-luk
-            # også får exit_z. Var None før → tp_exit_z tom i CSV'en.
-            await self._close(sym, price, reason, pos.get("last_z"))
+        """Luk alle åbne positioner (sessions-slut eller stop).
+
+        Med fyldnings-verificeret _close (await_fill + filled-tjek) kan en enkelt
+        lukning fejle (tynd likviditet) og beholde positionen åben. Ved sessions-slut
+        er der ingen 'næste bar' til at genforsøge, så vi looper op til
+        FORCE_CLOSE_MAX_ATTEMPTS (mirror K2's force-close). Hvad der STADIG ikke kan
+        lukkes efter sidste forsøg forbliver åbent + åbent-i-journal; opstarts-reconcile
+        fanger det næste session (den eneste resterende — og sikre — divergens)."""
+        for attempt in range(1, FORCE_CLOSE_MAX_ATTEMPTS + 1):
+            if not self._positions:
+                break
+            for sym in list(self._positions.keys()):
+                pos = self._positions[sym]
+                snap = await self.conn.get_snapshot(sym)
+                price = (snap.get("last") if snap else None) or pos["entry_price"]
+                # Giv seneste kendte z videre (sat i _evaluate_bar), så session_end-luk
+                # også får exit_z. Var None før → tp_exit_z tom i CSV'en.
+                await self._close(sym, price, reason, pos.get("last_z"))
+            if self._positions and attempt < FORCE_CLOSE_MAX_ATTEMPTS:
+                logger.warning(f"[Europa-reversion] _close_all: {len(self._positions)} position(er) "
+                               f"stadig åben efter forsøg {attempt}/{FORCE_CLOSE_MAX_ATTEMPTS} "
+                               f"— genforsøger om {FORCE_CLOSE_RETRY_DELAY}s")
+                await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
+
+        if self._positions:
+            still = ", ".join(self._positions.keys())
+            logger.error(f"[Europa-reversion] _close_all: kunne IKKE lukke {still} efter "
+                         f"{FORCE_CLOSE_MAX_ATTEMPTS} forsøg — forbliver åben (i journal); "
+                         f"opstarts-reconcile fanger den næste session")
+            self._status("trading",
+                         f"⚠ {still}: ikke lukket efter {FORCE_CLOSE_MAX_ATTEMPTS} forsøg — "
+                         f"forbliver åben, reconcile fanger den")
 
     # -------------------------------------------------------------
     # Hjælper
