@@ -396,14 +396,30 @@ def section_H():
     check("H1 update_trade_state(current_price=bar.close) kaldt",
           j.state_updates and j.state_updates[-1].get("current_price") == 5003.0, j.state_updates)
 
-    # F1 (KENDT HUL): EUREVERSION emitterer IKKE bar_evaluation → usynlig for
-    # datablind-watchdoggen. Vi LÅSER den nuværende adfærd (Trin 2 må ikke ændre
-    # den utilsigtet) og flagger den i rapporten som et separat fix.
+    # F1 (FIX): EUREVERSION emitterer nu ét bar_evaluation PER evalueret bar → synlig
+    # for datablind-forensik/watchdog. Tidligere hul (b2f074d) lukket. Det er
+    # datablind-signalet: fyrer når data flyder, stopper når feedet dør.
     a, conn, j = _algo_with_pos("long", 5000.0)
     for px in (5001.0, 5002.0, 5003.0):
         asyncio.run(a._evaluate_bar("MES", mk(3, 0, px), z=-1.0, sd=4.0))
-    check("F1 (baseline) EUREVERSION emitterer p.t. INGEN bar_evaluation [KENDT HUL]",
-          j.ev("bar_evaluation") == [], j.ev("bar_evaluation"))
+    be = j.ev("bar_evaluation")
+    check("F1 emitterer ét bar_evaluation pr. evalueret bar (3 bars → 3)", len(be) == 3, len(be))
+    check("F1 bar_evaluation har korrekt ticker (MES)",
+          all(p.get("ticker") == "MES" for (_, _, p) in be), be)
+    check("F1 status=in_session (03:00 ET i EU-sessionen)",
+          all(p.get("status") == "in_session" for (_, _, p) in be), [p.get("status") for (_, _, p) in be])
+    check("F1 bar_time_et formateret HH:MM (03:00)",
+          all(p.get("bar_time_et") == "03:00" for (_, _, p) in be), [p.get("bar_time_et") for (_, _, p) in be])
+    check("F1 reason bærer z+sd (forensisk værdi)",
+          all("z=" in (p.get("reason") or "") and "sd=" in (p.get("reason") or "") for (_, _, p) in be), be)
+
+    # F1b: bar UDEN for sessionen (12:00 ET) → status=out_of_session (signalet fyrer
+    # stadig — det er feed-livstegnet, ikke et session-tegn).
+    a, conn, j = _algo_with_pos("long", 5000.0)
+    asyncio.run(a._evaluate_bar("MES", mk(12, 0, 5001.0), z=-1.0, sd=4.0))
+    be = j.ev("bar_evaluation")
+    check("F1b uden for session → status=out_of_session",
+          len(be) == 1 and be[0][2].get("status") == "out_of_session", be)
 
 
 # ── I — fyldnings-verificeret luk (M2K-spøgelses-fix) ──────────

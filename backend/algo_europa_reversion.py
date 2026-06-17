@@ -566,6 +566,17 @@ class EuropaReversionLive(BaseStrategy):
         bar_t = bar.timestamp.time()
         in_session = SESSION_START_ET <= bar_t < SESSION_END_ET
 
+        # Lag B+: log DENNE bars evaluering — gør EUREVERSION synlig for datablind-
+        # forensik/watchdog (emitterede før INTET bar_evaluation). Ét event pr. færdig
+        # bar = datablind-signalet: fyrer når data flyder, stopper når feedet dør.
+        await self.log_bar_evaluation(
+            ticker      = sym,
+            bar_time_et = bar.timestamp.astimezone(ET).strftime("%H:%M")
+                          if hasattr(bar.timestamp, "astimezone") else str(bar.timestamp),
+            status      = "in_session" if in_session else "out_of_session",
+            reason      = f"z={z:+.2f} sd={sd:.2f}",
+        )
+
         # ── Åben position: tjek exit ──
         if sym in self._positions:
             pos = self._positions[sym]
