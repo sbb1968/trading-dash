@@ -3,11 +3,9 @@ scheduler.py
 ────────────
 Autonom dagsplan for algoserveren.
 
-På hver handelsdag:
-  09:30 ET  →  Pre-flight: send påmindelse hvis TWS ikke er logget ind
-  09:44 ET  →  Start MomentumORB strategi (1 min før handelsvinduet åbner)
-  10:35 ET  →  Send dagens resultat-summary til Iben
-  00:00 ET  →  Reset RiskManager daglige tællere
+På hver handelsdag (kun algoserveren auto-starter strategier):
+  09:20 ET  →  Start Konfluens 2 (10 min før US-åbning — tid til pre-flight + scan)
+  00:05 ET  →  Reset RiskManager daglige tællere
 
 Springer weekender og US helligdage over.
 
@@ -143,14 +141,14 @@ class AlgoScheduler:
         self._running = False
         self._task    = None
 
-        # ORB udfaset 2026-06-10. start_algo (ORB-start 09:44 ET), pre_flight_check
-        # og daily_summary var alle bundet til ORB og er fjernet fra planen.
-        # reset_daily er generisk (nulstiller RiskManager-tællere ved midnat ET) og
-        # beholdes. Når Europa-reversion skal auto-starte, tilføjes et nyt job her
-        # (02:00 ET / 08:00 DK), og /health-blokken i main.py opdateres tilsvarende.
-        # Metoderne _job_preflight / _job_start_algo / _job_daily_summary efterlades
-        # urørte (døde, men harmløse) for at holde diffen lille.
+        # ORB udfaset 2026-06-10 (start_algo/pre_flight_check/daily_summary var bundet
+        # til ORB). Konfluens 2 auto-starter nu 09:20 ET (15:20 DK) — 10 min før US-
+        # åbning, så pre-flight + scanner kan nå at køre før markedet åbner. Auto-start
+        # sker KUN på algoserveren (instance-guard i _job_start_konfluens2); workstation
+        # starter manuelt. reset_daily (midnat ET) er generisk og beholdes. De gamle
+        # _job_preflight / _job_start_algo / _job_daily_summary efterlades urørte (døde).
         self._jobs = [
+            ScheduledJob("start_konfluens2",  dtime( 9, 20), self._job_start_konfluens2),
             ScheduledJob("reset_daily",       dtime( 0,  5), self._job_reset_daily),
         ]
 
@@ -190,7 +188,7 @@ class AlgoScheduler:
 
     def _next_scheduled_start(self) -> datetime:
         now = now_et()
-        start_time = dtime(9, 44)
+        start_time = dtime(9, 20)   # Konfluens 2 auto-start (15:20 DK)
         today = now.date()
         today_start = ET.localize(datetime.combine(today, start_time))
 
@@ -243,6 +241,25 @@ class AlgoScheduler:
             return
         await self._start_algo()
         await notifier.alert_algo_started()   # no-op (deaktiveret i notifier.py)
+
+    async def _job_start_konfluens2(self):
+        """Auto-start Konfluens 2 kl. 09:20 ET (15:20 DK) på handelsdage.
+
+        Instance-guard: KUN algoserveren auto-starter. På workstation skal K2 startes
+        manuelt via UI — ellers ville BÅDE workstation og algoserver køre K2 på samme
+        tickers og generere parallel-handler på to paper-konti. TWS skal være online
+        (paper-session logget ind), ellers springes start over (logges).
+        """
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_konfluens2 sprunget over — "
+                f"instance_role='{self._instance_role}' (ikke 'algoserver')"
+            )
+            return
+        if not self._tws_is_online():
+            logger.warning("[Scheduler] Kan ikke auto-starte Konfluens 2 — TWS er offline")
+            return
+        await self._start_algo("Konfluens 2")
 
     async def _job_daily_summary(self):
         """Efter algoritmen har lukket alle positioner — send opsummering."""

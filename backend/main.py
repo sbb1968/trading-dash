@@ -1658,18 +1658,16 @@ async def health():
     sched = algo_scheduler.status_dict if algo_scheduler else None
     scheduled = None
     if sched and identity.instance_role == "algoserver":
-        start_job = next((j for j in sched["jobs"] if j["name"] == "start_algo"), None)
-        # Kun udfyld hvis et auto-start-job faktisk findes. ORB blev fjernet
-        # 2026-06-10, så start_job er None og scheduled forbliver None (Analyse
-        # viser "ingen planlagt strategi"). Når et nyt auto-start-job tilføjes,
-        # opdateres "strategy"-labelen her til den nye strategi.
+        start_job = next((j for j in sched["jobs"] if j["name"] == "start_konfluens2"), None)
+        # Udfyldes kun hvis et auto-start-job findes. Konfluens 2 auto-starter
+        # 09:20 ET (15:20 DK) på algoserveren (tilføjet 2026-06-17).
         if start_job:
             next_dk = sched.get("next_start_dk")
             dk_time = next_dk.split(" ")[-1] if next_dk else None
             scheduled = {
-                "strategy": "Momentum ORB",
+                "strategy": "Konfluens 2",
                 "et_time":  start_job["et_time"],
-                "dk_time":  dk_time,            # fx "15:44" — så UI kan vise "09:44 ET / 15:44 DK"
+                "dk_time":  dk_time,            # fx "15:20" — så UI kan vise "09:20 ET / 15:20 DK"
             }
     return {
         "status":           "ok",
