@@ -1674,8 +1674,8 @@ async def health():
         "clients":          len(connected_clients),
         "algo_clients":     len(algo_clients),
         "strategy_clients": len(strategy_clients),
-        "algo_running":     ("Momentum ORB" in strategy_manager._strategies and
-                             strategy_manager._strategies["Momentum ORB"].status == StrategyStatus.RUNNING),
+        "algo_running":     any(s.status == StrategyStatus.RUNNING
+                                for s in strategy_manager._strategies.values()),
         "ibkr_connected":   ibkr_connected,
         "threshold":        alert_engine.threshold,
         "journal_events":   await journal.count_events(),
@@ -1704,20 +1704,23 @@ async def status():
     Ingen auth-krav — viser kun read-only health-data, ingen handlinger.
     """
     # Algoritme-status
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    algo_running = (momentum is not None and
-                    momentum.status == StrategyStatus.RUNNING)
+    # Strategi-agnostisk: rapportér den første KØRENDE strategi (algoserver = Konfluens 2,
+    # workstation = EUREVERSION/BuyTheDip). ORB-hardkodningen var død på begge maskiner.
+    running_strat = next((s for s in strategy_manager._strategies.values()
+                          if s.status == StrategyStatus.RUNNING), None)
+    algo_running = running_strat is not None
 
     algo_stats = None
-    if momentum:
+    if running_strat:
         algo_stats = {
-            "status":         momentum.status,
-            "trades_today":   momentum.stats.trades_today,
-            "wins_today":     momentum.stats.wins_today,
-            "losses_today":   momentum.stats.losses_today,
-            "pnl_today":      round(momentum.stats.pnl_today, 2),
-            "open_positions": momentum.stats.open_positions,
-            "last_trade":     momentum.stats.last_trade_time,
+            "strategy":       running_strat.name,
+            "status":         running_strat.status,
+            "trades_today":   running_strat.stats.trades_today,
+            "wins_today":     running_strat.stats.wins_today,
+            "losses_today":   running_strat.stats.losses_today,
+            "pnl_today":      round(running_strat.stats.pnl_today, 2),
+            "open_positions": running_strat.stats.open_positions,
+            "last_trade":     running_strat.stats.last_trade_time,
         }
 
     return {

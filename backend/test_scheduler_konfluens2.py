@@ -60,21 +60,25 @@ def main():
     check("reset_daily findes stadig", job_named(sched, "reset_daily") is not None)
     check("ORB ('start_algo') er IKKE i planen", job_named(sched, "start_algo") is None)
 
-    # ── Instance-guard: algoserver starter K2 ──
+    # ── Instance-guard: algoserver starter K2 (returnerer True = færdig) ──
     sched, started = make_scheduler(role="algoserver", tws_online=True)
-    asyncio.run(sched._job_start_konfluens2())
+    ret = asyncio.run(sched._job_start_konfluens2())
     check("Algoserver + TWS online → start_algo('Konfluens 2') kaldt",
           started == ["Konfluens 2"], started)
+    check("Algoserver + TWS online → returnerer True (færdig)", ret is True, ret)
 
-    # ── Instance-guard: workstation starter IKKE ──
+    # ── Instance-guard: workstation starter IKKE (men returnerer True = markér færdig,
+    #    så genforsøgs-løkken IKKE spammer hvert tick) ──
     sched, started = make_scheduler(role="workstation", tws_online=True)
-    asyncio.run(sched._job_start_konfluens2())
+    ret = asyncio.run(sched._job_start_konfluens2())
     check("Workstation → IKKE startet (guard mod parallel-handel)", started == [], started)
+    check("Workstation → returnerer True (bevidst skip, ingen genforsøg/spam)", ret is True, ret)
 
-    # ── TWS-guard: offline → ingen start ──
+    # ── TWS-guard: offline → ingen start, returnerer False (= genforsøg) ──
     sched, started = make_scheduler(role="algoserver", tws_online=False)
-    asyncio.run(sched._job_start_konfluens2())
+    ret = asyncio.run(sched._job_start_konfluens2())
     check("Algoserver + TWS OFFLINE → IKKE startet", started == [], started)
+    check("Algoserver + TWS OFFLINE → returnerer False (genforsøg)", ret is False, ret)
 
     # ── should_run_now: tidslogik (job på 09:20 ET) ──
     sched, _ = make_scheduler()
@@ -87,8 +91,11 @@ def main():
         return ET.localize(datetime(y, mo, d, hh, mm))
 
     job.last_run_on = None
-    check("09:21 ET handelsdag (forbi 09:20, ikke kørt) → should_run", job.should_run_now(at(*WED, 9, 21)))
+    check("09:21 ET handelsdag (i genforsøgs-vinduet, ikke kørt) → should_run", job.should_run_now(at(*WED, 9, 21)))
     check("09:19 ET handelsdag (før 09:20) → IKKE endnu", not job.should_run_now(at(*WED, 9, 19)))
+    check("09:39 ET (sidste minut i vinduet) → should_run", job.should_run_now(at(*WED, 9, 39)))
+    check("09:45 ET (efter genforsøgs-vindue 09:40) → IKKE (giv op i dag)",
+          not job.should_run_now(at(*WED, 9, 45)))
 
     job.last_run_on = date_cls(*WED)   # allerede kørt i dag
     check("09:30 ET men allerede kørt i dag → IKKE igen", not job.should_run_now(at(*WED, 9, 30)))
@@ -96,6 +103,25 @@ def main():
     job.last_run_on = None
     check("Lørdag 10:00 ET → IKKE (weekend)", not job.should_run_now(at(*SAT, 10, 0)))
     check("Juneteenth 10:00 ET → IKKE (US-helligdag)", not job.should_run_now(at(*HOL, 10, 0)))
+
+    # ── run() genforsøgs-markering: TWS offline markerer IKKE kørt (prøver igen),
+    #    success markerer kørt (stopper). Tester den faktiske job.run()-sti. ──
+    sched, started = make_scheduler(role="algoserver", tws_online=False)
+    job = job_named(sched, "start_konfluens2")
+    asyncio.run(job.run(at(*WED, 9, 25)))
+    check("run() m. TWS offline → last_run_on IKKE sat (genforsøges)", job.last_run_on is None, job.last_run_on)
+    check("run() m. TWS offline → K2 ikke startet", started == [], started)
+
+    sched, started = make_scheduler(role="algoserver", tws_online=True)
+    job = job_named(sched, "start_konfluens2")
+    asyncio.run(job.run(at(*WED, 9, 25)))
+    check("run() m. TWS online → last_run_on sat (stopper genforsøg)", job.last_run_on == date_cls(*WED), job.last_run_on)
+    check("run() m. TWS online → K2 startet", started == ["Konfluens 2"], started)
+
+    sched, started = make_scheduler(role="workstation", tws_online=True)
+    job = job_named(sched, "start_konfluens2")
+    asyncio.run(job.run(at(*WED, 9, 25)))
+    check("run() på workstation → last_run_on sat (markér færdig, ingen spam)", job.last_run_on == date_cls(*WED), job.last_run_on)
 
     # ── next_start = 09:20 ET / 15:20 DK ──
     sched, _ = make_scheduler()

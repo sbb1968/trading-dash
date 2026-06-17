@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 DK = pytz.timezone("Europe/Copenhagen")   # dansk tid — til dual-visning (ET / DK) i UI
 
+# Auto-start af Konfluens 2 (KUN algoserveren — se _job_start_konfluens2).
+# K2 handler fra 09:30 ET; vi starter lidt før, så pre-flight + scanner-warmup er klar
+# før åbningen. Genforsøg: er TWS/Gateway nede præcis ved start, prøver jobbet igen hvert
+# loop-tick indtil K2_RETRY_UNTIL_ET — så en Gateway der kommer lidt sent op stadig fanges.
+K2_START_ET       = dtime(9, 20)   # 15:20 dansk
+K2_RETRY_UNTIL_ET = dtime(9, 40)   # giv op efter dette (for sent inde i sessionen)
+
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
 # 2026 NYSE-lukkede dage:
@@ -82,29 +89,49 @@ def now_et() -> datetime:
 # ─────────────────────────────────────────────────────────────
 
 class ScheduledJob:
-    def __init__(self, name: str, et_time: dtime, action: Callable[[], Awaitable]):
+    def __init__(self, name: str, et_time: dtime, action: Callable[[], Awaitable],
+                 window_end_et: Optional[dtime] = None, retry_until_success: bool = False):
         self.name        = name
         self.et_time     = et_time
         self.action      = action
+        # Genforsøgs-vindue: når sat, er jobbet kørbart i [et_time, window_end_et) og
+        # markeres først "kørt" når actionen returnerer truthy (success). Bruges til
+        # auto-start hvor TWS kan være nede præcis ved start-tidspunktet.
+        self.window_end_et       = window_end_et
+        self.retry_until_success = retry_until_success
         self.last_run_on: Optional[date_cls] = None
 
     def should_run_now(self, now: datetime) -> bool:
-        """True hvis vi er forbi job-tiden i dag og endnu ikke har kørt det."""
+        """True hvis vi er forbi job-tiden i dag og endnu ikke har kørt det.
+        For genforsøgs-jobs: kørbart i [et_time, window_end_et) indtil success."""
         if not is_trading_day(now.date()):
             return False
         if self.last_run_on == now.date():
             return False
         job_dt = ET.localize(datetime.combine(now.date(), self.et_time))
-        return now >= job_dt
+        if now < job_dt:
+            return False
+        if self.window_end_et is not None:
+            end_dt = ET.localize(datetime.combine(now.date(), self.window_end_et))
+            if now >= end_dt:
+                return False   # forbi genforsøgs-vinduet → giv op i dag
+        return True
 
     async def run(self, now: datetime):
-        self.last_run_on = now.date()
+        # One-shot jobs markeres kørt FØR action (uændret). Genforsøgs-jobs markeres
+        # først kørt når action returnerer truthy (success) — ellers prøves igen næste tick.
+        # (Loop'et awaiter run() sekventielt, så ingen samtidig re-entry trods sen mark.)
+        if not self.retry_until_success:
+            self.last_run_on = now.date()
+        result = None
         try:
             logger.info(f"[Scheduler] ▶ {self.name} ({now.strftime('%H:%M:%S')} ET)")
-            await self.action()
+            result = await self.action()
         except Exception as e:
             logger.exception(f"[Scheduler] Fejl i job '{self.name}': {e}")
             await notifier.alert_backend_error(f"Scheduler job '{self.name}' fejlede: {e}")
+        if self.retry_until_success and result:
+            self.last_run_on = now.date()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -148,8 +175,9 @@ class AlgoScheduler:
         # starter manuelt. reset_daily (midnat ET) er generisk og beholdes. De gamle
         # _job_preflight / _job_start_algo / _job_daily_summary efterlades urørte (døde).
         self._jobs = [
-            ScheduledJob("start_konfluens2",  dtime( 9, 20), self._job_start_konfluens2),
-            ScheduledJob("reset_daily",       dtime( 0,  5), self._job_reset_daily),
+            ScheduledJob("start_konfluens2", K2_START_ET, self._job_start_konfluens2,
+                         window_end_et=K2_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
         ]
 
     # ─────────────────────────────────────────────────────────
@@ -162,9 +190,12 @@ class AlgoScheduler:
         self._running = True
         self._task    = asyncio.create_task(self._loop())
 
+        auto = (f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')} ET (genforsøg til "
+                f"{K2_RETRY_UNTIL_ET.strftime('%H:%M')})"
+                if self._instance_role == "algoserver" else "ingen (manuel start)")
         logger.info(
-            f"[Scheduler] Startet ({self._instance_role}) — "
-            f"reset_daily aktiv, ingen auto-start af strategier planlagt"
+            f"[Scheduler] Startet ({self._instance_role}) — reset_daily aktiv, "
+            f"auto-start: {auto}"
         )
 
     async def stop(self):
@@ -188,7 +219,7 @@ class AlgoScheduler:
 
     def _next_scheduled_start(self) -> datetime:
         now = now_et()
-        start_time = dtime(9, 20)   # Konfluens 2 auto-start (15:20 DK)
+        start_time = K2_START_ET   # Konfluens 2 auto-start (15:20 DK)
         today = now.date()
         today_start = ET.localize(datetime.combine(today, start_time))
 
@@ -242,24 +273,29 @@ class AlgoScheduler:
         await self._start_algo()
         await notifier.alert_algo_started()   # no-op (deaktiveret i notifier.py)
 
-    async def _job_start_konfluens2(self):
-        """Auto-start Konfluens 2 kl. 09:20 ET (15:20 DK) på handelsdage.
+    async def _job_start_konfluens2(self) -> bool:
+        """Auto-start Konfluens 2 ~10 min før US-åbning. KUN på algoserveren.
 
-        Instance-guard: KUN algoserveren auto-starter. På workstation skal K2 startes
-        manuelt via UI — ellers ville BÅDE workstation og algoserver køre K2 på samme
-        tickers og generere parallel-handler på to paper-konti. TWS skal være online
-        (paper-session logget ind), ellers springes start over (logges).
+        Returnerer True når jobbet er "færdigt for i dag" (startet, eller bevidst sprunget
+        over på workstation), False når det bør genforsøges (TWS offline). Workstation
+        springer over: K2 startes dér manuelt — ellers ville BÅDE algoserver og workstation
+        køre K2 på samme tickers → parallel-handler på to konti. start_strategy har egne
+        guards (kører-allerede/limits), så et genforsøgs-kald er idempotent.
         """
         if self._instance_role != "algoserver":
             logger.info(
-                f"[Scheduler] start_konfluens2 sprunget over — "
-                f"instance_role='{self._instance_role}' (ikke 'algoserver')"
+                f"[Scheduler] start_konfluens2 sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); K2 startes manuelt på workstation"
             )
-            return
+            return True   # bevidst skip — markér færdig, ingen genforsøg/spam
         if not self._tws_is_online():
-            logger.warning("[Scheduler] Kan ikke auto-starte Konfluens 2 — TWS er offline")
-            return
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte Konfluens 2 — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {K2_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info("[Scheduler] Auto-starter Konfluens 2")
         await self._start_algo("Konfluens 2")
+        return True
 
     async def _job_daily_summary(self):
         """Efter algoritmen har lukket alle positioner — send opsummering."""
