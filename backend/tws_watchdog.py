@@ -59,6 +59,14 @@ DATA_BLIND_SEC_EU     = 1200
 # (hvor hyppig bar_evaluation holder sec_any lav). Se spec for begrundelse.
 STRATEGY_ALIVE_SEC_EU = 360
 
+# Session-start-grace: minutter efter sessions-åbning hvor en forældet bar_evaluation
+# IKKE regnes som datablind (strategien har ikke produceret sin første LIVE bar endnu).
+# EUREVERSION: warmup sætter _last_bar_processed + emitterer intet bar_evaluation → første
+# live-bar kommer op til ~15 min (én 15-min bar) inde; heartbeatet (5 min) kommer før.
+# Uden grace → falsk "EUREVERSION er DATABLIND" ~5-15 min efter EU-åbning hver dag.
+US_DATA_GRACE_MIN     = 3      # K2: 1-min bars → første live-bar ~1 min inde
+EU_DATA_GRACE_MIN     = 20     # EUREVERSION: 15-min bars → op til ~15 min + margin
+
 # Auto-recovery er OPT-IN og som standard SLÅET FRA. Når True kalder watchdogen
 # KUN on_data_blind-callbacken (wired i main.py) — den dræber aldrig selv Gateway.
 DATA_AUTO_RECOVER          = False
@@ -182,6 +190,14 @@ class TWSWatchdog:
             return "EU"
         return None
 
+    def _mins_into_session(self, session: str) -> float:
+        """Minutter siden den aktive sessions åbning (ET)."""
+        import pytz
+        et = datetime.now(pytz.timezone("America/New_York"))
+        open_et  = EU_SESSION_OPEN_ET if session == "EU" else SESSION_OPEN_ET
+        mins_now = et.hour * 60 + et.minute + et.second / 60.0
+        return mins_now - (open_et[0] * 60 + open_et[1])
+
     def _read_data_marks(self):
         """
         Læs journalen READ-ONLY: sekunder siden seneste bar_evaluation (data-puls)
@@ -266,6 +282,15 @@ class TWSWatchdog:
             self._data_blind_since   = None
             self._data_alerts_sent   = 0
             self._last_data_alert_at = None
+            return
+
+        # Session-start-grace: i opvarmnings-vinduet efter åbning er en forældet
+        # bar_evaluation IKKE datablindhed — strategien har bare ikke produceret sin
+        # første LIVE bar endnu (EUREVERSIONs warmup emitterer intet bar_evaluation, så
+        # den første kommer op til ~15 min inde; heartbeatet kommer før og ville ellers
+        # udløse falsk alarm). Efter grace fanges feed-dødt-fra-åbning stadig.
+        grace_min = EU_DATA_GRACE_MIN if session == "EU" else US_DATA_GRACE_MIN
+        if self._mins_into_session(session) < grace_min:
             return
 
         # ── DATABLIND (forbundet, men ingen friske bars) ──

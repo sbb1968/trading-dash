@@ -11,9 +11,11 @@ af live-DB + datetime.now → dækkes af spec'ens røgtest, ikke her.
 Kør i backend-mappen:  python test_watchdog_session.py
 """
 
+import asyncio
 from datetime import datetime as RealDT
 import pytz
 
+import notifier
 import tws_watchdog as wd
 from tws_watchdog import TWSWatchdog
 
@@ -36,15 +38,57 @@ class _FakeDatetime:
         return cls._fixed
 
 
-def session_at(y, mo, d, hh, mm):
-    """Byg watchdog, frys tiden til det givne ET-tidspunkt, returnér _active_session()."""
+def _freeze(y, mo, d, hh, mm):
     wd.datetime = _FakeDatetime
     _FakeDatetime._fixed = ET.localize(RealDT(y, mo, d, hh, mm))
+
+
+def session_at(y, mo, d, hh, mm):
+    """Byg watchdog, frys tiden til det givne ET-tidspunkt, returnér _active_session()."""
+    _freeze(y, mo, d, hh, mm)
     w = TWSWatchdog.__new__(TWSWatchdog)
     try:
         return w._active_session()
     finally:
         wd.datetime = RealDT   # gendan så andre tests ikke rammes
+
+
+def mins_into(session, y, mo, d, hh, mm):
+    _freeze(y, mo, d, hh, mm)
+    w = TWSWatchdog.__new__(TWSWatchdog)
+    try:
+        return w._mins_into_session(session)
+    finally:
+        wd.datetime = RealDT
+
+
+def _fresh_watchdog():
+    """Watchdog-instans med de data-status-felter _handle_data_status rører."""
+    w = TWSWatchdog.__new__(TWSWatchdog)
+    w._data_was_live      = None
+    w._data_blind_since   = None
+    w._data_alerts_sent   = 0
+    w._last_data_alert_at = None
+    return w
+
+
+def run_data_status(y, mo, d, hh, mm, marks):
+    """Kør _handle_data_status med frosset tid + mockede data-marks. Returnér antal
+    notifier.send-kald (= alarmer udløst)."""
+    _freeze(y, mo, d, hh, mm)
+    w = _fresh_watchdog()
+    w._read_data_marks = lambda: marks   # (sec_bareval, sec_any)
+    sent = []
+    orig = notifier.send
+    async def _spy(**kw):
+        sent.append(kw)
+    notifier.send = _spy
+    try:
+        asyncio.run(w._handle_data_status())
+    finally:
+        notifier.send = orig
+        wd.datetime = RealDT
+    return sent
 
 
 def main():
@@ -82,6 +126,34 @@ def main():
     check("STRATEGY_ALIVE_SEC_EU = 360 (> 300s heartbeat)", wd.STRATEGY_ALIVE_SEC_EU == 360, wd.STRATEGY_ALIVE_SEC_EU)
     check("EU-alive > heartbeat (kontinuerlig EU-detektion)", wd.STRATEGY_ALIVE_SEC_EU > 300)
     check("EU-blind > US-blind (15-min vs 1-min bars)", wd.DATA_BLIND_SEC_EU > wd.DATA_BLIND_SEC)
+
+    # ── Del C: _mins_into_session (ren tidslogik) ──
+    check("EU 02:00 ET → ~0 min inde", abs(mins_into("EU", *WED, 2, 0)) < 0.5, mins_into("EU", *WED, 2, 0))
+    check("EU 02:10 ET → ~10 min inde", abs(mins_into("EU", *WED, 2, 10) - 10) < 0.5, mins_into("EU", *WED, 2, 10))
+    check("EU 03:00 ET → ~60 min inde", abs(mins_into("EU", *WED, 3, 0) - 60) < 0.5, mins_into("EU", *WED, 3, 0))
+    check("US 09:30 ET → ~0 min inde", abs(mins_into("US", *WED, 9, 30)) < 0.5, mins_into("US", *WED, 9, 30))
+    check("US 09:45 ET → ~15 min inde", abs(mins_into("US", *WED, 9, 45) - 15) < 0.5, mins_into("US", *WED, 9, 45))
+
+    # ── Del C: grace-gate (regressions-lås på den falske EU-åbnings-alarm) ──
+    # Marks der ALENE ville udløse datablind: forældet bar_evaluation (>1200), men frisk
+    # heartbeat (≤360) → passerer alive-gaten, data_live=False. Det er præcis åbnings-hullet.
+    STALE_BAREVAL_FRESH_ANY = (2000.0, 100.0)
+    sent = run_data_status(*WED, 2, 5, STALE_BAREVAL_FRESH_ANY)   # 5 min inde i EU (< grace 20)
+    check("Grace: 5 min inde i EU + forældet bar → INGEN alarm (grace undertrykker)",
+          len(sent) == 0, sent)
+    sent = run_data_status(*WED, 2, 25, STALE_BAREVAL_FRESH_ANY)  # 25 min inde (> grace 20)
+    check("Grace: 25 min inde i EU + forældet bar → datablind-alarm udløses",
+          len(sent) == 1 and "DATABLIND" in (sent[0].get("message", "")), sent)
+
+    # K2/US uændret mid-session: 11:00 ET (90 min inde) + forældet bar → alarm (grace irrelevant).
+    sent = run_data_status(*WED, 11, 0, STALE_BAREVAL_FRESH_ANY)
+    check("US mid-session (90 min inde) + forældet bar → alarm (K2-adfærd uændret)",
+          len(sent) == 1 and "DATABLIND" in (sent[0].get("message", "")), sent)
+
+    # Frisk bar i grace-vinduet → data_live-grenen (ingen alarm uanset grace).
+    sent = run_data_status(*WED, 2, 5, (50.0, 50.0))
+    check("Grace-vindue + FRISK bar → ingen alarm (data_live, ikke undertrykt fejlagtigt)",
+          len(sent) == 0, sent)
 
     print("\nALLE TESTS BESTÅET ✓")
 
