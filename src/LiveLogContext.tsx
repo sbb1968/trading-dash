@@ -161,8 +161,14 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
   const didInit       = useRef(false);   // StrictMode-guard mod dobbelt-connect
 
   function addLog(line: string) {
+    // Stempl HVER log-linje med lokal (dansk) tid, konsistent på tværs af alle
+    // strategier og beskedtyper. Tidligere brugte kun algo_status-linjer msg.time
+    // (som EUREVERSION sætter til US/ET) → inkonsistente/forkerte tidsstempler.
+    const d = new Date();
+    const ts = [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map(n => String(n).padStart(2, "0")).join(":");
     setLog(prev => {
-      const next = [...prev, line].slice(-LOG_MAX);
+      const next = [...prev, `[${ts}] ${line}`].slice(-LOG_MAX);
       try { localStorage.setItem(LOG_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
@@ -186,7 +192,7 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
                           msg.strategy === "Konfluens" ? "[KONF] " :
                           msg.strategy === "Momentum ORB" ? "[ORB] " :
                           msg.strategy === "Europa-reversion" ? "[REV] " : "";
-      addLog(`[${msg.time}] ${stratPrefix}${msg.message}`);
+      addLog(`${stratPrefix}${msg.message}`);   // tidsstempel tilføjes nu i addLog (lokal tid)
       if (msg.status === "universe_ready" && msg.message.includes(":")) {
         const part = msg.message.split(":")[1]?.trim();
         if (part) setUniverse(part.split(", ").filter(Boolean));
