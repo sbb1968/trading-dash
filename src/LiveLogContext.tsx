@@ -233,12 +233,15 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
       algoWsRef.current = ws;
       ws.onopen    = () => { setConnected(true);  addLog("✅ Forbundet til backend"); };
       ws.onmessage = (e) => { try { handleAlgoMessage(JSON.parse(e.data)); } catch {} };
-      ws.onclose   = () => {
+      ws.onclose   = (ev) => {
         setConnected(false);
-        addLog("⚠ Backend ikke forbundet — genforbinder hvert 3. sek...");
+        // Diagnostik: close-kode afslører ÅRSAG. 1006=abnormt drop (netværk/keepalive-
+        // timeout, intet close-frame) · 1000/1001=bevidst luk · 1011/1012=server-fejl/genstart.
+        addLog(`⚠ /ws/algo lukket (code ${ev.code}${ev.reason ? `, "${ev.reason}"` : ""}, `
+               + `clean=${ev.wasClean}) — genforbinder om 3 sek...`);
         setTimeout(connectAlgo, 3000);
       };
-      ws.onerror   = () => setConnected(false);
+      ws.onerror   = () => { setConnected(false); addLog("⚠ /ws/algo onerror (onclose følger)"); };
     }
 
     // ── Connect /ws/strategy (manager-status) ─────────────────
