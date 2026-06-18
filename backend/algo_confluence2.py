@@ -113,8 +113,10 @@ HEARTBEAT_INTERVAL_SEC = 300
 # force_close (15:45 ET) til markedslukning (16:00 ET) — ~15 min, rigeligt.
 CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
 RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
-FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger
-FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem genforsøg
+FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger (fase 1)
+FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem genforsøg (fase 1 + 2)
+LATE_CLOSE_MAX_MIN       = 20   # sekundær cap på fase 2's feed-gated vente (ved tvangsluk
+                                # binder markedslukningen SESSION_END=16:00 ET først)
 
 # Fallback (ikke brugt i normal drift — kun hvis scanner fejler komplet)
 FALLBACK_UNIVERSE: list[str] = []
@@ -1235,13 +1237,18 @@ class Confluence2Live(BaseStrategy):
     async def _close_all(self, reason: str):
         """Luk alle åbne positioner med fill-verifikation + genforsøg.
 
-        Hver position lukkes via _close, som nu KUN bogfører ved bekræftet
-        fyldning og ellers beholder positionen åben. Vi genforsøger de der ikke
-        blev bekræftet lukket, op til FORCE_CLOSE_MAX_ATTEMPTS gange — afgørende
-        ved market-close, hvor loop'et bagefter stopper uden flere forsøg. Det
-        der STADIG ikke kan lukkes (fx et halt) forbliver åbent i journalen og
-        ryddes ved næste opstarts-reconciliation.
+        FASE 1 (uændret): op til FORCE_CLOSE_MAX_ATTEMPTS hurtige genforsøg. Dækker
+        tynd likviditet / kortvarige misser.
+
+        FASE 2 (mod IBKR data-farm-drop ved tvangsluk): hvis positioner stadig hænger,
+        venter vi feedet ud — FEED-GATED — men KUN indtil markedslukningen (SESSION_END =
+        16:00 ET). Aktier kan ikke fylde efter luk uanset feed, så vi forsøger kun mens
+        markedet er åbent. Et mid-session stop bindes desuden af LATE_CLOSE_MAX_MIN.
+
+        Hvad der STADIG ikke kan lukkes (drop der spænder over markedslukningen, halt, osv.)
+        forbliver åbent i journalen og ryddes ved næste opstarts-reconcile (UÆNDRET).
         """
+        # ── Fase 1: hurtige genforsøg (uændret) ──
         for attempt in range(1, FORCE_CLOSE_MAX_ATTEMPTS + 1):
             tickers = list(self._positions.keys())
             if not tickers:
@@ -1263,12 +1270,47 @@ class Confluence2Live(BaseStrategy):
                     f"{FORCE_CLOSE_RETRY_DELAY}s", level="warning")
                 await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
 
+        # ── Fase 2: feed-gated genoprettelses-luk INDTIL markedslukning ──
+        if self._positions:
+            now_et       = datetime.now(ET)
+            market_close = now_et.replace(hour=SESSION_END.hour, minute=SESSION_END.minute,
+                                          second=0, microsecond=0)
+            deadline     = min(now_et + timedelta(minutes=LATE_CLOSE_MAX_MIN), market_close)
+            feed_down_logged = False
+            while (self._positions and datetime.now(ET) < deadline
+                   and self.status == StrategyStatus.RUNNING):
+                for ticker in list(self._positions.keys()):
+                    position = self._positions.get(ticker)
+                    if position is None:
+                        continue
+                    snap = await self.conn.get_snapshot(ticker)
+                    last = snap.get("last") if snap else None
+                    if not last:
+                        # Feed nede: en luk kan ikke fylde uden kurs. Log årsagen ÉN gang
+                        # tydeligt i live-loggen — undgå at spamme "ikke bekræftet fyldt".
+                        if not feed_down_logged:
+                            await self._log(
+                                f"⚠ Datafeed nede (ingen kurs) — kan ikke lukke "
+                                f"{', '.join(self._positions)}. Venter feed-gated indtil "
+                                f"markedslukning ({SESSION_END.strftime('%H:%M')} ET), "
+                                f"genforsøger hvert {FORCE_CLOSE_RETRY_DELAY}s.",
+                                level="warning")
+                            feed_down_logged = True
+                        continue
+                    await self._close(ticker, last, reason)
+                if self._positions and datetime.now(ET) < deadline:
+                    await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
+
+            if not self._positions and feed_down_logged:
+                await self._log("✅ Datafeed tilbage — hængende positioner fladet ud før markedslukning")
+
+        # ── Endeligt: stadig åben → opstarts-reconcile (uændret) fanger den ──
         if self._positions:
             await self._log(
-                f"⛔ {len(self._positions)} position(er) kunne IKKE bekræftes lukket "
-                f"efter {FORCE_CLOSE_MAX_ATTEMPTS} forsøg — bevaret åbne i journalen, "
-                f"ryddes ved næste opstart (luk dem evt. manuelt i TWS nu)",
-                level="warning")
+                f"⛔ {len(self._positions)} position(er) kunne IKKE bekræftes lukket før "
+                f"markedslukning ({SESSION_END.strftime('%H:%M')} ET) — datafeed nede/ufyldt. "
+                f"Bevaret åbne i journalen, ryddes ved næste opstarts-reconcile "
+                f"(luk dem evt. manuelt i TWS)", level="warning")
 
     # -------------------------------------------------------------
     # Hjælpere

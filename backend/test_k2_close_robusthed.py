@@ -44,6 +44,10 @@ async def _noop_sleep(*a, **k):
     return None
 asyncio.sleep = _noop_sleep
 
+# Fase 2 (feed-gated luk) DEAKTIVERET som standard i tests (deadline ≤ now → ingen venten),
+# så de eksisterende _close_all-tests ikke busy-spinner. Sektion E aktiverer den lokalt.
+k2mod.LATE_CLOSE_MAX_MIN = 0
+
 
 # ── Mocks ──────────────────────────────────────────────────────
 class MockConn:
@@ -111,6 +115,7 @@ def make_algo(conn, journal):
     algo._mae = {}
     algo.trades = []
     algo.total_pnl = 0.0
+    algo.status = k2mod.StrategyStatus.RUNNING
     algo._status = lambda *a, **k: None
     async def _log(msg, level="info"):
         return None
@@ -343,10 +348,82 @@ def section_D():
           len(conn.order_calls) == k2mod.FORCE_CLOSE_MAX_ATTEMPTS, conn.order_calls)
 
 
+# ── SEKTION E — feed-gated genoprettelses-luk (Fase 2, markedslukke-bundet) ──
+class FeedConn:
+    """Mock: feedet er 'oppe' efter up_after get_snapshot-kald (None = aldrig).
+    place_paper_order fylder KUN når feedet er oppe (data-farm-drop → ufyldt)."""
+    def __init__(self, up_after=None, last_px=5.05):
+        self.connected = True
+        self._snap_calls = 0
+        self._up_after = up_after
+        self._last_px = last_px
+        self.order_calls = []
+    def _up(self):
+        return self._up_after is not None and self._snap_calls >= self._up_after
+    async def get_snapshot(self, ticker):
+        self._snap_calls += 1
+        return {"last": self._last_px} if self._up() else {"last": None}
+    async def place_paper_order(self, ticker, action, quantity, source="", await_fill_sec=0, **kw):
+        self.order_calls.append((ticker, action, quantity))
+        if self._up():
+            return {"filled": quantity, "avg_fill": self._last_px, "status": "Filled"}
+        return {"filled": 0, "status": "Submitted"}
+
+
+def _feed_algo(conn):
+    a = make_algo(conn, MockJournal())
+    a._positions["AAA"] = mk_position(100, 5.0)
+    a._log_msgs = []
+    async def _cap(m, level="info"):
+        a._log_msgs.append(m)
+    a._log = _cap
+    return a
+
+
+def section_E():
+    print("\nSektion E — feed-gated genoprettelses-luk (Fase 2, markedslukke-bundet)")
+    _save = (k2mod.LATE_CLOSE_MAX_MIN, k2mod.FORCE_CLOSE_RETRY_DELAY, k2mod.SESSION_END)
+    k2mod.FORCE_CLOSE_RETRY_DELAY = 0
+    try:
+        # E1: feed nede HELE vinduet (marked åbent) → AAA åben + "Datafeed nede" 1× + give-up.
+        k2mod.LATE_CLOSE_MAX_MIN = 0.005           # ~0.3s vindue
+        k2mod.SESSION_END = k2mod.dtime(23, 59)    # marked "åbent" → deadline bindes af LATE_CLOSE_MAX_MIN
+        a = _feed_algo(FeedConn(up_after=None))
+        asyncio.run(a._close_all("market_close"))
+        down = [m for m in a._log_msgs if "Datafeed nede" in m]
+        check("E1 feed nede → AAA STADIG åben", "AAA" in a._positions, list(a._positions))
+        check("E1 'Datafeed nede' netop ÉN gang (ikke spammet)", len(down) == 1, down)
+        check("E1 give-up-besked logget", any("bekræftes lukket før" in m for m in a._log_msgs), a._log_msgs)
+
+        # E2: feed tilbage før deadline → AAA flades ud + "Datafeed tilbage".
+        a = _feed_algo(FeedConn(up_after=6))       # nede gennem fase 1 (4 kald), op i fase 2
+        asyncio.run(a._close_all("market_close"))
+        check("E2 feed tilbage → AAA fladet ud (lukket)", "AAA" not in a._positions, list(a._positions))
+        check("E2 'Datafeed tilbage' logget", any("Datafeed tilbage" in m for m in a._log_msgs), a._log_msgs)
+
+        # E3: marked allerede LUKKET (SESSION_END i fortiden) → Fase 2 sprunget over.
+        k2mod.SESSION_END = k2mod.dtime(0, 1)      # markedslukning i fortiden → deadline ≤ now
+        a = _feed_algo(FeedConn(up_after=None))
+        asyncio.run(a._close_all("market_close"))
+        check("E3 marked lukket → AAA åben (Fase 1 fejlede, Fase 2 sprunget over)", "AAA" in a._positions)
+        check("E3 INGEN 'Datafeed nede'-log (Fase 2 sprunget over)",
+              not any("Datafeed nede" in m for m in a._log_msgs), a._log_msgs)
+
+        # E4: normal — feed oppe fra start → luk i fase 1, ingen Fase 2.
+        k2mod.SESSION_END = k2mod.dtime(23, 59)
+        a = _feed_algo(FeedConn(up_after=0))
+        asyncio.run(a._close_all("market_close"))
+        check("E4 feed oppe → AAA lukket i fase 1", "AAA" not in a._positions)
+        check("E4 ingen 'Datafeed nede'-log", not any("Datafeed nede" in m for m in a._log_msgs))
+    finally:
+        k2mod.LATE_CLOSE_MAX_MIN, k2mod.FORCE_CLOSE_RETRY_DELAY, k2mod.SESSION_END = _save
+
+
 if __name__ == "__main__":
     print("Samlet test: K2 reconcile-oprydning + robust force-close")
     section_A()
     section_B()
     section_C()
     section_D()
+    section_E()
     print("\nALLE TESTS BESTÅET ✓")
