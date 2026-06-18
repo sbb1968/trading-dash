@@ -37,6 +37,10 @@ import trade_queries
 
 ET = pytz.timezone("America/New_York")
 
+# Fase 2 (feed-gated luk) DEAKTIVERET som standard i tests (deadline=now → ingen venten),
+# så _close_all-tests ikke busy-spinner i 20 min. Sektion K aktiverer den lokalt.
+eur.LATE_CLOSE_MAX_MIN = 0
+
 
 def check(name, cond, detail=""):
     if cond:
@@ -537,6 +541,76 @@ def section_J():
     check("J2 < LOOKBACK → intet warmup-emit (ingen crash)", warmup_evs == [], warmup_evs)
 
 
+# ── K — feed-gated genoprettelses-luk (Fase 2 mod IBKR data-farm-drop) ──
+class FeedConn:
+    """Mock IBKR: feedet er 'oppe' efter `up_after` get_snapshot-kald (None = aldrig).
+    place_paper_order fylder KUN når feedet er oppe (data-farm-drop → ufyldt)."""
+    def __init__(self, up_after=None):
+        self.connected = True
+        self._snap_calls = 0
+        self._up_after = up_after
+        self.orders = []
+    def _feed_up(self):
+        return self._up_after is not None and self._snap_calls >= self._up_after
+    def get_account_summary(self):
+        return {"net_liquidation": 100000.0}
+    async def get_snapshot(self, sym):
+        self._snap_calls += 1
+        return {"last": 5010.0} if self._feed_up() else {"last": None}
+    async def place_paper_order(self, sym, action, quantity, source="", await_fill_sec=0, **kw):
+        self.orders.append((sym, action, quantity))
+        if self._feed_up():
+            return {"filled": quantity, "avg_fill": 5010.0, "status": "Filled"}
+        return {"filled": 0, "status": "Submitted"}
+
+
+def _algo_feed(conn):
+    j = MockJournal()
+    a = make_algo(conn, j)
+    a._positions["MES"] = {
+        "side": "long", "entry_price": 5000.0, "contracts": 5, "multiplier": 5.0,
+        "entry_time": ET.localize(datetime(2026, 6, 16, 3, 0)),
+        "stop_price": 4994.0, "std": 4.0, "reserved": 50.0, "init_margin": 1300.0,
+        "trade_id": "tid1", "last_z": -0.3}
+    a.stats.open_positions = 1
+    a._mfe["MES"] = 5000.0
+    a._mae["MES"] = 5000.0
+    a._log_msgs = []
+    async def _cap(m, level="info"):
+        a._log_msgs.append(m)
+    a._log = _cap
+    return a, j
+
+
+def section_K():
+    print("\nSektion K — feed-gated genoprettelses-luk (Fase 2)")
+    _save_max, _save_delay = eur.LATE_CLOSE_MAX_MIN, eur.FORCE_CLOSE_RETRY_DELAY
+    eur.LATE_CLOSE_MAX_MIN = 0.005      # ~0.3s vindue (testbart, ikke 20 min)
+    eur.FORCE_CLOSE_RETRY_DELAY = 0     # ingen rigtige sleeps
+    try:
+        # K1: feed nede HELE vinduet → MES forbliver åben; "Datafeed nede" logget ÉN gang.
+        a, j = _algo_feed(FeedConn(up_after=None))
+        asyncio.run(a._close_all("session_end"))
+        down_logs = [m for m in a._log_msgs if "Datafeed nede" in m]
+        check("K1 feed nede hele vinduet → MES STADIG åben", "MES" in a._positions, list(a._positions))
+        check("K1 'Datafeed nede' logget netop ÉN gang (ikke spammet)", len(down_logs) == 1, down_logs)
+
+        # K2: feed kommer tilbage midt i vinduet → MES flades ud + "Datafeed tilbage" logget.
+        a, j = _algo_feed(FeedConn(up_after=6))   # nede gennem fase 1 (4 kald), op i fase 2
+        asyncio.run(a._close_all("session_end"))
+        check("K2 feed tilbage → MES fladet ud (lukket)", "MES" not in a._positions, list(a._positions))
+        check("K2 'Datafeed tilbage' logget", any("Datafeed tilbage" in m for m in a._log_msgs), a._log_msgs)
+
+        # K3: feed oppe fra start → lukker i fase 1, ingen feed-down-log, ingen Fase 2.
+        a, j = _algo_feed(FeedConn(up_after=0))
+        asyncio.run(a._close_all("session_end"))
+        check("K3 feed oppe → MES lukket i fase 1", "MES" not in a._positions, list(a._positions))
+        check("K3 ingen 'Datafeed nede'-log (feed var oppe)",
+              not any("Datafeed nede" in m for m in a._log_msgs), a._log_msgs)
+    finally:
+        eur.LATE_CLOSE_MAX_MIN, eur.FORCE_CLOSE_RETRY_DELAY = _save_max, _save_delay
+
+
 if __name__ == "__main__":
     print("Test: Europa-reversion (adfærds-lås + Trin 2 regressions-gate)")
     section_A()
@@ -549,4 +623,5 @@ if __name__ == "__main__":
     section_H()
     section_I()
     section_J()
+    section_K()
     print("\nALLE TESTS BESTÅET ✓")

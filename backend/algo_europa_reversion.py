@@ -77,7 +77,9 @@ HEARTBEAT_INTERVAL_SEC = 300
 # bekræftet fyldning af lukke-ordrer; ufyldt → vi popper IKKE positionen.
 CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
 FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger
-FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem _close_all-genforsøg
+FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem _close_all-genforsøg (fase 1 + 2)
+LATE_CLOSE_MAX_MIN       = 20   # min fase 2 venter (feed-gated) på at datafeedet kommer tilbage,
+                                # så hængende positioner flades ud i stedet for at hænge til næste session
 RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
 
 
@@ -827,7 +829,9 @@ class EuropaReversionLive(BaseStrategy):
                            f"(status={result.get('status')}, filled={filled}/{contracts}) "
                            f"— beholder position åben, genforsøger")
             self._status("trading",
-                         f"⚠ {sym}: lukkeordre ikke bekræftet fyldt — position forbliver åben")
+                         f"⚠ {sym}: lukkeordre ikke bekræftet fyldt "
+                         f"(status={result.get('status')}, filled={filled}/{contracts}) "
+                         f"— position forbliver åben")
             return
 
         fill = result.get("avg_fill")
@@ -954,14 +958,23 @@ class EuropaReversionLive(BaseStrategy):
         self._status("trading", f"{emoji} {sym}: lukket @ ${price:.2f} | P&L: ${pnl:+.2f}")
 
     async def _close_all(self, reason: str):
-        """Luk alle åbne positioner (sessions-slut eller stop).
+        """Luk alle åbne positioner (sessions-slut eller stop), fyldnings-verificeret.
 
-        Med fyldnings-verificeret _close (await_fill + filled-tjek) kan en enkelt
-        lukning fejle (tynd likviditet) og beholde positionen åben. Ved sessions-slut
-        er der ingen 'næste bar' til at genforsøge, så vi looper op til
-        FORCE_CLOSE_MAX_ATTEMPTS (mirror K2's force-close). Hvad der STADIG ikke kan
-        lukkes efter sidste forsøg forbliver åbent + åbent-i-journal; opstarts-reconcile
-        fanger det næste session (den eneste resterende — og sikre — divergens)."""
+        FASE 1 — hurtige genforsøg: op til FORCE_CLOSE_MAX_ATTEMPTS forsøg med
+        FORCE_CLOSE_RETRY_DELAY imellem. Dækker tynd likviditet.
+
+        FASE 2 — feed-genoprettelses-vindue (mod IBKR data-farm-drop ved sessions-slut):
+        IBKR's daglige farm-drop forsinker simulerede ordrer i typisk minutter. I stedet
+        for at lade futures hænge åbne natten over til næste sessions reconcile, bliver vi
+        ved — FEED-GATED — i op til LATE_CLOSE_MAX_MIN: vi forsøger kun en luk når der er en
+        kurs (snapshot), og flader ud så snart feedet er tilbage. Kun self._positions
+        (vores), via _close (popper + bogfører kun ved bekræftet fyldning), afbrydelig
+        (status-tjek), tidsbegrænset.
+
+        Hvad der STADIG ikke kan lukkes (feed nede hele vinduet) forbliver åbent + åbent-i-
+        journal; opstarts-reconcile (_reconcile_orphans_impl, UÆNDRET) fanger det næste
+        session som sidste net."""
+        # ── Fase 1: hurtige genforsøg ──
         for attempt in range(1, FORCE_CLOSE_MAX_ATTEMPTS + 1):
             if not self._positions:
                 break
@@ -978,14 +991,46 @@ class EuropaReversionLive(BaseStrategy):
                                f"— genforsøger om {FORCE_CLOSE_RETRY_DELAY}s")
                 await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
 
+        # ── Fase 2: feed-gated genoprettelses-luk ──
+        if self._positions:
+            deadline = datetime.now(ET) + timedelta(minutes=LATE_CLOSE_MAX_MIN)
+            feed_down_logged = False
+            while (self._positions and datetime.now(ET) < deadline
+                   and self.status == StrategyStatus.RUNNING):
+                for sym in list(self._positions.keys()):
+                    pos  = self._positions[sym]
+                    snap = await self.conn.get_snapshot(sym)
+                    last = snap.get("last") if snap else None
+                    if not last:
+                        # Feed nede: en luk kan ikke fylde uden kurs. Log årsagen ÉN gang
+                        # tydeligt i live-loggen — undgå at spamme "ikke bekræftet fyldt".
+                        if not feed_down_logged:
+                            await self._log(
+                                f"⚠ Datafeed nede (ingen kurs) — kan ikke lukke "
+                                f"{', '.join(self._positions)}. Venter på genoprettelse, "
+                                f"genforsøger hvert {FORCE_CLOSE_RETRY_DELAY}s i op til "
+                                f"{LATE_CLOSE_MAX_MIN} min.", level="warning")
+                            self._status("trading",
+                                f"⚠ Datafeed nede — venter på kurs for at lukke "
+                                f"{', '.join(self._positions)} ({len(self._positions)} åben)")
+                            feed_down_logged = True
+                        continue
+                    await self._close(sym, last, reason, pos.get("last_z"))
+                if self._positions and datetime.now(ET) < deadline:
+                    await asyncio.sleep(FORCE_CLOSE_RETRY_DELAY)
+
+            if not self._positions and feed_down_logged:
+                await self._log("✅ Datafeed tilbage — hængende positioner fladet ud", level="info")
+
+        # ── Endeligt: stadig åben → opstarts-reconcile (uændret) fanger den ──
         if self._positions:
             still = ", ".join(self._positions.keys())
-            logger.error(f"[Europa-reversion] _close_all: kunne IKKE lukke {still} efter "
-                         f"{FORCE_CLOSE_MAX_ATTEMPTS} forsøg — forbliver åben (i journal); "
-                         f"opstarts-reconcile fanger den næste session")
+            logger.error(f"[Europa-reversion] _close_all: kunne IKKE lukke {still} inden for "
+                         f"{LATE_CLOSE_MAX_MIN} min (datafeed nede/ufyldt hele vinduet) — "
+                         f"forbliver åben (i journal); opstarts-reconcile fanger den næste session")
             self._status("trading",
-                         f"⚠ {still}: ikke lukket efter {FORCE_CLOSE_MAX_ATTEMPTS} forsøg — "
-                         f"forbliver åben, reconcile fanger den")
+                         f"⚠ {still}: ikke lukket inden for {LATE_CLOSE_MAX_MIN} min "
+                         f"(datafeed nede) — forbliver åben, opstarts-reconcile fanger den næste session")
 
     # -------------------------------------------------------------
     # Hjælper
