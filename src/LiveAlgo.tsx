@@ -10,7 +10,6 @@ import {
 // så docs-knapperne henter de rigtige .md-filer.
 const STRATEGY_DOCS_KEYS: Record<string, string> = {
   "Momentum ORB": "momentum_orb",
-  "Konfluens":    "confluence",
   "Konfluens 2":  "confluence2",
 };
 

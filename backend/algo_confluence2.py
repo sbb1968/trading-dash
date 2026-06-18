@@ -631,7 +631,7 @@ class Confluence2Live(BaseStrategy):
         og matcher Sørens screener. Returnerer symboler sorteret efter seneste
         dagsændring (faldende). Tom liste hvis API fejler.
         """
-        from strategies.confluence.tv_scanner import build_volatility_universe
+        from strategies.shared.tv_scanner import build_volatility_universe
         return await build_volatility_universe(
             top_n       = top_n,
             price_min   = UNIVERSE_PRICE_MIN,

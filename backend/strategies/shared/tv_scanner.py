@@ -37,12 +37,12 @@ if __name__ == "__main__" and __package__ is None:
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
 
-from strategies.confluence.config import (
-    UNIVERSE_PRICE_MIN,
-    UNIVERSE_PRICE_MAX,
-    UNIVERSE_MIN_VOLUME,
-    UNIVERSE_TOP_N,
-)
+# Neutrale default-konstanter (tidligere importeret fra K1's config; nu selvstændige i
+# den delte screener — alle strategier sender alligevel deres EGNE værdier ind).
+UNIVERSE_PRICE_MIN   = 5.0
+UNIVERSE_PRICE_MAX   = 50.0
+UNIVERSE_MIN_VOLUME  = 500_000
+UNIVERSE_TOP_N       = 25
 
 logger = logging.getLogger(__name__)
 

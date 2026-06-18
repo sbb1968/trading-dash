@@ -208,7 +208,7 @@ class MarketConditionChecker:
             # Kandidater hentes fra TradingView — samme kilde som algoerne bruger.
             # Vi rører IKKE TWS her længere: tidligere hentede vi gap/relvol via
             # IBKR-snapshots, hvilket fik MarketOverview til at hænge når TWS var nede.
-            from strategies.confluence.tv_scanner import fetch_tv_top_gainer_symbols
+            from strategies.shared.tv_scanner import fetch_tv_top_gainer_symbols
             loop = asyncio.get_event_loop()
             gainers = await asyncio.wait_for(
                 loop.run_in_executor(None, fetch_tv_top_gainer_symbols, 25),

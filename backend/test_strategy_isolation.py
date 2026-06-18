@@ -36,7 +36,6 @@ def check(name, cond, detail=""):
 # ── Registry: hver strategi-wrapper → (egen source, egen strategies-pakke|None) ──
 # Tilføj nye strategier HER. Mangler en algo_*.py → testen fejler (med vilje).
 STRATEGIES = {
-    "algo_confluence.py":       ("Konfluens",        "strategies.confluence"),
     "algo_confluence2.py":      ("Konfluens 2",      "strategies.confluence2"),
     "algo_buythedip.py":        ("BuyTheDip",        None),   # selvstændig, ingen egen pakke
     "algo_europa_reversion.py": ("Europa-reversion", "strategies.europa_reversion"),
@@ -44,11 +43,11 @@ STRATEGIES = {
 }
 ALL_SOURCES = [src for src, _ in STRATEGIES.values()]
 
-# Neutrale delte moduler en strategi GERNE må importere (ikke en søskende-strategis logik).
+# Neutrale delte moduler en strategi GERNE må importere (IKKE en søskende-strategis logik):
+# strategies.base + strategies.shared.* (delt screener/indikatorer — bor i et NEUTRALT
+# modul, ikke under nogen strategi, jf. hård-reglen). K1's pakke er fjernet 2026-06-18.
 NEUTRAL_SHARED = ("strategies.base",)
-# Delt, TILSTANDSLØS screener-primitiv. Whitelisted indtil Trin 2 flytter den til et
-# neutralt modul (så bor den under K1's pakke; det er infra, ikke K1-logik).
-WHITELISTED_SHARED = ("strategies.confluence.tv_scanner",)
+WHITELISTED_SHARED = ()   # ingen strategi-pakke-undtagelser mere (tv_scanner flyttet til shared)
 
 # Filer der matcher algo_*.py men IKKE er aktive strategier.
 IGNORE_FILES = {"algo_momentum_backup.py"}
@@ -109,6 +108,8 @@ def _import_allowed(module, own_pkg):
         return True   # egen pakke
     if module in NEUTRAL_SHARED or module.startswith("strategies.base."):
         return True
+    if module == "strategies.shared" or module.startswith("strategies.shared."):
+        return True   # neutralt delt modul (screener/indikatorer) — tilladt for alle
     if module in WHITELISTED_SHARED:
         return True
     return False

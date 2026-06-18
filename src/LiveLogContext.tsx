@@ -73,7 +73,7 @@ export type StrategyStatusEnum = "idle" | "running" | "paused" | "stopped" | "er
 // Skrinlagte strategier: backend-koden og historiske journaler bevares, men
 // de skjules fra frontenden (dropdowns + strategi-side). Fjern fra dette set
 // hvis en strategi tages i brug igen.
-const SKRINLAGTE_STRATEGIER = new Set(["Momentum ORB", "Konfluens"]);
+const SKRINLAGTE_STRATEGIER = new Set(["Momentum ORB"]);
 
 export interface StrategyInfo {
   name:         string;
@@ -195,7 +195,6 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
       setMessage(msg.message);
       setTotalPnl(msg.total_pnl);
       const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Konfluens" ? "[KONF] " :
                           msg.strategy === "Momentum ORB" ? "[ORB] " :
                           msg.strategy === "Europa-reversion" ? "[REV] " : "";
       addLog(`${stratPrefix}${msg.message}`);   // tidsstempel tilføjes nu i addLog (lokal tid)
@@ -206,7 +205,6 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
     } else if (msg.type === "algo_trade") {
       // Strategi-prefix til log (KONF eller ORB) hvis strategy er sat
       const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Konfluens" ? "[KONF] " :
                           msg.strategy === "Momentum ORB" ? "[ORB] " :
                           msg.strategy === "Europa-reversion" ? "[REV] " : "";
       // Konfluens-specifikt: vis bricks/score hvis tilgængelige

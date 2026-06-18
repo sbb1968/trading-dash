@@ -28,7 +28,7 @@ import pandas as pd
 
 from strategies.base import Bar, EntrySignal, ExitDecision, Position
 # Genbrug Konfluens 1's validerede indikator-beregninger (ingen duplikering)
-from strategies.confluence.indicators import ema, rsi, atr, sma
+from strategies.shared.indicators import ema, rsi, atr, sma
 
 from strategies.confluence2.config import (
     Confluence2VariantConfig,

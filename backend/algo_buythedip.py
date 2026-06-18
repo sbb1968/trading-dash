@@ -347,7 +347,7 @@ class BuyTheDipLive(BaseStrategy):
         parametre. Returnerer symboler sorteret efter seneste dagsændring (faldende);
         tom liste hvis API'et fejler/timeout. Spejler K2's _scan_volatility_universe 1:1.
         """
-        from strategies.confluence.tv_scanner import build_volatility_universe
+        from strategies.shared.tv_scanner import build_volatility_universe
         return await build_volatility_universe(
             top_n       = top_n,
             price_min   = UNIVERSE_PRICE_MIN,

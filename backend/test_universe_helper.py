@@ -8,7 +8,7 @@ Kør:  python test_universe_helper.py
 """
 
 import asyncio
-from strategies.confluence import tv_scanner
+from strategies.shared import tv_scanner
 
 
 def check(name, cond, detail=""):

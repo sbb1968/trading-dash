@@ -428,7 +428,7 @@ class MomentumORB(BaseStrategy):
         # for IBKR's scanner. IBKR's TOP_PERC_GAIN returnerer en helt anden
         # liste end den Iben ser i sin TradingView screener. TV-screener
         # giver os præcis det univers Iben forventer.
-        from strategies.confluence.tv_scanner import fetch_tv_top_gainers
+        from strategies.shared.tv_scanner import fetch_tv_top_gainers
         import asyncio as _asyncio
 
         for attempt in range(1, 3):
