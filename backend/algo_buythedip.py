@@ -358,35 +358,19 @@ class BuyTheDipLive(BaseStrategy):
         parametre. Returnerer symboler sorteret efter seneste dagsændring (faldende);
         tom liste hvis API'et fejler/timeout. Spejler K2's _scan_volatility_universe 1:1.
         """
-        from strategies.confluence.tv_scanner import fetch_tv_intraday_volatility
-        import asyncio as _asyncio
-
-        try:
-            loop = _asyncio.get_event_loop()
-            results = await _asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: fetch_tv_intraday_volatility(
-                        top_n       = top_n,
-                        price_min   = UNIVERSE_PRICE_MIN,
-                        price_max   = UNIVERSE_PRICE_MAX,
-                        mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
-                        mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
-                        min_avg_vol = UNIVERSE_MIN_VOLUME,
-                        atr_pct_min = UNIVERSE_ATR_PCT_MIN,
-                        exchanges   = UNIVERSE_EXCHANGES,
-                    ),
-                ),
-                timeout=SCAN_TIMEOUT_SEC,
-            )
-        except _asyncio.TimeoutError:
-            logger.error("[BuyTheDip] TV-screener (volatility) timeout")
-            return []
-        except Exception as e:
-            logger.error(f"[BuyTheDip] TV-screener (volatility) fejl: {e}")
-            return []
-
-        return [symbol for symbol, _, _, _ in results]
+        from strategies.confluence.tv_scanner import build_volatility_universe
+        return await build_volatility_universe(
+            top_n       = top_n,
+            price_min   = UNIVERSE_PRICE_MIN,
+            price_max   = UNIVERSE_PRICE_MAX,
+            mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
+            mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
+            min_avg_vol = UNIVERSE_MIN_VOLUME,
+            atr_pct_min = UNIVERSE_ATR_PCT_MIN,
+            exchanges   = UNIVERSE_EXCHANGES,
+            timeout     = SCAN_TIMEOUT_SEC,
+            log_tag     = "BuyTheDip",
+        )
 
     # -------------------------------------------------------------
     # Trading-loop (to-fase: exits, så entries efter dip-dybde-prioritet)

@@ -267,6 +267,53 @@ def fetch_tv_intraday_volatility(
     return results
 
 
+async def build_volatility_universe(
+    *,
+    top_n:        int,
+    price_min:    float,
+    price_max:    float,
+    mkt_cap_min:  float,
+    mkt_cap_max:  float,
+    min_avg_vol:  int,
+    atr_pct_min:  float,
+    exchanges:    Optional[list[str]] = None,
+    timeout:      float = 15.0,
+    log_tag:      str = "TV",
+) -> list[str]:
+    """
+    Delt async-wrapper om fetch_tv_intraday_volatility: kører den blokerende screener
+    i en executor med timeout + fejlhåndtering og returnerer KUN symbolerne (sorteret
+    efter dagsændring faldende, som screeneren).
+
+    Hoistet fra K2's og BuyTheDips ENS _scan_volatility_universe. Hver strategi kalder
+    med SINE EGNE filter-konstanter, så univers-uafhængigheden bevares — kun den
+    duplikerede wrapper er fælles. Tom liste ved timeout/fejl (kalderen falder så
+    tilbage til retry/fallback).
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        results = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: fetch_tv_intraday_volatility(
+                    top_n=top_n, price_min=price_min, price_max=price_max,
+                    mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
+                    min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min,
+                    exchanges=exchanges,
+                ),
+            ),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"[{log_tag}] TV-screener (volatility) timeout")
+        return []
+    except Exception as e:
+        logger.error(f"[{log_tag}] TV-screener (volatility) fejl: {e}")
+        return []
+    return [symbol for symbol, _, _, _ in results]
+
+
 # ─────────────────────────────────────────────────────────────────
 # Standalone test
 # ─────────────────────────────────────────────────────────────────
