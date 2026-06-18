@@ -732,3 +732,27 @@ class BaseStrategy(ABC):
             return []
         parsed = [self._parse_bar(b) for b in (raw_bars or [])]
         return [b for b in parsed if b is not None]
+
+    async def _preflight_connection_and_account(self) -> tuple[bool, str, list[str]]:
+        """Fælles pre-flight trin 1-2: IBKR-forbindelse + konto/NLV (+ update_nlv).
+
+        Returnerer (ok, fejlbesked, checks). Ved ok=True er fejlbesked "" og checks =
+        ["IBKR forbundet", "Konto aktiv — NLV: $..."]. Kalderen tilføjer sine egne
+        datafeed- og strategi-specifikke trin bagefter (de afviger reelt: AAPL vs MES,
+        MIDPOINT-fallback, markedsforhold — derfor er de IKKE hoistet).
+        """
+        checks: list[str] = []
+        self._status("started", "Pre-flight: Tjekker IBKR-forbindelse...")
+        if not self.conn.connected:
+            return False, "IBKR ikke forbundet", checks
+        checks.append("IBKR forbundet")
+
+        self._status("started", "Pre-flight: Henter konto-data...")
+        account = self.conn.get_account_summary()
+        balance = account.get("net_liquidation", 0)
+        if balance <= 0:
+            return False, "Ingen konto-data", checks
+        checks.append(f"Konto aktiv — NLV: ${balance:,.2f}")
+        if self._risk_manager:
+            await self._risk_manager.update_nlv(balance)
+        return True, "", checks

@@ -135,22 +135,9 @@ class EuropaReversionLive(BaseStrategy):
     # -------------------------------------------------------------
 
     async def pre_flight(self) -> tuple[bool, str]:
-        checks = []
-
-        self._status("started", "Pre-flight: Tjekker IBKR-forbindelse...")
-        if not self.conn.connected:
-            return False, "IBKR ikke forbundet"
-        checks.append("IBKR forbundet")
-
-        self._status("started", "Pre-flight: Henter konto-data...")
-        account = self.conn.get_account_summary()
-        balance = account.get("net_liquidation", 0)
-        if balance <= 0:
-            return False, "Ingen konto-data"
-        checks.append(f"Konto aktiv — NLV: ${balance:,.2f}")
-
-        if self._risk_manager:
-            await self._risk_manager.update_nlv(balance)
+        ok, err, checks = await self._preflight_connection_and_account()
+        if not ok:
+            return False, err
 
         self._status("started", "Pre-flight: Tester futures-datafeed (MES, 15-min)...")
         test_bars = await self.conn.get_historical_bars(

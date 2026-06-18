@@ -79,6 +79,29 @@ def main():
     out = asyncio.run(BaseStrategy._fetch_bars(ns, "X", duration="1 D", bar_size="1 min"))
     check("_fetch_bars filtrerer defekte bars fra (1 gyldig af 2)", len(out) == 1 and out[0].close == 10.0, out)
 
+    # ── _preflight_connection_and_account ──
+    class _AcctConn:
+        def __init__(self, connected=True, nlv=100000.0):
+            self.connected = connected
+            self._nlv = nlv
+        def get_account_summary(self):
+            return {"net_liquidation": self._nlv}
+
+    def _pf(connected=True, nlv=100000.0):
+        return types.SimpleNamespace(_status=lambda *a, **k: None, _risk_manager=None,
+                                     conn=_AcctConn(connected, nlv))
+
+    ok, err, checks = asyncio.run(BaseStrategy._preflight_connection_and_account(_pf()))
+    check("preflight forbundet + NLV>0 → ok + 2 checks",
+          ok and err == "" and checks[0] == "IBKR forbundet"
+          and checks[1].startswith("Konto aktiv — NLV: $"), (ok, err, checks))
+    ok, err, checks = asyncio.run(BaseStrategy._preflight_connection_and_account(_pf(connected=False)))
+    check("preflight ikke forbundet → (False, 'IBKR ikke forbundet', [])",
+          ok is False and err == "IBKR ikke forbundet" and checks == [], (ok, err, checks))
+    ok, err, checks = asyncio.run(BaseStrategy._preflight_connection_and_account(_pf(nlv=0)))
+    check("preflight NLV=0 → (False, 'Ingen konto-data', ['IBKR forbundet'])",
+          ok is False and err == "Ingen konto-data" and checks == ["IBKR forbundet"], (ok, err, checks))
+
     print("\nALLE TESTS BESTÅET ✓")
 
 
