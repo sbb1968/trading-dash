@@ -33,6 +33,35 @@ from fastapi import HTTPException, Header
 from fastapi import Depends
 from pydantic import BaseModel
 
+# ── Tidsstemplet logging: alle linjer (print, logger, uvicorn) ──
+import logging, builtins
+from datetime import datetime as _dt
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-7s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Rut uvicorns egne loggere gennem root, så DERES linjer også får tid:
+for _n in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+    _lg = logging.getLogger(_n)
+    _lg.handlers.clear()
+    _lg.propagate = True
+logging.getLogger("ib_async").setLevel(logging.WARNING)
+
+# Dæmp den hyppige dash-snapshot-access-linje (drukner ellers alt andet):
+class _DropSnapshotAccess(logging.Filter):
+    def filter(self, record):
+        return "/account/dash-snapshot" not in record.getMessage()
+logging.getLogger("uvicorn.access").addFilter(_DropSnapshotAccess())
+
+# De bare print()-kald i alle moduler stemples i ét greb (print er en builtin,
+# så dette rammer [Server]/[Watchdog]/[Algo]/[StrategyManager]/... overalt):
+_orig_print = builtins.print
+def _ts_print(*args, **kwargs):
+    _orig_print(_dt.now().strftime("%H:%M:%S"), *args, **kwargs)
+builtins.print = _ts_print
+
 app = FastAPI()
 
 app.add_middleware(
