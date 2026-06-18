@@ -409,46 +409,7 @@ class EuropaReversionLive(BaseStrategy):
                      f"warmup-historie ({', '.join(INSTRUMENTS)})")
 
     async def _fetch_warmup_bars(self, sym: str) -> list[Bar]:
-        try:
-            raw_bars = await self.conn.get_historical_bars(
-                sym, duration=WARMUP_DURATION, bar_size=BAR_SIZE, what_to_show="TRADES",
-            )
-        except Exception as e:
-            logger.error(f"[Europa-reversion] {sym}: warmup-fetch fejlede: {e}")
-            return []
-        parsed = [self._parse_bar(b) for b in raw_bars]
-        return [b for b in parsed if b is not None]
-
-    def _parse_bar(self, raw) -> Optional[Bar]:
-        """Konverter en rå IBKR-bar (dict fra get_historical_bars) til Bar.
-
-        Tidszone-håndtering spejler K2: naive timestamps lokaliseres til ET,
-        tz-aware konverteres til ET. (IBKR intraday-bars kommer i TWS-tidszonen
-        med formatDate=1 — samme antagelse som de eksisterende aktie-strategier
-        kører på i produktion.)
-        """
-        ts = raw.get("datetime") if isinstance(raw, dict) else getattr(raw, "date", None)
-        if not isinstance(ts, datetime):
-            return None
-        if ts.tzinfo is None:
-            ts = ET.localize(ts)
-        else:
-            ts = ts.astimezone(ET)
-
-        o = raw.get("open")   if isinstance(raw, dict) else raw.open
-        h = raw.get("high")   if isinstance(raw, dict) else raw.high
-        l = raw.get("low")    if isinstance(raw, dict) else raw.low
-        c = raw.get("close")  if isinstance(raw, dict) else raw.close
-        v = raw.get("volume") if isinstance(raw, dict) else raw.volume
-
-        try:
-            return Bar(
-                timestamp=ts,
-                open=float(o), high=float(h), low=float(l), close=float(c),
-                volume=float(v) if v else 0.0,
-            )
-        except (TypeError, ValueError):
-            return None
+        return await self._fetch_bars(sym, duration=WARMUP_DURATION, bar_size=BAR_SIZE)
 
     # -------------------------------------------------------------
     # Trading loop
@@ -574,15 +535,7 @@ class EuropaReversionLive(BaseStrategy):
             self._bar_history[sym] = hist[-LOOKBACK * 8:]
 
     async def _fetch_recent_bars(self, sym: str) -> list[Bar]:
-        try:
-            raw_bars = await self.conn.get_historical_bars(
-                sym, duration=LATEST_FETCH_DURATION, bar_size=BAR_SIZE, what_to_show="TRADES",
-            )
-        except Exception as e:
-            logger.warning(f"[Europa-reversion] {sym}: kunne ikke hente bars: {e}")
-            return []
-        parsed = [self._parse_bar(b) for b in raw_bars]
-        return [b for b in parsed if b is not None]
+        return await self._fetch_bars(sym, duration=LATEST_FETCH_DURATION, bar_size=BAR_SIZE)
 
     async def _evaluate_bar(self, sym: str, bar: Bar, z: float, sd: float):
         """Kør z-reglen på én netop-færdiggjort bar (spejler run_backtest)."""

@@ -13,6 +13,8 @@ import asyncio
 import logging
 import pytz
 
+from strategies.base import Bar   # delt bar-dataklasse (parse/fetch hoistet hertil)
+
 logger = logging.getLogger(__name__)
 
 # ── Fælles konstanter (løftet — identiske i alle wrappers) ───────────────────
@@ -678,3 +680,55 @@ class BaseStrategy(ABC):
                 "entry_time":  et if et else "",
             })
         return out
+
+    def _parse_bar(self, raw) -> Optional[Bar]:
+        """Konverter en rå IBKR-bar (dict eller objekt fra get_historical_bars) til Bar.
+
+        Tidszone: naive timestamps lokaliseres til ET, tz-aware konverteres til ET
+        (IBKR intraday-bars kommer i TWS-tidszonen). Returnerer None ved en defekt bar
+        i stedet for at kaste — kalderen filtrerer None fra.
+
+        Hoistet fra EUREVERSIONs _parse_bar (kanonisk) + K2's/BuyTheDips identiske
+        inline-parse. ÉN sandhed for bar-parsing på tværs af alle strategier.
+        """
+        ts = raw.get("datetime") if isinstance(raw, dict) else getattr(raw, "date", None)
+        if not isinstance(ts, datetime):
+            return None
+        if ts.tzinfo is None:
+            ts = ET.localize(ts)
+        else:
+            ts = ts.astimezone(ET)
+
+        o = raw.get("open")   if isinstance(raw, dict) else raw.open
+        h = raw.get("high")   if isinstance(raw, dict) else raw.high
+        l = raw.get("low")    if isinstance(raw, dict) else raw.low
+        c = raw.get("close")  if isinstance(raw, dict) else raw.close
+        v = raw.get("volume") if isinstance(raw, dict) else raw.volume
+
+        try:
+            return Bar(
+                timestamp=ts,
+                open=float(o), high=float(h), low=float(l), close=float(c),
+                volume=float(v) if v else 0.0,
+            )
+        except (TypeError, ValueError):
+            return None
+
+    async def _fetch_bars(
+        self, ticker: str, *, duration: str, bar_size: str, what_to_show: str = "TRADES",
+    ) -> list[Bar]:
+        """Hent rå bars fra IBKR og parse til en Bar-liste (None-bars filtreres fra).
+
+        Delt skal for alle strategiers fetch-hjælpere. Tom liste ved fejl. Per-strategi-
+        logik (dato-interval→duration, enkelt-bar-vs-liste, evt. filtrering) bliver i
+        kalderen — denne metode gør KUN fetch + parse.
+        """
+        try:
+            raw_bars = await self.conn.get_historical_bars(
+                ticker, duration=duration, bar_size=bar_size, what_to_show=what_to_show,
+            )
+        except Exception as e:
+            logger.warning(f"[{self.name}] {ticker}: kunne ikke hente bars ({bar_size}/{duration}): {e}")
+            return []
+        parsed = [self._parse_bar(b) for b in (raw_bars or [])]
+        return [b for b in parsed if b is not None]

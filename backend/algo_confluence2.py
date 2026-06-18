@@ -664,62 +664,11 @@ class Confluence2Live(BaseStrategy):
         start_date: date_cls,
         end_date: date_cls,
     ) -> list[Bar]:
-        """
-        Hent 1-min bars fra IBKR for én ticker.
-
-        IBKR's 1-min historik er stramt begrænset (typisk 1-2 dage pr. kald),
-        og K2 behøver kun ~25+ bars. Vi capper derfor duration til 2 dage —
-        rigeligt til at varme alle indikatorer op (EMA20/RSI14/ATR14/vol-snit).
-        """
-        bars: list[Bar] = []
-
+        """Hent 1-min bars fra IBKR for én ticker. IBKR's 1-min historik er stramt
+        begrænset (typisk 1-2 dage pr. kald); vi capper derfor duration til 2 dage."""
         days_back = (end_date - start_date).days + 1
-        if days_back < 1:
-            days_back = 1
-        # 1-min: IBKR returnerer ikke pålideligt mere end et par dage pr. kald.
-        if days_back > 2:
-            days_back = 2
-        duration_str = f"{days_back} D"
-
-        try:
-            raw_bars = await self.conn.get_historical_bars(
-                ticker,
-                duration=duration_str,
-                bar_size="1 min",
-                what_to_show="TRADES",
-            )
-        except Exception as e:
-            logger.error(f"  {ticker}: get_historical_bars fejlede: {e}")
-            return []
-
-        if not raw_bars:
-            return []
-
-        for raw in raw_bars:
-            ts = raw.get("datetime") if isinstance(raw, dict) else getattr(raw, "date", None)
-            if not isinstance(ts, datetime):
-                continue
-            if ts.tzinfo is None:
-                ts = ET.localize(ts)
-            else:
-                ts = ts.astimezone(ET)
-
-            o = raw.get("open")   if isinstance(raw, dict) else raw.open
-            h = raw.get("high")   if isinstance(raw, dict) else raw.high
-            l = raw.get("low")    if isinstance(raw, dict) else raw.low
-            c = raw.get("close")  if isinstance(raw, dict) else raw.close
-            v = raw.get("volume") if isinstance(raw, dict) else raw.volume
-
-            bars.append(Bar(
-                timestamp=ts,
-                open=float(o),
-                high=float(h),
-                low=float(l),
-                close=float(c),
-                volume=float(v) if v else 0.0,
-            ))
-
-        return bars
+        days_back = max(1, min(days_back, 2))
+        return await self._fetch_bars(ticker, duration=f"{days_back} D", bar_size="1 min")
 
     # -------------------------------------------------------------
     # Trading loop
@@ -993,45 +942,9 @@ class Confluence2Live(BaseStrategy):
             await self.log_rejection_change(ticker, evaluation["reason"])
 
     async def _fetch_latest_bar(self, ticker: str) -> Optional[Bar]:
-        """
-        Hent den seneste FÆRDIGE 1-min bar.
-
-        Vi spørger om en lille batch (sidste time) og tager seneste bar.
-        """
-        try:
-            bars = await self.conn.get_historical_bars(
-                ticker,
-                duration="3600 S",   # 1 time
-                bar_size="1 min",
-                what_to_show="TRADES",
-            )
-        except Exception as e:
-            logger.warning(f"  {ticker}: kunne ikke hente bar: {e}")
-            return None
-
-        if not bars:
-            return None
-
-        raw = bars[-1]
-        ts = raw.get("datetime") if isinstance(raw, dict) else raw.date
-        if not isinstance(ts, datetime):
-            return None
-        if ts.tzinfo is None:
-            ts = ET.localize(ts)
-        else:
-            ts = ts.astimezone(ET)
-
-        o = raw.get("open")   if isinstance(raw, dict) else raw.open
-        h = raw.get("high")   if isinstance(raw, dict) else raw.high
-        l = raw.get("low")    if isinstance(raw, dict) else raw.low
-        c = raw.get("close")  if isinstance(raw, dict) else raw.close
-        v = raw.get("volume") if isinstance(raw, dict) else raw.volume
-
-        return Bar(
-            timestamp=ts,
-            open=float(o), high=float(h), low=float(l), close=float(c),
-            volume=float(v) if v else 0.0,
-        )
+        """Seneste FÆRDIGE 1-min bar (sidste bar i batchen). None hvis ingen."""
+        bars = await self._fetch_bars(ticker, duration="3600 S", bar_size="1 min")
+        return bars[-1] if bars else None
 
     # -------------------------------------------------------------
     # Open / Close — ordre-håndtering

@@ -486,28 +486,9 @@ class BuyTheDipLive(BaseStrategy):
         return self._detect(ticker, new_bar)
 
     async def _fetch_latest_bar(self, ticker: str) -> Optional[Bar]:
-        """Seneste FÆRDIGE 1-min bar (spejler K2)."""
-        try:
-            bars = await self.conn.get_historical_bars(
-                ticker, duration="3600 S", bar_size="1 min", what_to_show="TRADES")
-        except Exception as e:
-            logger.warning(f"  [BuyTheDip] {ticker}: kunne ikke hente bar: {e}")
-            return None
-        if not bars:
-            return None
-        raw = bars[-1]
-        ts = raw.get("datetime") if isinstance(raw, dict) else raw.date
-        if not isinstance(ts, datetime):
-            return None
-        ts = ET.localize(ts) if ts.tzinfo is None else ts.astimezone(ET)
-        g = (lambda k, a: raw.get(k) if isinstance(raw, dict) else getattr(raw, a))
-        try:
-            return Bar(timestamp=ts,
-                       open=float(g("open", "open")), high=float(g("high", "high")),
-                       low=float(g("low", "low")), close=float(g("close", "close")),
-                       volume=float(g("volume", "volume") or 0))
-        except Exception:
-            return None
+        """Seneste FÆRDIGE 1-min bar (sidste bar i batchen). None hvis ingen."""
+        bars = await self._fetch_bars(ticker, duration="3600 S", bar_size="1 min")
+        return bars[-1] if bars else None
 
     # -------------------------------------------------------------
     # Detektion — dip → bounce (validerede scan_trade-regel, streaming)
