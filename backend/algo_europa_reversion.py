@@ -381,6 +381,29 @@ class EuropaReversionLive(BaseStrategy):
             meta={"session": "europæisk 02-08 ET", "bar_size": BAR_SIZE, "lookback": LOOKBACK},
         )
 
+        # Datablind-fix: emit ÉT bar_evaluation pr. instrument for sidste warmup-bar,
+        # så watchdog-uret stilles friskt allerede ved start. Uden dette ser watchdog
+        # nattens gamle bar_evaluation (~13 t) og fyrer falsk "EUREVERSION DATABLIND"
+        # fra graceen udløber (~20 min inde) til første LIVE bar lander (~30 min inde).
+        # Vi LOGGER kun denne ene evaluering — ingen exit/entry-handling på en warmup-bar.
+        for sym in ready:
+            hist = self._bar_history.get(sym, [])
+            if len(hist) < LOOKBACK:
+                continue
+            res = rule.compute_z([b.close for b in hist[-LOOKBACK:]])
+            if res is None:
+                continue
+            z, sd = res
+            last_bar = hist[-1]
+            in_session = SESSION_START_ET <= last_bar.timestamp.time() < SESSION_END_ET
+            await self.log_bar_evaluation(
+                ticker      = sym,
+                bar_time_et = last_bar.timestamp.astimezone(ET).strftime("%H:%M")
+                              if hasattr(last_bar.timestamp, "astimezone") else str(last_bar.timestamp),
+                status      = "in_session" if in_session else "out_of_session",
+                reason      = f"warmup z={z:+.2f} sd={sd:.2f}",
+            )
+
         self._status("orb_ready",
                      f"✅ Klar — {len(ready)}/{len(INSTRUMENTS)} instrumenter med "
                      f"warmup-historie ({', '.join(INSTRUMENTS)})")

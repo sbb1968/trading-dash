@@ -22,7 +22,7 @@ Stil: PASS/FAIL-print, raise SystemExit(1) ved fejl, ALLE TESTS BESTÅET til sid
 
 import asyncio
 import types
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 
@@ -496,6 +496,47 @@ def section_I():
     check("I5 → log_trade_close bogført", len(j.closes) == 1, j.closes)
 
 
+# ── J — warmup-emit af bar_evaluation (datablind-åbnings-fix) ──
+def section_J():
+    print("\nSektion J — warmup-emit af bar_evaluation (fjern falsk åbnings-alarm)")
+
+    def _warmup_bars(n):
+        base = ET.localize(datetime(2026, 6, 16, 3, 0))   # 03:00 ET = i EU-sessionen
+        return [Bar(timestamp=base + timedelta(minutes=i),
+                    open=5000.0 + i, high=5001.0 + i, low=4999.0 + i,
+                    close=5000.0 + i, volume=1000.0) for i in range(n)]
+
+    # J1: ≥ LOOKBACK warmup-bars → _prepare() emitterer ét bar_evaluation pr.
+    #     instrument med "warmup" i reason (stiller watchdog-uret friskt ved start).
+    conn = MockConn(equity=100000.0)
+    j = MockJournal()
+    a = make_algo(conn, j)
+    async def _full(sym):
+        return _warmup_bars(eur.LOOKBACK + 2)
+    a._fetch_warmup_bars = _full
+    asyncio.run(a._prepare())
+    warmup_evs = [(et, src, p) for (et, src, p) in j.events
+                  if et == "bar_evaluation" and "warmup" in str(p.get("reason", ""))]
+    check("J1 _prepare() emitterer warmup-bar_evaluation", len(warmup_evs) >= 1, warmup_evs)
+    check("J1 warmup-event har source Europa-reversion",
+          all(src == "Europa-reversion" for (_, src, _) in warmup_evs), warmup_evs)
+    check("J1 reason bærer z+sd (forensisk værdi)",
+          any("z=" in str(p.get("reason", "")) and "sd=" in str(p.get("reason", ""))
+              for (_, _, p) in warmup_evs), warmup_evs)
+
+    # J2: < LOOKBACK warmup-bars → INTET warmup-emit, ingen crash (grace dækker den case).
+    conn = MockConn(equity=100000.0)
+    j = MockJournal()
+    a = make_algo(conn, j)
+    async def _short(sym):
+        return _warmup_bars(3)   # langt under LOOKBACK
+    a._fetch_warmup_bars = _short
+    asyncio.run(a._prepare())   # må ikke kaste
+    warmup_evs = [p for (et, _, p) in j.events
+                  if et == "bar_evaluation" and "warmup" in str(p.get("reason", ""))]
+    check("J2 < LOOKBACK → intet warmup-emit (ingen crash)", warmup_evs == [], warmup_evs)
+
+
 if __name__ == "__main__":
     print("Test: Europa-reversion (adfærds-lås + Trin 2 regressions-gate)")
     section_A()
@@ -507,4 +548,5 @@ if __name__ == "__main__":
     section_G()
     section_H()
     section_I()
+    section_J()
     print("\nALLE TESTS BESTÅET ✓")
