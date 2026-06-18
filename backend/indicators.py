@@ -78,7 +78,7 @@ def rsi(closes: list[float], period: int = 14) -> Optional[float]:
     Relative Strength Index på `period` bars.
 
     Bemærk: bruger samme simple-average formel som strategien selv
-    (calc_rsi_from_closes i strategies/momentum_orb/entry.py) — så vi
+    (calc_rsi_from_closes, historisk reference) — så vi
     får IDENTISKE tal som strategiens entry-check.
 
     Returnerer None hvis < period+1 closes.

@@ -9,7 +9,6 @@ import {
 // Når en ny strategi registreres i backend, tilføj dens mapping her
 // så docs-knapperne henter de rigtige .md-filer.
 const STRATEGY_DOCS_KEYS: Record<string, string> = {
-  "Momentum ORB": "momentum_orb",
   "Konfluens 2":  "confluence2",
 };
 
@@ -414,7 +413,7 @@ export function LiveAlgo() {
           </div>
           {selectedStrategy && (() => {
             // Map display name → docs filename key
-            const docsKey = STRATEGY_DOCS_KEYS[selectedStrategy] || "momentum_orb";
+            const docsKey = STRATEGY_DOCS_KEYS[selectedStrategy] || "confluence2";
             return (
               <div style={{ display: "flex", gap: 6 }}>
                 <button

@@ -92,7 +92,7 @@ def _breakout_strength_pct(price: float, orb_high: float) -> Optional[float]:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# ORB (MomentumORB) snapshots
+# Generiske entry/exit-snapshots (delt af EUREVERSION/BuyTheDip)
 # ═══════════════════════════════════════════════════════════════════
 
 def build_entry_snapshot(
@@ -241,7 +241,7 @@ def _confluence_setup_at_bar(context: dict, timestamp, current_price: float) -> 
     """
     Saml Konfluens-specifikt setup ved en given bar.
 
-    context: session_context fra ConfluenceStrategy.build_session_context()
+    context: session_context fra strategiens build_session_context()
              — indeholder 'ind_df' (DataFrame med indikatorer pr. bar).
     timestamp: bar-timestamp som vi vil slå indikatorer op for.
     current_price: prisen vi handlede på (entry/exit).

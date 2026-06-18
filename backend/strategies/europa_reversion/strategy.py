@@ -4,15 +4,13 @@ strategies/europa_reversion/strategy.py
 Facade for Europa-reversion — samler regel + config under ét strategi-objekt,
 så den er registrerbar i STRATEGY_REGISTRY på linje med de øvrige strategier.
 
-BEMÆRK — bevidst strukturel forskel fra ORB/Konfluens:
-  De strategier har stateful entry/exit-ENGINES (state-maskiner, pris-stops)
-  drevet af den generiske OHLC-backtest (backtest_momentum.py). Europa-reversions
-  regel er derimod en ren funktion af et rullende z-score-vindue (rule.py), og
-  dens validerede backtest er den fritstående meanrev_backtest.py (15-min
-  futures fra data_harvest/). Derfor eksponerer denne facade reglen + config i
-  stedet for OHLC-engines — men reglen er DELT med live-wrapperen, så live og
-  backtest aldrig divergerer. (backtest_momentum.py redirigerer korrekt til
-  meanrev_backtest.py for denne strategi.)
+BEMÆRK — bevidst strukturel forskel fra de OHLC-engine-baserede strategier:
+  De har stateful entry/exit-ENGINES (state-maskiner, pris-stops). Europa-
+  reversions regel er derimod en ren funktion af et rullende z-score-vindue
+  (rule.py), og dens validerede backtest er den fritstående meanrev_backtest.py
+  (15-min futures fra data_harvest/). Derfor eksponerer denne facade reglen +
+  config i stedet for OHLC-engines — men reglen er DELT med live-wrapperen, så
+  live og backtest aldrig divergerer.
 """
 
 from __future__ import annotations

@@ -94,7 +94,7 @@ class Bar:
 class EuropaReversionLive(BaseStrategy):
     """
     Live-wrapper for Europa-reversion. Følger BaseStrategy-interfacet så
-    StrategyManager kan administrere den parallelt med ORB/K1/K2.
+    StrategyManager kan administrere den parallelt med de øvrige strategier.
     """
 
     def __init__(self, conn: IBKRConnection, config: Optional[StrategyConfig] = None):
@@ -217,7 +217,7 @@ class EuropaReversionLive(BaseStrategy):
         """
         Delt-konto-sikker reconcile ved opstart.
 
-        To guards i stedet for K1/K2's nul:
+        To guards i stedet for nul-reconcile:
           1. INSTRUMENT-KLASSE: kun positioner i VORES futures-symboler
              (MES/M2K) er overhovedet synlige her — aktie-positioner (ORB/K2)
              er per definition usynlige. Vandtæt mod at røre en anden strategis
@@ -335,7 +335,7 @@ class EuropaReversionLive(BaseStrategy):
         self._status("started", f"Gammel åben position {sym} er lukket (reconcile)")
 
     # -------------------------------------------------------------
-    # Status broadcast (samme format som ORB/K1/K2)
+    # Status broadcast
     # -------------------------------------------------------------
 
     # _status() er løftet til BaseStrategy (Trin 1).

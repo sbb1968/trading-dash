@@ -231,7 +231,7 @@ async def portfolio_loop():
 
 
 # ── Algo ──────────────────────────────────────────────────────
-async def start_algo(strategy_name: str = "Momentum ORB"):
+async def start_algo(strategy_name: str = ""):
     """Start en strategi via StrategyManager (med fælles risk limits).
 
     Sikrer en levende IBKR-forbindelse FØR strategien startes. Det er
@@ -285,7 +285,7 @@ def broadcast_algo_sync(message: dict):
         return None
 
 
-async def stop_algo(strategy_name: str = "Momentum ORB"):
+async def stop_algo(strategy_name: str = ""):
     """Stop en strategi via StrategyManager."""
     await strategy_manager.stop_strategy(strategy_name, reason="Manuelt stoppet fra UI")
     print(f"[Algo] {strategy_name} stoppet via StrategyManager")
@@ -328,20 +328,7 @@ async def startup():
 
     # Registrér strategier hos StrategyManager
     if True:   # ALTID registrér — strategier skal findes selv hvis TWS er nede ved opstart
-        from algo_momentum import MomentumORB
         from strategy_base import StrategyConfig
-
-        momentum_config = StrategyConfig(
-            max_loss_per_trade  = 100.0,
-            max_daily_loss      = 300.0,     # var 150.0
-            max_open_positions  = 3,
-            max_position_size   = 1000.0,    # Capital per handel
-        )
-        momentum = MomentumORB(strategy_manager.get_ibkr(), config=momentum_config)
-        strategy_manager.register(momentum)
-        # Override broadcast: algoen sender via algo_clients (ikke strategy_clients)
-        momentum._broadcast_fn = broadcast_algo_sync
-        print(f"[Server] MomentumORB registreret — capital per handel: ${momentum_config.max_position_size:.0f}")
 
         # ── Registrér Konfluens 2 (1-min impuls) parallelt ──────
         from algo_confluence2 import Confluence2Live
@@ -404,14 +391,12 @@ async def startup():
     # Den kender ikke til strategy_manager direkte — kun til funktioner.
 
     def get_daily_summary() -> dict:
-        """Saml dagens stats fra MomentumORB til daily summary push."""
-        momentum = strategy_manager._strategies.get("Momentum ORB")
-        if not momentum:
-            return {"trades": 0, "wins": 0, "total_pnl": 0.0}
+        """Saml dagens samlede stats på tværs af ALLE registrerede strategier."""
+        strats = strategy_manager._strategies.values()
         return {
-            "trades":    momentum.stats.trades_today,
-            "wins":      momentum.stats.wins_today,
-            "total_pnl": momentum.stats.pnl_today,
+            "trades":    sum(s.stats.trades_today for s in strats),
+            "wins":      sum(s.stats.wins_today for s in strats),
+            "total_pnl": sum(s.stats.pnl_today for s in strats),
         }
 
     def tws_is_online() -> bool:
@@ -737,7 +722,7 @@ async def websocket_algo(websocket: WebSocket):
     # LiveAlgo.tsx vil modtage flere algo_status-beskeder; hver med 'strategy'-felt
     # så frontenden kan adskille dem. Bagudkompatibilitet: hvis ingen ekstra
     # strategier er registreret, sender vi som før (uden strategy-felt).
-    for strat_name in ("Momentum ORB", "Konfluens 2", "Europa-reversion"):
+    for strat_name in ("Konfluens 2", "Europa-reversion"):
         strat = strategy_manager._strategies.get(strat_name)
         if strat and strat.status == StrategyStatus.RUNNING:
             status  = "trading"
@@ -791,12 +776,12 @@ async def websocket_algo(websocket: WebSocket):
             if message.get("command") == "start":
                 # Strategi-agnostisk start. Default = "Momentum ORB" for bagudkompat
                 # (eksisterende LiveAlgo.tsx sender ingen strategy-felt).
-                strat_name = message.get("strategy", "Momentum ORB")
+                strat_name = message.get("strategy", "")
                 print(f"[Algo] Start-kommando modtaget for: {strat_name}")
                 asyncio.create_task(start_algo(strat_name))
 
             elif message.get("command") == "stop":
-                strat_name = message.get("strategy", "Momentum ORB")
+                strat_name = message.get("strategy", "")
                 print(f"[Algo] Stop-kommando modtaget for: {strat_name}")
                 await stop_algo(strat_name)
                 await broadcast_algo({
@@ -1357,7 +1342,7 @@ async def get_strategy_docs(strategy_name: str, version: str):
     Returnér markdown-dokumentation for en strategi.
 
     Argumenter:
-        strategy_name: fx "momentum_orb"
+        strategy_name: fx "confluence2"
         version: "iben" (almindelig) eller "teknisk"
     """
     # Whitelist gyldige versions for at undgå path traversal
@@ -1860,19 +1845,20 @@ async def algo_list():
 
 @app.get("/algo/status", dependencies=[Depends(require_studio_auth)])
 async def algo_status():
-    """Bevaret for bagudkompatibilitet — status for Momentum ORB alene."""
-    momentum = strategy_manager._strategies.get("Momentum ORB")
-    running  = momentum is not None and momentum.status == StrategyStatus.RUNNING
+    """Bevaret for bagudkompatibilitet — status for den FØRSTE kørende strategi."""
+    running_strat = next((s for s in strategy_manager._strategies.values()
+                          if s.status == StrategyStatus.RUNNING), None)
+    running = running_strat is not None
 
     ibkr = strategy_manager.get_ibkr()
     ibkr_connected = ibkr is not None and ibkr.connected
 
     stats = {}
-    if running:
+    if running_strat:
         stats = {
-            "pnl_today":      momentum.stats.pnl_today,
-            "trades_today":   momentum.stats.trades_today,
-            "open_positions": momentum.stats.open_positions,
+            "pnl_today":      running_strat.stats.pnl_today,
+            "trades_today":   running_strat.stats.trades_today,
+            "open_positions": running_strat.stats.open_positions,
         }
 
     return {
@@ -1884,7 +1870,7 @@ async def algo_status():
 
 
 class AlgoActionRequest(BaseModel):
-    strategy: str = "Momentum ORB"
+    strategy: str = ""
 
 
 @app.post("/algo/start", dependencies=[Depends(require_studio_auth)])

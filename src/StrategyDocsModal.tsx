@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 
 interface Props {
-  strategy: string;            // fx "momentum_orb"
+  strategy: string;            // fx "confluence2"
   version: "iben" | "teknisk"; // hvilken doc-version
   onClose: () => void;
 }

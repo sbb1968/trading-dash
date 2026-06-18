@@ -17,12 +17,12 @@ interface StatusMsg {
   positions:  number;
   trades:     number;
   time:       string;
-  strategy?:  string;          // NY — strategi-prefix til log ([ORB]/[KONF])
+  strategy?:  string;          // strategi-prefix til log (fx [KONF2]/[REV])
 }
 
 interface TradeMsg {
   type:         "algo_trade";
-  strategy?:    string;        // NY — "Momentum ORB" eller "Konfluens"
+  strategy?:    string;        // strateginavn (fx "Konfluens 2")
   action:       "buy" | "sell" | "sell_short" | "buy_cover";
   ticker:       string;
   price?:       number;
@@ -73,7 +73,7 @@ export type StrategyStatusEnum = "idle" | "running" | "paused" | "stopped" | "er
 // Skrinlagte strategier: backend-koden og historiske journaler bevares, men
 // de skjules fra frontenden (dropdowns + strategi-side). Fjern fra dette set
 // hvis en strategi tages i brug igen.
-const SKRINLAGTE_STRATEGIER = new Set(["Momentum ORB"]);
+const SKRINLAGTE_STRATEGIER = new Set<string>([]);
 
 export interface StrategyInfo {
   name:         string;
@@ -195,7 +195,6 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
       setMessage(msg.message);
       setTotalPnl(msg.total_pnl);
       const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Momentum ORB" ? "[ORB] " :
                           msg.strategy === "Europa-reversion" ? "[REV] " : "";
       addLog(`${stratPrefix}${msg.message}`);   // tidsstempel tilføjes nu i addLog (lokal tid)
       if (msg.status === "universe_ready" && msg.message.includes(":")) {
@@ -205,7 +204,6 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
     } else if (msg.type === "algo_trade") {
       // Strategi-prefix til log (KONF eller ORB) hvis strategy er sat
       const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Momentum ORB" ? "[ORB] " :
                           msg.strategy === "Europa-reversion" ? "[REV] " : "";
       // Konfluens-specifikt: vis bricks/score hvis tilgængelige
       const bricksTag = msg.bricks ? `  [${msg.bricks}]` : "";

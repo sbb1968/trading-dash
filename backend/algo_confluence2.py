@@ -3,26 +3,23 @@ algo_confluence2.py
 ───────────────────
 Live Trading Wrapper for Konfluens 2 (impuls-strategien).
 
-Strukturelt næsten identisk med algo_confluence.py (ConfluenceLive) — K2 deler
-hele live-arkitekturen med K1. De væsentlige forskelle er:
+Karakteristik:
 
-  - 1-MIN BARS (ikke 5-min): K2 reagerer på selve impulsen i realtid, så vi
-    venter på færdige 1-min bars og poller hyppigere (LOOP_SLEEP_SECONDS=15).
+  - 1-MIN BARS: K2 reagerer på selve impulsen i realtid, så vi venter på færdige
+    1-min bars og poller hyppigt (LOOP_SLEEP_SECONDS=15).
 
   - KORT WARMUP: K2's indikatorer (EMA9/20, RSI14, ATR14, vol/krop-snit) kræver
-    kun min_warmup_bars=25 1-min bars. IBKR kan ikke levere 20 dages 1-min bars
-    i ét kald (grænse ~1-2 dage), så vi henter ~2 dages 1-min bars — rigeligt.
+    kun min_warmup_bars=25 1-min bars; vi henter ~2 dages 1-min bars (IBKR-grænse).
 
   - IMPULS-ENTRY: 2 obligatoriske impuls-kriterier (volumen-spike + range/grøn)
-    + mindst N kontekst-kriterier. Bricks er 7 tegn (V,B,G,E,K,R,T) mod K1's 6.
+    + mindst N kontekst-kriterier. Bricks er 7 tegn (V,B,G,E,K,R,T).
 
   - EXIT: live-variant A_impulse_low — hold til prisen falder under impuls-
-    candlens low (vidt stop, ingen target). Exit-state har impulse_low /
-    target_price / trail_stop (ikke K1's initial_stop / trail_active).
+    candlens low (vidt stop, ingen target). Exit-state: impulse_low /
+    target_price / trail_stop.
 
 Al strategi-logik bor i strategies/confluence2/. Denne fil styrer IBKR-
-forbindelse, universe-scanning, position-management, broadcast og diagnostik —
-præcis som ConfluenceLive.
+forbindelse, universe-scanning, position-management, broadcast og diagnostik.
 
 Placering: C:\\Projects\\trading-dash\\backend\\algo_confluence2.py
 """
@@ -57,9 +54,8 @@ from strategies.confluence2.config import (
 )
 from strategies.base import Bar, Position
 
-# Exit-reason-konstanter. K2's Confluence2Exit returnerer disse strenge direkte
-# (check_exit_bar) — K2 har ikke K1's REASON_*-konstanter, så vi definerer dem
-# lokalt for læsbarhed.
+# Exit-reason-konstanter. K2's Confluence2Exit.check_exit_bar returnerer disse
+# strenge direkte; vi definerer dem lokalt for læsbarhed.
 REASON_STOP          = "stop"
 REASON_TARGET        = "target"
 REASON_TRAIL         = "trail"
@@ -67,7 +63,7 @@ REASON_SIGNAL_EXIT   = "signal_exit"
 REASON_SESSION_CLOSE = "session_close"
 
 # Trade Forensics — logger indikatorer, tape og L2 ved hver entry/exit.
-# K2's context har færre indikator-kolonner end K1 (ingen vwap/swing/htf), men
+# K2's context har få indikator-kolonner (ingen vwap/swing/htf), men
 # _confluence_setup_at_bar bruger row.get(...) så de manglende felter bliver
 # bare None. Forensics-kald er desuden try/except-omsluttet og kan aldrig
 # nedlægge handelsflowet.
@@ -100,7 +96,7 @@ MIN_UNIVERSE_SIZE = 3   # Færre end dette og vi advarer (men kører videre)
 # ~2 dages 1-min bars — rigeligt til EMA20/RSI14/ATR14/vol-snit.
 WARMUP_TRADING_DAYS = 2
 
-# Loop-frekvens: 1-min bars, så vi poller hyppigere end K1's 30 sek for at
+# Loop-frekvens: 1-min bars, så vi poller hyppigt for at
 # fange nye bars hurtigt og reagere prompte på exit-betingelser.
 LOOP_SLEEP_SECONDS = 15
 
@@ -135,7 +131,7 @@ class Confluence2Live(BaseStrategy):
     Live trading-wrapper for Konfluens 2 (impuls-strategien).
 
     Følger BaseStrategy-interfacet så StrategyManager kan administrere den
-    parallelt med MomentumORB og Konfluens.
+    parallelt med de øvrige strategier.
     """
 
     def __init__(self, conn: IBKRConnection, config: Optional[StrategyConfig] = None):
@@ -210,7 +206,7 @@ class Confluence2Live(BaseStrategy):
             return False, "Kan ikke hente markedsdata"
         checks.append(f"Datafeed virker — {len(test_bars)} bars")
 
-        # Markedsforhold (samme som ORB/K1)
+        # Markedsforhold
         self._status("started", "Pre-flight: Analyserer markedsforhold...")
         try:
             from market_conditions import MarketConditionChecker
@@ -461,7 +457,7 @@ class Confluence2Live(BaseStrategy):
             f"(fantom, nul-P&L), ingen ordre sendt", level="warning")
 
     # -------------------------------------------------------------
-    # Status broadcast — samme format som ORB/K1
+    # Status broadcast
     # -------------------------------------------------------------
 
     # _status() er løftet til BaseStrategy (Trin 1).
@@ -473,7 +469,7 @@ class Confluence2Live(BaseStrategy):
     async def _prepare_universe(self):
         """
         Scan top gainers, filtrer på pris, og byg session-context for hver
-        ticker. For K2 er warmup-delen billigere end K1 (kun ~2 dages 1-min
+        ticker. K2's warmup er kun ~2 dages 1-min
         bars pr. ticker) men scanning + pris-filter er identisk.
         """
         self._status("scanning", "Scanner markedet efter dagens kandidater...")

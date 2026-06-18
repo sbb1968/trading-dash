@@ -168,12 +168,11 @@ class AlgoScheduler:
         self._running = False
         self._task    = None
 
-        # ORB udfaset 2026-06-10 (start_algo/pre_flight_check/daily_summary var bundet
-        # til ORB). Konfluens 2 auto-starter nu 09:20 ET (15:20 DK) — 10 min før US-
-        # åbning, så pre-flight + scanner kan nå at køre før markedet åbner. Auto-start
-        # sker KUN på algoserveren (instance-guard i _job_start_konfluens2); workstation
-        # starter manuelt. reset_daily (midnat ET) er generisk og beholdes. De gamle
-        # _job_preflight / _job_start_algo / _job_daily_summary efterlades urørte (døde).
+        # ORB udfaset 2026-06-10 og FJERNET 2026-06-18 (incl. dens døde scheduler-jobs).
+        # Konfluens 2 auto-starter nu 09:20 ET (15:20 DK) — 10 min før US-åbning, så
+        # pre-flight + scanner kan nå at køre før markedet åbner. Auto-start sker KUN på
+        # algoserveren (instance-guard i _job_start_konfluens2); workstation starter
+        # manuelt. reset_daily (midnat ET) er generisk og beholdes.
         self._jobs = [
             ScheduledJob("start_konfluens2", K2_START_ET, self._job_start_konfluens2,
                          window_end_et=K2_RETRY_UNTIL_ET, retry_until_success=True),
@@ -233,46 +232,6 @@ class AlgoScheduler:
     # Jobs
     # ─────────────────────────────────────────────────────────
 
-    async def _job_preflight(self):
-        """Tjek 14 min før start at TWS er logget ind."""
-        if self._tws_is_online():
-            logger.info("[Scheduler] Pre-flight: TWS er online ✅")
-            return
-        # TWS er ikke online — ping Iben med ekstra urgency
-        # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
-        # await notifier.send(
-        #     message  = "Algoritmen starter om 14 minutter (09:44 ET / 15:44 DK) men TWS er ikke logget ind. Log ind nu.",
-        #     title    = "⏰ Log ind på TWS",
-        #     priority = 5,
-        #     tags     = "alarm_clock,key",
-        # )
-
-    async def _job_start_algo(self):
-        # ── Instance-aware guard ─────────────────────────────────
-        # Auto-start må KUN ske på algoserveren. På workstation skal
-        # brugeren starte strategien manuelt via UI — ellers ville BÅDE
-        # workstation og algoserver køre samme strategi på samme tickers
-        # og generere parallel-handler på to forskellige paper-konti.
-        if self._instance_role != "algoserver":
-            logger.info(
-                f"[Scheduler] start_algo job sprunget over — "
-                f"instance_role='{self._instance_role}' (ikke 'algoserver')"
-            )
-            return
-
-        if not self._tws_is_online():
-            logger.warning("[Scheduler] Kan ikke starte algoritme — TWS er offline")
-            # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
-            # await notifier.send(
-            #     message  = "Algoritmen blev IKKE startet — TWS er ikke logget ind. Du går glip af dagens handel.",
-            #     title    = "🔴 Algo ikke startet",
-            #     priority = 5,
-            #     tags     = "x,key",
-            # )
-            return
-        await self._start_algo()
-        await notifier.alert_algo_started()   # no-op (deaktiveret i notifier.py)
-
     async def _job_start_konfluens2(self) -> bool:
         """Auto-start Konfluens 2 ~10 min før US-åbning. KUN på algoserveren.
 
@@ -296,29 +255,6 @@ class AlgoScheduler:
         logger.info("[Scheduler] Auto-starter Konfluens 2")
         await self._start_algo("Konfluens 2")
         return True
-
-    async def _job_daily_summary(self):
-        """Efter algoritmen har lukket alle positioner — send opsummering."""
-        # Vent 5 min så alle exits er færdige
-        await asyncio.sleep(5)
-        try:
-            summary = self._get_summary() or {}
-            trades  = summary.get("trades", 0)
-            wins    = summary.get("wins", 0)
-            pnl     = summary.get("total_pnl", 0.0)
-            if trades > 0:
-                await notifier.alert_daily_summary(trades, wins, pnl)
-            # DEAKTIVERET 2026-05-17 — "Ingen handler"-varianten sendes ikke længere;
-            # Iben vil kun se dagens resultat når der ER handler.
-            # else:
-            #     await notifier.send(
-            #         message  = "Ingen handler i dag (markedsbetingelser eller ingen breakouts).",
-            #         title    = "📊 Dagens algo-resultat",
-            #         priority = 2,
-            #         tags     = "bar_chart",
-            #     )
-        except Exception as e:
-            logger.exception(f"[Scheduler] Summary fejl: {e}")
 
     async def _job_reset_daily(self):
         """Nulstil RiskManager-tællere ved midnat ET."""

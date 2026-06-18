@@ -5,7 +5,7 @@ Konfluens 2 — impuls-strategi på 1-min bars.
 
 Implementerer projektets Strategy/EntryEngine/ExitEngine-kontrakt (strategies.base),
 så den kan køres af den eksisterende live-algo og backtest-engine uden ændringer
-i dem — på nøjagtig samme måde som Konfluens 1 og MomentumORB.
+i dem — på samme måde som de øvrige OHLC-strategier.
 
 PRINCIP:
   Entry  = 2 obligatoriske impuls-kriterier (volumen-spike + range/stærk-grøn)
@@ -27,7 +27,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from strategies.base import Bar, EntrySignal, ExitDecision, Position
-# Genbrug Konfluens 1's validerede indikator-beregninger (ingen duplikering)
+# Delte, validerede indikator-beregninger fra strategies.shared (ingen duplikering)
 from strategies.shared.indicators import ema, rsi, atr, sma
 
 from strategies.confluence2.config import (

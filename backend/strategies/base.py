@@ -65,7 +65,7 @@ class EntrySignal:
     side:     "long" (køb) eller "short" (sælg-først). Default "long" så
               eksisterende strategier ikke skal opdateres.
     metadata: strategi-specifikke felter der skal følge positionen indtil exit.
-              MomentumORB lægger fx orb_high, orb_low, retest_low her.
+              En strategi lægger fx sine niveauer (high/low/retest) her.
               Mean reversion ville lægge mean_price, std_dev osv. her.
     """
     ticker: str
@@ -93,7 +93,7 @@ class Position:
     """
     En åben position — opdateres af ExitEngine på hver pris-observation.
 
-    state: strategi-specifik state. For MomentumORB er det vores PositionState
+    state: strategi-specifik state (fx en PositionState med exit-tilstand)
            med stage, stop, target, highest_high. For andre strategier kan det
            være hvad de har brug for. ExitEngine ejer den, ingen andre rører
            den.

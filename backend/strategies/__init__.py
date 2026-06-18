@@ -9,17 +9,15 @@ Når en ny strategi tilføjes:
   3. Live algo og backtest finder den automatisk via key
 """
 
-from strategies.momentum_orb import MomentumORBStrategy
 from strategies.confluence2 import Confluence2Strategy
 from strategies.europa_reversion import EuropaReversionStrategy
 
 # Registry: key → Strategy-klasse (ikke instans — instantieres ved brug)
-# Konfluens (K1) pensioneret + fjernet 2026-06-18.
+# Konfluens (K1) + Momentum ORB pensioneret og fjernet 2026-06-18.
 STRATEGY_REGISTRY = {
-    "momentum_orb":     MomentumORBStrategy,
     "confluence2":      Confluence2Strategy,
     # Europa-reversion er ikke OHLC-engine-baseret (ren z-score-regel); den
-    # backtestes med meanrev_backtest.py, ikke den generiske backtest_momentum.py.
+    # backtestes med meanrev_backtest.py.
     "europa_reversion": EuropaReversionStrategy,
 }
 

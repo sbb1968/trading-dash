@@ -39,7 +39,6 @@ STRATEGIES = {
     "algo_confluence2.py":      ("Konfluens 2",      "strategies.confluence2"),
     "algo_buythedip.py":        ("BuyTheDip",        None),   # selvstændig, ingen egen pakke
     "algo_europa_reversion.py": ("Europa-reversion", "strategies.europa_reversion"),
-    "algo_momentum.py":         ("Momentum ORB",     "strategies.momentum_orb"),
 }
 ALL_SOURCES = [src for src, _ in STRATEGIES.values()]
 
@@ -50,7 +49,7 @@ NEUTRAL_SHARED = ("strategies.base",)
 WHITELISTED_SHARED = ()   # ingen strategi-pakke-undtagelser mere (tv_scanner flyttet til shared)
 
 # Filer der matcher algo_*.py men IKKE er aktive strategier.
-IGNORE_FILES = {"algo_momentum_backup.py"}
+IGNORE_FILES: set[str] = set()
 
 
 def _name_regex(name):

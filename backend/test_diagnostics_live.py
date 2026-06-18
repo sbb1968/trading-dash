@@ -4,7 +4,7 @@ test_diagnostics_live.py
 Målrettet test af diagnostik-loggingen (Lag A/B/C) mod den ÆGTE
 BaseStrategy fra strategy_base.py på denne maskine.
 
-Tester de metoder algo_confluence/_check_ticker faktisk kalder:
+Tester de bar-evaluerings/diagnostik-metoder en strategi-loop kalder:
   - log_universe         (Lag A)
   - log_rejection_change (Lag B — "kun ændringer")
   - log_daily_summary    (Lag C)
