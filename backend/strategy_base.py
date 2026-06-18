@@ -620,3 +620,37 @@ class BaseStrategy(ABC):
     def reset_diagnostics(self) -> None:
         """Nulstil Lag B-tilstand. Kaldes ved dagsstart / reset_daily."""
         self._last_rejection.clear()
+
+    def open_positions_snapshot(self) -> list[dict]:
+        """Ensartet snapshot af åbne positioner til UI-genopbygning ved WS-connect.
+
+        Frontendens 'Åbne positioner'-panel bygges ellers kun af live algo_trade-events
+        og mistes ved reload/reconnect. Denne metode lader backenden sende de åbne
+        positioner ved connect, så panelet kan genopbygges. Håndterer de tre forskellige
+        _positions-strukturer: dict m. 'shares' (BuyTheDip), dict m. 'contracts'
+        (EUREVERSION), og Position-objekter (K2 — display-felter fra _position_data).
+        """
+        out: list[dict] = []
+        pdata = getattr(self, "_position_data", {}) or {}
+        for ticker, pos in (getattr(self, "_positions", {}) or {}).items():
+            d = pos if isinstance(pos, dict) else pdata.get(ticker)
+            if isinstance(d, dict):
+                entry = d.get("entry_price")
+                qty   = d.get("shares") or d.get("contracts") or 0
+                et    = d.get("entry_time")
+                side  = d.get("side", "long")
+            else:  # Position-objekt uden _position_data-spejling
+                entry = getattr(pos, "entry_price", None)
+                qty   = getattr(pos, "shares", None) or getattr(pos, "contracts", 0)
+                et    = getattr(pos, "entry_time", None)
+                side  = getattr(pos, "side", "long")
+            if hasattr(et, "strftime"):
+                et = et.strftime("%H:%M:%S")
+            out.append({
+                "ticker":      ticker,
+                "side":        side,
+                "entry_price": entry,
+                "shares":      int(qty) if qty else 0,
+                "entry_time":  et if et else "",
+            })
+        return out

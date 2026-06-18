@@ -40,7 +40,13 @@ interface TradeMsg {
   bricks?:      string;        // NY — Konfluens bricks "TV·H·L"
 }
 
-type AlgoMsg = StatusMsg | TradeMsg;
+interface PositionsSnapshotMsg {
+  type:      "positions_snapshot";
+  positions: { ticker: string; entry_price: number; shares: number; entry_time: string; side?: string; strategy?: string }[];
+  time?:     string;
+}
+
+type AlgoMsg = StatusMsg | TradeMsg | PositionsSnapshotMsg;
 
 export interface Trade {
   ticker:      string;
@@ -226,6 +232,12 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
         const verb = msg.action === "buy_cover" ? "COVR" : "SÆLG";
         addLog(`📉 ${stratPrefix}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.exit_price!)}  ${emoji} ${usd(msg.pnl!)} (${msg.reason})`);
       }
+    } else if (msg.type === "positions_snapshot") {
+      // Genopbyg "Åbne positioner"-panelet fra backendens snapshot (sendt ved hver
+      // connect), så det overlever reload/reconnect. Erstatter hele listen.
+      setPositions(msg.positions.map(p => ({
+        ticker: p.ticker, entry_price: p.entry_price, shares: p.shares, entry_time: p.entry_time,
+      })));
     }
   }
 

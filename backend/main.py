@@ -780,6 +780,23 @@ async def websocket_algo(websocket: WebSocket):
             "time":      datetime.now().strftime("%H:%M:%S"),
         }))
 
+    # Open-positions snapshot, så UI'et kan genopbygge "Åbne positioner"-panelet efter
+    # et reload/reconnect. algo_status sender kun ANTAL — panelet bygges ellers kun af
+    # live algo_trade-events og mistes ved reload. Iterér ALLE kørende strategier.
+    open_positions = []
+    for strat in strategy_manager._strategies.values():
+        if strat.status == StrategyStatus.RUNNING:
+            try:
+                for p in strat.open_positions_snapshot():
+                    open_positions.append({**p, "strategy": strat.name})
+            except Exception as e:
+                print(f"[Algo] open_positions_snapshot fejl for {strat.name}: {e}")
+    await websocket.send_text(json.dumps({
+        "type":      "positions_snapshot",
+        "positions": open_positions,
+        "time":      datetime.now().strftime("%H:%M:%S"),
+    }))
+
     try:
         while True:
             raw     = await websocket.receive_text()
