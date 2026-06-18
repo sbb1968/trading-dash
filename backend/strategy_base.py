@@ -8,7 +8,7 @@ Placering: C:\\Projects\\Trading_Dash\\backend\\strategy_base.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TypedDict
 import asyncio
 import logging
 import pytz
@@ -74,6 +74,27 @@ class StrategyStatus:
     PAUSED  = "paused"    # Midlertidigt pauset af RiskManager
     STOPPED = "stopped"   # Manuelt stoppet
     ERROR   = "error"     # Fejl — kræver manuel genstart
+
+
+# ---------------------------------------------------------------------------
+# PositionView — DEN KANONISKE kryds-strategi positions-kontrakt
+# ---------------------------------------------------------------------------
+
+class PositionView(TypedDict):
+    """Ensartet, strategi-agnostisk view af én åben position.
+
+    DETTE er den kanoniske måde at læse positioner på tværs af strategier (UI, journal,
+    risk, reconcile-rapportering). Kryds-strategi-kode SKAL bruge open_positions_snapshot()
+    og må ALDRIG røre en strategis rå self._positions — hvis interne form bevidst er
+    strategi-specifik (futures 'contracts' i EUREVERSION, equity 'shares' i BuyTheDip,
+    Position-OBJEKT m. exit-state i K2). Fuld intern ensretning af _positions = Trin 2.
+    Håndhæves af test_strategy_isolation (ingen ekstern _positions-adgang).
+    """
+    ticker:      str
+    side:        str          # "long" | "short"
+    entry_price: Optional[float]
+    shares:      int          # antal (kontrakter for futures)
+    entry_time:  str          # "HH:MM:SS"
 
 
 # ---------------------------------------------------------------------------
@@ -621,16 +642,19 @@ class BaseStrategy(ABC):
         """Nulstil Lag B-tilstand. Kaldes ved dagsstart / reset_daily."""
         self._last_rejection.clear()
 
-    def open_positions_snapshot(self) -> list[dict]:
-        """Ensartet snapshot af åbne positioner til UI-genopbygning ved WS-connect.
+    def open_positions_snapshot(self) -> list[PositionView]:
+        """DEN KANONISKE kryds-strategi positions-læsning — returnerer ensartede
+        PositionView'er (se den type). Al kode der skal kende åbne positioner på tværs
+        af strategier (UI, journal, risk, reconcile-rapport) SKAL bruge denne metode og
+        ALDRIG røre rå self._positions. Det er denne grænseflade der gør de tre bevidst
+        forskellige interne former (BuyTheDip 'shares', EUREVERSION 'contracts', K2
+        Position-objekt + _position_data) usynlige for consumers.
 
-        Frontendens 'Åbne positioner'-panel bygges ellers kun af live algo_trade-events
-        og mistes ved reload/reconnect. Denne metode lader backenden sende de åbne
-        positioner ved connect, så panelet kan genopbygges. Håndterer de tre forskellige
-        _positions-strukturer: dict m. 'shares' (BuyTheDip), dict m. 'contracts'
-        (EUREVERSION), og Position-objekter (K2 — display-felter fra _position_data).
+        Oprindelig motivation: frontendens 'Åbne positioner'-panel byggedes kun af live
+        algo_trade-events og mistedes ved reload/reconnect — backenden sender nu et
+        snapshot ved WS-connect så panelet kan genopbygges.
         """
-        out: list[dict] = []
+        out: list[PositionView] = []
         pdata = getattr(self, "_position_data", {}) or {}
         for ticker, pos in (getattr(self, "_positions", {}) or {}).items():
             d = pos if isinstance(pos, dict) else pdata.get(ticker)

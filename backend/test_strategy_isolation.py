@@ -152,6 +152,30 @@ def main():
         check(f"{fname}: ingen reference til en anden strategis source",
               not violations, " | ".join(violations))
 
+    # ── C) Positions-kontrakt: ekstern kode må IKKE røre rå _positions/_position_data ──
+    # Kryds-strategi positions-læsning SKAL gå gennem BaseStrategy.open_positions_snapshot()
+    # (de tre interne former — equity 'shares', futures 'contracts', K2 Position-objekt —
+    # er bevidst strategi-specifikke; fuld intern ensretning = Trin 2). Strategi-filerne
+    # selv + strategies/-pakken må gerne; alt andet (main.py, manager, journal, ...) ikke.
+    print("\nPositions-kontrakt — ingen ekstern adgang til rå _positions")
+    POS_ATTRS = {"_positions", "_position_data"}
+    allowed_pos = set(STRATEGIES) | {"strategy_base.py"} | IGNORE_FILES
+    offenders = []
+    for path in glob.glob(os.path.join(BACKEND, "*.py")):
+        base = os.path.basename(path)
+        if base in allowed_pos or base.startswith("test_"):
+            continue
+        try:
+            # utf-8-sig: tolerér BOM i dev-/hjælpe-scripts; spring uparsbare filer over.
+            tree = ast.parse(open(path, encoding="utf-8-sig").read(), filename=base)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in POS_ATTRS:
+                offenders.append(f"{base}:{node.lineno} (.{node.attr})")
+    check("Ingen ekstern adgang til rå _positions/_position_data "
+          "(brug open_positions_snapshot)", not offenders, "; ".join(offenders))
+
     print("\nALLE TESTS BESTÅET ✓")
 
 
