@@ -260,6 +260,26 @@ class TWSWatchdog:
         if sec_bareval is None or sec_any is None or sec_any > alive_limit:
             return
 
+        # ── NO-STRATEGY FLOOR (fix mod falsk datablind ved opstart) ──────────
+        # sec_any er en for svag proxy for "en strategi kører": ved backend-opstart
+        # skriver Journal/Replication m.fl. startup-events i events-tabellen, så sec_any
+        # er frisk (få sekunder) — MENS sec_bareval stadig peger på forrige sessions
+        # sidste bar_evaluation (timer/dage gammel, fordi ingen strategi er startet endnu).
+        # Den gamle guard (sec_any > alive_limit) fanger derfor IKKE "ingen strategi kører",
+        # og resultatet var en falsk "DATABLIND"-push til Iben ved hver out-of-session-
+        # genstart (set 2026-06-19: 818859s gap meldt i opstartssekundet, før EUREVERSION
+        # var startet).
+        #
+        # En ÆGTE datablind (strategi kørte, leverede bars for 5-20 min siden, og stoppede)
+        # har sec_bareval lige over blind_limit. En urealistisk gammel sec_bareval betyder
+        # "ingen strategi har kørt i denne session" → ikke startet, ikke datablind.
+        # 3 × blind_limit (EU: 3600s, US: 720s) ligger godt over enhver kørende-men-haltende
+        # strategi, men langt under et session-mellemrum.
+        NO_STRATEGY_FLOOR_SEC = 3 * blind_limit
+        if sec_bareval > NO_STRATEGY_FLOOR_SEC:
+            return
+        # ────────────────────────────────────────────────────────────────────
+
         data_live = sec_bareval <= blind_limit
 
         if data_live:
