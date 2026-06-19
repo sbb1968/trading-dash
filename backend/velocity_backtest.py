@@ -45,7 +45,7 @@ from datetime import datetime, timedelta, time as dtime
 from pathlib import Path
 
 OUTPUT_DIRNAME = "velocity_backtest_output"
-BAR_CACHE = Path("bar_cache")
+BAR_CACHE = Path("bar_cache")   # overstyres af --data-dir i main()
 
 RTH_OPEN  = dtime(9, 30)
 RTH_CLOSE = dtime(16, 0)
@@ -273,10 +273,18 @@ def main() -> int:
     ap.add_argument("--vol-threshold", type=float, default=VOL_THR_DEFAULT)
     ap.add_argument("--hold-min", type=int, default=HOLD_DEFAULT)
     ap.add_argument("--oos-split", type=float, default=OOS_SPLIT)
-    ap.add_argument("--symbols", default=None, help="kommasepareret; default = alle i bar_cache")
+    ap.add_argument("--symbols", default=None, help="kommasepareret; default = alle i data-dir")
     ap.add_argument("--limit", type=int, default=None, help="kun første N navne (verifikation)")
+    ap.add_argument("--data-dir", default=None,
+                    help="mappe med {TICKER}_*_1min.csv (default bar_cache)")
+    ap.add_argument("--out-name", default="summary.txt",
+                    help="output-filnavn i velocity_backtest_output/ (fx summary_neutral.txt)")
     ap.add_argument("--sweep", action="store_true")
     args = ap.parse_args()
+
+    global BAR_CACHE
+    if args.data_dir:
+        BAR_CACHE = Path(args.data_dir)
 
     out_dir = Path.cwd() / OUTPUT_DIRNAME
     out_dir.mkdir(exist_ok=True)
@@ -292,7 +300,7 @@ def main() -> int:
 
     if not BAR_CACHE.exists():
         emit(f"  {BAR_CACHE} findes ikke.")
-        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        (out_dir / args.out_name).write_text("\n".join(lines), encoding="utf-8")
         return 1
 
     symbols = ([s.strip().upper() for s in args.symbols.split(",")]
@@ -302,7 +310,7 @@ def main() -> int:
     loaded = load_universe(symbols, emit)
     if not loaded:
         emit("  Ingen brugbare navne.")
-        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        (out_dir / args.out_name).write_text("\n".join(lines), encoding="utf-8")
         return 1
 
     if args.sweep:
@@ -336,8 +344,8 @@ def main() -> int:
                                 if s["n"] >= 30:
                                     emit(f"     {hyp:>9}{L:>5}{hold:>6}{s['n']:>7}{s['wr']:>7.0f}"
                                          f"{fmt_pf(s['pf']):>8}{fmt_pf(so['pf']):>8}")
-        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
-        emit(f"\nFil: {out_dir / 'summary.txt'}")
+        (out_dir / args.out_name).write_text("\n".join(lines), encoding="utf-8")
+        emit(f"\nFil: {out_dir / args.out_name}")
         return 0
 
     # ── Hoved-config ──
@@ -442,8 +450,8 @@ def main() -> int:
     emit("  proxy (ingen mcap). bar_cache-univers valgt på et tidspunkt → mild survivorship.")
     emit("  Events er unikke løb (cooldown); handler kan overlappe (event-study, ikke én-kapital).")
 
-    (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
-    emit(f"\nFil: {out_dir / 'summary.txt'}")
+    (out_dir / args.out_name).write_text("\n".join(lines), encoding="utf-8")
+    emit(f"\nFil: {out_dir / args.out_name}")
     return 0
 
 

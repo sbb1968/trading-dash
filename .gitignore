@@ -122,6 +122,7 @@ backend/daily_cache/
 backend/futures_cache/
 backend/data_harvest/
 backend/catalyst_data/
+backend/velocity_universe_data/
 backend/*_output/
 backend/Claude_screener_*.csv
 backend/account.yaml.backup_*
