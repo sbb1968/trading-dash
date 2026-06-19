@@ -357,6 +357,38 @@ def section_F():
         ok = False
     check("F5 best-effort: fejl i per-row-løkke propagerer IKKE", ok)
 
+    # ── Journal-pas: luk forældede åbne rows UDEN IBKR-position (2026-06-19-fix) ──
+    # F6: IBKR fladt + 2 åbne journal-rows (MES, M2K) → begge lukkes journal-sync,
+    #     INGEN place_paper_order (rapporteret fejl 2026-06-19).
+    rows = [
+        {"symbol": "MES", "side": "long",  "entry_price": 5000.0, "trade_id": "t1"},
+        {"symbol": "M2K", "side": "short", "entry_price": 2000.0, "trade_id": "t2"},
+    ]
+    o, c = asyncio.run(run([], rows))
+    check("F6 IBKR fladt + 2 åbne rows → 0 ordrer (journal-pas sender aldrig)", o == [], o)
+    check("F6 begge rows lukket journal-sync",
+          sorted(x.get("exit_reason") for x in c) == ["reconcile_journal_sync"] * 2, c)
+
+    # F7: IBKR har MES-position MED row + forældet M2K-row uden position →
+    #     MES lukkes via _reconcile_close (ordre sendt), M2K via journal-pas (ingen ordre).
+    rows = [
+        {"symbol": "MES", "side": "long",  "entry_price": 5000.0, "trade_id": "t1", "multiplier": 5.0},
+        {"symbol": "M2K", "side": "short", "entry_price": 2000.0, "trade_id": "t2"},
+    ]
+    o, c = asyncio.run(run([{"ticker": "MES", "position": 2}], rows))
+    check("F7 MES-position → præcis 1 lukke-ordre (M2K-row sender ingen)",
+          [x[0] for x in o] == ["MES"], o)
+    reasons = sorted(x.get("exit_reason") for x in c)
+    check("F7 MES→reconcile_flatten + M2K→reconcile_journal_sync",
+          reasons == ["reconcile_flatten", "reconcile_journal_sync"], reasons)
+
+    # F8: åben row for symbol der HAR en IBKR-position → journal-pas rører den IKKE
+    #     (kun reconcile_flatten fra IBKR-løkken, ingen dobbelt-luk via journal-sync).
+    rows = [{"symbol": "MES", "side": "long", "entry_price": 5000.0, "trade_id": "t1", "multiplier": 5.0}]
+    o, c = asyncio.run(run([{"ticker": "MES", "position": 2}], rows))
+    check("F8 row m. modsvarende IBKR-position → journal-pas rører den IKKE",
+          [x.get("exit_reason") for x in c] == ["reconcile_flatten"], c)
+
 
 # ── G — gates + vindue + reconcile-edge ────────────────────────
 def section_G():
@@ -379,13 +411,17 @@ def section_G():
     check("C2 _close_all lukker positionen", "MES" not in a._positions, list(a._positions))
     check("C2 lukke-ordre sendt", any(o[1] == "SELL" for o in conn.orders), conn.orders)
 
-    # E3: IBKR flad (ingen futures-positioner) → reconcile rører intet (ingen ordre)
+    # E3: IBKR flad + åben journal-row → reconcile sender INGEN ordre (intet at lukke
+    #     i IBKR), men lukker den forældede row i journalen (journal-sync, 2026-06-19-fix).
     conn = MockConn(positions=[])
-    a = make_algo(conn, MockJournal())
+    j = MockJournal()
+    a = make_algo(conn, j)
     trade_queries.list_trades = lambda db, **kw: _ret(
-        [{"symbol": "MES", "side": "long", "shares": 2, "trade_id": "t1"}])
+        [{"symbol": "MES", "side": "long", "shares": 2, "trade_id": "t1", "entry_price": 5000.0}])
     asyncio.run(a._reconcile_orphans())
-    check("E3 IBKR flad → 0 ordrer (intet at lukke)", conn.orders == [], conn.orders)
+    check("E3 IBKR flad → 0 ordrer (intet at lukke i IBKR)", conn.orders == [], conn.orders)
+    check("E3 forældet row lukket journal-sync (ingen ordre)",
+          [x.get("exit_reason") for x in j.closes] == ["reconcile_journal_sync"], j.closes)
 
 
 # ── H — live P&L + hold + bar_evaluation-status ────────────────

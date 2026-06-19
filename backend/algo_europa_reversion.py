@@ -249,6 +249,9 @@ class EuropaReversionLive(BaseStrategy):
         if not ours:
             self._status("started",
                          "Reconciliation: ingen gamle futures-positioner i vores instrumenter")
+            # FALD IKKE igennem til IBKR-løkken (den er tom), men HOP til journal-passet
+            # nedenfor: forældede åbne journal-rows uden IBKR-position skal stadig lukkes.
+            await self._reconcile_close_stale_journal_rows(ibkr_positions)
             return
 
         for p in ours:
@@ -275,6 +278,13 @@ class EuropaReversionLive(BaseStrategy):
                 await self._log(
                     f"🔎 Gammel åben position {sym} ({qty:+.0f}) i IBKR uden journal-spor "
                     f"fra os — observe-only, rører den IKKE", level="warning")
+
+        # ── Journal-pas: luk forældede åbne rows UDEN modsvarende IBKR-position ──
+        # (IBKR er sandheden; en åben journal-row uden position betyder positionen
+        # blev lukket manuelt/eksternt eller en lukke-ordre fyldte i IBKR men ikke i
+        # journalen. Vi sender INGEN ordre — der er intet at lukke i IBKR — vi retter
+        # kun journalen så den matcher.)
+        await self._reconcile_close_stale_journal_rows(ibkr_positions)
 
     async def _reconcile_close(self, sym: str, qty: float, row: dict) -> None:
         """Luk en gammel åben position der er ægte vores, og bogfør den med
@@ -335,6 +345,74 @@ class EuropaReversionLive(BaseStrategy):
             f"♻ Gammel åben position {sym} ({qty:+.0f}) er lukket @ ${exit_price:.2f} "
             f"(reconcile) | P&L: ${pnl:+.2f}")
         self._status("started", f"Gammel åben position {sym} er lukket (reconcile)")
+
+    async def _reconcile_close_stale_journal_rows(self, ibkr_positions: list) -> None:
+        """Luk åbne journal-rows (source=self.name, MES/M2K) der IKKE har nogen
+        modsvarende IBKR-position. Sender INGEN IBKR-ordre — positionen er allerede
+        væk i IBKR; vi retter kun journalen så den matcher virkeligheden.
+
+        Dette er det modsatte pas af IBKR-løkken: dér lukker vi IBKR-positioner der
+        har journal-spor; her lukker vi journal-rows der IKKE har IBKR-spor. Tilsammen
+        holder de journal og IBKR i sync uanset hvilken side der drev fra.
+
+        Tæller IKKE med i dagens handels-statistik (rører ikke self.trades/self.stats).
+        """
+        if self._journal is None or getattr(self._journal, "_db", None) is None:
+            return
+
+        # Symboler vi FAKTISK har en position i hos IBKR (disse rows er IKKE forældede
+        # — de håndteres af IBKR-løkken / det normale exit-flow).
+        held = {p.get("ticker") for p in ibkr_positions
+                if p.get("ticker") in INSTRUMENTS and p.get("position")}
+
+        try:
+            from trade_queries import list_trades
+            open_rows = await list_trades(
+                self._journal._db, status="open", source=self.name,
+            )
+        except Exception as e:
+            logger.error(f"[Europa-reversion] reconciliation: list_trades (journal-pas) fejl: {e}")
+            return
+
+        for row in open_rows:
+            sym = (row.get("symbol") or "").upper()
+            # Kun vores instrumenter, og kun rows UDEN modsvarende IBKR-position.
+            if sym not in INSTRUMENTS:
+                continue
+            if sym in held:
+                continue   # ægte åben position → lad det normale flow håndtere den
+
+            trade_id = row.get("trade_id")
+            if not trade_id:
+                continue
+
+            # Luk journal-rowen så den matcher IBKR (fladt). Ingen IBKR-ordre.
+            # exit_price = sidste kendte (snapshot hvis muligt, ellers entry) — kun til
+            # bogføring; P&L kan ikke beregnes pålideligt uden en faktisk fill, så vi
+            # bogfører 0 og markerer årsagen tydeligt.
+            entry = row.get("entry_price") or 0.0
+            exit_price = entry
+            try:
+                snap = await self.conn.get_snapshot(sym) if self.conn else None
+                if snap and snap.get("last"):
+                    exit_price = snap.get("last")
+            except Exception:
+                pass
+
+            await self._journal.log_trade_close(
+                trade_id    = trade_id,
+                exit_price  = exit_price,
+                exit_time   = datetime.now(ET),
+                exit_reason = "reconcile_journal_sync",
+                pnl         = 0.0,
+                payload     = {"reconcile": True, "journal_only": True,
+                               "note": "lukket i journal — ingen IBKR-position (fladt)"},
+            )
+            await self._log(
+                f"♻ Forældet åben journal-row {sym} ({row.get('side','?')}) lukket — "
+                f"ingen IBKR-position (journal-sync, ingen ordre sendt)", level="info")
+            self._status("started",
+                         f"Forældet journal-row {sym} ryddet (ingen IBKR-position)")
 
     # -------------------------------------------------------------
     # Status broadcast
