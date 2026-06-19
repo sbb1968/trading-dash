@@ -2,7 +2,7 @@
 """
 meanrev_regime.py
 ═════════════════
-Regime-split af mean-reversion-strategien fra meanrev_backtest.py. Svarer på det
+Regime-split af EUREVERSION-strategien fra eureversion_backtest.py. Svarer på det
 ene spørgsmål baseline efterlod: FINDES DER ET REGIME HVOR DEN BLØDER?
 
 Baggrund: baseline viste OOS stærkere end in-sample for MES og M2K — usædvanligt,
@@ -26,7 +26,7 @@ Plus: in-sample vs OOS gennemsnits-ER/vol — tester direkte om OOS-perioden var
 Efficiency-ratio (ER) pr. session-dag = |sidste − første close| / Σ|bar-til-bar bevægelse|.
   ER → 0 = ren chop (godt for mean-reversion) · ER → 1 = ren trend (farligt).
 
-Importerer backtest-motoren fra meanrev_backtest.py (samme mappe) — ÉN kilde til logikken,
+Importerer backtest-motoren fra eureversion_backtest.py (samme mappe) — ÉN kilde til logikken,
 så resultaterne er sammenlignelige. Begge filer SKAL ligge i samme mappe.
 
 Rent offline. Kun stdlib. Ingen IBKR.
@@ -48,12 +48,12 @@ from pathlib import Path
 from statistics import median, pstdev
 
 try:
-    from meanrev_backtest import (
+    from eureversion_backtest import (
         load_15min, run_backtest, session_of, SESSIONS,
         stats, fmt_pf, OUTPUT_DIRNAME,
     )
 except ImportError:
-    print("FEJL: meanrev_backtest.py skal ligge i samme mappe som dette script.")
+    print("FEJL: eureversion_backtest.py skal ligge i samme mappe som dette script.")
     sys.exit(1)
 
 DEFAULT_INSTR = ["MES", "MNQ", "M2K"]

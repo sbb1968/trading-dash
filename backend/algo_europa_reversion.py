@@ -12,7 +12,7 @@ og samme broadcast/journal-mønster, men:
   - INGEN TradingView/IBKR-gainer-scanner, ingen pris-filter.
   - INGEN trade-forensics/tape/L2.
   - SELVSTÆNDIG z-score-regel (ingen strategies/-pakke; den validerede
-    backtest bor i meanrev_backtest.py — vi spejler dens z-matematik 1:1).
+    backtest bor i eureversion_backtest.py — vi spejler dens z-matematik 1:1).
   - KONTRAKT-baseret sizing (futures), ikke shares (§2).
   - SCOPED, observe-først reconcile (§5) — delt konto-sikker.
 
@@ -43,7 +43,7 @@ from ibkr_connect import IBKRConnection
 from trade_forensics import build_entry_snapshot, build_exit_snapshot
 
 # Strategi-logik + parametre bor i pakken (delt sandhedskilde med backtesten
-# meanrev_backtest.py, så live og backtest aldrig divergerer). Wrapperen
+# eureversion_backtest.py, så live og backtest aldrig divergerer). Wrapperen
 # håndterer kun IBKR, sizing, broadcast og reconcile.
 from strategies.europa_reversion import EuropaReversionStrategy, rule
 from strategies.europa_reversion.config import (

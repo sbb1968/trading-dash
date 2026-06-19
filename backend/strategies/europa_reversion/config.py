@@ -6,7 +6,7 @@ den europæiske session). ÉN konfiguration — bevidst (ingen variant-sweep);
 Søren prøver fx LOOKBACK 40 ved at ændre ét tal her.
 
 Disse konstanter er ENESTE sandhedskilde for strategiens parametre: både
-live-wrapperen (algo_europa_reversion.py) og backtesten (meanrev_backtest.py)
+live-wrapperen (algo_europa_reversion.py) og backtesten (eureversion_backtest.py)
 læser herfra, så live og backtest aldrig kan divergere på parametre.
 """
 

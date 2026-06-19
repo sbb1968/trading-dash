@@ -4,8 +4,8 @@ strategies/europa_reversion/rule.py
 Den rene z-score-regel — ENESTE sandhedskilde for beslutningslogikken.
 
 Bruges identisk af live-wrapperen (algo_europa_reversion.py) og backtesten
-(meanrev_backtest.py), så de aldrig kan divergere. Ingen IBKR, ingen state —
-kun matematik på en liste af closes. Spejler den validerede meanrev_backtest-
+(eureversion_backtest.py), så de aldrig kan divergere. Ingen IBKR, ingen state —
+kun matematik på en liste af closes. Spejler den validerede eureversion_backtest-
 regel 1:1 (population-std via pstdev).
 """
 

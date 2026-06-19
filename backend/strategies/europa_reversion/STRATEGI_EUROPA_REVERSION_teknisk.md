@@ -9,13 +9,13 @@ vindue af closes, uden state og uden IBKR.
 - Parametre (låst, ingen variant-sweep): `strategies/europa_reversion/config.py`
 - Strategi-facade: `strategies/europa_reversion/strategy.py`
 - Live-wrapper: `algo_europa_reversion.py`
-- Valideret backtest: `meanrev_backtest.py` (15-min futures fra `data_harvest/`)
+- Valideret backtest: `eureversion_backtest.py` (15-min futures fra `data_harvest/`)
 
 ### Strukturel forskel fra ORB/Konfluens
 ORB og Konfluens har stateful entry/exit-ENGINES drevet af den generiske
 OHLC-backtest (`backtest_momentum.py`). Europa-reversions regel er derimod en
 ren funktion af et z-score-vindue, og dens validerede backtest er den
-fritstående `meanrev_backtest.py`. Derfor eksponerer facaden **reglen + config**
+fritstående `eureversion_backtest.py`. Derfor eksponerer facaden **reglen + config**
 i stedet for OHLC-engines. `rule.py` deles 1:1 af live-wrapper og backtest, så de
 **aldrig kan divergere** på beslutningslogik.
 
@@ -114,6 +114,6 @@ P&L pr. handel: `(exit − entry) × contracts × multiplier` (long), omvendt fo
 
 ## Status
 
-Paper trading. Reglen spejler den validerede `meanrev_backtest`-logik 1:1
+Paper trading. Reglen spejler den validerede `eureversion_backtest`-logik 1:1
 (population-std, revert-før-stop). MNQ bevidst udeladt fordi den ikke
 mean-reverterer pålideligt nok i denne session.

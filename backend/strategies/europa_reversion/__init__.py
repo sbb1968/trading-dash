@@ -7,7 +7,7 @@ europæiske session (02–08 ET). z-score på FÆRDIGE 15-min bars:
   · tvangsluk ved sessions-slut. Én position pr. instrument.
 
 rule.py er ENESTE sandhedskilde for beslutningslogikken og deles af
-live-wrapperen (algo_europa_reversion.py) og backtesten (meanrev_backtest.py),
+live-wrapperen (algo_europa_reversion.py) og backtesten (eureversion_backtest.py),
 så de aldrig kan divergere.
 
 Brug:

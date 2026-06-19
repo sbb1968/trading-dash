@@ -7,7 +7,7 @@ så den er registrerbar i STRATEGY_REGISTRY på linje med de øvrige strategier.
 BEMÆRK — bevidst strukturel forskel fra de OHLC-engine-baserede strategier:
   De har stateful entry/exit-ENGINES (state-maskiner, pris-stops). Europa-
   reversions regel er derimod en ren funktion af et rullende z-score-vindue
-  (rule.py), og dens validerede backtest er den fritstående meanrev_backtest.py
+  (rule.py), og dens validerede backtest er den fritstående eureversion_backtest.py
   (15-min futures fra data_harvest/). Derfor eksponerer denne facade reglen +
   config i stedet for OHLC-engines — men reglen er DELT med live-wrapperen, så
   live og backtest aldrig divergerer.

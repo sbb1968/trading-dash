@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-meanrev_backtest.py
-═══════════════════
+eureversion_backtest.py
+═══════════════════════
+Den validerede backtest for EUREVERSION-strategien (algo_europa_reversion.py).
 Backtester den konkrete mean-reversion-regel som forudsætningstesten åbnede for:
 index/rente/metal-futures der mean-reverter i den EUROPÆISKE session (02–08 ET
 ≈ 08–14 dansk tid). Det her er make-or-break — det afgør om reversionen er ÆGTE
@@ -26,14 +27,14 @@ Plus OUT-OF-SAMPLE-split (in-sample først, OOS sidst) og handler/dag.
 Rent offline på de høstede 15-min CSV'er. Kun stdlib. Ingen IBKR.
 
 Brug (på Sørens workstation):
-    python meanrev_backtest.py
-    python meanrev_backtest.py --only MES
-    python meanrev_backtest.py --session european --entry-z 2.0 --exit-z 0.5 --stop-z 3.5
-    python meanrev_backtest.py --sweep            # let parametersweep (efter defaults)
+    python eureversion_backtest.py
+    python eureversion_backtest.py --only MES
+    python eureversion_backtest.py --session european --entry-z 2.0 --exit-z 0.5 --stop-z 3.5
+    python eureversion_backtest.py --sweep            # let parametersweep (efter defaults)
 
-Output i ./meanrev_backtest_output/: summary.txt
+Output i ./eureversion_backtest_output/: summary.txt
 
-Placering: C:\\Projects\\trading_dash\\backend\\meanrev_backtest.py
+Placering: C:\\Projects\\trading_dash\\backend\\eureversion_backtest.py
 """
 
 from __future__ import annotations
@@ -62,7 +63,7 @@ from strategies.europa_reversion.config import (
     INSTRUMENTS as CFG_INSTRUMENTS,
 )
 
-OUTPUT_DIRNAME = "meanrev_backtest_output"
+OUTPUT_DIRNAME = "eureversion_backtest_output"
 BAR_SECONDS = 900  # 15 min
 
 SESSIONS = {

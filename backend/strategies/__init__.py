@@ -17,7 +17,7 @@ from strategies.europa_reversion import EuropaReversionStrategy
 STRATEGY_REGISTRY = {
     "confluence2":      Confluence2Strategy,
     # Europa-reversion er ikke OHLC-engine-baseret (ren z-score-regel); den
-    # backtestes med meanrev_backtest.py.
+    # backtestes med eureversion_backtest.py.
     "europa_reversion": EuropaReversionStrategy,
 }
 
