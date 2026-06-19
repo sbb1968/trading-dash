@@ -12,7 +12,7 @@ Kør i backend-mappen:  python test_watchdog_session.py
 """
 
 import asyncio
-from datetime import datetime as RealDT
+from datetime import datetime as RealDT, timedelta
 import pytz
 
 import notifier
@@ -69,14 +69,18 @@ def _fresh_watchdog():
     w._data_blind_since   = None
     w._data_alerts_sent   = 0
     w._last_data_alert_at = None
+    w._started_at         = None   # ingen restart-floor → bevarer eksisterende test-semantik
     return w
 
 
-def run_data_status(y, mo, d, hh, mm, marks):
+def run_data_status(y, mo, d, hh, mm, marks, started_min_ago=None):
     """Kør _handle_data_status med frosset tid + mockede data-marks. Returnér antal
-    notifier.send-kald (= alarmer udløst)."""
+    notifier.send-kald (= alarmer udløst). started_min_ago=None → ingen restart-floor
+    (langtkørende process); et tal → _started_at sat så mange min før frosset nu."""
     _freeze(y, mo, d, hh, mm)
     w = _fresh_watchdog()
+    if started_min_ago is not None:
+        w._started_at = _FakeDatetime._fixed - timedelta(minutes=started_min_ago)
     w._read_data_marks = lambda: marks   # (sec_bareval, sec_any)
     sent = []
     orig = notifier.send
@@ -146,7 +150,11 @@ def main():
           len(sent) == 1 and "DATABLIND" in (sent[0].get("message", "")), sent)
 
     # K2/US uændret mid-session: 11:00 ET (90 min inde) + forældet bar → alarm (grace irrelevant).
-    sent = run_data_status(*WED, 11, 0, STALE_BAREVAL_FRESH_ANY)
+    # Bar-alder skal ligge mellem blind_limit (240s) og NO_STRATEGY_FLOOR (3×240=720s) —
+    # dvs. en ÆGTE K2-feed-død, ikke et helt session-mellemrum (>720s floores som "ingen
+    # strategi"). 400s = ~7 min uden bar = K2 gået datablind mens sessionen kører.
+    US_REAL_BLIND = (400.0, 100.0)
+    sent = run_data_status(*WED, 11, 0, US_REAL_BLIND)
     check("US mid-session (90 min inde) + forældet bar → alarm (K2-adfærd uændret)",
           len(sent) == 1 and "DATABLIND" in (sent[0].get("message", "")), sent)
 
@@ -154,6 +162,19 @@ def main():
     sent = run_data_status(*WED, 2, 5, (50.0, 50.0))
     check("Grace-vindue + FRISK bar → ingen alarm (data_live, ikke undertrykt fejlagtigt)",
           len(sent) == 0, sent)
+
+    # ── Proces-restart-floor (regressions-lås på den falske opstart-datablind) ──
+    # Scenarie 2026-06-19: genstart 03:07 ET (67 min inde i EU, > grace 20). Seneste
+    # bar_evaluation 1329s gammel — fra FORRIGE process, slipper under NO_STRATEGY_FLOOR
+    # (3600s) og er ældre end blind_limit (1200s). Frisk heartbeat (startup-events).
+    RESTART_STALE = (1329.0, 5.0)
+    sent = run_data_status(*WED, 3, 7, RESTART_STALE, started_min_ago=1)   # oppetid 60s
+    check("Restart-floor: bar ældre end oppetid (60s) → INGEN alarm (forrige process' bar)",
+          len(sent) == 0, sent)
+    # Samme marks, men langtkørende process (oppetid 60 min > bar-alder) → ÆGTE datablind.
+    sent = run_data_status(*WED, 3, 7, RESTART_STALE, started_min_ago=60)
+    check("Restart-floor: langtkørende process + forældet bar → datablind-alarm (ægte feed-død)",
+          len(sent) == 1 and "DATABLIND" in (sent[0].get("message", "")), sent)
 
     print("\nALLE TESTS BESTÅET ✓")
 

@@ -84,6 +84,8 @@ class TWSWatchdog:
                  on_data_blind: Optional[Callable] = None):
         self._running         = False
         self._task            = None
+        self._started_at      = None     # proces-opstart (sættes i start()) — bruges til
+                                         # restart-floor mod falsk datablind ved genstart
         self._was_online      = None     # None = uvist, True/False = sidste kendte
         self._fail_count      = 0
         self._on_status       = on_status_change   # callback (online: bool) → broadcastes til UI
@@ -107,8 +109,9 @@ class TWSWatchdog:
     async def start(self):
         if self._running:
             return
-        self._running = True
-        self._task    = asyncio.create_task(self._loop())
+        self._running    = True
+        self._started_at = datetime.now()   # ref for proces-restart-floor (se _handle_data_status)
+        self._task       = asyncio.create_task(self._loop())
         logger.info(f"[Watchdog] Startet — tjekker {TWS_HOST}:{TWS_PORT} hvert {CHECK_INTERVAL_SEC}s")
 
     async def stop(self):
@@ -278,6 +281,25 @@ class TWSWatchdog:
         NO_STRATEGY_FLOOR_SEC = 3 * blind_limit
         if sec_bareval > NO_STRATEGY_FLOOR_SEC:
             return
+        # ────────────────────────────────────────────────────────────────────
+
+        # ── PROCES-RESTART-FLOOR (fix mod falsk datablind LIGE EFTER opstart) ─
+        # NO_STRATEGY_FLOOR fanger kun en MEGET gammel bar (et helt session-mellemrum).
+        # Ved en genstart MIDT i en session ligger forrige process' sidste bar_evaluation
+        # typisk kun 1-20 min tilbage — frisk nok til at slippe under floor'en, men ældre
+        # end blind_limit, og sec_any er frisk pga. startup-events (Journal/Replication).
+        # Resultat: falsk "DATABLIND" i selve opstartssekundet, før denne process' strategi
+        # har nået sin første live-bar (set 2026-06-19: 1329s gap meldt 0 sek efter
+        # uvicorn-start, EUREVERSION ikke engang auto-startet på workstation).
+        #
+        # En ÆGTE datablind kræver at den nu-forældede bar blev produceret AF DENNE process
+        # — altså efter opstart. Er seneste bar_evaluation ældre end vores egen oppetid, har
+        # ingen strategi i denne process leveret en live-bar endnu → ikke startet / i warmup,
+        # ikke datablind. (Næste tick fanger ægte feed-død, så snart oppetiden > bar-alderen.)
+        if self._started_at is not None:
+            uptime_sec = (datetime.now() - self._started_at).total_seconds()
+            if sec_bareval > uptime_sec:
+                return
         # ────────────────────────────────────────────────────────────────────
 
         data_live = sec_bareval <= blind_limit
