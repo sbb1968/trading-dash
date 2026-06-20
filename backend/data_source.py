@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""
+data_source.py — Daglig OHLCV-kilde til swing-vaerktoejet.
+
+load_bars(ticker) returnerer en daglig OHLCV-DataFrame
+(Open/High/Low/Close/Volume, DatetimeIndex) — praecis det format
+technical_score og swing_report forventer. Returnerer None hvis data ikke
+kan skaffes (swing_report falder paent tilbage og foreslaar --source yfinance).
+
+Kilde-prioritet:
+  1) In-memory cache (samme proces)
+  2) Disk-cache  data_swing_cache/{TICKER}_daily.csv  hvis aendret i dag
+  3) IBKR on-demand via ib_async (qualify Stock + reqHistoricalDataAsync 1 day)
+
+DESIGNVALG (genskabelse): den oprindelige data_source laeste fra en bars_daily-
+cache som en SEPARAT downloader skulle fylde foerst ("tilfoej tickeren til
+download-universet"). Den downloader er ogsaa tabt, og det ritual passer
+daarligt til et MANUELT vaerktoej hvor man slaar én ticker op ad gangen. Derfor
+henter vi nu on-demand direkte fra IBKR og cacher resultatet til disk, saa
+gentagne opslag samme dag er oejeblikkelige. IBKR forbliver primaerkilden (jf.
+dine "Aabne beslutninger"); yfinance er fallback via `swing_report --source
+yfinance` (som bruger technical_score._yf_ohlcv).
+
+Krav: TWS/Gateway koerer paa porten nedenfor. Vi forbinder med et hoejt,
+tilfaeldigt client-id saa vi ikke kolliderer med den koerende live-backend.
+"""
+from __future__ import annotations
+
+import asyncio
+import random
+from datetime import date
+from pathlib import Path
+from typing import Optional
+
+import pandas as pd
+
+# Python 3.14 event-loop fix (samme som resten af kodebasen).
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
+IBKR_HOST = "127.0.0.1"
+IBKR_PORT = 7497          # paper trading
+DURATION = "2 Y"          # ~2 aar daily — daekker 200-MA + 52-ugers range
+CONNECT_TIMEOUT = 15
+
+CACHE_DIR = Path(__file__).parent / "data_swing_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+
+_MEM: dict[str, Optional[pd.DataFrame]] = {}   # in-memory cache pr. proces
+
+
+def _cache_path(ticker: str) -> Path:
+    return CACHE_DIR / f"{ticker.upper()}_daily.csv"
+
+
+def _read_cache(ticker: str) -> Optional[pd.DataFrame]:
+    p = _cache_path(ticker)
+    if not p.exists():
+        return None
+    # "Frisk" = filen er aendret i dag. Handelsdag-granularitet er rigeligt
+    # for et manuelt vaerktoej der kigger paa daglige bars.
+    if date.fromtimestamp(p.stat().st_mtime) != date.today():
+        return None
+    try:
+        df = pd.read_csv(p, index_col=0, parse_dates=True)
+        return df if not df.empty else None
+    except Exception:
+        return None
+
+
+def _write_cache(ticker: str, df: pd.DataFrame) -> None:
+    try:
+        df.to_csv(_cache_path(ticker))
+    except Exception:
+        pass   # cache-fejl maa aldrig vaelte et opslag
+
+
+async def _fetch_ibkr(ticker: str) -> Optional[pd.DataFrame]:
+    try:
+        from ib_async import IB, Stock
+    except ImportError:
+        return None
+    ib = IB()
+    cid = random.randint(70, 89)   # hoejt id -> kolliderer ikke med live-backend
+    try:
+        await ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=cid, timeout=CONNECT_TIMEOUT)
+    except Exception:
+        return None
+    try:
+        c = Stock(ticker.upper(), "SMART", "USD")
+        await ib.qualifyContractsAsync(c)
+        bars = await ib.reqHistoricalDataAsync(
+            c, endDateTime="", durationStr=DURATION, barSizeSetting="1 day",
+            whatToShow="TRADES", useRTH=True, formatDate=2)
+        if not bars:
+            return None
+        df = pd.DataFrame(
+            [{"Open": b.open, "High": b.high, "Low": b.low,
+              "Close": b.close, "Volume": b.volume} for b in bars],
+            index=pd.to_datetime([b.date for b in bars]),
+        )
+        return df if not df.empty else None
+    except Exception:
+        return None
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+
+def _run(coro):
+    """Koer en coroutine synkront — robust uanset event-loop-tilstand."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # baeltet+seler: kun relevant hvis kaldt inde fra async kontekst
+            return asyncio.run_coroutine_threadsafe(coro, loop).result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+def load_bars(ticker: str) -> Optional[pd.DataFrame]:
+    """Daglig OHLCV for én ticker. None hvis utilgaengelig."""
+    t = ticker.upper()
+    if t in _MEM:
+        return _MEM[t]
+
+    df = _read_cache(t)
+    if df is None:
+        df = _run(_fetch_ibkr(t))
+        if df is not None and not df.empty:
+            _write_cache(t, df)
+
+    _MEM[t] = df
+    return df
+
+
+if __name__ == "__main__":
+    import sys
+    t = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
+    df = load_bars(t)
+    if df is None or df.empty:
+        print(f"Ingen data for {t}. Er TWS/Gateway forbundet paa port {IBKR_PORT}?")
+    else:
+        print(f"{t}: {len(df)} daglige bars  "
+              f"{df.index[0].date()} -> {df.index[-1].date()}")
+        print(df.tail())

@@ -123,6 +123,8 @@ backend/futures_cache/
 backend/data_harvest/
 backend/catalyst_data/
 backend/velocity_universe_data/
+# Swing-værktøjets daglige OHLCV-cache (genereret on-demand)
+backend/data_swing_cache/
 backend/*_output/
 backend/Claude_screener_*.csv
 backend/account.yaml.backup_*
