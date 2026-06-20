@@ -235,6 +235,104 @@ def fetch_catalyst_fmp(symbol: str, api_key: str, price: Optional[float] = None,
     return out
 
 
+def fetch_catalyst_finnhub(symbol: str, price: Optional[float] = None) -> dict:
+    """
+    Fallback-kilde: Finnhub (gratis). Daekker analyst-revisioner (afledt af
+    recommendation-NIVEAUER maaned-over-maaned), dage til regnskab og earnings-
+    surprise. Kursmaal + nyheds-sentiment er premium paa Finnhub og hentes ikke.
+    Genbruger noeglen fra finnhub_news. Returnerer kun felter Finnhub leverer.
+    """
+    import urllib.request
+    import json
+    from datetime import datetime, date, timedelta
+
+    try:
+        from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
+    except Exception:
+        return {}
+
+    def get(path):
+        sep = "&" if "?" in path else "?"
+        url = f"{FINNHUB_BASE}{path}{sep}token={FINNHUB_API_KEY}"
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return json.loads(r.read().decode())
+
+    out = {}
+    today = date.today()
+
+    # Analyst-revisioner: aendring i konsensus maaned-over-maaned.
+    # bullish = strongBuy + buy - sell - strongSell. Positiv delta = opjustering.
+    try:
+        rec = get(f"/stock/recommendation?symbol={symbol}")
+        if isinstance(rec, list) and len(rec) >= 2:
+            def bullish(r):
+                return ((r.get("strongBuy") or 0) + (r.get("buy") or 0)
+                        - (r.get("sell") or 0) - (r.get("strongSell") or 0))
+            delta = bullish(rec[0]) - bullish(rec[1])
+            out["rating_up"] = delta if delta > 0 else 0
+            out["rating_down"] = -delta if delta < 0 else 0
+    except Exception:
+        pass
+
+    # Dage til regnskab: naeste fremtidige earnings-dato.
+    try:
+        to = (today + timedelta(days=365)).isoformat()
+        cal = get(f"/calendar/earnings?from={today.isoformat()}&to={to}&symbol={symbol}")
+        rows = cal.get("earningsCalendar", []) if isinstance(cal, dict) else []
+        future = []
+        for e in rows:
+            ds = (e.get("date") or "")[:10]
+            try:
+                dd = datetime.strptime(ds, "%Y-%m-%d").date()
+            except Exception:
+                continue
+            if dd >= today:
+                future.append((dd - today).days)
+        if future:
+            out["days_to_earnings"] = min(future)
+    except Exception:
+        pass
+
+    # Earnings-surprise: snit af surprisePercent for seneste 4 kvartaler.
+    try:
+        surp = get(f"/stock/earnings?symbol={symbol}")
+        if isinstance(surp, list) and surp:
+            vals = [e.get("surprisePercent") for e in surp[:4]
+                    if e.get("surprisePercent") is not None]
+            if vals:
+                out["avg_surprise_pct"] = sum(vals) / len(vals)
+    except Exception:
+        pass
+
+    return out
+
+
+def fetch_catalyst(symbol: str, api_key: str, price: Optional[float] = None,
+                   sector_momentum_pct: Optional[float] = None) -> dict:
+    """
+    Kaede med felt-niveau fallback: FMP foerst, dernaest Finnhub for de felter FMP
+    ikke leverede. Paa gratis-noegler er FMP's katalysator-endpoints 402-laaste, saa
+    Finnhub baerer laget i praksis. Finnhub overskriver aldrig et FMP-felt.
+    Sektor-momentum kommer altid fra kalderen (IBKR), aldrig fra FMP/Finnhub.
+    """
+    try:
+        c = fetch_catalyst_fmp(symbol, api_key, price,
+                               sector_momentum_pct=sector_momentum_pct) or {}
+    except Exception:
+        c = {}
+    needed = ("rating_up", "days_to_earnings", "avg_surprise_pct")
+    if not all(k in c for k in needed):
+        try:
+            fh = fetch_catalyst_finnhub(symbol, price)
+        except Exception:
+            fh = {}
+        for k, v in fh.items():
+            c.setdefault(k, v)   # fyld kun huller
+    if sector_momentum_pct is not None:
+        c.setdefault("sector_momentum_pct", sector_momentum_pct)
+    return c
+
+
 if __name__ == "__main__":
     import argparse
     import os
@@ -243,5 +341,5 @@ if __name__ == "__main__":
     ap.add_argument("--price", type=float, required=True)
     ap.add_argument("--api-key", default=os.environ.get("FMP_API_KEY", ""))
     args = ap.parse_args()
-    cat = fetch_catalyst_fmp(args.ticker, args.api_key, args.price)
+    cat = fetch_catalyst(args.ticker, args.api_key, args.price)
     print(format_catalyst_report(args.ticker, compute_catalyst(cat, args.price)))

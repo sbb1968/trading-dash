@@ -241,7 +241,7 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
             sector_df = None
 
     tech_res = tech.compute_technical(df, benchmark=bench, sector=sector_df)
-    cat_dict = cat.fetch_catalyst_fmp(ticker, api_key, price, sector_momentum_pct=sector_mom)
+    cat_dict = cat.fetch_catalyst(ticker, api_key, price, sector_momentum_pct=sector_mom)
     cat_res = cat.compute_catalyst(cat_dict, price)
 
     adv = float(df["Volume"].tail(50).mean())
