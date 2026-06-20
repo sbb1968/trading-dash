@@ -238,6 +238,7 @@ def fetch_fundamentals_fmp(symbol: str, api_key: str) -> dict:
     try:
         p = _first(get(f"profile?symbol={symbol}"))
         out["sector"] = p.get("sector")
+        out["market_cap"] = p.get("marketCap")
     except Exception:
         pass
     return out

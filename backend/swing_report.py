@@ -30,13 +30,29 @@ LABEL = {"technical": "Teknisk", "fundamental": "Fundamental", "catalyst": "Kata
 def compute_gate(adv_shares: Optional[float] = None,
                  dollar_vol: Optional[float] = None,
                  price: Optional[float] = None,
-                 spread_pct: Optional[float] = None) -> float:
-    """0..1. Mindste delfaktor styrer (bindende flaskehals)."""
+                 spread_pct: Optional[float] = None,
+                 market_cap: Optional[float] = None) -> float:
+    """0..1. Mindste delfaktor styrer (bindende flaskehals).
+
+    Likviditets-taersklerne (adv_shares, dollar_vol) skaleres efter market cap
+    naar den er kendt; ellers bruges faste standardtaerskler (fallback), saa
+    intet braekker hvis cap ikke kan hentes.
+    """
+    if market_cap is None:
+        adv_full, dol_full = 500_000, 20_000_000        # ukendt cap -> standard
+    elif market_cap < 300e6:
+        adv_full, dol_full = 150_000, 2_000_000         # micro
+    elif market_cap < 2e9:
+        adv_full, dol_full = 300_000, 6_000_000         # small
+    elif market_cap < 10e9:
+        adv_full, dol_full = 500_000, 15_000_000        # mid
+    else:
+        adv_full, dol_full = 750_000, 30_000_000        # large
     f = []
     if adv_shares is not None:
-        f.append(min(1.0, adv_shares / 500_000))         # 500k+ aktier/dag = fuld
+        f.append(min(1.0, adv_shares / adv_full))
     if dollar_vol is not None:
-        f.append(min(1.0, dollar_vol / 20_000_000))      # $20M+/dag = fuld
+        f.append(min(1.0, dollar_vol / dol_full))
     if price is not None:
         f.append(0.0 if price < 1 else 0.5 if price < 3 else 1.0)
     if spread_pct is not None:
@@ -229,7 +245,8 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
     cat_res = cat.compute_catalyst(cat_dict, price)
 
     adv = float(df["Volume"].tail(50).mean())
-    gate = compute_gate(adv_shares=adv, dollar_vol=adv * price, price=price)
+    gate = compute_gate(adv_shares=adv, dollar_vol=adv * price, price=price,
+                        market_cap=fdict.get("market_cap"))
 
     c = combine({"technical": tech_res, "fundamental": fund_res, "catalyst": cat_res},
                 gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
