@@ -129,3 +129,13 @@ backend/*_output/
 backend/Claude_screener_*.csv
 backend/account.yaml.backup_*
 backend/account_yaml.txt
+
+# Claude Code lokal tool-state
+.claude/
+
+# Reproducerbart analyse-output (velocity/OOP point-in-time + screener-eksport)
+pit_*.json
+pit_*.csv
+union_distinct.csv
+Claude screener*.csv
+reconstructed_universe_*.json
