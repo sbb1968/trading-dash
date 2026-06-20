@@ -21,6 +21,7 @@ from typing import Optional
 
 LAG_WEIGHTS = {"technical": 0.55, "fundamental": 0.20, "catalyst": 0.25}
 MANUAL_TECH_SHARE = 0.12   # manuel chart-overlay = 12 % af det tekniske lag
+GATE_STRAF = 40.0          # gate-straf: lav handelbarhed skubber final NEDAD mod Fraraades
 
 LABEL = {"technical": "Teknisk", "fundamental": "Fundamental", "catalyst": "Katalysator"}
 
@@ -75,16 +76,20 @@ def combine(layers: dict, gate: float = 1.0,
         "catalyst": layers["catalyst"]["lag_score"],
     }
     combined = sum(LAG_WEIGHTS[k] * adj[k] for k in LAG_WEIGHTS)
-    final = combined * gate
+    # Gate som nedadrettet straf (ikke ren multiplikator): bevarer flaskehalsen,
+    # men lav handelbarhed skubber ALTID mod Fraraades, aldrig mod neutral.
+    gate_straf = (1.0 - gate) * GATE_STRAF
+    final = combined * gate - gate_straf
+    final = max(-100.0, min(100.0, final))
 
     drivers = []   # (layer, navn, global_bidrag, signal)
     for layer, res in layers.items():
         for r in res["results"]:
             drivers.append((layer, r.name, LAG_WEIGHTS[layer] * r.weighted, r.signal))
 
-    return {"adj": adj, "combined": combined, "gate": gate, "final": final,
-            "drivers": drivers, "manual": manual, "days_to_earnings": days_to_earnings}
-
+    return {"adj": adj, "combined": combined, "gate": gate, "gate_straf": gate_straf,
+            "final": final, "drivers": drivers, "manual": manual,
+            "days_to_earnings": days_to_earnings}
 
 def _band(final: float) -> str:
     if final >= 45:
@@ -137,6 +142,9 @@ def format_final_report(ticker: str, c: dict) -> str:
     gate = c["gate"]
     gate_note = "" if gate >= 0.7 else "   <-- traekker scoren ned!"
     L.append(f"  Handelbarheds-gate:    {gate:>6.2f}{gate_note}")
+    gs = c.get("gate_straf", 0.0)
+    if gs > 0.01:
+        L.append(f"  Gate-straf:            {-gs:>+6.1f}   (lav handelbarhed)")
     L.append("  " + "-" * 62)
     L.append("  SAMLET-SKALA:  <=-25 Fraraades | -25..0 Svag | 0..+25 Afvent | +25..+45 Egnet | >+45 Staerk")
     L.append(f"  SAMLET EGNETHED:  {c['final']:>+6.1f}  [{_band(c['final'])}]")
