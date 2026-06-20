@@ -261,6 +261,45 @@ def all_symbols() -> list:
     return sorted(syms)
 
 
+def load_pit_universe(path):
+    """Point-in-time univers-JSON {dato: [tickere]} → {date_cls: set}. None hvis path None."""
+    if not path:
+        return None
+    import json
+    from datetime import date as _date
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    out = {}
+    for ds, ticks in raw.items():
+        try:
+            out[_date.fromisoformat(ds)] = {t.upper() for t in ticks}
+        except ValueError:
+            continue
+    return out
+
+
+def filter_events_pit(ev_by_t_with_sym, universe):
+    """[(sym, bars, [events])] → flad [(sym, bars, event)]; event beholdes hvis universe
+    er None ELLER sym ∈ universe[event.day]."""
+    flat = []
+    for sym, b, evs in ev_by_t_with_sym:
+        for ev in evs:
+            if universe is None or sym.upper() in universe.get(ev.day, ()):
+                flat.append((sym, b, ev))
+    return flat
+
+
+def regroup_by_bars(flat):
+    """[(sym, bars, event)] → [(bars, [events])] bevarende rækkefølge."""
+    order, seen = [], {}
+    for _sym, b, ev in flat:
+        key = id(b)
+        if key not in seen:
+            seen[key] = (b, [])
+            order.append(seen[key])
+        seen[key][1].append(ev)
+    return order
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -279,12 +318,17 @@ def main() -> int:
                     help="mappe med {TICKER}_*_1min.csv (default bar_cache)")
     ap.add_argument("--out-name", default="summary.txt",
                     help="output-filnavn i velocity_backtest_output/ (fx summary_neutral.txt)")
+    ap.add_argument("--universe-file", default=None,
+                    help="point-in-time univers-JSON {dato: [tickere]}; events for ticker T på "
+                         "dag d beholdes kun hvis T ∈ univers[d] (OOP-validering)")
     ap.add_argument("--sweep", action="store_true")
     args = ap.parse_args()
 
     global BAR_CACHE
     if args.data_dir:
         BAR_CACHE = Path(args.data_dir)
+
+    pit_universe = load_pit_universe(args.universe_file)
 
     out_dir = Path.cwd() / OUTPUT_DIRNAME
     out_dir.mkdir(exist_ok=True)
@@ -321,7 +365,8 @@ def main() -> int:
         for w in VEL_WINDOWS:
             for vth in VEL_THRS:
                 for volth in VOL_THRS:
-                    ev_by_t = [(b, detect_events(b, w, vth, volth)) for _s, b in loaded]
+                    _evs = [(sym, b, detect_events(b, w, vth, volth)) for sym, b in loaded]
+                    ev_by_t = regroup_by_bars(filter_events_pit(_evs, pit_universe))
                     ntot = sum(len(e) for _b, e in ev_by_t)
                     if ntot < 30:
                         continue
@@ -356,7 +401,11 @@ def main() -> int:
     emit("")
 
     ev_by_t = [(sym, b, detect_events(b, w, vth, volth)) for sym, b in loaded]
-    all_events = [(b, ev) for _s, b, evs in ev_by_t for ev in evs]
+    flat_ev = filter_events_pit(ev_by_t, pit_universe)
+    all_events = [(b, ev) for _s, b, ev in flat_ev]
+    if pit_universe is not None:
+        emit(f"Point-in-time univers: {len(pit_universe)} dage · "
+             f"events efter univers-filter: {len(all_events)}")
     n_ev = len(all_events)
     n_up = sum(1 for _b, e in all_events if e.direction == "up")
     n_names = sum(1 for _s, _b, evs in ev_by_t if evs)

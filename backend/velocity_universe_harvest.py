@@ -69,11 +69,17 @@ def load_universe(path: Path):
     return rows
 
 
-async def harvest_bars(ib, contract, days: int, emit_dbg=None):
-    """1-min RTH-bars ~`days` bagud, ET-tidsstempler. Walk bagud i 30 D-chunks med
-    eksplicit UTC-endDateTime (verificeret korrekt i catalyst_harvest)."""
-    target_start = datetime.now(timezone.utc) - timedelta(days=days)
-    end_str = ""
+async def harvest_bars(ib, contract, days: int, emit_dbg=None, end_date=None):
+    """1-min RTH-bars ~`days` bagud fra end_date (default i dag), ET-tidsstempler. Walk
+    bagud i 30 D-chunks med eksplicit UTC-endDateTime (verificeret i catalyst_harvest)."""
+    if end_date is not None:
+        end_anchor = datetime(end_date.year, end_date.month, end_date.day,
+                              23, 59, 59, tzinfo=timezone.utc)
+        end_str = end_anchor.strftime("%Y%m%d %H:%M:%S") + " UTC"
+    else:
+        end_anchor = datetime.now(timezone.utc)
+        end_str = ""
+    target_start = end_anchor - timedelta(days=days)
     by_ts = {}
     oldest_utc = None
     for _chunk in range(days // BAR_CHUNK_DAYS + 6):
@@ -134,6 +140,8 @@ def _safe_name(sym: str) -> str:
 async def main_async(args, emit) -> int:
     from ib_async import IB, Stock
 
+    from datetime import date as _date
+    _end_date = _date.fromisoformat(args.end_date) if args.end_date else None
     universe = load_universe(Path(args.universe))
     if args.limit:
         universe = universe[:args.limit]
@@ -174,7 +182,7 @@ async def main_async(args, emit) -> int:
                 emit(f"  {sym:<8}  ❌ kvalificering: {str(e)[:50]}  [{idx}/{len(universe)}]")
                 totals["missing"].append(sym)
                 continue
-            bars = await harvest_bars(ib, contract, args.days)
+            bars = await harvest_bars(ib, contract, args.days, end_date=_end_date)
             n = len(bars)
             if n == 0:
                 emit(f"  {sym:<8}{0:>9}   (ingen data)  [{idx}/{len(universe)}]")
@@ -212,6 +220,9 @@ def main() -> int:
     ap.add_argument("--client-id", type=int, default=CLIENT_ID)
     ap.add_argument("--universe", default=UNIVERSE_CSV)
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS)
+    ap.add_argument("--end-date", default=None,
+                    help="seneste dag i harvest-vinduet YYYY-MM-DD (default i dag); brug med "
+                         "--days til at afgrænse held-out (fx --end-date 2026-02-28 --days 95)")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--force", action="store_true",
                     help="genhent også navne der allerede har en CSV (default: spring over = resume)")

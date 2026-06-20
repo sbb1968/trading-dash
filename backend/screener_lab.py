@@ -67,7 +67,9 @@ ATR_WINDOW = 14
 VOL_WINDOW = 20
 WEEK_DAYS = 5
 MONTH_DAYS = 21
-MIN_HISTORY = MONTH_DAYS + 2     # nok bagud til chg% 1m + ATR
+WEEK_ATR_WEEKS = 14                              # ATR(14) på UGE-bars (= TV's ATRP|1W)
+WEEK_ATR_DAYS  = WEEK_ATR_WEEKS * WEEK_DAYS      # ~70 handelsdages historik
+MIN_HISTORY = max(MONTH_DAYS + 2, WEEK_ATR_DAYS + WEEK_DAYS)  # chg% 1m + uge-ATR(14)
 
 # ── Kandidat-puljedefinitioner — REDIGÉR/UDVID frit ──────────────────────────
 # rank_by ∈ {"rvol","chg1d","chg1w","chg1m","atr","green"}
@@ -192,32 +194,73 @@ def per_day_metrics(bars):
         c1d, c1w, c1m = chg(1), chg(WEEK_DAYS), chg(MONTH_DAYS)
         green = sum(1 for c in (c1d, c1w, c1m) if c is not None and c > 0)
         out[bars[i][0]] = {
-            "price": prior_close, "atr_pct": atr_pct, "avg_vol": avg_vol, "rvol": rvol,
+            "price": prior_close, "atr_pct": atr_pct, "atr_pct_1w": _weekly_atr_pct(bars, i),
+            "avg_vol": avg_vol, "rvol": rvol,
             "chg1d": c1d or 0.0, "chg1w": c1w or 0.0, "chg1m": c1m or 0.0, "green": green,
         }
     return out
 
 
+def _weekly_atr_pct(bars, i):
+    """UGE-ATR(14)% frem til d-1 (= TV's ATRP|1W). Resampler de seneste daglige bars
+    (KUN indeks < i) til uge-OHLC i WEEK_DAYS-grupper bagud fra i-1, og beregner ATR(14)
+    over uge-true-ranges som % af gårsdagens luk. Ingen look-ahead (alle indeks < i)."""
+    if i - 1 < WEEK_ATR_DAYS:
+        return 0.0
+    prior_close = bars[i - 1][4]
+    if prior_close <= 0:
+        return 0.0
+    weeks = []
+    j = i  # eksklusiv: bars[j-1] = seneste dag i nyeste uge (= i-1)
+    while len(weeks) < WEEK_ATR_WEEKS + 1 and j - WEEK_DAYS >= 0:
+        seg = bars[j - WEEK_DAYS:j]               # WEEK_DAYS daglige bars, alle < i
+        weeks.append((max(b[2] for b in seg), min(b[3] for b in seg), seg[-1][4]))
+        j -= WEEK_DAYS
+    if len(weeks) < WEEK_ATR_WEEKS + 1:
+        return 0.0
+    weeks.reverse()                                # ældste→nyeste
+    trs = []
+    for k in range(1, len(weeks)):
+        h, l, _ = weeks[k]
+        pc = weeks[k - 1][2]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    trs = trs[-WEEK_ATR_WEEKS:]
+    return (sum(trs) / len(trs) / prior_close * 100.0) if trs else 0.0
+
+
 # ── Anvend en puljedefinition → {dag: [tickere]} ─────────────────────────────
 RANK_KEY = {"rvol": "rvol", "chg1d": "chg1d", "chg1w": "chg1w",
-            "chg1m": "chg1m", "atr": "atr_pct", "green": "green"}
+            "chg1m": "chg1m", "atr": "atr_pct", "atr1w": "atr_pct_1w",
+            "green": "green", "random": "random"}
 
 
-def build_pool(metrics_by_ticker, defn):
+def build_pool(metrics_by_ticker, defn, *, atr_key="atr_pct",
+               start=None, end=None, cap_ok=None, rng=None):
+    """{dag: [tickere]}. atr_key='atr_pct' (dagligt, default) eller 'atr_pct_1w' (uge).
+    start/end: date_cls-grænser inkl. cap_ok: callable(ticker)->bool eller None.
+    rng: random.Random til rank_by='random'. Eksisterende kald (POSITIONELT defn) uændrede."""
     pmin, pmax = defn["price"]
-    rk = RANK_KEY[defn["rank_by"]]
+    rank_by = defn["rank_by"]
+    rk = RANK_KEY[rank_by]
     by_day = defaultdict(list)
     for ticker, mbd in metrics_by_ticker.items():
+        if cap_ok is not None and not cap_ok(ticker):
+            continue
         for d, m in mbd.items():
+            if start is not None and d < start:
+                continue
+            if end is not None and d > end:
+                continue
             if not (pmin <= m["price"] <= pmax):
                 continue
-            if m["atr_pct"] < defn["atr_pct_min"]:
+            if m[atr_key] < defn["atr_pct_min"]:
                 continue
             if m["avg_vol"] < defn["avg_vol_min"]:
                 continue
             if m["green"] < defn["momentum_min_green"]:
                 continue
-            by_day[d].append((m[rk], ticker))
+            score = rng.random() if rank_by == "random" else m[rk]
+            by_day[d].append((score, ticker))
     pool = {}
     for d, cands in by_day.items():
         cands.sort(key=lambda x: (-x[0], x[1]))
@@ -277,10 +320,31 @@ def load_validated(pattern):
 def main():
     ap = argparse.ArgumentParser(description="Fase A: karakterisér puljedefinitioner (deskriptivt)")
     ap.add_argument("--cache-dir", default=CACHE_DIRNAME)
-    ap.add_argument("--meta", required=True, help="TV-CSV med sektor-metadata")
+    ap.add_argument("--meta", default=None,
+                    help="TV-CSV med sektor/mktcap-metadata (valgfri; kun til --cap-filter "
+                         "og exchange i union-CSV)")
     ap.add_argument("--validated-universe", default=None,
                     help="glob til validerede univers-JSON'er (valgfrit, til overlap)")
     ap.add_argument("--emit", default=None, help="skriv pulje-JSON for denne definition (til Fase B)")
+    ap.add_argument("--emit-pit", action="store_true",
+                    help="skriv point-in-time univers (per-dag JSON + union-CSV) til OOP-validering")
+    ap.add_argument("--rank", default="chg1d", choices=["chg1d", "random"],
+                    help="--emit-pit ranking: chg1d (=prev_close_chg) eller random (kontrol)")
+    ap.add_argument("--seed", type=int, default=42, help="seed for --rank random")
+    ap.add_argument("--start", default=None, help="held-out start YYYY-MM-DD (inkl.)")
+    ap.add_argument("--end", default=None, help="held-out slut YYYY-MM-DD (inkl.)")
+    ap.add_argument("--weekly-atr", action="store_true",
+                    help="filtrér på UGE-ATR(14) (= K2's ATRP|1W) i stedet for dagligt ATR")
+    ap.add_argument("--atr-min", type=float, default=5.0)
+    ap.add_argument("--price-min", type=float, default=5.0)
+    ap.add_argument("--price-max", type=float, default=50.0)
+    ap.add_argument("--avg-vol-min", type=int, default=500_000)
+    ap.add_argument("--top-n", type=int, default=25)
+    ap.add_argument("--cap-filter", action="store_true",
+                    help="kræv mktcap i [--cap-min,--cap-max] fra --meta (ellers intet cap-filter)")
+    ap.add_argument("--cap-min", type=float, default=5_000_000_000)
+    ap.add_argument("--cap-max", type=float, default=1_000_000_000_000)
+    ap.add_argument("--out-json", default=None, help="filnavn for per-dag JSON (default auto)")
     args = ap.parse_args()
 
     cache_dir = Path.cwd() / args.cache_dir if not Path(args.cache_dir).is_absolute() else Path(args.cache_dir)
@@ -295,10 +359,12 @@ def main():
     if not cache_dir.exists():
         emit(f"FEJL: {cache_dir} findes ikke — kør download_daily_universe.py først.")
         return 1
-    meta_path = Path(args.meta) if Path(args.meta).is_absolute() else cache_dir.parent / args.meta
-    if not meta_path.exists():
-        meta_path = Path.cwd() / args.meta
-    sector_map = load_meta(meta_path) if meta_path.exists() else {}
+    sector_map = {}
+    if args.meta:
+        meta_path = Path(args.meta) if Path(args.meta).is_absolute() else cache_dir.parent / args.meta
+        if not meta_path.exists():
+            meta_path = Path.cwd() / args.meta
+        sector_map = load_meta(meta_path) if meta_path.exists() else {}
 
     # Indlæs alle cachede tickers og beregn metrikker
     tickers = sorted({Path(fp).name.split("_")[0].upper()
@@ -323,6 +389,64 @@ def main():
         if m:
             metrics_by_ticker[t] = m
     emit(f"Tickers med nok historik: {len(metrics_by_ticker)}   (sprunget over: {skipped})")
+
+    # ── Point-in-time univers-emit (OOP-validering) ──────────────────────────
+    if args.emit_pit:
+        import random as _random
+        from datetime import date as _date
+        _pd = lambda s: _date.fromisoformat(s) if s else None
+        start_d, end_d = _pd(args.start), _pd(args.end)
+        atr_key = "atr_pct_1w" if args.weekly_atr else "atr_pct"
+        cap_ok = None
+        if args.cap_filter:
+            lo, hi = args.cap_min, args.cap_max
+            cap_ok = lambda t: (sector_map.get(t, {}).get("mktcap") is not None
+                                and lo <= sector_map[t]["mktcap"] <= hi)
+        pit_defn = dict(name="pit_k2", price=(args.price_min, args.price_max),
+                        atr_pct_min=args.atr_min, avg_vol_min=args.avg_vol_min,
+                        momentum_min_green=0, rank_by=args.rank, top_n=args.top_n)
+        rng = _random.Random(args.seed) if args.rank == "random" else None
+        pool = build_pool(metrics_by_ticker, pit_defn, atr_key=atr_key,
+                          start=start_d, end=end_d, cap_ok=cap_ok, rng=rng)
+        payload = {d.isoformat(): ticks for d, ticks in sorted(pool.items())}
+        jname = args.out_json or ("pit_" + args.rank
+                                  + (f"_{args.start}" if args.start else "")
+                                  + (f"_{args.end}" if args.end else "") + ".json")
+        jp = cache_dir.parent / jname
+        jp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        union = sorted({t for ticks in pool.values() for t in ticks})
+        cp = cache_dir.parent / (Path(jname).stem + "_union.csv")
+        with cp.open("w", newline="", encoding="utf-8") as f:
+            wcsv = csv.writer(f)
+            wcsv.writerow(["Symbol", "Exchange"])
+            for t in union:
+                wcsv.writerow([t, sector_map.get(t, {}).get("exchange", "")])
+        emit("")
+        emit("─" * 78)
+        emit("  POINT-IN-TIME UNIVERS-EMIT (OOP-validering)")
+        emit("─" * 78)
+        emit(f"  rank={args.rank}" + (f" seed={args.seed}" if args.rank == "random" else "")
+             + f"  ATR={'UGE(14)' if args.weekly_atr else 'dagligt(14)'}>{args.atr_min}%"
+             + f"  pris ${args.price_min:.0f}-{args.price_max:.0f}"
+             + f"  avg-vol>{args.avg_vol_min:,}  top-{args.top_n}")
+        emit("  mktcap-filter: " + (f"${args.cap_min/1e9:.0f}B-${args.cap_max/1e12:.0f}T "
+             "(navne uden kendt cap droppet)" if args.cap_filter else "FRA (daily_cache-univers)"))
+        emit(f"  vindue: {args.start or '(alle)'} → {args.end or '(alle)'}   "
+             f"dage: {len(payload)}   distinkte (union): {len(union)}")
+        if payload:
+            tot = sum(len(v) for v in payload.values())
+            emit(f"  navn-dage: {tot}   gns/dag: {tot/len(payload):.1f}")
+        emit("  Look-ahead: metrikker pr. dag d kun fra bars < d (per_day_metrics + "
+             "_weekly_atr_pct, indeks < i). Ren ved konstruktion.")
+        emit(f"  Per-dag JSON: {jp}")
+        emit(f"  Union CSV:    {cp}")
+        emit(f"  → harvest:  python velocity_universe_harvest.py --universe {cp.name} "
+             f"--end-date {args.end or '<i-dag>'} --days <dæk vinduet>")
+        emit(f"  → backtest: python velocity_backtest.py "
+             f"--data-dir velocity_universe_data/bars "
+             f"--universe-file {jp.name} --out-name summary_pit_{args.rank}.txt")
+        (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+        return 0
 
     validated = load_validated(args.validated_universe) if args.validated_universe else None
     if args.validated_universe:
