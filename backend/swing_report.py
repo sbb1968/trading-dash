@@ -267,6 +267,14 @@ if __name__ == "__main__":
     ap.add_argument("--period", default="1y")
     ap.add_argument("--source", default="ibkr", choices=["ibkr", "yfinance"])
     ap.add_argument("--brief", action="store_true", help="kun samlet score + anbefaling")
+    ap.add_argument("--sr", type=float, default=None,
+                    help="manuel S/R-score -100..+100 (fra TradingView)")
+    ap.add_argument("--pattern", type=float, default=None,
+                    help="manuel chart-mønster-score -100..+100")
+    ap.add_argument("--candle", type=float, default=None,
+                    help="manuel candlestick-score -100..+100")
     args = ap.parse_args()
+    manual = manual_overlay(sr=args.sr, chart_pattern=args.pattern,
+                            candlestick=args.candle)
     print(run_full(args.ticker, args.api_key, args.period, source=args.source,
-                   detailed=not args.brief))
+                   manual=manual, detailed=not args.brief))
