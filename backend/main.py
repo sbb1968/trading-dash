@@ -827,6 +827,50 @@ async def cancel_order(req: CancelOrderRequest):
     result = await get_tracker().cancel(ibkr, req.order_id)
     return result
 
+
+# ── Swing-rapport endpoint ────────────────────────────────────
+# Koerer det manuelle swing-egnethedsvaerktoej (swing_report.run_full) for EEN
+# ticker og returnerer rapporten som TEKST. Frontend (SwingReport.tsx) viser den
+# i en monospace-blok. De tre valgfrie skydere (sr/pattern/candle = Ibens
+# manuelle chart-read) flettes ind via manual_overlay.
+
+class SwingAnalyzeRequest(BaseModel):
+    ticker:  str
+    sr:      float | None = None   # support/modstand-overlay  (-100..+100)
+    pattern: float | None = None   # chart-moenster-overlay     (-100..+100)
+    candle:  float | None = None   # candlestick-overlay        (-100..+100)
+
+
+def _run_swing_report(ticker: str, sr, pattern, candle) -> str:
+    """BLOKERENDE: koerer hele swing-rapporten (IBKR-bars + FMP/Finnhub + TV).
+    KALDES KUN i en threadpool (asyncio.to_thread), ALDRIG direkte i
+    event-loopet - data_source._run ville ellers deadlocke paa det koerende loop."""
+    import os
+    import swing_report
+    manual = swing_report.manual_overlay(sr=sr, chart_pattern=pattern, candlestick=candle)
+    api_key = os.environ.get("FMP_API_KEY", "")
+    return swing_report.run_full(ticker, api_key, manual=manual)
+
+
+@app.post("/swing/analyze")
+async def swing_analyze(req: SwingAnalyzeRequest):
+    """Swing-egnethed for EEN ticker. Returnerer {ticker, report} hvor report er
+    den fulde tekst-rapport. run_full koeres i threadpool (se _run_swing_report)."""
+    ticker = (req.ticker or "").strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    try:
+        report = await asyncio.to_thread(
+            _run_swing_report, ticker, req.sr, req.pattern, req.candle
+        )
+    except ValueError as e:
+        # fx ingen prisdata for tickeren (delisted/ukendt/TWS nede)
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Swing-analyse fejlede: {e}")
+    return {"ticker": ticker, "report": report}
+
+
 # ── Journal / Trades endpoints ────────────────────────────────
 # Læser fra trades-tabellen. Skriver sker via algo-strategierne
 # (automatisk) eller via manuel-handel-endpoints (kommer senere).
