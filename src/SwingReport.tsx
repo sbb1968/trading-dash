@@ -24,7 +24,7 @@ interface ChartData {
   pattern_needs_human: boolean;
 }
 interface SwingData {
-  ticker: string; price: number | null; final: number; final_band: string;
+  ticker: string; company: string | null; price: number | null; final: number; final_band: string;
   combined: number; gate: number; gate_straf: number;
   layers: { technical: Layer; fundamental: Layer; catalyst: Layer };
   drivers: { positive: Driver[]; negative: Driver[] };
@@ -74,7 +74,7 @@ const fmtShares = (v: number | null) =>
 function Badge({ text, color }: { text: string; color: string }) {
   return (
     <span style={{
-      fontSize: 10, fontWeight: 700, color, border: `1px solid ${color}`,
+      fontSize: 12, fontWeight: 700, color, border: `1px solid ${color}`,
       borderRadius: 4, padding: "1px 6px", whiteSpace: "nowrap",
       background: "var(--bg-overlay)",
     }}>{text}</span>
@@ -108,7 +108,7 @@ function LayerCard({ title, layer }: { title: string; layer: Layer }) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{title}</span>
-        <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{Math.round(layer.weight * 100)}%</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{Math.round(layer.weight * 100)}%</span>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
         <span style={{ fontSize: 22, fontWeight: 800, color: scoreColor(layer.score) }}>{signed(layer.score)}</span>
@@ -117,7 +117,7 @@ function LayerCard({ title, layer }: { title: string; layer: Layer }) {
       <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
         {layer.groups.map((g, i) => (
           <div key={i}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-secondary)", marginBottom: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text-secondary)", marginBottom: 3 }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.name}</span>
               <span style={{ color: scoreColor(g.score), fontWeight: 700, flexShrink: 0, marginLeft: 6 }}>{signed(g.score)}</span>
             </div>
@@ -125,7 +125,7 @@ function LayerCard({ title, layer }: { title: string; layer: Layer }) {
           </div>
         ))}
         {layer.groups.length === 0 && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Ingen faktorer i dette lag.</span>
+          <span style={{ fontSize: 13, color: "var(--text-muted)" }}>Ingen faktorer i dette lag.</span>
         )}
       </div>
     </div>
@@ -135,12 +135,12 @@ function LayerCard({ title, layer }: { title: string; layer: Layer }) {
 function DriverList({ title, color, items }: { title: string; color: string; items: Driver[] }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color, marginBottom: 4 }}>{title}</div>
-      {items.length === 0 && <div style={{ fontSize: 11, color: "var(--text-muted)" }}>Ingen.</div>}
+      <div style={{ fontSize: 13, fontWeight: 700, color, marginBottom: 4 }}>{title}</div>
+      {items.length === 0 && <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Ingen.</div>}
       {items.map((d, i) => (
-        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
           <span style={{ color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            <span style={{ color: "var(--text-muted)", fontSize: 9, textTransform: "uppercase", marginRight: 5 }}>{d.layer.slice(0, 4)}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", marginRight: 5 }}>{d.layer.slice(0, 4)}</span>
             {d.name}
           </span>
           <span style={{ color, fontWeight: 700, flexShrink: 0, marginLeft: 6 }}>{signed(d.contribution, 1)}</span>
@@ -153,7 +153,7 @@ function DriverList({ title, color, items }: { title: string; color: string; ite
 function Chip({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "5px 9px", background: "var(--bg-elevated)", borderRadius: 6, minWidth: 84 }}>
-      <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}</span>
+      <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}</span>
       <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{value}</span>
     </div>
   );
@@ -164,7 +164,7 @@ function Slider({ label, value, onChange }: { label: string; value: number; onCh
   const col = value > 0 ? "var(--bull)" : value < 0 ? "var(--bear)" : "var(--text-muted)";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ width: 110, fontSize: 11, color: "var(--text-muted)" }}>{label}</span>
+      <span style={{ width: 110, fontSize: 13, color: "var(--text-muted)" }}>{label}</span>
       <input type="range" min={-100} max={100} step={5} value={value}
         onChange={e => onChange(Number(e.target.value))}
         style={{ flex: 1, accentColor: "var(--accent)" }} />
@@ -237,7 +237,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
           </button>
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-muted)", cursor: "pointer" }}>
           <input type="checkbox" checked={useOverlay} onChange={e => setUseOverlay(e.target.checked)} />
           Inkluder manuelt chart-overlay (din egen chart-vurdering)
         </label>
@@ -247,7 +247,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             <Slider label="Support/modstand" value={sr}      onChange={setSr} />
             <Slider label="Chart-moenster"    value={pattern} onChange={setPattern} />
             <Slider label="Candlestick"       value={candle}  onChange={setCandle} />
-            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>-100 bearish · 0 neutral · +100 bullish. Flettes ind i det tekniske lag.</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>-100 bearish · 0 neutral · +100 bullish. Flettes ind i det tekniske lag.</span>
           </div>
         )}
       </div>
@@ -258,17 +258,17 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
           <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--bear)", borderRadius: 4, color: "var(--bear)", fontSize: 13 }}>{error}</div>
         )}
         {!error && loading && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>Henter daglige bars (IBKR), fundamentaler og float ... tager et par sekunder.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter daglige bars (IBKR), fundamentaler og float ... tager et par sekunder.</div>
         )}
         {!error && !loading && !data && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 13 }}>Indtast en ticker og tryk Analyser. Rapporten scorer aktien for swing-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. Rapporten scorer aktien for swing-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
         )}
         {!error && !loading && data && (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
             {/* Header: ticker/pris + samlet score + baand */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "12px 16px" }}>
               <div>
-                <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "0.5px", color: "var(--text-primary)" }}>{data.ticker}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "0.5px", color: "var(--text-primary)" }}>{data.ticker}{data.company ? <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "normal" }}> · {data.company}</span> : null}</div>
                 {data.price != null && <div style={{ fontSize: 13, color: "var(--text-muted)" }}>${data.price.toFixed(2)}</div>}
               </div>
               <div style={{ textAlign: "right" }}>
@@ -278,7 +278,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             </div>
 
             {/* Gate-linje */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 11, color: "var(--text-muted)", padding: "0 4px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--text-muted)", padding: "0 4px" }}>
               <span>Kombineret <b style={{ color: "var(--text-secondary)" }}>{signed(data.combined)}</b></span>
               <span>×</span>
               <span>Tradability-gate <b style={{ color: data.gate >= 0.95 ? "var(--bull)" : data.gate >= 0.6 ? "var(--neutral)" : "var(--bear)" }}>{data.gate.toFixed(2)}</b></span>

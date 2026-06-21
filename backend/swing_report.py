@@ -369,6 +369,7 @@ def _compute_swing(ticker: str, api_key: str, period: str = "1y",
                 gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
     c["eps_growth"] = fdict.get("eps_growth")
     c["price"] = price
+    c["company_name"] = fdict.get("company_name")
     try:
         import data_source
         _fl = data_source.fetch_float(ticker)
@@ -438,6 +439,7 @@ def _report_to_json(ticker: str, core: dict) -> dict:
 
     return {
         "ticker": ticker.upper(),
+        "company": c.get("company_name"),
         "price": round(core["price"], 2) if core.get("price") is not None else None,
         "final": round(c["final"], 1),
         "final_band": _band(c["final"]),

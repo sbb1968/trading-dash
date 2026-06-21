@@ -249,6 +249,7 @@ def fetch_fundamentals_fmp(symbol: str, api_key: str) -> dict:
         p = _first(get(f"profile?symbol={symbol}"))
         out["sector"] = p.get("sector")
         out["market_cap"] = p.get("marketCap")
+        out["company_name"] = p.get("companyName")
     except Exception:
         pass
     return out
@@ -320,6 +321,26 @@ def fetch_fundamentals_finnhub(symbol: str) -> dict:
     return out
 
 
+_NAME_CACHE: dict = {}
+
+
+def _company_name_yf(symbol: str):
+    """Firmanavn via yfinance (FMP-profile er premium-laast paa vores plan). Cachet
+    i hukommelsen - navne aendrer sig ikke."""
+    s = symbol.upper()
+    if s in _NAME_CACHE:
+        return _NAME_CACHE[s]
+    name = None
+    try:
+        import yfinance as yf
+        info = yf.Ticker(s).info
+        name = info.get("longName") or info.get("shortName")
+    except Exception:
+        name = None
+    _NAME_CACHE[s] = name
+    return name
+
+
 def fetch_fundamentals(symbol: str, api_key: str) -> dict:
     """
     Kaede med felt-niveau fallback: FMP foerst (giver typisk sektor + noegletal),
@@ -339,6 +360,8 @@ def fetch_fundamentals(symbol: str, api_key: str) -> dict:
             fh = {}
         for k, v in fh.items():
             f.setdefault(k, v)   # fyld kun huller
+    if not f.get("company_name"):
+        f["company_name"] = _company_name_yf(symbol)   # FMP-profile er premium-laast
     return f
 
 

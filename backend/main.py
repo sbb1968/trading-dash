@@ -994,6 +994,8 @@ def _swing_report_html(d: dict) -> str:
            ".wrap{padding:16px;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:12px}"
            "@media print{.bar{display:none}}")
     t = esc(d["ticker"])
+    co = esc(d.get("company") or "")
+    co_html = f' <span style="font-size:14px;font-weight:600;color:{MUT}">{co}</span>' if co else ""
     price = f'${d["price"]:.2f}' if d.get("price") is not None else "—"
     fbc = fb(d["final_band"])
     return (
@@ -1002,7 +1004,7 @@ def _swing_report_html(d: dict) -> str:
         '<div class="bar">Gem som PDF: <button onclick="window.print()">Gem / Print</button>'
         '<span>(eller Ctrl+P -&gt; "Gem som PDF")</span></div><div class="wrap">'
         '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px">'
-        f'<div><div style="font-size:24px;font-weight:800">{t}</div><div style="color:{MUT};font-size:13px">{price}</div></div>'
+        f'<div><div style="font-size:24px;font-weight:800">{t}{co_html}</div><div style="color:{MUT};font-size:13px">{price}</div></div>'
         f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{sg(d["final"])}</div>'
         f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(bl(d["final_band"]))}</div></div></div>'
         f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{sg(d["combined"])}</b> &times; Tradability-gate <b>{d["gate"]:.2f}</b> &rarr; Samlet <b style="color:{fbc}">{sg(d["final"])}</b></div>'
@@ -1019,7 +1021,8 @@ def _swing_report_html(d: dict) -> str:
 
 
 @app.get("/swing/report.html", response_class=HTMLResponse)
-async def swing_report_html(ticker: str, sr: float = 0, pattern: float = 0, candle: float = 0):
+async def swing_report_html(ticker: str, sr: float | None = None,
+                            pattern: float | None = None, candle: float | None = None):
     """Den paene rapport som printbar HTML-side til EKSTERN browser (PDF-knappen).
     Print sker i browserens eget vindue -> ingen print-overlay paa app-vinduet, saa
     man ikke ved et uheld lukker Trading Dash via app'ens X."""
