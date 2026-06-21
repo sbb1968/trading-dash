@@ -21,6 +21,7 @@ import { AlertsWindow } from "./Alertspanel";
 import { MarketOverview } from "./MarketOverview";
 import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
+import { SwingReport } from "./SwingReport";
 import { useTickerName } from "./useTickerName";
 
 
@@ -1224,6 +1225,7 @@ function renderWindowContent(id: WindowId, props: {
     case "marketoverview": return <MarketOverview />;
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     case "orders":  return <OrdersWindow />;
+    case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
     case "alerts":
       return <AlertsWindow
         alerts={props.alerts ?? []}

@@ -9,7 +9,8 @@ export type WindowId =
   | "alerts"
   | "marketoverview"
   | "account"
-  | "orders";
+  | "orders"
+  | "swing";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   scanner1:     "Small Cap Scanner",
@@ -36,6 +37,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   marketoverview:  "marketoverview",
   account:         "Konto",
   orders:          "Ordrer",
+  swing:           "Swing-rapport",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────
