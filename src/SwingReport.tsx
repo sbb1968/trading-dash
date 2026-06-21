@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SwingChart } from "./SwingChart";
 
 const API_JSON = "http://127.0.0.1:8000/swing/analyze_json";
 const API_TEXT = "http://127.0.0.1:8000/swing/analyze"; // kun til PDF indtil reportlab-trinnet
@@ -56,11 +57,6 @@ function finalBandColor(b: string): string {
   if (b.startsWith("EGNET")) return "var(--neutral)";
   if (b.startsWith("SVAG") || b.startsWith("FRARAADES")) return "var(--bear)";
   return "var(--text-muted)";
-}
-function structureColor(s: string): string {
-  if (s.startsWith("HH/HL")) return "var(--bull)";
-  if (s.startsWith("LH/LL")) return "var(--bear)";
-  return "var(--neutral)";
 }
 const signed = (v: number, d = 0) => `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
 const fmtPct = (v: number | null, d = 1) => (v == null ? "—" : `${v.toFixed(d)}%`);
@@ -156,34 +152,6 @@ function Chip({ label, value }: { label: string; value: string }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "5px 9px", background: "var(--bg-elevated)", borderRadius: 6, minWidth: 84 }}>
       <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}</span>
       <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{value}</span>
-    </div>
-  );
-}
-
-function ChartContext({ chart }: { chart: ChartData }) {
-  const lvlText = (lv: ChartLevel | null) =>
-    lv ? `${lv.price.toFixed(2)} · ${lv.touches} berøringer · ${lv.size}` : "ingen i båndet";
-  return (
-    <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>Chart-kontekst</span>
-        <Badge text={chart.structure} color={structureColor(chart.structure)} />
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, color: "var(--text-secondary)" }}>
-        <div><span style={{ color: "var(--text-muted)" }}>Nærmeste modstand: </span>{lvlText(chart.nearest_resistance)}</div>
-        <div><span style={{ color: "var(--text-muted)" }}>Nærmeste støtte: </span>{lvlText(chart.nearest_support)}</div>
-        <div>
-          <span style={{ color: "var(--text-muted)" }}>Candlestick: </span>
-          {chart.candles.length ? chart.candles.map(c => `${c.name} (${c.when})`).join(", ") : "ingen tydelige mønstre"}
-        </div>
-      </div>
-      <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 10px", background: "var(--neutral-dim)", borderRadius: 6 }}>
-        <span style={{ fontSize: 14, lineHeight: "16px" }}>👁</span>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-          <b style={{ color: "var(--neutral)" }}>Chart-mønster kræver menneskelig vurdering.</b>{" "}
-          Flag, trekant, hoved-skulder, cup &amp; handle, range — kig på charten. Resten er beregnet.
-        </span>
-      </div>
     </div>
   );
 }
@@ -376,8 +344,8 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
               <Chip label="Dage til earnings" value={data.info.days_to_earnings == null ? "—" : `${data.info.days_to_earnings}d`} />
             </div>
 
-            {/* Chart-kontekst (den annoterede chart kommer som eget komponent) */}
-            {data.chart && <ChartContext chart={data.chart} />}
+            {/* Annoteret chart fra chart-sektionen */}
+            {data.chart && <SwingChart chart={data.chart} />}
           </div>
         )}
       </div>
