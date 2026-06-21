@@ -6,7 +6,7 @@
 #     powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 # ─────────────────────────────────────────────────────────────
 $root = $PSScriptRoot
-$ps1  = Join-Path $root "start_trading_dash.ps1"
+$bat  = Join-Path $root "start_trading_dash.bat"
 
 # Ikon: brug repoets icon.ico hvis det findes, ellers spring (genvej faar default-ikon).
 $icon = Join-Path $root "src-tauri\icons\icon.ico"
@@ -17,10 +17,9 @@ $lnk = Join-Path $desktop "Trading Dash.lnk"
 
 $ws = New-Object -ComObject WScript.Shell
 $s  = $ws.CreateShortcut($lnk)
-$s.TargetPath       = "powershell.exe"
-$s.Arguments        = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$ps1`""
+$s.TargetPath       = $bat            # peger paa den robuste .bat-launcher
 $s.WorkingDirectory = $root
-$s.WindowStyle      = 7   # minimeret (ingen synlig PowerShell-konsol)
+$s.WindowStyle      = 7               # minimeret launcher-vindue
 $s.Description       = "Start Trading Dash (backend + app)"
 if (Test-Path $icon) { $s.IconLocation = $icon }
 $s.Save()
