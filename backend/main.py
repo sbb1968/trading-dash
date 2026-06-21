@@ -871,6 +871,41 @@ async def swing_analyze(req: SwingAnalyzeRequest):
     return {"ticker": ticker, "report": report}
 
 
+# ── Dokumentation (PDF'er i backend/docs/, aabnes eksternt af frontend) ──────
+# Auto-listende: /docs/list laeser mappen ved hvert kald, saa nye PDF'er dukker
+# op uden kodeaendring. /docs/file/{name} serverer EEN PDF (sti-traversal-sikret,
+# kun .pdf), uden Content-Disposition saa browseren VISER den frem for at downloade.
+DOCS_DIR = Path(__file__).parent / "docs"
+
+
+@app.get("/docs/list")
+async def docs_list():
+    """Lister PDF'er i backend/docs/. Returnerer {docs: [{name, title}]} sorteret."""
+    if not DOCS_DIR.is_dir():
+        return {"docs": []}
+    items = []
+    for p in sorted(DOCS_DIR.glob("*.pdf")):
+        title = p.stem.replace("_", " ").replace("-", " ").strip()
+        title = (title[:1].upper() + title[1:]) if title else p.name
+        items.append({"name": p.name, "title": title})
+    return {"docs": items}
+
+
+@app.get("/docs/file/{name}")
+async def docs_file(name: str):
+    """Serverer EEN PDF fra backend/docs/. Kun filer i mappen, kun .pdf."""
+    if not name.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Kun PDF-filer")
+    target = (DOCS_DIR / name).resolve()
+    try:
+        target.relative_to(DOCS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ugyldig sti")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Dokumentet findes ikke")
+    return FileResponse(str(target), media_type="application/pdf")
+
+
 # ── Journal / Trades endpoints ────────────────────────────────
 # Læser fra trades-tabellen. Skriver sker via algo-strategierne
 # (automatisk) eller via manuel-handel-endpoints (kommer senere).
