@@ -885,7 +885,11 @@ async def docs_list():
         return {"docs": []}
     items = []
     for p in sorted(DOCS_DIR.glob("*.pdf")):
-        title = p.stem.replace("_", " ").replace("-", " ").strip()
+        stem = p.stem
+        # Strip ledende sorterings-praefiks "NN_" (styrer raekkefoelgen, vises ikke).
+        if "_" in stem and stem.split("_", 1)[0].isdigit():
+            stem = stem.split("_", 1)[1]
+        title = stem.replace("_", " ").replace("-", " ").strip()
         title = (title[:1].upper() + title[1:]) if title else p.name
         items.append({"name": p.name, "title": title})
     return {"docs": items}
