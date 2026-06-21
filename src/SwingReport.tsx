@@ -158,15 +158,27 @@ function Chip({ label, value }: { label: string; value: string }) {
 
 // Gem rapporten som PDF via print-dialogen. Henter tekst-rapporten on-demand
 // (indtil reportlab-trinnet). Printer KUN teksten i en skjult iframe.
+//
+// KRITISK: fjern ALDRIG print-iframen mens dens dialog kan vaere aaben. I WebView2
+// fyrer `afterprint` ofte med det samme (foer brugeren lukker dialogen), og en
+// blind timer rammer samme problem — fjernes iframen mens dialogen er aaben,
+// crasher WebView2 og HELE Trading Dash lukker. Loesning: vi rydder den FORRIGE
+// iframe op ved naeste print (dialogen er for laengst lukket da), aldrig den nu.
+let _prevPrintFrame: HTMLIFrameElement | null = null;
+
 function printTextPdf(ticker: string, report: string) {
   if (!report) return;
+  if (_prevPrintFrame) {
+    try { document.body.removeChild(_prevPrintFrame); } catch { /* ignore */ }
+    _prevPrintFrame = null;
+  }
   const title = `SWING_${(ticker || "rapport").toUpperCase()}_${new Date().toISOString().slice(0, 10)}`;
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
   document.body.appendChild(iframe);
   const w = iframe.contentWindow;
   const doc = w?.document;
-  if (!w || !doc) { document.body.removeChild(iframe); return; }
+  if (!w || !doc) { try { document.body.removeChild(iframe); } catch { /* ignore */ } return; }
   doc.open();
   doc.write(
     `<!DOCTYPE html><html><head><title>${title}</title>` +
@@ -178,11 +190,8 @@ function printTextPdf(ticker: string, report: string) {
   doc.close();
   const pre = doc.querySelector("pre");
   if (pre) pre.textContent = report;
-  let cleaned = false;
-  const cleanup = () => { if (cleaned) return; cleaned = true; try { document.body.removeChild(iframe); } catch { /* ignore */ } };
-  w.onafterprint = cleanup;
+  _prevPrintFrame = iframe;   // ryddes ved NAESTE print, ikke nu
   setTimeout(() => { w.focus(); w.print(); }, 150);
-  setTimeout(cleanup, 60000);
 }
 
 function Slider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void; }) {
