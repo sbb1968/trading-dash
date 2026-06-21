@@ -899,6 +899,115 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     return data
 
 
+# Vanilla-JS der tegner den annoterede swing-chart i PDF-siden. Samme layout som
+# SwingChart.tsx (skalaer, anker-mapping, kollisionsfri etiketter), men print-
+# farver (lyst tema) og fast 900x420 viewBox skaleret til sidebredden. CHART
+# injiceres som JSON foran scriptet i _swing_report_html.
+SWING_CHART_JS = r"""(function(){
+  if(!CHART || !CHART.bars || !CHART.bars.length) return;
+  var W=900, H=420, TOP=28, BOTM=52, XL=14, GUTTER=62, PILL_H=22, GAP=8;
+  var BULL="#15803d", BEAR="#b91c1c", NEU="#b45309", MUT="#6b7280", GRID="#e5e7eb", PILLBG="#fff", TAGBG="#374151";
+  var MONTHS=["jan","feb","mar","apr","maj","jun","jul","aug","sep","okt","nov","dec"];
+  function pillW(t){return t.length*7+18;}
+  function scol(s){return s.indexOf("HH/HL")===0?BULL:s.indexOf("LH/LL")===0?BEAR:NEU;}
+  function esc(t){return String(t).replace(/[&<>"]/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch];});}
+
+  var bars=CHART.bars, n=bars.length, BOT=H-BOTM, xr=W-GUTTER;
+  var lo=Infinity, hi=-Infinity, i, b;
+  for(i=0;i<n;i++){b=bars[i]; if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h;}
+  (CHART.levels||[]).forEach(function(lv){if(lv.price<lo)lo=lv.price; if(lv.price>hi)hi=lv.price;});
+  if(CHART.swing_high && CHART.swing_high.price>hi) hi=CHART.swing_high.price;
+  if(CHART.swing_low && CHART.swing_low.price<lo) lo=CHART.swing_low.price;
+  var pad=(hi-lo)*0.06||1, pmin=lo-pad, pmax=hi+pad;
+  var slot=(xr-XL)/Math.max(n,1);
+  function x(idx){return XL+(idx+0.5)*slot;}
+  function y(p){return BOT-(p-pmin)/(pmax-pmin)*(BOT-TOP);}
+  var idxByDate={}; bars.forEach(function(bb,ii){idxByDate[bb.t]=ii;});
+  var optrend=CHART.structure.indexOf("HH/HL")===0, downtrend=CHART.structure.indexOf("LH/LL")===0;
+  var trendCol=scol(CHART.structure);
+
+  function resolve(labels, dir){
+    var out=[], sorted=labels.slice().sort(function(a,b){return a.cx-b.cx;});
+    sorted.forEach(function(lab){
+      var w=lab.w, x0=Math.max(XL, Math.min(lab.cx-w/2, xr-w)), x1=x0+w;
+      var y0 = dir==="above" ? lab.anchorY-GAP-PILL_H : lab.anchorY+GAP;
+      function ov(yy){return out.some(function(p){return x0<p.x1 && x1>p.x0 && yy<p.y1 && (yy+PILL_H)>p.y0;});}
+      var guard=0;
+      while(ov(y0) && guard++<50){
+        var bl=out.filter(function(p){return x0<p.x1 && x1>p.x0;});
+        if(dir==="above"){var m=Infinity; bl.forEach(function(p){if(p.y0<m)m=p.y0;}); y0=m-PILL_H-4;}
+        else {var mx=-Infinity; bl.forEach(function(p){if(p.y1>mx)mx=p.y1;}); y0=mx+4;}
+      }
+      y0=Math.max(4, Math.min(y0, BOT-2-PILL_H));
+      out.push({kind:lab.kind,text:lab.text,x0:x0,x1:x1,y0:y0,y1:y0+PILL_H,ax:lab.ax,ay:lab.ay,color:lab.color});
+    });
+    return out;
+  }
+
+  var above=[], below=[];
+  if(CHART.swing_high && (CHART.swing_high.t in idxByDate)){
+    var ih=idxByDate[CHART.swing_high.t];
+    var th=optrend?"Higher High":downtrend?"Lower High":"Sving-top";
+    above.push({kind:"hh",text:th,cx:x(ih),anchorY:y(CHART.swing_high.price),w:pillW(th),ax:x(ih),ay:y(CHART.swing_high.price),color:trendCol});
+  }
+  (CHART.candles||[]).forEach(function(c){
+    var ic=n-1;
+    above.push({kind:"candle",text:c.name,cx:x(ic),anchorY:y(bars[ic].h),w:pillW(c.name),ax:x(ic),ay:y(bars[ic].h),color:NEU});
+  });
+  if(CHART.swing_low && (CHART.swing_low.t in idxByDate)){
+    var il=idxByDate[CHART.swing_low.t];
+    var tl=optrend?"Higher Low":downtrend?"Lower Low":"Sving-bund";
+    below.push({kind:"hl",text:tl,cx:x(il),anchorY:y(CHART.swing_low.price),w:pillW(tl),ax:x(il),ay:y(CHART.swing_low.price),color:trendCol});
+  }
+  var pills=resolve(above,"above").concat(resolve(below,"below"));
+
+  var ticks=[], span=pmax-pmin;
+  var step=span>400?100:span>200?50:span>80?25:span>30?10:5;
+  for(var p=Math.ceil(pmin/step)*step;p<pmax;p+=step)ticks.push(p);
+  var months=[], prevM="";
+  bars.forEach(function(bb,ii){var m=bb.t.slice(5,7); if(m!==prevM){months.push({x:x(ii),label:MONTHS[parseInt(m,10)-1]||m}); prevM=m;}});
+
+  var bw=Math.min(8, slot*0.6);
+  var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block">';
+  s+='<defs><marker id="swcp-ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="'+MUT+'"/></marker></defs>';
+  ticks.forEach(function(pp){
+    s+='<line x1="'+XL+'" y1="'+y(pp)+'" x2="'+xr+'" y2="'+y(pp)+'" stroke="'+GRID+'" stroke-width="0.5"/>';
+    s+='<text x="'+(xr+6)+'" y="'+(y(pp)+5)+'" font-size="14" fill="'+MUT+'">'+pp.toFixed(0)+'</text>';
+  });
+  months.forEach(function(m){
+    s+='<line x1="'+m.x+'" y1="'+BOT+'" x2="'+m.x+'" y2="'+(BOT+4)+'" stroke="'+MUT+'" stroke-width="0.5"/>';
+    s+='<text x="'+m.x+'" y="'+(BOT+22)+'" text-anchor="middle" font-size="14" fill="'+MUT+'">'+m.label+'</text>';
+  });
+  (CHART.levels||[]).forEach(function(lv){
+    s+='<line x1="'+XL+'" y1="'+y(lv.price)+'" x2="'+xr+'" y2="'+y(lv.price)+'" stroke="'+(lv.kind==="resistance"?BEAR:BULL)+'" stroke-width="1.3" stroke-dasharray="5 4" opacity="0.8"/>';
+  });
+  bars.forEach(function(bb,ii){
+    var up=bb.c>=bb.o, col=up?BULL:BEAR, cx=x(ii);
+    var yb=y(Math.max(bb.o,bb.c)), hb=Math.max(Math.abs(y(bb.o)-y(bb.c)),1.2);
+    s+='<line x1="'+cx+'" y1="'+y(bb.h)+'" x2="'+cx+'" y2="'+y(bb.l)+'" stroke="'+col+'" stroke-width="1"/>';
+    s+='<rect x="'+(cx-bw/2)+'" y="'+yb+'" width="'+bw+'" height="'+hb+'" fill="'+col+'" rx="1"/>';
+  });
+  var yc=y(CHART.current_price);
+  s+='<line x1="'+XL+'" y1="'+yc+'" x2="'+xr+'" y2="'+yc+'" stroke="'+MUT+'" stroke-width="0.5" stroke-dasharray="2 3"/>';
+  s+='<rect x="'+(xr+2)+'" y="'+(yc-11)+'" width="'+(GUTTER-6)+'" height="22" rx="4" fill="'+TAGBG+'"/>';
+  s+='<text x="'+(xr+2+(GUTTER-6)/2)+'" y="'+(yc+5)+'" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">'+CHART.current_price.toFixed(2)+'</text>';
+  pills.forEach(function(pl){
+    var ab = pl.y1<=pl.ay;
+    var lx=Math.max(pl.x0+6, Math.min(pl.ax, pl.x1-6));
+    var ly=ab?pl.y1:pl.y0;
+    if(pl.kind!=="candle") s+='<circle cx="'+pl.ax+'" cy="'+pl.ay+'" r="3.5" fill="'+pl.color+'"/>';
+    s+='<line x1="'+lx+'" y1="'+ly+'" x2="'+pl.ax+'" y2="'+pl.ay+'" stroke="'+MUT+'" stroke-width="1.2" marker-end="url(#swcp-ah)"/>';
+    s+='<rect x="'+pl.x0+'" y="'+pl.y0+'" width="'+(pl.x1-pl.x0)+'" height="'+PILL_H+'" rx="6" fill="'+PILLBG+'" stroke="'+pl.color+'" stroke-width="1.3"/>';
+    s+='<text x="'+((pl.x0+pl.x1)/2)+'" y="'+(pl.y0+15)+'" text-anchor="middle" font-size="13" font-weight="600" fill="'+pl.color+'">'+esc(pl.text)+'</text>';
+  });
+  var sw=pillW(CHART.structure);
+  s+='<rect x="12" y="6" width="'+sw+'" height="22" rx="6" fill="'+PILLBG+'" stroke="'+trendCol+'" stroke-width="1.3"/>';
+  s+='<text x="'+(12+sw/2)+'" y="21" text-anchor="middle" font-size="13" font-weight="700" fill="'+trendCol+'">'+esc(CHART.structure)+'</text>';
+  s+='</svg>';
+  document.getElementById("swing-chart").innerHTML=s;
+})();"""
+
+
 def _swing_report_html(d: dict) -> str:
     """Render analyze_json som en paen, print-venlig HTML-side (lyst tema). Spejler
     UI'ets kort/score/drivers/info + chart-kontekst som tekst (den interaktive SVG-
@@ -997,7 +1106,19 @@ def _swing_report_html(d: dict) -> str:
     co = esc(d.get("company") or "")
     co_html = f' <span style="font-size:14px;font-weight:600;color:{MUT}">{co}</span>' if co else ""
     price = f'${d["price"]:.2f}' if d.get("price") is not None else "—"
+    import json as _json
     fbc = fb(d["final_band"])
+    chart_block = (
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;'
+        'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+        '<div id="swing-chart"></div>'
+        f'<div style="font-size:12px;color:#374151;margin-top:8px"><b>Stoette/modstand:</b> {esc(sr_txt)}</div>'
+        '<div style="margin-top:8px;padding:8px;background:#fef9c3;border-radius:6px;font-size:12px">'
+        '&#128065; <b>Chart-moenster kraever menneskelig vurdering.</b> Flag, trekant, '
+        'hoved-skulder, cup &amp; handle, range &mdash; kig paa charten. Resten er beregnet '
+        'og tegnet automatisk.</div></div>'
+    )
+    chart_script = '<script>const CHART=' + _json.dumps(d.get("chart")) + ';' + SWING_CHART_JS + '</script>'
     return (
         f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>SWING_{t}</title>'
         f'<style>{css}</style></head><body>'
@@ -1013,10 +1134,8 @@ def _swing_report_html(d: dict) -> str:
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{chips}</div>'
-        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px">'
-        f'<b>Chart-kontekst</b> &mdash; Struktur: {esc(ch.get("structure", "—"))}<br>Stoette/modstand: {esc(sr_txt)}<br>Candlestick: {candles}'
-        '<div style="margin-top:8px;padding:8px;background:#fef9c3;border-radius:6px">&#128065; <b>Chart-moenster kraever menneskelig vurdering.</b> Den annoterede chart vises interaktivt i appen.</div></div>'
-        '</div></body></html>'
+        f'{chart_block}'
+        f'</div>{chart_script}</body></html>'
     )
 
 
