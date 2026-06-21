@@ -45,20 +45,19 @@ function downloadPdf(ticker: string, report: string) {
   doc.close();
   const pre = doc.querySelector("pre");
   if (pre) pre.textContent = report;   // textContent => ingen HTML-injektion fra rapporten
-  setTimeout(() => {
-    w.focus();
-    // Fjern FOERST iframen naar print-dialogen lukkes (afterprint). En blind timer
-    // ville rive iframen vaek mens preview stadig er aaben -> WebView2 crasher og
-    // hele appen lukker. afterprint fyrer baade ved print OG annuller.
-    let done = false;
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      try { document.body.removeChild(iframe); } catch { /* ignore */ }
-    };
-    w.onafterprint = cleanup;
-    w.print();
-  }, 150);
+  // Ryd iframen op NAAR print-dialogen lukkes (afterprint), ikke paa en fast timer.
+  // window.print() blokerer ikke i WebView2, saa den gamle 1s-timer fjernede iframen
+  // mens dialogen stadig var aaben -> at lukke dialogen tog hele Trading Dash-
+  // webview'en med sig. afterprint fyrer baade ved "gem" og ved "annuller".
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    try { document.body.removeChild(iframe); } catch { /* ignore */ }
+  };
+  w.onafterprint = cleanup;
+  setTimeout(() => { w.focus(); w.print(); }, 150);
+  setTimeout(cleanup, 60000);   // sikkerhedsnet hvis afterprint udebliver i webview'en
 }
 
 export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) => void }) {
