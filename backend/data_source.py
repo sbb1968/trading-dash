@@ -177,6 +177,63 @@ def fetch_float(ticker: str) -> dict:
     return {}
 
 
+# --- Spread (live IBKR bid/ask, kun i US-aabningstid) ----------------------
+def fetch_spread(ticker: str) -> Optional[float]:
+    """
+    Live bid/ask-spread i PROCENT for EEN ticker fra IBKR ((ask-bid)/mid*100).
+
+    KUN i US-aabningstid (man-fre 09:30-16:00 ET); ellers None, fordi bid/ask er
+    staale/tomme uden for RTH. Returnerer None hvis markedet er lukket, der ikke
+    er quote, eller noget fejler. Fejler ALDRIG kalderen.
+
+    INFO-linje, IKKE i gaten (gatens spread_pct-faktor er bevidst ikke fodret).
+    I et typisk weekend-/aften-koersels-vindue er svaret None.
+    """
+    from datetime import datetime, time as dtime
+    import pytz
+    now = datetime.now(pytz.timezone("America/New_York"))
+    if now.weekday() >= 5 or not (dtime(9, 30) <= now.time() <= dtime(16, 0)):
+        return None
+    return _run(_fetch_spread_ibkr(ticker.upper()))
+
+
+async def _fetch_spread_ibkr(ticker: str) -> Optional[float]:
+    try:
+        from ib_async import IB, Stock
+    except ImportError:
+        return None
+    ib = IB()
+    cid = random.randint(70, 89)   # samme hoeje id-rum som bar-hentning
+    try:
+        await ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=cid, timeout=CONNECT_TIMEOUT)
+    except Exception:
+        return None
+    try:
+        c = Stock(ticker, "SMART", "USD")
+        await ib.qualifyContractsAsync(c)
+        tks = await asyncio.wait_for(ib.reqTickersAsync(c), timeout=8)
+        if not tks:
+            return None
+        tk = tks[0]
+        try:
+            bid = float(tk.bid)
+            ask = float(tk.ask)
+        except (TypeError, ValueError):
+            return None
+        # IBKR giver -1 (eller NaN) naar der ikke er quote
+        if bid != bid or ask != ask or bid <= 0 or ask <= 0 or ask < bid:
+            return None
+        mid = (bid + ask) / 2.0
+        return ((ask - bid) / mid * 100.0) if mid > 0 else None
+    except Exception:
+        return None
+    finally:
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+
+
 def load_bars(ticker: str) -> Optional[pd.DataFrame]:
     """Daglig OHLCV for én ticker. None hvis utilgaengelig."""
     t = ticker.upper()

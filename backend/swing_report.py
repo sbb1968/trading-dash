@@ -188,6 +188,9 @@ def format_final_report(ticker: str, c: dict) -> str:
         dvtxt = f", ~${dv/1e9:.1f}B/dag" if dv >= 1e9 else f", ~${dv/1e6:.0f}M/dag"
     else:
         dvtxt = ""
+    sp = c.get("spread_pct")
+    if sp is not None:
+        dvtxt += f", spread {sp:.1f}%"
     if gate < 0.7:
         L.append(f"  • Handelbarhed: BEGRAENSET (gate {gate:.2f}{dvtxt}) — likviditet/spread er en hindring")
     else:
@@ -305,6 +308,12 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
     except Exception:
         c["gap_pct"] = None
     c["dollar_vol"] = adv * price
+    # Spread (live IBKR bid/ask, kun i US-aabningstid; ellers None). Info-linje.
+    try:
+        import data_source
+        c["spread_pct"] = data_source.fetch_spread(ticker)
+    except Exception:
+        c["spread_pct"] = None
     out = format_final_report(ticker, c)
     if detailed:
         out += "\n\n" + tech.format_technical_report(ticker, tech_res)
