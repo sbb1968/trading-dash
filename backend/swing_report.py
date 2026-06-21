@@ -183,10 +183,15 @@ def format_final_report(ticker: str, c: dict) -> str:
         L.append(f"  !!  {flag}: INDTJENING FALDER (EPS {eg:+.1f}%)")
         L.append("  !!  Overvej andre swing-kandidater med voksende indtjening")
         L.append("  " + "!" * 58)
-    if gate < 0.7:
-        L.append(f"  • Handelbarhed: BEGRAENSET (gate {gate:.2f}) — likviditet/spread er en hindring")
+    dv = c.get("dollar_vol")
+    if dv:
+        dvtxt = f", ~${dv/1e9:.1f}B/dag" if dv >= 1e9 else f", ~${dv/1e6:.0f}M/dag"
     else:
-        L.append(f"  • Handelbarhed: OK (gate {gate:.2f})")
+        dvtxt = ""
+    if gate < 0.7:
+        L.append(f"  • Handelbarhed: BEGRAENSET (gate {gate:.2f}{dvtxt}) — likviditet/spread er en hindring")
+    else:
+        L.append(f"  • Handelbarhed: OK (gate {gate:.2f}{dvtxt})")
     pr = c.get("price")
     if pr is not None and pr < 3:
         L.append(f"  • OBS: lav aktiekurs (${pr:.2f}) - spread fylder mere i %, stoerre")
@@ -207,6 +212,9 @@ def format_final_report(ticker: str, c: dict) -> str:
         if fl < 10e6:
             L.append("      smal float -> kraftigere bevaegelser, men ogsaa bredere"
                      " spread og stoerre gap-risiko ved swing-hold")
+    gp = c.get("gap_pct")
+    if gp is not None and abs(gp) >= 0.1:
+        L.append(f"  • Gap (seneste dag): {gp:+.1f}% (aabning vs forrige luk)")
     L.append("  • Staerkeste medvind:")
     for layer, name, contrib, sig in pos:
         L.append(f"      + {name} [{LABEL[layer]}]  ({contrib:+.1f})")
@@ -289,6 +297,14 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
         _fl = {}
     c["float_shares"] = _fl.get("float_shares")
     c["float_pct"] = _fl.get("float_pct")
+    # Info-linjer (ikke scoret): gap% (seneste aabning vs forrige luk) og
+    # dollar-volumen (snitvolumen x pris). df/adv/price er alle i scope her.
+    try:
+        c["gap_pct"] = ((float(df["Open"].iloc[-1]) / float(df["Close"].iloc[-2]) - 1) * 100
+                        ) if len(df) >= 2 else None
+    except Exception:
+        c["gap_pct"] = None
+    c["dollar_vol"] = adv * price
     out = format_final_report(ticker, c)
     if detailed:
         out += "\n\n" + tech.format_technical_report(ticker, tech_res)

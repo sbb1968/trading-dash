@@ -254,6 +254,7 @@ def _build_context(df: pd.DataFrame, benchmark=None, sector=None) -> dict:
     # Volatilitet
     atr = safe(lambda: _last(_atr(h, l, c)))
     ctx["atr_pct"] = (atr / ctx["price"] * 100) if (atr and ctx["price"]) else None
+    ctx["atr_dollar"] = float(atr) if atr else None   # dollar-ATR til info ved siden af ATR%
     bb = safe(lambda: _bollinger(c))
     if bb:
         bw, pb = bb
@@ -510,7 +511,9 @@ def s_atr(x):
         sig = -30
     else:
         sig = -40
-    return f"ATR {a:.1f}%", float(sig)
+    ad = x.get("atr_dollar")
+    dtxt = f" (${ad:.2f})" if ad is not None else ""
+    return f"ATR {a:.1f}%{dtxt}", float(sig)
 
 
 def s_bb(x):
