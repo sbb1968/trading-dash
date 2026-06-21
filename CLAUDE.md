@@ -66,6 +66,10 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 
 | `PaperTrading.tsx` | Paper trading panel med ALT+K/ALT+S |
 
+| `SwingReport.tsx` | Swing-rapport vindue (POST /swing/analyze, PDF via print, skrift-skyder) |
+
+| `DocsWindow.tsx` | Dokumentation-vindue — lister backend/docs/ PDF'er, aabner dem eksternt |
+
 
 
 \### Backend (`backend/`)
@@ -74,7 +78,7 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 
 |---|---|
 
-| `main.py` | FastAPI server med `/ws` og `/ws/algo` endpoints |
+| `main.py` | FastAPI server: `/ws`, `/ws/algo`, `/swing/analyze`, `/docs/list` + `/docs/file` |
 
 | `ibkr\_connect.py` | IBKR forbindelsesmanager (ib\_async, Python 3.14 kompatibel) |
 
@@ -91,6 +95,8 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 | `download\_data.py` | Downloader historiske data fra Yahoo Finance |
 
 | `data/` | 14+ CSV-filer med historiske kursdata |
+
+| `docs/` | PDF-guides serveret af /docs (auto-listende; `NN\_`-praefiks styrer raekkefoelge) |
 
 
 
@@ -515,6 +521,38 @@ Pædagogisk demo til at vise algotrading til ikke-tekniske brugere.
 \- \[ ] Konfigurerbar scanner-UI i frontend
 
 \- \[ ] Notifikationer (lyd/popup) ved nye handler
+
+
+
+\---
+
+
+
+\## Dokumentation-vindue (`docs`)
+
+PDF-guides vist som knapper; klik aabner PDF'en EKSTERNT (systemets browser/PDF-laeser via Tauri `openUrl`).
+
+\- \*\*Filer:\*\* `backend/docs/*.pdf` — committet til git (`.gitattributes` markerer `*.pdf` som binary).
+
+\- \*\*Auto-listende:\*\* `/docs/list` laeser mappen ved hvert kald. Ny PDF = laeg fil i mappen, commit, faerdig. Ingen kodeaendring.
+
+\- \*\*Raekkefoelge:\*\* numerisk praefiks `NN_` i filnavnet (fx `01_start_med_at_laese_mig.pdf`); `docs_list` stripper praefikset fra den viste titel.
+
+\- \*\*Sikkerhed:\*\* `/docs/file/{name}` serverer kun `.pdf` i mappen (sti-traversal afvist), inline (ingen Content-Disposition).
+
+\- Genvej i Menubar: Oevrige → Dokumentation (ALT+T, K).
+
+
+
+\## Deployment (exe + launcher)
+
+Tauri-exe'en er KUN frontend; backenden (uvicorn :8000) skal koere separat.
+
+\- \*\*Build:\*\* `npm run tauri build` → `src-tauri/target/release/app.exe` + NSIS/MSI-installere. (`build` = `vite build`; tsc er separat `npm run typecheck`.)
+
+\- \*\*Launcher:\*\* `start_trading_dash.bat` (repo-rod) starter backenden hvis :8000 ikke svarer, venter paa HTTP, aabner exe'en. `install_shortcut.ps1` laver skrivebordsgenvej m. ikon.
+
+\- \*\*Distribuer:\*\* `git pull` henter alt UNDTAGEN `app.exe` (build-artefakt) — kopiér exe'en manuelt. Genstart backenden efter pull (koerer uden `--reload`).
 
 
 
