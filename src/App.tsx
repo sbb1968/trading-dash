@@ -336,6 +336,20 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     }
     onRequestOrder(action, stock.ticker, shares, stock.price);
   }
+
+  async function openCompanySite(ticker: string) {
+    // Slaa firmaets hjemmeside op (backend -> yfinance) og aaben den eksternt.
+    // Falder tilbage paa en soegning hvis ingen website findes / backend nede.
+    const fallback = `https://www.google.com/search?q=${encodeURIComponent(ticker + " stock company website")}`;
+    try {
+      const r = await fetch(`http://127.0.0.1:8000/company/website?ticker=${encodeURIComponent(ticker)}`);
+      const d = await r.json();
+      openUrl(d.website || fallback);
+    } catch {
+      openUrl(fallback);
+    }
+  }
+
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [visibleCols, setVisibleCols] = useState<string[]>(() => {
@@ -409,7 +423,15 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                 className={[stock.change_percent >= 0 ? "row-up" : "row-down", stock.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
                 onClick={() => onSelectTicker(stock.ticker)}
               >
-                <td className="sym-cell">{stock.ticker}</td>
+                <td className="sym-cell">
+                  <span
+                    onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
+                    title={`Åbn ${stock.ticker}'s hjemmeside i browser`}
+                    style={{ cursor: "pointer", textDecoration: "underline dotted" }}
+                  >
+                    {stock.ticker}
+                  </span>
+                </td>
                 {visibleCols.map(colId => renderCell(stock, colId))}
                 <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                   <input

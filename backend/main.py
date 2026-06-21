@@ -899,6 +899,36 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     return data
 
 
+# ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──
+# yfinance .info["website"]. Caches i hukommelsen (websites aendrer sig ikke), saa
+# kun foerste opslag pr. ticker koster et (langsomt) yfinance-kald.
+_WEBSITE_CACHE: dict = {}
+
+
+def _lookup_website(ticker: str):
+    t = ticker.upper()
+    if t in _WEBSITE_CACHE:
+        return _WEBSITE_CACHE[t]
+    try:
+        import yfinance as yf
+        url = yf.Ticker(t).info.get("website") or None
+    except Exception:
+        url = None
+    _WEBSITE_CACHE[t] = url
+    return url
+
+
+@app.get("/company/website")
+async def company_website(ticker: str):
+    """Firmaets hjemmeside for en ticker (til watchlist-klik). website=null hvis
+    ukendt — frontend falder saa tilbage paa en soegning."""
+    t = (ticker or "").strip().upper()
+    if not t:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    url = await asyncio.to_thread(_lookup_website, t)
+    return {"ticker": t, "website": url}
+
+
 # ── Dokumentation (PDF'er i backend/docs/, aabnes eksternt af frontend) ──────
 # Auto-listende: /docs/list laeser mappen ved hvert kald, saa nye PDF'er dukker
 # op uden kodeaendring. /docs/file/{name} serverer EEN PDF (sti-traversal-sikret,
