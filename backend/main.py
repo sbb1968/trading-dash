@@ -871,6 +871,34 @@ async def swing_analyze(req: SwingAnalyzeRequest):
     return {"ticker": ticker, "report": report}
 
 
+def _run_swing_json(ticker: str, sr, pattern, candle) -> dict:
+    """BLOKERENDE: som _run_swing_report, men returnerer struktureret JSON.
+    Samme threadpool-regel - kald ALDRIG direkte i event-loopet."""
+    import os
+    import swing_report
+    manual = swing_report.manual_overlay(sr=sr, chart_pattern=pattern, candlestick=candle)
+    api_key = os.environ.get("FMP_API_KEY", "")
+    return swing_report.analyze_json(ticker, api_key, manual=manual)
+
+
+@app.post("/swing/analyze_json")
+async def swing_analyze_json(req: SwingAnalyzeRequest):
+    """Swing-egnethed for EEN ticker som struktureret JSON (til UI-rendering).
+    Samme scoring som /swing/analyze, men felter i stedet for tekst."""
+    ticker = (req.ticker or "").strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    try:
+        data = await asyncio.to_thread(
+            _run_swing_json, ticker, req.sr, req.pattern, req.candle
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Swing-analyse fejlede: {e}")
+    return data
+
+
 # ── Dokumentation (PDF'er i backend/docs/, aabnes eksternt af frontend) ──────
 # Auto-listende: /docs/list laeser mappen ved hvert kald, saa nye PDF'er dukker
 # op uden kodeaendring. /docs/file/{name} serverer EEN PDF (sti-traversal-sikret,

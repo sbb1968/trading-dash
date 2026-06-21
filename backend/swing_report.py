@@ -322,6 +322,145 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
     return out
 
 
+# === Struktureret output (JSON til UI) ======================================
+# _compute_swing koerer SAMME orkestrering som run_full (data -> lag -> gate ->
+# combine -> berig c med info-linjer) og returnerer raadelene. analyze_json
+# serialiserer dem. NB: orkestreringen er p.t. en kopi af run_full's - naar UI'et
+# afloeser tekst-rapporten (trin 2/3) slankes run_full til at kalde _compute_swing,
+# eller pensioneres. Indtil da: aendrer du wiringen, ret begge steder.
+def _compute_swing(ticker: str, api_key: str, period: str = "1y",
+                   source: str = "ibkr", manual: Optional[float] = None) -> dict:
+    import technical_score as tech
+    import fundamental_score as fund
+    import catalyst_score as cat
+
+    df = _ohlcv(ticker, source, period)
+    if df is None or df.empty:
+        raise ValueError(
+            f"Ingen prisdata for {ticker} (kilde={source}). "
+            f"Tilfoej tickeren til download-universet, eller brug --source yfinance.")
+    price = float(df["Close"].iloc[-1])
+
+    bench = _ohlcv("SPY", source, period)
+    if bench is not None and bench.empty:
+        bench = None
+
+    fdict = fund.fetch_fundamentals(ticker, api_key)
+    fund_res = fund.compute_fundamental(fdict, price)
+
+    sector_df, sector_mom = None, None
+    etf = tech.SECTOR_ETF.get(fdict.get("sector"))
+    if etf:
+        sector_df = _ohlcv(etf, source, period)
+        if sector_df is not None and not sector_df.empty and len(sector_df) > 63:
+            sector_mom = (sector_df["Close"].iloc[-1] / sector_df["Close"].iloc[-64] - 1) * 100
+        else:
+            sector_df = None
+
+    tech_res = tech.compute_technical(df, benchmark=bench, sector=sector_df)
+    cat_dict = cat.fetch_catalyst(ticker, api_key, price, sector_momentum_pct=sector_mom)
+    cat_res = cat.compute_catalyst(cat_dict, price)
+
+    adv = float(df["Volume"].tail(50).mean())
+    gate = compute_gate(adv_shares=adv, dollar_vol=adv * price, price=price,
+                        market_cap=fdict.get("market_cap"))
+
+    c = combine({"technical": tech_res, "fundamental": fund_res, "catalyst": cat_res},
+                gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
+    c["eps_growth"] = fdict.get("eps_growth")
+    c["price"] = price
+    try:
+        import data_source
+        _fl = data_source.fetch_float(ticker)
+    except Exception:
+        _fl = {}
+    c["float_shares"] = _fl.get("float_shares")
+    c["float_pct"] = _fl.get("float_pct")
+    try:
+        c["gap_pct"] = ((float(df["Open"].iloc[-1]) / float(df["Close"].iloc[-2]) - 1) * 100
+                        ) if len(df) >= 2 else None
+    except Exception:
+        c["gap_pct"] = None
+    c["dollar_vol"] = adv * price
+    try:
+        import data_source
+        c["spread_pct"] = data_source.fetch_spread(ticker)
+    except Exception:
+        c["spread_pct"] = None
+
+    return {"ticker": ticker, "price": price, "c": c,
+            "tech_res": tech_res, "fund_res": fund_res, "cat_res": cat_res}
+
+
+def _report_to_json(ticker: str, core: dict) -> dict:
+    c = core["c"]
+
+    def _layer(res, adj_score):
+        groups, gmap = [], {}
+        for r in res["results"]:
+            g = gmap.get(r.group)
+            if g is None:
+                g = {"name": r.group, "score": 0.0, "factors": []}
+                gmap[r.group] = g
+                groups.append(g)
+            g["factors"].append({
+                "name": r.name, "raw": r.raw,
+                "signal": round(r.signal, 1),
+                "weight": round(r.weight, 4),
+                "weighted": round(r.weighted, 2),
+            })
+            g["score"] += r.weighted
+        for g in groups:
+            g["score"] = round(g["score"], 1)
+        return {
+            "score": round(adj_score, 1),
+            "band": _lag_band(adj_score),
+            "groups": groups,
+            "excluded": [{"name": n, "why": w} for n, w in res["excluded"]],
+        }
+
+    def _drivers(positive: bool):
+        if positive:
+            sel = sorted([d for d in c["drivers"] if d[2] > 0], key=lambda x: -x[2])[:5]
+        else:
+            sel = sorted([d for d in c["drivers"] if d[2] < 0], key=lambda x: x[2])[:5]
+        return [{"layer": l, "name": n, "contribution": round(ct, 1), "signal": round(s, 1)}
+                for (l, n, ct, s) in sel]
+
+    return {
+        "ticker": ticker.upper(),
+        "price": round(core["price"], 2) if core.get("price") is not None else None,
+        "final": round(c["final"], 1),
+        "final_band": _band(c["final"]),
+        "combined": round(c["combined"], 1),
+        "gate": round(c["gate"], 2),
+        "gate_straf": round(c.get("gate_straf", 0.0), 1),
+        "layers": {
+            "technical":   {**_layer(core["tech_res"], c["adj"]["technical"]),   "weight": LAG_WEIGHTS["technical"]},
+            "fundamental": {**_layer(core["fund_res"], c["adj"]["fundamental"]), "weight": LAG_WEIGHTS["fundamental"]},
+            "catalyst":    {**_layer(core["cat_res"],  c["adj"]["catalyst"]),    "weight": LAG_WEIGHTS["catalyst"]},
+        },
+        "drivers": {"positive": _drivers(True), "negative": _drivers(False)},
+        "info": {
+            "eps_growth":       c.get("eps_growth"),
+            "dollar_vol":       c.get("dollar_vol"),
+            "float_shares":     c.get("float_shares"),
+            "float_pct":        c.get("float_pct"),
+            "gap_pct":          c.get("gap_pct"),
+            "spread_pct":       c.get("spread_pct"),
+            "days_to_earnings": c.get("days_to_earnings"),
+            "manual":           c.get("manual"),
+        },
+    }
+
+
+def analyze_json(ticker: str, api_key: str, period: str = "1y",
+                 source: str = "ibkr", manual: Optional[float] = None) -> dict:
+    """Som run_full, men returnerer struktureret JSON (til UI). Samme scoring."""
+    core = _compute_swing(ticker, api_key, period, source, manual)
+    return _report_to_json(ticker, core)
+
+
 if __name__ == "__main__":
     import argparse
     import os
