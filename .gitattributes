@@ -1,0 +1,11 @@
+# Binaere filer: aldrig linjeskift-konvertering (beskytter PDF'er + ikoner mod
+# korruption paa tvaers af maskiner med core.autocrlf=true).
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.msi  binary
+*.exe  binary
