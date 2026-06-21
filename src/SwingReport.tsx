@@ -60,6 +60,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
   const [candle, setCandle]       = useState(0);
   const [report, setReport]       = useState("");
   const [lastTicker, setLastTicker] = useState("");
+  const [fontSize, setFontSize]   = useState(13);   // rapport-skriftstoerrelse (px), justerbar
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
 
@@ -148,6 +149,18 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             </span>
           </div>
         )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11,
+                      color: "var(--text-muted)" }}>
+          <span style={{ width: 110 }}>Skriftstoerrelse</span>
+          <input
+            type="range" min={9} max={22} step={0.5} value={fontSize}
+            onChange={e => setFontSize(Number(e.target.value))}
+            style={{ flex: 1, accentColor: "var(--accent)" }}
+          />
+          <span style={{ width: 44, textAlign: "right", color: "var(--text-primary)",
+                         fontWeight: 700 }}>{fontSize}px</span>
+        </div>
       </div>
 
       {/* Rapport-omraade */}
@@ -172,7 +185,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
         {!error && !loading && report && (
           <pre style={{ margin: 0, padding: "12px 14px",
                         fontFamily: "'Consolas','Menlo','Monaco',monospace",
-                        fontSize: 11.5, lineHeight: 1.4, whiteSpace: "pre",
+                        fontSize: fontSize, lineHeight: 1.4, whiteSpace: "pre",
                         color: "var(--text-primary)" }}>
             {report}
           </pre>
