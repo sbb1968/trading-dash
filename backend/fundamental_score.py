@@ -78,6 +78,8 @@ def s_pe(f, price):
         if eps is not None and eps <= 0:
             return "P/E n/a (underskud)", -40.0
         return None
+    if pe < 0:                            # negativ P/E (fra pe_ttm) = underskud, ikke "billig"
+        return "P/E n/a (underskud)", -40.0
     sig = _band_score(pe, [(15, 20), (30, 10), (50, -10), (80, -30)], -50)
     return f"P/E {pe:.1f}", sig
 
@@ -94,6 +96,8 @@ def s_peg(f, price):
         if g <= -10:
             return f"EPS FALDER {g:+.1f}% - ROEDT FLAG (PEG n/a)", -70.0
         return f"EPS FALDER {g:+.1f}% - advarsel (PEG n/a)", -50.0
+    if pe < 0:                            # underskud (negativ P/E) med voksende EPS: PEG udefineret -> udeluk
+        return None
     peg = pe / g
     sig = _band_score(peg, [(1, 40), (2, 10), (3, -10)], -30)
     return f"PEG {peg:.2f}", sig
