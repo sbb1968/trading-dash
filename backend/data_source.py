@@ -123,6 +123,60 @@ def _run(coro):
         return asyncio.run(coro)
 
 
+def fetch_float(ticker: str) -> dict:
+    """
+    Hent FLOAT (frit omsaettelige aktier) for EEN ticker fra TradingViews
+    screener - samme bibliotek (tradingview-screener) som tv_scanner.py.
+
+    Felt: float_shares_outstanding (verificeret 40/40 udfyldt juni 2026).
+    Sekundaert: float_shares_percent_current (float i % af udestaaende aktier).
+    TV's screener baerer IKKE short interest - alle short-felter er tomme
+    (verificeret), saa kun float hentes her.
+
+    set_tickers() kraever 'EXCHANGE:SYMBOL'. Vi kender ikke boersen paa forhaand,
+    saa vi proever NASDAQ/NYSE/AMEX og bruger det foerste hit med udfyldt float
+    (en US-aktie ligger kun paa een af dem; de oevrige giver 0 rows).
+
+    Returnerer {'float_shares': float, 'float_pct': float|None} ved hit, ellers
+    {} (swing_report viser saa bare ingen float-linje). Fejler ALDRIG kalderen:
+    net-/lib-problemer giver tom dict.
+    """
+    try:
+        from tradingview_screener import Query
+    except ImportError:
+        return {}
+    sym = ticker.strip().upper()
+    for exch in ("NASDAQ", "NYSE", "AMEX"):
+        try:
+            _, df = (
+                Query()
+                .select("float_shares_outstanding", "float_shares_percent_current")
+                .set_tickers(f"{exch}:{sym}")
+                .get_scanner_data()
+            )
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        row = df.iloc[0]
+        fl = row.get("float_shares_outstanding")
+        try:
+            fl = float(fl)
+        except (TypeError, ValueError):
+            continue
+        if fl != fl or fl <= 0:          # NaN eller ugyldig -> proev naeste boers
+            continue
+        pct = row.get("float_shares_percent_current")
+        try:
+            pct = float(pct)
+            if pct != pct:               # NaN
+                pct = None
+        except (TypeError, ValueError):
+            pct = None
+        return {"float_shares": fl, "float_pct": pct}
+    return {}
+
+
 def load_bars(ticker: str) -> Optional[pd.DataFrame]:
     """Daglig OHLCV for én ticker. None hvis utilgaengelig."""
     t = ticker.upper()

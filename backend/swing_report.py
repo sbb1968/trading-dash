@@ -192,6 +192,21 @@ def format_final_report(ticker: str, c: dict) -> str:
         L.append(f"  • OBS: lav aktiekurs (${pr:.2f}) - spread fylder mere i %, stoerre")
         L.append(f"        slippage og tick-stoerrelse. Ikke ekskluderende, men")
         L.append(f"        handelsrisici stiger jo taettere prisen er paa $1.")
+    fl = c.get("float_shares")
+    if fl is not None:
+        if fl < 10e6:
+            fb = "lav float"
+        elif fl < 50e6:
+            fb = "medium float"
+        else:
+            fb = "hoej float"
+        fnum = f"{fl/1e9:.2f}B" if fl >= 1e9 else f"{fl/1e6:.1f}M"
+        fpct = c.get("float_pct")
+        pct_txt = f" - {fpct:.0f}% af aktierne" if fpct is not None else ""
+        L.append(f"  • Float: {fnum} ({fb}){pct_txt}")
+        if fl < 10e6:
+            L.append("      smal float -> kraftigere bevaegelser, men ogsaa bredere"
+                     " spread og stoerre gap-risiko ved swing-hold")
     L.append("  • Staerkeste medvind:")
     for layer, name, contrib, sig in pos:
         L.append(f"      + {name} [{LABEL[layer]}]  ({contrib:+.1f})")
@@ -264,6 +279,16 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
                 gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
     c["eps_growth"] = fdict.get("eps_growth")   # til indtjenings-advarsel oeverst i rapporten
     c["price"] = price                          # til lav-pris-notits i rapporten
+    # Float (frit omsaettelige aktier) fra TradingView - INFO-linje, ikke scoret.
+    # Tvetydig retning for swing (lav float = stoerre bevaegelse men ogsaa bredere
+    # spread/gap-risiko), saa den vises som kontekst Iben selv vaegter.
+    try:
+        import data_source
+        _fl = data_source.fetch_float(ticker)
+    except Exception:
+        _fl = {}
+    c["float_shares"] = _fl.get("float_shares")
+    c["float_pct"] = _fl.get("float_pct")
     out = format_final_report(ticker, c)
     if detailed:
         out += "\n\n" + tech.format_technical_report(ticker, tech_res)
