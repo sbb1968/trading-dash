@@ -21,7 +21,7 @@ from finnhub_news import FinnhubNewsFeed
 
 from accounts import identity
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -897,6 +897,142 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Swing-analyse fejlede: {e}")
     return data
+
+
+def _swing_report_html(d: dict) -> str:
+    """Render analyze_json som en paen, print-venlig HTML-side (lyst tema). Spejler
+    UI'ets kort/score/drivers/info + chart-kontekst som tekst (den interaktive SVG-
+    chart vises i appen)."""
+    import html as _html
+    esc = _html.escape
+    BULL, BEAR, NEU, MUT = "#15803d", "#b91c1c", "#b45309", "#6b7280"
+    BAND = {
+        "STAERK SWING-KANDIDAT": "Staerk swing-kandidat", "EGNET MED FORBEHOLD": "Egnet med forbehold",
+        "NEUTRAL-AFVENT": "Neutral - afvent", "SVAG": "Svag", "FRARAADES": "Fraraades",
+        "Staerk": "Staerk", "Medvind": "Medvind", "Neutral": "Neutral", "Fraraades": "Fraraades",
+    }
+
+    def sc(v): return BULL if v >= 15 else BEAR if v <= -15 else NEU
+    def fb(b):
+        if b.startswith("STAERK"): return BULL
+        if b.startswith("EGNET"): return NEU
+        if b.startswith("SVAG") or b.startswith("FRARAADES"): return BEAR
+        return MUT
+    def bl(b): return BAND.get(b, b)
+    def sg(v, dd=0): return ("+" if v > 0 else "") + f"{v:.{dd}f}"
+    def pf(v, dd=1): return "—" if v is None else f"{v:.{dd}f}%"
+    def usd(v):
+        if v is None: return "—"
+        if v >= 1e9: return f"${v/1e9:.1f}B"
+        if v >= 1e6: return f"${v/1e6:.1f}M"
+        return f"${round(v):,}"
+    def sh(v):
+        if v is None: return "—"
+        if v >= 1e9: return f"{v/1e9:.1f}B"
+        if v >= 1e6: return f"{v/1e6:.1f}M"
+        return f"{v:,}"
+
+    def layer_html(title, ly):
+        rows = ""
+        for g in ly["groups"]:
+            col, pct = sc(g["score"]), min(abs(g["score"]), 100)
+            side = "left:50%" if g["score"] >= 0 else f"left:{50 - pct/2}%"
+            rows += (
+                '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between;font-size:12px;color:#374151">'
+                f'<span>{esc(g["name"])}</span><span style="color:{col};font-weight:700">{sg(g["score"])}</span></div>'
+                '<div style="position:relative;height:6px;background:#e5e7eb;border-radius:3px;margin-top:3px">'
+                '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#9ca3af"></div>'
+                f'<div style="position:absolute;top:0;bottom:0;{side};width:{pct/2}%;background:{col};border-radius:3px"></div>'
+                '</div></div>'
+            )
+        col = sc(ly["score"])
+        return (
+            '<div style="flex:1;min-width:200px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
+            f'<div style="display:flex;justify-content:space-between"><b style="font-size:13px">{esc(title)}</b>'
+            f'<span style="font-size:11px;color:{MUT}">{round(ly["weight"]*100)}%</span></div>'
+            f'<div style="margin:4px 0"><span style="font-size:22px;font-weight:800;color:{col}">{sg(ly["score"])}</span> '
+            f'<span style="font-size:11px;color:{col}">{esc(bl(ly["band"]))}</span></div>{rows}</div>'
+        )
+
+    def drivers_html(title, col, items):
+        rows = "".join(
+            '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">'
+            f'<span style="color:#374151">{esc(it["name"])}</span>'
+            f'<span style="color:{col};font-weight:700">{sg(it["contribution"],1)}</span></div>'
+            for it in items
+        ) or f'<div style="font-size:12px;color:{MUT}">Ingen.</div>'
+        return f'<div style="flex:1"><div style="font-weight:700;color:{col};font-size:12px;margin-bottom:4px">{esc(title)}</div>{rows}</div>'
+
+    def chip(lbl, val):
+        return (f'<div style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 9px">'
+                f'<div style="font-size:9px;color:{MUT};text-transform:uppercase">{esc(lbl)}</div>'
+                f'<div style="font-size:13px;font-weight:700">{esc(val)}</div></div>')
+
+    info = d.get("info", {})
+    chips = "".join([
+        chip("EPS-vaekst", pf(info.get("eps_growth"))),
+        chip("Dollar-vol", usd(info.get("dollar_vol"))),
+        chip("Float", sh(info.get("float_shares"))),
+        chip("Gap", pf(info.get("gap_pct"))),
+        chip("Spread", pf(info.get("spread_pct"), 2)),
+        chip("Dage til earnings", "—" if info.get("days_to_earnings") is None else f'{info["days_to_earnings"]}d'),
+    ])
+
+    ch = d.get("chart") or {}
+    res = [l for l in ch.get("levels", []) if l["kind"] == "resistance"]
+    sup = [l for l in ch.get("levels", []) if l["kind"] == "support"]
+    sr_txt = "ingen i baandet - pris naer periodens top/bund" if not ch.get("levels") else "  ·  ".join(filter(None, [
+        ("Modstand " + ", ".join(f'{l["price"]:.2f} ({l["touches"]}x)' for l in res)) if res else "",
+        ("Stoette " + ", ".join(f'{l["price"]:.2f} ({l["touches"]}x)' for l in sup)) if sup else "",
+    ]))
+    candles = ", ".join(f'{esc(c["name"])} ({esc(c["when"])})' for c in ch.get("candles", [])) or "ingen tydelige moenstre"
+
+    css = ("@page{margin:14mm}*{box-sizing:border-box}"
+           "body{margin:0;background:#fff;color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif}"
+           ".bar{padding:8px 16px;background:#eee;font-size:13px;display:flex;gap:10px;align-items:center}"
+           ".bar button{font-size:13px;padding:4px 12px;cursor:pointer}"
+           ".wrap{padding:16px;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:12px}"
+           "@media print{.bar{display:none}}")
+    t = esc(d["ticker"])
+    price = f'${d["price"]:.2f}' if d.get("price") is not None else "—"
+    fbc = fb(d["final_band"])
+    return (
+        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>SWING_{t}</title>'
+        f'<style>{css}</style></head><body>'
+        '<div class="bar">Gem som PDF: <button onclick="window.print()">Gem / Print</button>'
+        '<span>(eller Ctrl+P -&gt; "Gem som PDF")</span></div><div class="wrap">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px">'
+        f'<div><div style="font-size:24px;font-weight:800">{t}</div><div style="color:{MUT};font-size:13px">{price}</div></div>'
+        f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{sg(d["final"])}</div>'
+        f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(bl(d["final_band"]))}</div></div></div>'
+        f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{sg(d["combined"])}</b> &times; Tradability-gate <b>{d["gate"]:.2f}</b> &rarr; Samlet <b style="color:{fbc}">{sg(d["final"])}</b></div>'
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        f'{layer_html("Teknisk", d["layers"]["technical"])}{layer_html("Fundamental", d["layers"]["fundamental"])}{layer_html("Katalysator", d["layers"]["catalyst"])}</div>'
+        '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
+        f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{chips}</div>'
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:12px">'
+        f'<b>Chart-kontekst</b> &mdash; Struktur: {esc(ch.get("structure", "—"))}<br>Stoette/modstand: {esc(sr_txt)}<br>Candlestick: {candles}'
+        '<div style="margin-top:8px;padding:8px;background:#fef9c3;border-radius:6px">&#128065; <b>Chart-moenster kraever menneskelig vurdering.</b> Den annoterede chart vises interaktivt i appen.</div></div>'
+        '</div></body></html>'
+    )
+
+
+@app.get("/swing/report.html", response_class=HTMLResponse)
+async def swing_report_html(ticker: str, sr: float = 0, pattern: float = 0, candle: float = 0):
+    """Den paene rapport som printbar HTML-side til EKSTERN browser (PDF-knappen).
+    Print sker i browserens eget vindue -> ingen print-overlay paa app-vinduet, saa
+    man ikke ved et uheld lukker Trading Dash via app'ens X."""
+    t = (ticker or "").strip().upper()
+    if not t:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    try:
+        d = await asyncio.to_thread(_run_swing_json, t, sr, pattern, candle)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Swing-rapport fejlede: {e}")
+    return HTMLResponse(_swing_report_html(d))
 
 
 # ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──

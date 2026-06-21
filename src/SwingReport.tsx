@@ -1,8 +1,11 @@
 import { useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { SwingChart } from "./SwingChart";
 
 const API_JSON = "http://127.0.0.1:8000/swing/analyze_json";
-const API_TEXT = "http://127.0.0.1:8000/swing/analyze"; // kun til PDF indtil reportlab-trinnet
+// PDF: den paene rapport aabnes i EKSTERN browser (print sker der -> app-vinduet
+// rammes ikke, saa man ikke ved et uheld lukker Trading Dash via dets X).
+const API_HTML = "http://127.0.0.1:8000/swing/report.html";
 
 // ---- Typer (matcher backendens analyze_json) -------------------------------
 interface Factor { name: string; raw: number | null; signal: number; weight: number; weighted: number; }
@@ -156,43 +159,6 @@ function Chip({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Gem rapporten som PDF via print-dialogen. Henter tekst-rapporten on-demand
-// (indtil reportlab-trinnet). Printer KUN teksten i en skjult iframe.
-//
-// KRITISK: fjern ALDRIG print-iframen mens dens dialog kan vaere aaben. I WebView2
-// fyrer `afterprint` ofte med det samme (foer brugeren lukker dialogen), og en
-// blind timer rammer samme problem — fjernes iframen mens dialogen er aaben,
-// crasher WebView2 og HELE Trading Dash lukker. Loesning: vi rydder den FORRIGE
-// iframe op ved naeste print (dialogen er for laengst lukket da), aldrig den nu.
-let _prevPrintFrame: HTMLIFrameElement | null = null;
-
-function printTextPdf(ticker: string, report: string) {
-  if (!report) return;
-  if (_prevPrintFrame) {
-    try { document.body.removeChild(_prevPrintFrame); } catch { /* ignore */ }
-    _prevPrintFrame = null;
-  }
-  const title = `SWING_${(ticker || "rapport").toUpperCase()}_${new Date().toISOString().slice(0, 10)}`;
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
-  document.body.appendChild(iframe);
-  const w = iframe.contentWindow;
-  const doc = w?.document;
-  if (!w || !doc) { try { document.body.removeChild(iframe); } catch { /* ignore */ } return; }
-  doc.open();
-  doc.write(
-    `<!DOCTYPE html><html><head><title>${title}</title>` +
-    "<style>@page{margin:14mm;}body{margin:0;}" +
-    "pre{font-family:'Consolas','Menlo','Monaco',monospace;font-size:10px;" +
-    "line-height:1.35;white-space:pre-wrap;color:#000;}</style></head>" +
-    "<body><pre></pre></body></html>"
-  );
-  doc.close();
-  const pre = doc.querySelector("pre");
-  if (pre) pre.textContent = report;
-  _prevPrintFrame = iframe;   // ryddes ved NAESTE print, ikke nu
-  setTimeout(() => { w.focus(); w.print(); }, 150);
-}
 
 function Slider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void; }) {
   const col = value > 0 ? "var(--bull)" : value < 0 ? "var(--bear)" : "var(--text-muted)";
@@ -216,7 +182,6 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
   const [candle, setCandle]         = useState(0);
   const [data, setData]             = useState<SwingData | null>(null);
   const [loading, setLoading]       = useState(false);
-  const [pdfBusy, setPdfBusy]       = useState(false);
   const [error, setError]           = useState("");
 
   async function analyze() {
@@ -244,20 +209,12 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
     }
   }
 
-  async function exportPdf() {
+  function exportPdf() {
     if (!data) return;
-    setPdfBusy(true);
-    try {
-      const body: any = { ticker: data.ticker };
-      if (useOverlay) { body.sr = sr; body.pattern = pattern; body.candle = candle; }
-      const resp = await fetch(API_TEXT, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      const j = await resp.json();
-      printTextPdf(data.ticker, j.report || "");
-    } catch { /* ignore */ } finally {
-      setPdfBusy(false);
-    }
+    // Aaben den paene rapport i ekstern browser; brugeren gemmer som PDF derfra.
+    const p = new URLSearchParams({ ticker: data.ticker });
+    if (useOverlay) { p.set("sr", String(sr)); p.set("pattern", String(pattern)); p.set("candle", String(candle)); }
+    openUrl(`${API_HTML}?${p.toString()}`);
   }
 
   return (
@@ -273,10 +230,10 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
             {loading ? "Analyserer..." : "Analyser"}
           </button>
-          <button onClick={exportPdf} disabled={!data || loading || pdfBusy}
-            title="Gem rapporten som PDF (vaelg placering i print-dialogen)"
-            style={{ background: "var(--bg-elevated)", color: (!data || loading || pdfBusy) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading || pdfBusy) ? "default" : "pointer" }}>
-            {pdfBusy ? "..." : "PDF"}
+          <button onClick={exportPdf} disabled={!data || loading}
+            title="Aabn den paene rapport i browseren og gem som PDF"
+            style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+            PDF
           </button>
         </div>
 
