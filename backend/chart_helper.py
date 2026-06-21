@@ -168,6 +168,96 @@ def detect_candles(df: pd.DataFrame):
     return patterns
 
 
+# --- Struktureret output (til swing-rapportens JSON) -------------------------
+def chart_data_from_df(df: pd.DataFrame, window: int = 120) -> dict:
+    """Som report_from_df, men returnerer struktureret data (til UI) i stedet for
+    tekst: S/R-niveauer, trend-struktur, candlestick-moenstre, de seneste OHLC-
+    staenger, og HH/HL-ankre saa frontend kan tegne en annoteret chart. Chart-
+    MOENSTER (flag/H&S/...) er IKKE med - det kraever menneskelig vurdering."""
+    current = float(df["Close"].iloc[-1])
+    highs, lows = find_pivots(df)
+    recency = min(RECENCY_BARS, len(df) - 1)
+    cutoff = df.index[-recency]
+    rec_highs = [(d, p) for d, p in highs if d >= cutoff]
+    rec_lows = [(d, p) for d, p in lows if d >= cutoff]
+    all_levels = cluster_levels(rec_highs + rec_lows, current)
+    in_band = [lv for lv in all_levels
+               if abs(lv.price - current) / current <= BAND_PCT]
+    supports = sorted([lv for lv in in_band if lv.kind == "support"],
+                      key=lambda x: x.price, reverse=True)[:MAX_PER_SIDE]
+    resistances = sorted([lv for lv in in_band if lv.kind == "resistance"],
+                         key=lambda x: x.price)[:MAX_PER_SIDE]
+    ns = supports[0] if supports else None
+    nr = resistances[0] if resistances else None
+
+    structure = detect_structure(highs, lows)
+    uptrend = structure.startswith("HH/HL")
+    downtrend = structure.startswith("LH/LL")
+
+    # Candle-navn oploeses ud fra trend: shooting star / inverted hammer er samme
+    # form (navnet afhaenger af retning); det samme for hammer / hanging man.
+    def _resolve(name: str) -> str:
+        if "Shooting star / inverted hammer" in name:
+            if uptrend:
+                return "Shooting star"
+            if downtrend:
+                return "Inverted hammer"
+        if "Hammer / hanging man" in name:
+            if uptrend:
+                return "Hanging man"
+            if downtrend:
+                return "Hammer"
+        return name
+    candles = [{"name": _resolve(name), "when": when}
+               for name, when in detect_candles(df)]
+
+    def _t(idx):
+        try:
+            return pd.Timestamp(idx).strftime("%Y-%m-%d")
+        except Exception:
+            return str(idx)
+
+    # HH/HL-ankre: seneste svingtop hoejere end den forrige (Higher High) og
+    # seneste svingbund hoejere end den forrige (Higher Low). Til at pege paa.
+    def _last_higher(points):
+        if len(points) < 2:
+            return points[-1] if points else None
+        for i in range(len(points) - 1, 0, -1):
+            if points[i][1] > points[i - 1][1]:
+                return points[i]
+        return points[-1]
+
+    def _anchor(pt):
+        return None if pt is None else {"t": _t(pt[0]), "price": round(float(pt[1]), 2)}
+
+    hh = _anchor(_last_higher(rec_highs)) if rec_highs else None
+    hl = _anchor(_last_higher(rec_lows)) if rec_lows else None
+
+    # Seneste ~window staenger til candlesticks.
+    win = df.tail(window)
+    bars = [{"t": _t(idx),
+             "o": round(float(r["Open"]), 2), "h": round(float(r["High"]), 2),
+             "l": round(float(r["Low"]), 2), "c": round(float(r["Close"]), 2)}
+            for idx, r in win.iterrows()]
+
+    def _lv(lv):
+        return {"price": lv.price, "kind": lv.kind, "touches": lv.touches, "size": lv.size}
+
+    levels = sorted(resistances + supports, key=lambda x: x.price, reverse=True)
+    return {
+        "current_price": round(current, 2),
+        "structure": structure,
+        "nearest_support": _lv(ns) if ns else None,
+        "nearest_resistance": _lv(nr) if nr else None,
+        "levels": [_lv(lv) for lv in levels],
+        "candles": candles,
+        "swing_high": hh,
+        "swing_low": hl,
+        "bars": bars,
+        "pattern_needs_human": True,
+    }
+
+
 # --- Rapport-formatering -----------------------------------------------------
 def report_from_df(ticker: str, df: pd.DataFrame) -> str:
     current = float(df["Close"].iloc[-1])

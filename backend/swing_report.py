@@ -388,7 +388,16 @@ def _compute_swing(ticker: str, api_key: str, period: str = "1y",
     except Exception:
         c["spread_pct"] = None
 
-    return {"ticker": ticker, "price": price, "c": c,
+    # Chart-kontekst (S/R, struktur, candles, staenger, HH/HL-ankre) fra
+    # chart_helper paa SAMME df. Supplerende - en fejl her maa ikke vaelte
+    # rapporten, saa den fanges.
+    try:
+        import chart_helper
+        chart = chart_helper.chart_data_from_df(df)
+    except Exception:
+        chart = None
+
+    return {"ticker": ticker, "price": price, "c": c, "chart": chart,
             "tech_res": tech_res, "fund_res": fund_res, "cat_res": cat_res}
 
 
@@ -441,6 +450,7 @@ def _report_to_json(ticker: str, core: dict) -> dict:
             "catalyst":    {**_layer(core["cat_res"],  c["adj"]["catalyst"]),    "weight": LAG_WEIGHTS["catalyst"]},
         },
         "drivers": {"positive": _drivers(True), "negative": _drivers(False)},
+        "chart": core.get("chart"),
         "info": {
             "eps_growth":       c.get("eps_growth"),
             "dollar_vol":       c.get("dollar_vol"),
