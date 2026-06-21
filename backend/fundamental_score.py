@@ -296,6 +296,17 @@ def fetch_fundamentals_finnhub(symbol: str) -> dict:
         v = g(*keys)
         if v is not None:
             out[dst] = v
+
+    # Free cash flow-margin: Finnhub har intet faerdigt felt, men kan udledes.
+    # FCF/indtjening = PE / pfcfShare  ->  fcf_margin = net_margin * (PE / pfcfShare).
+    # Kraever alle tre felter; pfcfShare != 0. Negativ FCF gir negativ margin (straffes
+    # korrekt af s_fcf_margin's (0,-60)-baand).
+    nm = out.get("net_margin")
+    pe = g("peTTM", "peBasicExclExtraTTM")
+    pfcf = g("pfcfShareTTM", "pfcfShareAnnual")
+    if nm is not None and pe is not None and pfcf:
+        out["fcf_margin"] = nm * (pe / pfcf)
+
     return out
 
 
