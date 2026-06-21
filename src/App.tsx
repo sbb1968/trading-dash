@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import { useMarketData } from "./useMarketData";
-import type { NewsData } from "./useMarketData";
+import type { NewsData, StockData } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
@@ -58,7 +58,6 @@ const FONT_WINDOW_TYPES = [
   { id: "journal",   label: "Trade Journal" },
   { id: "livealgo",  label: "Live Algo" },
   { id: "alerts",    label: "Pris/Nyheds Alerts" },
-  { id: "algohub", label: "Algo Hub" },
   { id: "marketoverview", label: "Markedsoverblik" },
   { id: "account",   label: "Konto" },
 ];
@@ -92,7 +91,6 @@ function getWindowType(id: WindowId): string {
   if (id === "timesales")    return "timesales";
   if (id === "papertrading") return "paper";
   if (id === "alerts")       return "alerts";
-  if (id === "algohub")      return "algohub";
   if (id === "marketoverview") return "marketoverview";
   if (id === "account") return "account";
   return "scanner";

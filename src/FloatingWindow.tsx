@@ -130,8 +130,8 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
     if (!tradingViewTicker) return;
     const url = `https://www.tradingview.com/chart/?symbol=${tradingViewTicker}`;
     try {
-      const { open } = await import("@tauri-apps/plugin-opener");
-      await open(url);
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
     } catch {
       window.open(url, "_blank");
     }

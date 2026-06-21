@@ -923,12 +923,6 @@ button {
 }
 
 :root {
-  --fs-title-algohub:   18px;
-  --fs-header-algohub:  13px;
-  --fs-content-algohub: 14px;
-}
-
-:root {
   --fs-title-account:   18px;
   --fs-header-account:  11px;
   --fs-content-account: 13px;
