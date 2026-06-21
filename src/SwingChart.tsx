@@ -16,7 +16,7 @@ interface ChartData {
 // Charten renderes i RIGTIGE pixels: viewBox = maalt bredde x fast hoejde, saa
 // skrift/streger/staenger har literal stoerrelse og ikke skaleres uniformt.
 const CHART_H = 440;
-const TOP = 28, BOTM = 46, XL = 14, GUTTER = 56;
+const TOP = 28, BOTM = 52, XL = 14, GUTTER = 62;
 const PILL_H = 22, GAP = 8;
 const MONTHS_DA = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
 
@@ -147,14 +147,14 @@ export function SwingChart({ chart }: { chart: ChartData }) {
         {L.ticks.map((p, i) => (
           <g key={`t${i}`}>
             <line x1={XL} y1={L.y(p)} x2={L.xr} y2={L.y(p)} stroke="var(--border-subtle)" strokeWidth={0.5} />
-            <text x={L.xr + 6} y={L.y(p) + 4} fontSize={11} fill="var(--text-muted)">{p.toFixed(0)}</text>
+            <text x={L.xr + 6} y={L.y(p) + 5} fontSize={15} fill="var(--text-muted)">{p.toFixed(0)}</text>
           </g>
         ))}
 
         {L.months.map((m, i) => (
           <g key={`m${i}`}>
             <line x1={m.x} y1={L.BOT} x2={m.x} y2={L.BOT + 4} stroke="var(--text-muted)" strokeWidth={0.5} />
-            <text x={m.x} y={L.BOT + 18} textAnchor="middle" fontSize={11} fill="var(--text-muted)">{m.label}</text>
+            <text x={m.x} y={L.BOT + 22} textAnchor="middle" fontSize={15} fill="var(--text-muted)">{m.label}</text>
           </g>
         ))}
 
@@ -178,8 +178,8 @@ export function SwingChart({ chart }: { chart: ChartData }) {
         })}
 
         <line x1={XL} y1={L.y(chart.current_price)} x2={L.xr} y2={L.y(chart.current_price)} stroke="var(--text-muted)" strokeWidth={0.5} strokeDasharray="2 3" />
-        <rect x={L.xr + 2} y={L.y(chart.current_price) - 10} width={GUTTER - 6} height={20} rx={4} fill="var(--text-secondary)" />
-        <text x={L.xr + 2 + (GUTTER - 6) / 2} y={L.y(chart.current_price) + 4} textAnchor="middle" fontSize={12} fontWeight={700} fill="var(--bg-base)">{chart.current_price.toFixed(2)}</text>
+        <rect x={L.xr + 2} y={L.y(chart.current_price) - 11} width={GUTTER - 6} height={22} rx={4} fill="var(--text-secondary)" />
+        <text x={L.xr + 2 + (GUTTER - 6) / 2} y={L.y(chart.current_price) + 5} textAnchor="middle" fontSize={15} fontWeight={700} fill="var(--bg-base)">{chart.current_price.toFixed(2)}</text>
 
         {L.pills.map((p, i) => {
           const above = p.y1 <= p.ay;
@@ -199,12 +199,12 @@ export function SwingChart({ chart }: { chart: ChartData }) {
         <text x={12 + pillW(chart.structure) / 2} y={21} textAnchor="middle" fontSize={12} fontWeight={700} fill={L.trendCol}>{chart.structure}</text>
       </svg>
 
-      <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-secondary)" }}>
+      <div style={{ marginTop: 8, fontSize: 14, color: "var(--text-secondary)" }}>
         <span style={{ color: "var(--text-muted)" }}>Støtte/modstand: </span>{srText}
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 10px", background: "var(--neutral-dim)", borderRadius: 6 }}>
-        <span style={{ fontSize: 14, lineHeight: "16px" }}>👁</span>
-        <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+        <span style={{ fontSize: 16, lineHeight: "18px" }}>👁</span>
+        <span style={{ fontSize: 14, color: "var(--text-secondary)" }}>
           <b style={{ color: "var(--neutral)" }}>Chart-mønster kræver menneskelig vurdering.</b>{" "}
           Flag, trekant, hoved-skulder, cup &amp; handle, range — kig på charten. Resten er beregnet og tegnet automatisk.
         </span>
