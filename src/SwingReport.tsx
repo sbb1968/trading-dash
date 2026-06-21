@@ -47,8 +47,17 @@ function downloadPdf(ticker: string, report: string) {
   if (pre) pre.textContent = report;   // textContent => ingen HTML-injektion fra rapporten
   setTimeout(() => {
     w.focus();
+    // Fjern FOERST iframen naar print-dialogen lukkes (afterprint). En blind timer
+    // ville rive iframen vaek mens preview stadig er aaben -> WebView2 crasher og
+    // hele appen lukker. afterprint fyrer baade ved print OG annuller.
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      try { document.body.removeChild(iframe); } catch { /* ignore */ }
+    };
+    w.onafterprint = cleanup;
     w.print();
-    setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* ignore */ } }, 1000);
   }, 150);
 }
 
