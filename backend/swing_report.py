@@ -176,6 +176,13 @@ def format_final_report(ticker: str, c: dict) -> str:
     L.append("PUNKTVIS ANBEFALING")
     L.append("=" * 78)
     L.append(f"  • Samlet vurdering: {_band(c['final'])}  ({c['final']:+.1f})")
+    eg = c.get("eps_growth")
+    if eg is not None and eg <= 0:
+        flag = "ROEDT FLAG" if eg <= -10 else "ADVARSEL"
+        L.append("  " + "!" * 58)
+        L.append(f"  !!  {flag}: INDTJENING FALDER (EPS {eg:+.1f}%)")
+        L.append("  !!  Overvej andre swing-kandidater med voksende indtjening")
+        L.append("  " + "!" * 58)
     if gate < 0.7:
         L.append(f"  • Handelbarhed: BEGRAENSET (gate {gate:.2f}) — likviditet/spread er en hindring")
     else:
@@ -250,6 +257,7 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
 
     c = combine({"technical": tech_res, "fundamental": fund_res, "catalyst": cat_res},
                 gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
+    c["eps_growth"] = fdict.get("eps_growth")   # til indtjenings-advarsel oeverst i rapporten
     out = format_final_report(ticker, c)
     if detailed:
         out += "\n\n" + tech.format_technical_report(ticker, tech_res)

@@ -86,8 +86,14 @@ def s_peg(f, price):
     eps = f.get("eps_ttm")
     g = f.get("eps_growth")
     pe = (price / eps) if (eps and price and eps > 0) else f.get("pe_ttm")
-    if pe is None or g is None or g <= 0:
+    if pe is None or g is None:
         return None
+    if g <= 0:
+        # Negativ/nul EPS-vaekst: PEG matematisk meningsloes (negativ PEG ser "billig"
+        # ud men betyder faldende indtjening). Vis som roedt flag - trappe efter faldet.
+        if g <= -10:
+            return f"EPS FALDER {g:+.1f}% - ROEDT FLAG (PEG n/a)", -70.0
+        return f"EPS FALDER {g:+.1f}% - advarsel (PEG n/a)", -50.0
     peg = pe / g
     sig = _band_score(peg, [(1, 40), (2, 10), (3, -10)], -30)
     return f"PEG {peg:.2f}", sig
