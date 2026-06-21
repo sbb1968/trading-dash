@@ -917,12 +917,6 @@ button {
 }
 
 :root {
-  --fs-title-alerts:   14px;
-  --fs-header-alerts:  12px;
-  --fs-content-alerts: 13px;
-}
-
-:root {
   --fs-title-account:   18px;
   --fs-header-account:  11px;
   --fs-content-account: 13px;

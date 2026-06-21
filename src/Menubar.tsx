@@ -14,8 +14,6 @@ interface Props {
   onSaveLayout: (name: string) => void;
   onDeleteLayout: (id: string) => void;
   onAutoArrange: () => void;
-  soundEnabled: boolean;
-  onToggleSound: () => void;
   onAddWindow: (id: WindowId) => void;
   activeWindowIds: WindowId[];
 }
@@ -57,7 +55,6 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
     items: [
       { id: "watchlist",    shortcut: "A" },
       { id: "newsroom",     shortcut: "N" },
-      { id: "alerts",       shortcut: "I" },
       { id: "account",      shortcut: "U" },
       { id: "papertrading", shortcut: "P" },
       { id: "journal",      shortcut: "J" },
@@ -297,7 +294,7 @@ function ThemeSection({ theme, setTheme }: { theme: string; setTheme: (t: string
 export function Menubar({
   activeView, onViewChange,
   layouts, activeLayoutId, onLoadLayout, onSaveLayout, onDeleteLayout,
-  onAutoArrange, soundEnabled, onToggleSound,
+  onAutoArrange,
   onAddWindow, activeWindowIds
 }: Props) {
 
@@ -454,14 +451,6 @@ export function Menubar({
         🎛 Studio
       </button>
 
-      {/* ── Lyd ── */}
-      <button
-        className={`menu-sound-btn ${soundEnabled ? "sound-on" : "sound-off"}`}
-        onClick={onToggleSound}
-        title={soundEnabled ? "Slå lyd fra" : "Slå lyd til"}
-      >
-        {soundEnabled ? "🔔" : "🔕"}
-      </button>
 
     </div>
   );

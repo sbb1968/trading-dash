@@ -6,7 +6,6 @@ export type WindowId =
   | "chart1time" | "chart4time"
   | "chartdaily" | "chartweekly"
   | "level2" | "timesales" | "journal" | "livealgo"
-  | "alerts"
   | "marketoverview"
   | "account"
   | "orders"
@@ -34,7 +33,6 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   timesales:    "Time & Sales",
   journal:      "Trade Journal",
   livealgo:     "Live Algo",
-  alerts:       "Nyheds Alerts",
   marketoverview:  "marketoverview",
   account:         "Konto",
   orders:          "Ordrer",

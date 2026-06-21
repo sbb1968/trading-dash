@@ -17,7 +17,6 @@ import {
 import { TradeJournal } from "./TradeJournal";
 import { LiveAlgo } from "./LiveAlgo";
 import { LiveLogProvider } from "./LiveLogContext";
-import { AlertsWindow } from "./Alertspanel";
 import { MarketOverview } from "./MarketOverview";
 import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
@@ -27,7 +26,6 @@ import { useTickerName } from "./useTickerName";
 
 
 // ── Konstanter ────────────────────────────────────────────────
-const ALERT_THRESHOLD_DEFAULT = 0.5;
 type ActiveView = "scanners" | "watchlist" | "charting" | "newsroom" | "konfigurator" | "papertrading";
 
 const ALL_COLUMNS = [
@@ -57,7 +55,6 @@ const FONT_WINDOW_TYPES = [
   { id: "paper",     label: "Paper Trading" },
   { id: "journal",   label: "Trade Journal" },
   { id: "livealgo",  label: "Live Algo" },
-  { id: "alerts",    label: "Pris/Nyheds Alerts" },
   { id: "marketoverview", label: "Markedsoverblik" },
   { id: "account",   label: "Konto" },
 ];
@@ -90,7 +87,6 @@ function getWindowType(id: WindowId): string {
   if (id === "level2")       return "level2";
   if (id === "timesales")    return "timesales";
   if (id === "papertrading") return "paper";
-  if (id === "alerts")       return "alerts";
   if (id === "marketoverview") return "marketoverview";
   if (id === "account") return "account";
   return "scanner";
@@ -140,21 +136,6 @@ function MarketStatus() {
   return <div className={`status-item market-status ${labels[status].cls}`}>{labels[status].text}</div>;
 }
 
-// ── Alert Counter ─────────────────────────────────────────────
-function AlertCounter({ count }: { count: number }) {
-  const [flash, setFlash] = useState(false);
-  const prevCount = useRef(count);
-  useEffect(() => {
-    if (count > prevCount.current) { setFlash(true); setTimeout(() => setFlash(false), 600); }
-    prevCount.current = count;
-  }, [count]);
-  return (
-    <div className={`status-item alert-counter ${flash ? "alert-flash" : ""}`}>
-      <span className="status-label">🔔</span>
-      <span className="status-value">{count} alerts</span>
-    </div>
-  );
-}
 
 // ── Connection Status ─────────────────────────────────────────
 function ConnectionStatus({ status }: { status: string }) {
@@ -1196,7 +1177,6 @@ function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
   news: any[]; portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
-  alerts: any[]; alertThreshold: number; onThresholdChange: (v: number) => void;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
@@ -1226,15 +1206,6 @@ function renderWindowContent(id: WindowId, props: {
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
-    case "alerts":
-      return <AlertsWindow
-        alerts={props.alerts ?? []}
-        selectedTicker={props.selectedTicker}
-        onSelectTicker={props.onSelectTicker}
-        watchlist={props.watchlist ?? []}
-        alertThreshold={props.alertThreshold ?? 0.5}
-        onThresholdChange={props.onThresholdChange}
-      />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }
@@ -1271,25 +1242,21 @@ function App() {
   const [layoutToast, setLayoutToast] = useState<string>("");
   const [activeView, setActiveView]         = useState<ActiveView>("scanners");
   const [selectedTicker, setSelectedTicker] = useState<string>(() => localStorage.getItem("selectedTicker") || "NVDA");
-  const [alertThreshold, setAlertThreshold] = useState<number>(() => { const s = localStorage.getItem("alertThreshold"); return s ? parseFloat(s) : ALERT_THRESHOLD_DEFAULT; });
   const [watchlist, setWatchlist]           = useState<string[]>(() => { const s = localStorage.getItem("watchlist"); return s ? JSON.parse(s) : ["NVDA","TSLA","AAPL"]; });
-  const [soundEnabled, setSoundEnabled]     = useState<boolean>(() => { const s = localStorage.getItem("soundEnabled"); return s !== null ? JSON.parse(s) : true; });
   const [layouts, setLayouts]               = useState<Layout[]>(() => loadLayouts(window.innerWidth, window.innerHeight));
   const [activeLayoutId, setActiveLayoutIdState] = useState<string>(() => getActiveLayoutId());
 
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
-  useEffect(() => { localStorage.setItem("alertThreshold", alertThreshold.toString()); }, [alertThreshold]);
   useEffect(() => { localStorage.setItem("watchlist",      JSON.stringify(watchlist)); }, [watchlist]);
-  useEffect(() => { localStorage.setItem("soundEnabled",   JSON.stringify(soundEnabled)); }, [soundEnabled]);
 
   // Indlæs gemte fontstørrelser ved opstart
   useEffect(() => { applyAllFonts(); }, []);
 
   const {
-    stocksArray, alerts, news, portfolio, status,
+    stocksArray, news, portfolio, status,
     buyStock, sellStock, resetPortfolio,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
-  } = useMarketData(alertThreshold, soundEnabled);
+  } = useMarketData();
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
   const activeLayout = layouts.find(l => l.id === activeLayoutId);
 
@@ -1365,7 +1332,6 @@ function App() {
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
     news, portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
-    alerts, alertThreshold, onThresholdChange: setAlertThreshold,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
@@ -1381,7 +1347,6 @@ function App() {
         <div className="status-bar">
           <ConnectionStatus status={status} />
           <MarketStatus />
-          <AlertCounter count={alerts.length} />
           <Clock />
         </div>
       </div>
@@ -1409,7 +1374,7 @@ function App() {
         activeView={activeView} onViewChange={setActiveView}
         layouts={layouts} activeLayoutId={activeLayoutId}
         onLoadLayout={handleLoadLayout} onSaveLayout={handleSaveLayout} onDeleteLayout={handleDeleteLayout}
-        onAutoArrange={autoArrange} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled(s => !s)}
+        onAutoArrange={autoArrange}
         onAddWindow={handleAddWindow}
         activeWindowIds={activeLayout?.windows.filter(w => !w.closed).map(w => w.id as WindowId) || []}
       />

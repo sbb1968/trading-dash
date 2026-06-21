@@ -57,7 +57,7 @@ export default function Screen2() {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   const { stocksArray, portfolio, buyStock, sellStock, resetPortfolio } =
-    useMarketData(0.5, false);
+    useMarketData();
 
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
 

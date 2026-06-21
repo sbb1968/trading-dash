@@ -3,8 +3,6 @@ import ReconnectingWebSocket from "reconnecting-websocket";
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
 
-const globalSoundEnabled = { value: true };
-
 export interface StockData {
   ticker:         string;
   price:          number;
@@ -23,17 +21,6 @@ export interface StockData {
   low?:           number;
   open?:          number;
   source?:        string;
-}
-
-export interface AlertData {
-  id:             number;
-  ticker:         string;
-  price:          number;
-  change_percent: number;
-  direction:      "up" | "down";
-  message:        string;
-  time:           string;
-  timestamp:      string;
 }
 
 export interface NewsData {
@@ -99,39 +86,6 @@ const EMPTY_PORTFOLIO: Portfolio = {
   num_positions: 0, num_trades: 0,
 };
 
-// ── Lyd ───────────────────────────────────────────────────────
-const lastSoundTime    = { value: 0 };
-const tickerCooldowns: Record<string, number> = {};
-
-function playAlertSound(direction: "up" | "down", ticker: string) {
-  const soundEnabled = localStorage.getItem("soundEnabled");
-  if (soundEnabled === "false") return;
-  const now = Date.now();
-  if (now - lastSoundTime.value < 1000) return;
-  if (tickerCooldowns[ticker] && now - tickerCooldowns[ticker] < 30000) return;
-  lastSoundTime.value      = now;
-  tickerCooldowns[ticker]  = now;
-  try {
-    const ctx        = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const oscillator = ctx.createOscillator();
-    const gainNode   = ctx.createGain();
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    if (direction === "up") {
-      oscillator.frequency.setValueAtTime(600, ctx.currentTime);
-      oscillator.frequency.setValueAtTime(900, ctx.currentTime + 0.1);
-    } else {
-      oscillator.frequency.setValueAtTime(500, ctx.currentTime);
-      oscillator.frequency.setValueAtTime(300, ctx.currentTime + 0.1);
-    }
-    oscillator.type = "sine";
-    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.3);
-  } catch {}
-}
-
 // ── IBKR ordre-resultat (fra manuel watchlist-handel) ─────────
 export interface IbkrOrderResult {
   type:     "ibkr_order_result";
@@ -146,27 +100,14 @@ export interface IbkrOrderResult {
 }
 
 // ── Hook ──────────────────────────────────────────────────────
-export function useMarketData(alertThreshold: number, soundEnabled: boolean = true) {
+export function useMarketData() {
   const [stocks,    setStocks]    = useState<Map<string, StockData>>(new Map());
-  const [alerts,    setAlerts]    = useState<AlertData[]>([]);
   const [news,      setNews]      = useState<NewsData[]>([]);
   const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
   const [status,    setStatus]    = useState<ConnectionStatus>("connecting");
   const [lastOrderResult, setLastOrderResult] = useState<IbkrOrderResult | null>(null);
 
   const wsRef         = useRef<ReconnectingWebSocket | null>(null);
-  const thresholdRef  = useRef(alertThreshold);
-
-  useEffect(() => {
-    globalSoundEnabled.value = soundEnabled;
-  }, [soundEnabled]);
-
-  useEffect(() => {
-    thresholdRef.current = alertThreshold;
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "set_threshold", value: alertThreshold }));
-    }
-  }, [alertThreshold]);
 
   useEffect(() => {
     const ws = new ReconnectingWebSocket(WS_URL, [], {
@@ -180,7 +121,6 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
 
     ws.onopen = () => {
       setStatus("connected");
-      ws.send(JSON.stringify({ type: "set_threshold", value: thresholdRef.current }));
     };
 
     ws.onclose = () => setStatus("disconnected");
@@ -198,13 +138,6 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
             }
             return next;
           });
-
-        } else if (message.type === "alerts") {
-          const newAlerts = message.data as AlertData[];
-          newAlerts.forEach(a => {
-            if (globalSoundEnabled.value) playAlertSound(a.direction, a.ticker);
-          });
-          setAlerts(prev => [...newAlerts, ...prev].slice(0, 50));
 
         } else if (message.type === "news") {
           const item = { ...message.data as NewsData, isNew: true };
@@ -272,7 +205,7 @@ export function useMarketData(alertThreshold: number, soundEnabled: boolean = tr
 
   const stocksArray = Array.from(stocks.values());
   return {
-    stocksArray, alerts, news, portfolio, status, sendMessage,
+    stocksArray, news, portfolio, status, sendMessage,
     buyStock, sellStock, resetPortfolio,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
   };
