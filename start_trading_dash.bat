@@ -9,17 +9,21 @@ REM ─────────────────────────�
 title Trading Dash launcher
 cd /d "%~dp0"
 
-REM 1) Backend allerede oppe paa :8000?
+REM 1) Backend allerede oppe (port bundet)?
 powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',8000);exit 0}catch{exit 1}"
-if not errorlevel 1 goto startapp
+if errorlevel 1 (
+  echo Backend ikke oppe - starter den paa port 8000...
+  start "Trading Dash Backend" cmd /k call "%~dp0backend\start_backend.bat"
+)
 
-echo Backend ikke oppe - starter den paa port 8000...
-start "Trading Dash Backend" cmd /k call "%~dp0backend\start_backend.bat"
-
-echo Venter paa at backend svarer paa :8000 (op til 60 sek)...
-powershell -NoProfile -Command "for($i=0;$i -lt 60;$i++){try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',8000);Write-Host ' backend oppe';exit 0}catch{Start-Sleep 1}}; Write-Host ' TIMEOUT - backend kom ikke op'; exit 1"
-
-:startapp
+REM 2) Vent paa at backenden SVARER paa HTTP (ikke kun port-bind) - op til 120 sek.
+REM    /health-svar = serving. 404 taeller ogsaa (HTTP svarer); kun connection-refused venter.
+echo Venter paa at backend svarer paa http://127.0.0.1:8000 (op til 120 sek)...
+powershell -NoProfile -Command "for($i=0;$i -lt 120;$i++){try{$null=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://127.0.0.1:8000/health';Write-Host ' backend svarer'; exit 0}catch{if($_.Exception.Response){Write-Host ' backend svarer'; exit 0}; Start-Sleep 1}}; Write-Host ' TIMEOUT - backend svarede ikke'; exit 1"
+if errorlevel 1 (
+  echo ADVARSEL: backend svarede ikke inden timeout. Tjek "Trading Dash Backend"-vinduet for fejl.
+  echo Appen aabnes alligevel - tryk Analyser igen naar backenden er klar.
+)
 if not exist "%~dp0app.exe" (
   echo FEJL: app.exe blev ikke fundet i %~dp0
   echo Kopiér app.exe hertil og proev igen.
