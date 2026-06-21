@@ -54,7 +54,7 @@ def compute_gate(adv_shares: Optional[float] = None,
     if dollar_vol is not None:
         f.append(min(1.0, dollar_vol / dol_full))
     if price is not None:
-        f.append(0.0 if price < 1 else 0.5 if price < 3 else 1.0)
+        f.append(0.0 if price < 1 else 1.0)
     if spread_pct is not None:
         f.append(max(0.0, 1.0 - spread_pct))             # 0 % = 1, >=1 % = 0
     return round(min(f), 3) if f else 1.0
@@ -187,6 +187,11 @@ def format_final_report(ticker: str, c: dict) -> str:
         L.append(f"  • Handelbarhed: BEGRAENSET (gate {gate:.2f}) — likviditet/spread er en hindring")
     else:
         L.append(f"  • Handelbarhed: OK (gate {gate:.2f})")
+    pr = c.get("price")
+    if pr is not None and pr < 3:
+        L.append(f"  • OBS: lav aktiekurs (${pr:.2f}) - spread fylder mere i %, stoerre")
+        L.append(f"        slippage og tick-stoerrelse. Ikke ekskluderende, men")
+        L.append(f"        handelsrisici stiger jo taettere prisen er paa $1.")
     L.append("  • Staerkeste medvind:")
     for layer, name, contrib, sig in pos:
         L.append(f"      + {name} [{LABEL[layer]}]  ({contrib:+.1f})")
@@ -258,6 +263,7 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
     c = combine({"technical": tech_res, "fundamental": fund_res, "catalyst": cat_res},
                 gate=gate, manual=manual, days_to_earnings=cat_dict.get("days_to_earnings"))
     c["eps_growth"] = fdict.get("eps_growth")   # til indtjenings-advarsel oeverst i rapporten
+    c["price"] = price                          # til lav-pris-notits i rapporten
     out = format_final_report(ticker, c)
     if detailed:
         out += "\n\n" + tech.format_technical_report(ticker, tech_res)
