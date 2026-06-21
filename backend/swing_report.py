@@ -228,7 +228,7 @@ def run_full(ticker: str, api_key: str, period: str = "1y",
         bench = None   # SPY ikke i cachen endnu -> relativ styrke ekskluderes pænt
 
     # Fundamentaler hentes én gang; sektor-feltet genbruges til sektor-ETF'en
-    fdict = fund.fetch_fundamentals_fmp(ticker, api_key)
+    fdict = fund.fetch_fundamentals(ticker, api_key)
     fund_res = fund.compute_fundamental(fdict, price)
 
     sector_df, sector_mom = None, None
