@@ -21,6 +21,37 @@ function Slider({ label, value, onChange }: {
   );
 }
 
+// Gem rapporten som PDF via print-dialogen ("Microsoft Print to PDF" -> vaelg
+// mappe/filnavn). Printer KUN rapporten i en skjult iframe, saa resten af app-
+// layoutet ikke paavirkes. Sort tekst paa hvid; document.title bliver default-
+// filnavnet i Save-as-PDF-dialogen.
+function downloadPdf(ticker: string, report: string) {
+  if (!report) return;
+  const title = `SWING_${(ticker || "rapport").toUpperCase()}_${new Date().toISOString().slice(0, 10)}`;
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const w = iframe.contentWindow;
+  const doc = w?.document;
+  if (!w || !doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(
+    `<!DOCTYPE html><html><head><title>${title}</title>` +
+    "<style>@page{margin:14mm;}body{margin:0;}" +
+    "pre{font-family:'Consolas','Menlo','Monaco',monospace;font-size:10px;" +
+    "line-height:1.35;white-space:pre-wrap;color:#000;}</style></head>" +
+    "<body><pre></pre></body></html>"
+  );
+  doc.close();
+  const pre = doc.querySelector("pre");
+  if (pre) pre.textContent = report;   // textContent => ingen HTML-injektion fra rapporten
+  setTimeout(() => {
+    w.focus();
+    w.print();
+    setTimeout(() => { try { document.body.removeChild(iframe); } catch { /* ignore */ } }, 1000);
+  }, 150);
+}
+
 export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) => void }) {
   const [ticker, setTicker]       = useState("");
   const [useOverlay, setUseOverlay] = useState(false);
@@ -28,6 +59,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
   const [pattern, setPattern]     = useState(0);
   const [candle, setCandle]       = useState(0);
   const [report, setReport]       = useState("");
+  const [lastTicker, setLastTicker] = useState("");
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState("");
 
@@ -51,6 +83,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
       }
       const data = await resp.json();
       setReport(data.report || "");
+      setLastTicker(data.ticker || t);
       if (onSelectTicker && data.ticker) onSelectTicker(data.ticker);
     } catch (e: any) {
       setError(`Kunne ikke naa backenden (koerer den paa :8000?): ${e?.message || e}`);
@@ -83,6 +116,17 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
                      fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}
           >
             {loading ? "Analyserer..." : "Analyser"}
+          </button>
+          <button
+            onClick={() => downloadPdf(lastTicker, report)} disabled={!report || loading}
+            title="Gem rapporten som PDF (vaelg placering i print-dialogen)"
+            style={{ background: "var(--bg-elevated)",
+                     color: (!report || loading) ? "var(--text-muted)" : "var(--text-primary)",
+                     border: "1px solid var(--border-default)", borderRadius: 4,
+                     padding: "6px 12px", fontSize: 13, fontWeight: 700,
+                     cursor: (!report || loading) ? "default" : "pointer" }}
+          >
+            PDF
           </button>
         </div>
 
