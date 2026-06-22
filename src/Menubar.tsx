@@ -63,6 +63,7 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
       { id: "orders",       shortcut: "D" },
       { id: "swing",        shortcut: "W" },
       { id: "docs",         shortcut: "K" },
+      { id: "assistent",    shortcut: "H" },
     ],
   },
 ];
