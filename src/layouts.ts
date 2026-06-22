@@ -11,7 +11,8 @@ export type WindowId =
   | "orders"
   | "swing"
   | "docs"
-  | "assistent";
+  | "assistent"
+  | "swingtop10";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   scanner1:     "Small Cap Scanner",
@@ -40,6 +41,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   swing:           "Swing-rapport",
   docs:            "Dokumentation",
   assistent:       "Hjælp (Claude)",
+  swingtop10:      "Swing top-10",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────

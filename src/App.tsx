@@ -24,6 +24,7 @@ import { OrdersWindow } from "./OrdersWindow";
 import { SwingReport } from "./SwingReport";
 import { DocsWindow } from "./DocsWindow";
 import { HelpAssistant } from "./HelpAssistant";
+import { SwingTop10 } from "./SwingTop10";
 import { useTickerName } from "./useTickerName";
 
 
@@ -1242,6 +1243,7 @@ function renderWindowContent(id: WindowId, props: {
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
     case "assistent": return <HelpAssistant />;
+    case "swingtop10": return <SwingTop10 />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }
