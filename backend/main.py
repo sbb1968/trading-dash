@@ -1157,6 +1157,43 @@ async def swing_report_html(ticker: str, sr: float | None = None,
     return HTMLResponse(_swing_report_html(d))
 
 
+# ── Hjaelpe-assistent endpoint ────────────────────────────────
+# Iben spoerger om hvordan Trading Dash bruges; help_assistant kalder Anthropic
+# (Haiku 4.5) med dokumentationen som kontekst. Noegle: ANTHROPIC_API_KEY i miljoeet.
+# BaseModel + HTTPException er allerede importeret oeverst i main.py (swing bruger dem).
+
+class HelpRequest(BaseModel):
+    question: str
+    history: list[dict] = []   # [{"role": "user"|"assistant", "content": "..."}]
+
+
+@app.post("/help/ask")
+async def help_ask(req: HelpRequest):
+    q = (req.question or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Mangler spoergsmaal")
+    try:
+        import help_assistant   # LAZY: en manglende anthropic-pakke maa ALDRIG vaelte backenden
+        answer = await help_assistant.answer_question(q, req.history)
+        return {"answer": answer}
+    except Exception as e:
+        # Venlig fejl i stedet for 500 - UI'et viser den som en besked til Iben.
+        # Saertilfaelde: tom Anthropic-kreditkonto -> specifik besked til Iben (Soeren
+        # bad om denne) saa hun ved at bede Soeren toppe kontoen op.
+        emsg = str(e).lower()
+        if any(k in emsg for k in ("credit balance", "insufficient", "billing", "quota", "payment")):
+            return {
+                "answer": "Du har brugt al din Claude-hjaelpekredit. Bed Soeren om at "
+                          "saette flere penge ind paa Claude API-kontoen, saa hjaelpe-"
+                          "assistenten virker igen.",
+                "error": f"{type(e).__name__}: {e}",
+            }
+        return {
+            "answer": "Hjælpe-assistenten kunne ikke svare lige nu. Sig til Søren hvis det bliver ved.",
+            "error": f"{type(e).__name__}: {e}",
+        }
+
+
 # ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──
 # yfinance .info["website"]. Caches i hukommelsen (websites aendrer sig ikke), saa
 # kun foerste opslag pr. ticker koster et (langsomt) yfinance-kald.
