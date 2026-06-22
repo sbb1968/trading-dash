@@ -163,6 +163,29 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series,
 
 
 # ─────────────────────────────────────────────────────────────────
+# MACD — matcher ta.macd
+# ─────────────────────────────────────────────────────────────────
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26,
+         signal: int = 9) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Moving Average Convergence Divergence — matcher Pine's ta.macd.
+
+    Pine:
+        [macdLine, signalLine, hist] = ta.macd(close, fast, slow, signal)
+        macdLine   = ema(close, fast) - ema(close, slow)
+        signalLine = ema(macdLine, signal)
+        hist       = macdLine - signalLine
+
+    Alle tre EMA'er bruger ta.ema (alpha = 2/(n+1), adjust=False), saa vi
+    genbruger ema() ovenfor. Returnerer (macd_line, signal_line, hist).
+    """
+    macd_line = ema(close, fast) - ema(close, slow)
+    signal_line = ema(macd_line, signal)
+    return macd_line, signal_line, macd_line - signal_line
+
+
+# ─────────────────────────────────────────────────────────────────
 # VWAP med daglig anchor + std-bands
 # ─────────────────────────────────────────────────────────────────
 
