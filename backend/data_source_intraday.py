@@ -159,6 +159,52 @@ async def load_intraday_context(ib, symbol, *, timeframe="5 mins", duration="5 D
     return bars, spy_bars, daily
 
 
+# === Forsyningsdata (float fra TradingViews screener — IKKE IBKR) ==========
+def fetch_supply(symbol: str) -> dict:
+    """Float fra TradingViews screener (samme verificerede query-moenster som swings
+    data_source.fetch_float — kopieret, ikke importeret: forsyningsdata er day-tradings
+    eget datalag). Short interest er tomt paa TV (verificeret) -> None.
+
+    Proever NASDAQ/NYSE/AMEX (en US-aktie ligger kun paa een); foerste hit med udfyldt
+    float. Fejler ALDRIG kalderen (net-/lib-problem -> alle None).
+
+    -> {'float_shares','float_pct','short_float_pct','days_to_cover'} (None hvor ukendt).
+    """
+    out = {"float_shares": None, "float_pct": None, "short_float_pct": None, "days_to_cover": None}
+    try:
+        from tradingview_screener import Query
+    except ImportError:
+        return out
+    sym = symbol.strip().upper()
+    for exch in ("NASDAQ", "NYSE", "AMEX"):
+        try:
+            _, df = (Query()
+                     .select("float_shares_outstanding", "float_shares_percent_current")
+                     .set_tickers(f"{exch}:{sym}")
+                     .get_scanner_data())
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        row = df.iloc[0]
+        fl = row.get("float_shares_outstanding")
+        try:
+            fl = float(fl)
+        except (TypeError, ValueError):
+            continue
+        if fl != fl or fl <= 0:          # NaN/ugyldig -> proev naeste boers
+            continue
+        out["float_shares"] = fl
+        pct = row.get("float_shares_percent_current")
+        try:
+            pct = float(pct)
+            out["float_pct"] = None if pct != pct else pct
+        except (TypeError, ValueError):
+            pass
+        return out
+    return out
+
+
 # === Smoke-test ============================================================
 if __name__ == "__main__":
     import argparse
