@@ -186,6 +186,7 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
 
     # Skriv ogsaa et fast-navngivet JSON som Swing top-10-vinduet laeser (med tidsstempel).
     import json
+    import fundamental_score as _fund   # firmanavn (yfinance, cachet) til UI'et
     gen_local, gen_utc = _now_pair()
     payload = {
         "generated_local": gen_local,
@@ -196,6 +197,7 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
             {
                 "rank": rank,
                 "ticker": r["ticker"],
+                "company": _fund._company_name_yf(r["ticker"]),
                 "final": round(r["final_num"], 2),
                 "band": _band(r["final_num"]),
                 "combined": r.get("combined", ""),
