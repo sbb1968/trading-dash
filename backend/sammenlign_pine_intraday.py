@@ -97,12 +97,22 @@ def _read_ohlcv(path: str) -> pd.DataFrame:
 
 
 def _load_daily(path: str) -> pd.DataFrame:
-    """Raa daglig OHLCV -> FORRIGE dags prev_day_*, adv20, adr20 (shift 1)."""
+    """Raa daglig OHLCV -> FORRIGE dags prev_day_*, adv20, adr20 (shift 1).
+    Tid kan vaere unix-sekunder (TradingView) ELLER ISO. Vi tager session-DATOEN
+    (UTC, ikke ET — daglige bars ligger ved midnat og maa ikke skubbes en dag)."""
     df = pd.read_csv(path)
     df.columns = [c.strip().lower() for c in df.columns]
     timecol = next((c for c in df.columns if c in ("time", "date", "datetime", "timestamp")), df.columns[0])
-    dates = pd.to_datetime(df[timecol]).dt.date
-    out = pd.DataFrame(index=pd.Index(dates, name="date"))
+    col = df[timecol]
+    tnum = pd.to_numeric(col, errors="coerce")
+    if tnum.notna().all():
+        df = df.loc[tnum > 100_000_000].copy()                       # smid epoch-nul/padding (TV-quirk)
+        ts = pd.to_datetime(df[timecol], unit="s", utc=True)         # unix-sekunder
+    else:
+        ts = pd.to_datetime(col, utc=True)                            # ISO
+    df = df.assign(_d=ts.dt.date).sort_values("_d")
+    df = df[~df["_d"].duplicated(keep="last")]                        # entydigt dato-index
+    out = pd.DataFrame(index=pd.Index(df["_d"].to_numpy(), name="date"))
     out["prev_day_close"] = df["close"].shift(1).to_numpy()
     out["prev_day_high"] = df["high"].shift(1).to_numpy()
     out["prev_day_low"] = df["low"].shift(1).to_numpy()
@@ -130,11 +140,30 @@ def main():
     ap.add_argument("--orb", type=int, default=5, choices=[5, 15], help="opening-range minutter")
     ap.add_argument("--tol", type=float, default=TOL, help="tolerance pr. bar (score-point)")
     ap.add_argument("--warmup", type=int, default=None, help="antal bars at droppe (default max(rsi,atr,26))")
+    ap.add_argument("--window", choices=["rth", "eth", "all"], default="rth",
+                    help="sammenlignings-vindue: rth=09:30-16:00 (default, det vaerktoejet bruges i), "
+                         "eth=04:00-20:00, all=alt. Beregningen koerer paa ALLE bars uanset (akkumulatorer); "
+                         "kun selve sammenligningen begraenses.")
+    ap.add_argument("--keep-first-day", action="store_true",
+                    help="behold den foerste session-dag i sammenligningen (default: drop den, kolde akkumulatorer/VWAP-anker)")
     args = ap.parse_args()
     tol = args.tol
 
     pine_raw = _read_ohlcv(args.pine)
     bars = pine_raw[["open", "high", "low", "close", "volume"]].copy()
+
+    # ETH-sanitetstjek: uden premarket-bars nulstiller dag-akkumulatorerne ikke pr. dag
+    # (rth_start kan ikke se dagsskiftet naar RTH-bars er sammenhaengende paa tvaers af dage).
+    _mod = bars.index.hour * 60 + bars.index.minute
+    _pm_count = int(((_mod >= 240) & (_mod < 570)).sum())
+    _ndays = len(set(bars.index.date))
+    if _pm_count == 0 and _ndays > 1:
+        print("=" * 78)
+        print("! ADVARSEL: 0 premarket-bars (04:00-09:30 ET) -> Extended Hours var slaaet FRA.")
+        print("  Day-akkumulatorerne (RVOL, gap, ORB, HOD, ADR, RS) nulstiller IKKE pr. dag,")
+        print("  saa group_vol/open/vola/rs + DAG-SCORE vil afvige. group_vwap/mom/trig er upaavirkede.")
+        print("  FIX: eksportér igen fra TradingView med Extended Trading Hours = TIL.")
+        print("=" * 78)
 
     spy_bars = None
     if args.spy:
@@ -156,10 +185,21 @@ def main():
     warmup = args.warmup if args.warmup is not None else max(params.rsi_len, params.atr_len, 26)
     series = series.iloc[warmup:]
 
+    # Begraens SAMMENLIGNINGEN (ikke beregningen) til handelsvinduet + drop kold foerste dag.
+    # Premarket-akkumulatorer kraever Pine's ubegraensede historik (kan ikke replikeres fra en
+    # afkortet eksport), og VWAP-ankeret er tvetydigt i after-hours -> sammenlign i RTH. Spec §8.
+    win_lo, win_hi = {"rth": (570, 960), "eth": (240, 1200), "all": (0, 1440)}[args.window]
+    _wmod = series.index.hour * 60 + series.index.minute
+    series = series[(_wmod >= win_lo) & (_wmod < win_hi)]
+    if not args.keep_first_day and len(series):
+        _first = min(series.index.date)
+        series = series[series.index.date != _first]
+
     print("=" * 78)
     print(" Intradag-lag vs Pine 'Day trading konfluens v1'")
     print(f" pine={args.pine}  spy={args.spy or '-'}  daily={args.daily or '-'}  TF-orb={args.orb}m")
-    print(f" warmup droppet: {warmup} bars   TOL={tol}  median-TOL<{MEDIAN_TOL}")
+    print(f" warmup droppet: {warmup} bars   vindue={args.window}   drop-foerste-dag={not args.keep_first_day}")
+    print(f" sammenlignings-bars: {len(series)}   TOL={tol}  median-TOL<{MEDIAN_TOL}")
     print("=" * 78)
     print(f"{'Serie':<16}{'bars':>6}{'max-afv':>10}{'median':>10}{'>TOL':>7}  status")
     print("-" * 78)

@@ -223,6 +223,8 @@ def _build_context(bars: pd.DataFrame, spy_bars: pd.DataFrame, daily: pd.DataFra
 
     # ── Dags-aggregater fra daily (FORRIGE dags taerter — slaaet op pr. bar) ─
     bar_dates = pd.Series(idx.date, index=idx)
+    if daily is not None and not daily.index.is_unique:    # forsvar: .map kraever unikt index
+        daily = daily[~daily.index.duplicated(keep="last")]
     for col in ("prev_day_close", "prev_day_high", "prev_day_low", "adv20", "adr20"):
         if daily is not None and col in daily.columns:
             ctx[col] = bar_dates.map(daily[col]).astype(float)
