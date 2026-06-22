@@ -159,6 +159,27 @@ async def load_intraday_context(ib, symbol, *, timeframe="5 mins", duration="5 D
     return bars, spy_bars, daily
 
 
+# === Live bid/ask-spaend (IBKR, til gaten) =================================
+async def fetch_spread(ib, symbol: str) -> float | None:
+    """Live bid/ask-spaend i DECIMAL ((ask-bid)/mid). None ved enhver fejl/manglende
+    quote -> gaten degraderer til adv+pris ('intet braekker hvis spaendet mangler').
+    Bruges af intradag_report's gate. Begge TWS-kald har timeout (haeng -> None)."""
+    try:
+        contract = Stock(symbol, "SMART", "USD")
+        await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=10.0)
+        tickers = await asyncio.wait_for(ib.reqTickersAsync(contract), timeout=10.0)
+        if not tickers:
+            return None
+        tkr = tickers[0]
+        bid, ask = tkr.bid, tkr.ask
+        if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
+            return None
+        mid = (bid + ask) / 2.0
+        return (ask - bid) / mid if mid > 0 else None
+    except Exception:
+        return None
+
+
 # === Forsyningsdata (float fra TradingViews screener — IKKE IBKR) ==========
 def fetch_supply(symbol: str) -> dict:
     """Float fra TradingViews screener (samme verificerede query-moenster som swings
