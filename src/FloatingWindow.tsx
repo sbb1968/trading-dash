@@ -8,6 +8,7 @@ interface WindowState {
   minimized: boolean;
   maximized: boolean;
   closed: boolean;
+  zIndex?: number;
 }
 
 interface Props {
@@ -29,9 +30,13 @@ function getNextZ() { return ++zCounter; }
 
 export function FloatingWindow({ id, title, children, defaultState, onClose, tradingViewTicker, onStateChange, windowType }: Props) {
   const [state, setState]             = useState<WindowState>(defaultState);
-  const [zIndex, setZIndex]           = useState<number>(() => getNextZ());
   const [preMaxState, setPreMaxState] = useState<WindowState | null>(null);
   const isUserDriving                 = useRef(false);
+
+  // Sikr at nye fokus (getNextZ) altid lander OVER de gemte z-vaerdier ved load.
+  useEffect(() => {
+    if (defaultState.zIndex && defaultState.zIndex > zCounter) zCounter = defaultState.zIndex;
+  }, []);
 
   // Synkroniser state når defaultState ændres udefra (fx auto-arrange)
   useEffect(() => {
@@ -50,7 +55,7 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
     onStateChange?.(state);
   }, [state, id]);
 
-  function bringToFront() { setZIndex(getNextZ()); }
+  function bringToFront() { setState(prev => ({ ...prev, zIndex: getNextZ() })); }
 
   // ── Drag ──────────────────────────────────────────────────
   function onTitleMouseDown(e: React.MouseEvent) {
@@ -143,7 +148,7 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
   const typeClass = windowType ? `win-type-${windowType}` : "";
 
   const style: React.CSSProperties = {
-    zIndex,
+    zIndex: state.zIndex ?? 100,
     ...(state.maximized
       ? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight - 34 }
       : { left: state.x, top: state.y, width: state.width, height: state.minimized ? "auto" : state.height }

@@ -10,6 +10,7 @@ interface Props {
   onViewChange: (view: ActiveView) => void;
   layouts: Layout[];
   activeLayoutId: string;
+  layoutDirty: boolean;   // workspace afviger fra det aktive layout (ugemt) -> ingen ✓
   onLoadLayout: (id: string) => void;
   onSaveLayout: (name: string) => void;
   onDeleteLayout: (id: string) => void;
@@ -294,14 +295,13 @@ function ThemeSection({ theme, setTheme }: { theme: string; setTheme: (t: string
 // ── Menubar ───────────────────────────────────────────────────
 export function Menubar({
   activeView, onViewChange,
-  layouts, activeLayoutId, onLoadLayout, onSaveLayout, onDeleteLayout,
+  layouts, activeLayoutId, layoutDirty, onLoadLayout, onSaveLayout, onDeleteLayout,
   onAutoArrange,
   onAddWindow, activeWindowIds
 }: Props) {
 
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [newLayoutName, setNewLayoutName]   = useState("");
-  const activeLayout = layouts.find(l => l.id === activeLayoutId);
   const { theme, setTheme } = useTheme();
 
   function handleSave() {
@@ -389,10 +389,10 @@ export function Menubar({
         {layouts.map(layout => (
           <div key={layout.id} className="menu-layout-row">
             <div
-              className={`menu-dropdown-item menu-layout-name ${layout.id === activeLayoutId ? "menu-dropdown-item-active" : ""}`}
+              className={`menu-dropdown-item menu-layout-name ${layout.id === activeLayoutId && !layoutDirty ? "menu-dropdown-item-active" : ""}`}
               onClick={() => onLoadLayout(layout.id)}
             >
-              {layout.id === activeLayoutId ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
+              {layout.id === activeLayoutId && !layoutDirty ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
               {layout.name}
             </div>
             {!layout.isDefault && (
@@ -406,7 +406,7 @@ export function Menubar({
         ))}
 
         <div className="menu-dropdown-item" onClick={() => onSaveLayout("__overwrite__" + activeLayoutId)}>
-          💾 Opdater "{activeLayout?.name}"
+          💾 Opdater aktuelt layout
         </div>
         {!showSaveDialog && (
           <div className="menu-dropdown-item" onClick={e => { e.stopPropagation(); setShowSaveDialog(true); }}>

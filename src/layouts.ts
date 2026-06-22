@@ -52,6 +52,7 @@ export interface WindowConfig {
   minimized:  boolean;
   maximized:  boolean;
   closed:     boolean;
+  zIndex?:    number;   // stabling (for/bag) — bevares paa tvaers af sessioner
   poppedOut?: boolean;
   popX?:      number;
   popY?:      number;
@@ -169,30 +170,89 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
 // ── Gem / load layouts ────────────────────────────────────────
 const STORAGE_KEY = "td_layouts";
 
+// Standard-layouts er PRISTINE skabeloner (aldrig live-redigeret). Det levende
+// arrangement bor i "workspace" (se nedenfor). loadLayouts returnerer derfor rene
+// defaults + brugerens egne gemte (custom_*) layouts. Det fjerner den gamle
+// forurening hvor aabnede/trukne vinduer sneg sig ind i fx "Ibens ORB".
 export function loadLayouts(W: number, H: number): Layout[] {
+  const defaults = makeDefaultLayouts(W, H);
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return makeDefaultLayouts(W, H);
+    if (!saved) return defaults;
     const parsed: Layout[] = JSON.parse(saved);
-    const defaults   = makeDefaultLayouts(W, H);
     const defaultIds = defaults.map(d => d.id);
-    // Bevar screen2Windows fra gemte layouts
-    const mergedDefaults = defaults.map(def => {
-      const saved = parsed.find(p => p.id === def.id);
-      if (!saved) return def;
-      // Bevar gemte ændringer (vinduer + screen2) — men hvis arrayet er tomt
-      // efter en buggy save, så fald tilbage til defaults
+    // Bevar EKSPLICIT gemte aendringer af defaults ("Opdater aktuelt layout").
+    // Live-aendringer forurener dem ikke laengere — de gaar i workspace.
+    const merged = defaults.map(def => {
+      const s = parsed.find(p => p.id === def.id);
+      if (!s) return def;
       return {
         ...def,
-        windows: saved.windows && saved.windows.length > 0 ? saved.windows : def.windows,
-        screen2Windows: saved.screen2Windows ?? [],
+        windows: s.windows && s.windows.length > 0 ? s.windows : def.windows,
+        screen2Windows: s.screen2Windows ?? [],
       };
     });
     const customs = parsed.filter(l => !defaultIds.includes(l.id));
-    return [...mergedDefaults, ...customs];
+    return [...merged, ...customs];
   } catch {
-    return makeDefaultLayouts(W, H);
+    return defaults;
   }
+}
+
+// Engangs-oprydning: den GAMLE bug skrev live-aendringer ind i default-layouts.
+// Nulstil default-layouts til rene skabeloner EEN gang (behold custom-layouts).
+// Fremover forurenes defaults ikke (live-aendringer bor i workspace), og eksplicit
+// "Opdater aktuelt layout" gemmes normalt via merge ovenfor.
+export function migrateLayoutsOnce(W: number, H: number) {
+  if (localStorage.getItem("td_layouts_clean_v2")) return;
+  try {
+    const defaults = makeDefaultLayouts(W, H);
+    const defaultIds = defaults.map(d => d.id);
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const customs = saved
+      ? (JSON.parse(saved) as Layout[]).filter(l => !defaultIds.includes(l.id))
+      : [];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...defaults, ...customs]));
+  } catch { /* ignore */ }
+  localStorage.setItem("td_layouts_clean_v2", "1");
+}
+
+// ── Workspace (den levende vindues-opsaetning = "sidste session") ─────────────
+// Persisteres loebende og genskabes ved opstart. Foerste gang nogensinde (ingen
+// gemt workspace) startes med "Ibens ORB". Navngivne layouts ANVENDES ind i
+// workspace; live-aendringer roerer kun workspace, aldrig de navngivne layouts.
+const WORKSPACE_KEY = "td_workspace";
+const MIN_W = 200, MIN_H = 120;
+
+// Klamp vinduer ind paa skaermen (fx ved skift til mindre oploesning), saa
+// titellinjen altid kan rammes.
+export function clampWindows(windows: WindowConfig[], W: number, H: number): WindowConfig[] {
+  const maxX = Math.max(0, W - 80);
+  const maxY = Math.max(0, H - 60);
+  return windows.map(w => ({
+    ...w,
+    width:  Math.min(w.width,  Math.max(MIN_W, W)),
+    height: Math.min(w.height, Math.max(MIN_H, H)),
+    x: Math.min(Math.max(0, w.x), maxX),
+    y: Math.min(Math.max(0, w.y), maxY),
+  }));
+}
+
+export function loadWorkspace(W: number, H: number): WindowConfig[] {
+  try {
+    const saved = localStorage.getItem(WORKSPACE_KEY);
+    if (saved) {
+      const parsed: WindowConfig[] = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return clampWindows(parsed, W, H);
+    }
+  } catch { /* falder igennem til default */ }
+  // Foerste gang / korrupt -> start med Ibens ORB.
+  const orb = makeDefaultLayouts(W, H).find(l => l.id === "ibens-orb");
+  return orb ? orb.windows.map(w => ({ ...w })) : [];
+}
+
+export function saveWorkspace(windows: WindowConfig[]) {
+  localStorage.setItem(WORKSPACE_KEY, JSON.stringify(windows));
 }
 
 export function saveLayouts(layouts: Layout[]) {

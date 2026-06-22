@@ -11,6 +11,7 @@ import {
   Layout, WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId, setActiveLayoutId,
   saveCurrentAsLayout, deleteLayout,
+  loadWorkspace, saveWorkspace, clampWindows, migrateLayoutsOnce,
   WATCHLIST_COLUMNS, LEVEL2_COLUMNS, TIMESALES_COLUMNS,
   DEFAULT_WATCHLIST_COLUMNS, DEFAULT_LEVEL2_COLUMNS, DEFAULT_TIMESALES_COLUMNS,
 } from "./layouts";
@@ -91,6 +92,17 @@ function getWindowType(id: WindowId): string {
   if (id === "marketoverview") return "marketoverview";
   if (id === "account") return "account";
   return "scanner";
+}
+
+// Workspace "dirty" = afviger fra det layout den er baseret paa (saa intet layout
+// vises som aktivt). Sammenligner geometri + aaben/lukket (IKKE z-orden/fokus).
+function sameArrangement(a: WindowConfig[], b: WindowConfig[]): boolean {
+  const sig = (ws: WindowConfig[]) => JSON.stringify(
+    ws.map(w => ({ id: w.id, x: w.x, y: w.y, width: w.width, height: w.height,
+                   minimized: w.minimized, maximized: w.maximized, closed: w.closed }))
+      .sort((p, q) => p.id.localeCompare(q.id))
+  );
+  return sig(a) === sig(b);
 }
 
 // ── Clock ─────────────────────────────────────────────────────
@@ -1267,11 +1279,19 @@ function App() {
   const [activeView, setActiveView]         = useState<ActiveView>("scanners");
   const [selectedTicker, setSelectedTicker] = useState<string>(() => localStorage.getItem("selectedTicker") || "NVDA");
   const [watchlist, setWatchlist]           = useState<string[]>(() => { const s = localStorage.getItem("watchlist"); return s ? JSON.parse(s) : ["NVDA","TSLA","AAPL"]; });
-  const [layouts, setLayouts]               = useState<Layout[]>(() => loadLayouts(window.innerWidth, window.innerHeight));
+  const [layouts, setLayouts]               = useState<Layout[]>(() => {
+    migrateLayoutsOnce(window.innerWidth, window.innerHeight);  // engangs-oprydning af gamle forurenede defaults
+    return loadLayouts(window.innerWidth, window.innerHeight);
+  });
   const [activeLayoutId, setActiveLayoutIdState] = useState<string>(() => getActiveLayoutId());
+  // Den levende vindues-opsaetning (= sidste session). Genskabes ved opstart;
+  // foerste gang -> Ibens ORB. Live-aendringer roerer KUN workspace, ikke layouts.
+  const [workspace, setWorkspace]           = useState<WindowConfig[]>(() => loadWorkspace(window.innerWidth, window.innerHeight));
 
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
   useEffect(() => { localStorage.setItem("watchlist",      JSON.stringify(watchlist)); }, [watchlist]);
+  // Gem den levende opsaetning loebende -> ingen "gem ved luk" noedvendig.
+  useEffect(() => { saveWorkspace(workspace); }, [workspace]);
 
   // Indlæs gemte fontstørrelser ved opstart
   useEffect(() => { applyAllFonts(); }, []);
@@ -1282,7 +1302,10 @@ function App() {
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
   } = useMarketData();
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
-  const activeLayout = layouts.find(l => l.id === activeLayoutId);
+  // Vis kun et layout som aktivt (✓) hvis workspace matcher det layout den er baseret
+  // paa. Er opsaetningen aendret (ugemt), er der INTET aktivt layout.
+  const baseLayout = layouts.find(l => l.id === activeLayoutId);
+  const layoutDirty = !baseLayout || !sameArrangement(workspace, baseLayout.windows);
 
   // ── Bekræftelses-dialog state for manuelle IBKR-ordrer ──────
   const [orderConfirm, setOrderConfirm] = useState<{
@@ -1290,21 +1313,30 @@ function App() {
   } | null>(null); 
   const selectedTickerName = useTickerName(selectedTicker);
   
-  function handleLoadLayout(id: string) { setActiveLayoutId(id); setActiveLayoutIdState(id); }
+  // Anvend et navngivet layout = kopiér dets vinduer ind i workspace (rene kopier,
+  // klampet ind paa skaermen). De navngivne layouts (skabeloner) roeres ikke.
+  function handleLoadLayout(id: string) {
+    const layout = layouts.find(l => l.id === id);
+    if (layout) {
+      setWorkspace(clampWindows(layout.windows.map(w => ({ ...w })), window.innerWidth, window.innerHeight));
+    }
+    setActiveLayoutId(id); setActiveLayoutIdState(id);
+  }
 
   function handleSaveLayout(name: string) {
     if (name.startsWith("__overwrite__")) {
       const id = name.replace("__overwrite__", "");
-      const updated = layouts.map(l => l.id !== id ? l : { ...l, windows: activeLayout?.windows || l.windows });
+      // Snapshot den aktuelle workspace ind i det navngivne layout.
+      const updated = layouts.map(l => l.id !== id ? l : { ...l, windows: workspace.map(w => ({ ...w })) });
       setLayouts(updated); saveLayouts(updated);
       const layoutName = layouts.find(l => l.id === id)?.name || "Layout";
       setLayoutToast(`✓ "${layoutName}" opdateret`);
       setTimeout(() => setLayoutToast(""), 2000);
       return;
     }
-    const newLayout = saveCurrentAsLayout(name, activeLayout?.windows || [], window.innerWidth, window.innerHeight);
+    const newLayout = saveCurrentAsLayout(name, workspace.map(w => ({ ...w })), window.innerWidth, window.innerHeight);
     setLayouts(loadLayouts(window.innerWidth, window.innerHeight));
-    handleLoadLayout(newLayout.id);
+    setActiveLayoutId(newLayout.id); setActiveLayoutIdState(newLayout.id);
     setLayoutToast(`✓ "${name}" gemt`);
     setTimeout(() => setLayoutToast(""), 2000);
   }
@@ -1312,43 +1344,38 @@ function App() {
   function handleDeleteLayout(id: string) {
     const updated = deleteLayout(id, window.innerWidth, window.innerHeight);
     setLayouts(updated);
-    if (activeLayoutId === id) handleLoadLayout(updated[0]?.id || "ibens-orb");
+    // Roer IKKE workspace ved sletning — flyt kun "aktiv"-markeringen hvis det
+    // slettede layout var markeret. Brugerens aabne vinduer forbliver praecis som de er.
+    if (activeLayoutId === id) { setActiveLayoutId("ibens-orb"); setActiveLayoutIdState("ibens-orb"); }
   }
 
   function autoArrange() {
-    if (!activeLayout) return;
     const gap = 6, topH = 62;
     const w = window.innerWidth, h = window.innerHeight - topH;
-    const open = activeLayout.windows.filter(win => !win.closed);
+    const open = workspace.filter(win => !win.closed);
     if (open.length === 0) return;
     const cols = Math.ceil(Math.sqrt(open.length));
     const rows = Math.ceil(open.length / cols);
     const winW = Math.floor((w - gap * (cols + 1)) / cols);
     const winH = Math.floor((h - gap * (rows + 1)) / rows);
-    const updated = layouts.map(l => {
-      if (l.id !== activeLayoutId) return l;
-      let idx = 0;
-      return { ...l, windows: l.windows.map(win => {
-        if (win.closed) return win;
-        const col = idx % cols, row = Math.floor(idx / cols); idx++;
-        return { ...win, x: gap + col*(winW+gap), y: gap + row*(winH+gap), width: winW, height: winH, minimized: false, maximized: false };
-      })};
-    });
-    setLayouts(updated); saveLayouts(updated);
+    let idx = 0;
+    setWorkspace(workspace.map(win => {
+      if (win.closed) return win;
+      const col = idx % cols, row = Math.floor(idx / cols); idx++;
+      return { ...win, x: gap + col*(winW+gap), y: gap + row*(winH+gap), width: winW, height: winH, minimized: false, maximized: false };
+    }));
   }
 
   function handleAddWindow(id: WindowId) {
     const w = window.innerWidth - 200, h = window.innerHeight - 100;
-    const existing = activeLayout?.windows.find(win => win.id === id);
+    const existing = workspace.find(win => win.id === id);
     if (existing) { updateWindowState(id, { closed: false, minimized: false }); return; }
     const newWindow: WindowConfig = { id, x: Math.floor(w/4), y: Math.floor(h/4), width: Math.floor(w/2), height: Math.floor(h/2), minimized: false, maximized: false, closed: false };
-    const updated = layouts.map(l => l.id !== activeLayoutId ? l : { ...l, windows: [...l.windows, newWindow] });
-    setLayouts(updated); saveLayouts(updated);
+    setWorkspace(ws => [...ws, newWindow]);
   }
 
   function updateWindowState(id: WindowId, state: Partial<WindowConfig>) {
-    const updated = layouts.map(l => l.id !== activeLayoutId ? l : { ...l, windows: l.windows.map(w => w.id === id ? { ...w, ...state } : w) });
-    setLayouts(updated); saveLayouts(updated);
+    setWorkspace(ws => ws.map(w => w.id === id ? { ...w, ...state } : w));
   }
 
   const windowProps = {
@@ -1396,11 +1423,11 @@ function App() {
       )}
       <Menubar
         activeView={activeView} onViewChange={setActiveView}
-        layouts={layouts} activeLayoutId={activeLayoutId}
+        layouts={layouts} activeLayoutId={activeLayoutId} layoutDirty={layoutDirty}
         onLoadLayout={handleLoadLayout} onSaveLayout={handleSaveLayout} onDeleteLayout={handleDeleteLayout}
         onAutoArrange={autoArrange}
         onAddWindow={handleAddWindow}
-        activeWindowIds={activeLayout?.windows.filter(w => !w.closed).map(w => w.id as WindowId) || []}
+        activeWindowIds={workspace.filter(w => !w.closed).map(w => w.id as WindowId)}
       />
 
       <div className="workspace">
@@ -1409,7 +1436,7 @@ function App() {
             <Konfigurator onClose={() => setActiveView("scanners")} />
           ) : (
             <>
-              {activeLayout?.windows.filter(w => !w.closed).map(win => (
+              {workspace.filter(w => !w.closed).map(win => (
                 <FloatingWindow
                   key={win.id} id={win.id}
                   title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray, selectedTickerName)}
