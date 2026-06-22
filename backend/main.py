@@ -1194,6 +1194,78 @@ async def help_ask(req: HelpRequest):
         }
 
 
+# ── Swing top-10 (vindue) ─────────────────────────────────────
+# Vinduet viser seneste top-10 + tidsstempel og kan starte en frisk koersel
+# (IBKR-kilde, ~et par timer) som baggrundsproces. swing_top10.py skriver
+# swing_top10_latest.json (resultatet) og en laasefil mens den koerer.
+# NB: os/sys er IKKE modul-importeret oeverst i main.py (kun lokalt) -> importer her.
+import os
+import sys
+import json as _json
+import subprocess as _subprocess
+import datetime as _datetime
+
+_SWING_DIR = os.path.dirname(os.path.abspath(__file__))   # backend/
+_SWING_LATEST_PATH = os.path.join(_SWING_DIR, "swing_top10_latest.json")
+_SWING_LOCK_PATH = os.path.join(_SWING_DIR, "swing_top10_running.lock")
+_SWING_RUNLOG_PATH = os.path.join(_SWING_DIR, "swing_top10_run.log")
+_SWING_STALE_SEC = 4 * 3600   # laas aeldre end dette = staale (proces doede) -> ikke koerende
+
+
+def _swing_running():
+    """(running: bool, started_utc: str|None). Laasefilen er kilden, med staale-backstop."""
+    if not os.path.exists(_SWING_LOCK_PATH):
+        return False, None
+    try:
+        with open(_SWING_LOCK_PATH, encoding="utf-8") as f:
+            lock = _json.load(f)
+        started = lock.get("started_utc")
+        age = (_datetime.datetime.now(_datetime.timezone.utc)
+               - _datetime.datetime.fromisoformat(started)).total_seconds()
+        return (age <= _SWING_STALE_SEC), started
+    except Exception:
+        return False, None
+
+
+@app.get("/swing/top10")
+async def swing_top10_get():
+    """Seneste top-10 (fra swing_top10_latest.json) + om en koersel er i gang."""
+    data = {"generated_local": None, "generated_utc": None, "source": None, "count": 0, "rows": []}
+    if os.path.exists(_SWING_LATEST_PATH):
+        try:
+            with open(_SWING_LATEST_PATH, encoding="utf-8") as f:
+                data = _json.load(f)
+        except Exception:
+            pass
+    running, started = _swing_running()
+    data["running"] = running
+    data["started_utc"] = started
+    return data
+
+
+@app.post("/swing/top10/run")
+async def swing_top10_run():
+    """Start en frisk top-10-koersel (IBKR) som baggrundsproces. Afvis hvis en allerede koerer."""
+    running, started = _swing_running()
+    if running:
+        return {"started": False, "already_running": True, "started_utc": started}
+    # Ryd evt. staale laas foer ny start
+    if os.path.exists(_SWING_LOCK_PATH):
+        try:
+            os.remove(_SWING_LOCK_PATH)
+        except OSError:
+            pass
+    try:
+        logf = open(_SWING_RUNLOG_PATH, "a", encoding="utf-8")
+        _subprocess.Popen(
+            [sys.executable, "swing_top10.py", "--source", "ibkr"],
+            cwd=_SWING_DIR, stdout=logf, stderr=_subprocess.STDOUT,
+        )
+    except Exception as e:
+        return {"started": False, "error": f"{type(e).__name__}: {e}"}
+    return {"started": True}
+
+
 # ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──
 # yfinance .info["website"]. Caches i hukommelsen (websites aendrer sig ikke), saa
 # kun foerste opslag pr. ticker koster et (langsomt) yfinance-kald.

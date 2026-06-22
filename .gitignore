@@ -139,3 +139,9 @@ pit_*.csv
 union_distinct.csv
 Claude screener*.csv
 reconstructed_universe_*.json
+
+# Swing top-10 runtime-output (genereres pr. koersel; ikke kildekode)
+backend/swing_scores_*.csv
+backend/swing_top10_*.csv
+backend/swing_top10_latest.json
+backend/swing_top10_running.lock
