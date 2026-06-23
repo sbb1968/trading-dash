@@ -4,6 +4,7 @@ scheduler.py
 Autonom dagsplan for algoserveren.
 
 På hver handelsdag (kun algoserveren auto-starter strategier):
+  01:50 ET  →  Start Europa-reversion (10 min før EU-session 02:00-08:00 ET = 08:00-14:00 DK)
   09:20 ET  →  Start Konfluens 2 (10 min før US-åbning — tid til pre-flight + scan)
   00:05 ET  →  Reset RiskManager daglige tællere
 
@@ -32,6 +33,15 @@ DK = pytz.timezone("Europe/Copenhagen")   # dansk tid — til dual-visning (ET /
 # loop-tick indtil K2_RETRY_UNTIL_ET — så en Gateway der kommer lidt sent op stadig fanges.
 K2_START_ET       = dtime(9, 20)   # 15:20 dansk
 K2_RETRY_UNTIL_ET = dtime(9, 40)   # giv op efter dette (for sent inde i sessionen)
+
+# Auto-start af Europa-reversion (KUN algoserveren — se _job_start_europa_reversion).
+# Strategien handler i EU-sessionen 02:00-08:00 ET (= 08:00-14:00 DK); vi starter 10 min
+# før, så IBKR-forbindelse + warmup er klar før sessionen. Samme genforsøgs-mønster som K2:
+# er TWS/Gateway nede ved start, prøver jobbet igen hvert loop-tick indtil EUREV_RETRY_UNTIL_ET
+# — sat sent (men før tvangsluk 07:55 ET) så en Gateway der kommer sent op stadig fanges og
+# strategien kan handle resten af sessionen.
+EUREV_START_ET       = dtime(1, 50)   # 07:50 dansk
+EUREV_RETRY_UNTIL_ET = dtime(7, 30)   # giv op efter dette (for sent — session lukker 08:00 ET)
 
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
@@ -174,6 +184,8 @@ class AlgoScheduler:
         # algoserveren (instance-guard i _job_start_konfluens2); workstation starter
         # manuelt. reset_daily (midnat ET) er generisk og beholdes.
         self._jobs = [
+            ScheduledJob("start_europa_reversion", EUREV_START_ET, self._job_start_europa_reversion,
+                         window_end_et=EUREV_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("start_konfluens2", K2_START_ET, self._job_start_konfluens2,
                          window_end_et=K2_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
@@ -189,7 +201,9 @@ class AlgoScheduler:
         self._running = True
         self._task    = asyncio.create_task(self._loop())
 
-        auto = (f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')} ET (genforsøg til "
+        auto = (f"Europa-reversion @ {EUREV_START_ET.strftime('%H:%M')} ET (genforsøg til "
+                f"{EUREV_RETRY_UNTIL_ET.strftime('%H:%M')}), "
+                f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')} ET (genforsøg til "
                 f"{K2_RETRY_UNTIL_ET.strftime('%H:%M')})"
                 if self._instance_role == "algoserver" else "ingen (manuel start)")
         logger.info(
@@ -217,16 +231,20 @@ class AlgoScheduler:
             await asyncio.sleep(20)   # tjek hvert 20. sek
 
     def _next_scheduled_start(self) -> datetime:
+        """Tidligste kommende auto-start på tværs af auto-start-jobs (Europa-reversion 01:50 ET
+        + Konfluens 2 09:20 ET). I dag hvis et af tidspunkterne endnu ikke er passeret og det er
+        en handelsdag; ellers første tidspunkt på næste handelsdag."""
         now = now_et()
-        start_time = K2_START_ET   # Konfluens 2 auto-start (15:20 DK)
-        today = now.date()
-        today_start = ET.localize(datetime.combine(today, start_time))
+        start_times = sorted([EUREV_START_ET, K2_START_ET])   # 01:50, 09:20 ET
 
-        if is_trading_day(today) and now < today_start:
-            return today_start
+        if is_trading_day(now.date()):
+            for st in start_times:
+                cand = ET.localize(datetime.combine(now.date(), st))
+                if now < cand:
+                    return cand   # næste auto-start senere i dag
 
-        next_day = next_trading_day(today)
-        return ET.localize(datetime.combine(next_day, start_time))
+        next_day = next_trading_day(now.date())
+        return ET.localize(datetime.combine(next_day, start_times[0]))
 
     # ─────────────────────────────────────────────────────────
     # Jobs
@@ -254,6 +272,30 @@ class AlgoScheduler:
             return False  # genforsøg inden for vinduet
         logger.info("[Scheduler] Auto-starter Konfluens 2")
         await self._start_algo("Konfluens 2")
+        return True
+
+    async def _job_start_europa_reversion(self) -> bool:
+        """Auto-start Europa-reversion ~10 min før EU-sessionen (02:00 ET). KUN på algoserveren.
+
+        Spejler _job_start_konfluens2: returnerer True når jobbet er "færdigt for i dag"
+        (startet, eller bevidst sprunget over på workstation), False når det bør genforsøges
+        (TWS offline). Workstation springer over — ellers ville BÅDE algoserver og workstation
+        køre strategien på samme futures → parallel-handler på to konti. start_strategy har egne
+        guards (kører-allerede/limits), så et genforsøgs-kald er idempotent.
+        """
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_europa_reversion sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); startes manuelt på workstation"
+            )
+            return True   # bevidst skip — markér færdig, ingen genforsøg/spam
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte Europa-reversion — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {EUREV_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info("[Scheduler] Auto-starter Europa-reversion")
+        await self._start_algo("Europa-reversion")
         return True
 
     async def _job_reset_daily(self):
