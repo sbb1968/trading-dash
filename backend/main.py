@@ -1595,6 +1595,26 @@ async def intradag_top10_run():
     return {"started": True, "already_running": False, "started_utc": _intradag_top10["started_utc"]}
 
 
+# ── Live halt-scanner (movers-univers, halted-overvaagning paa delt ib) ──────
+# In-process baggrunds-task (halt_scanner) der laeser IBKR's halted-felt pr. cyklus.
+# /halt/list ensure'er at tasken koerer (start-on-demand) + returnerer tilstanden.
+import halt_scanner
+
+
+@app.get("/halt/list")
+async def halt_list():
+    """Aktuelt haltede + netop genaabnede navne fra movers-universet."""
+    conn = strategy_manager.get_ibkr()
+    if conn is not None and conn.connected:
+        halt_scanner.ensure_running(conn.ib)   # delt ib — ALDRIG en egen klient
+    return {
+        "halted":        halt_scanner.snapshot(),
+        "asof":          halt_scanner.asof(),
+        "running":       halt_scanner.is_running(),
+        "universe_size": halt_scanner.universe_size(),
+    }
+
+
 # ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──
 # yfinance .info["website"]. Caches i hukommelsen (websites aendrer sig ikke), saa
 # kun foerste opslag pr. ticker koster et (langsomt) yfinance-kald.
