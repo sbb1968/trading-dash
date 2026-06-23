@@ -26,7 +26,7 @@ from typing import Optional
 import pandas as pd
 
 from technical_intraday import (
-    compute_technical_intraday, format_technical_report, ParamResult, _band,
+    compute_technical_intraday, format_technical_report, chart_data_intraday, ParamResult, _band,
 )
 from supply_score import compute_supply, format_supply_report
 from catalyst_intraday import compute_catalyst_intraday, _build_catalyst_data, format_catalyst_report
@@ -174,7 +174,8 @@ async def compute_intradag_report(
         chart_pattern: Optional[float] = None,
         candlestick: Optional[float] = None,
         spy_bars=None,          # NY: hvis givet, spring SPY-fetch over (scanneren deler SPY)
-        supply_data=None) -> dict:   # NY: hvis givet, spring fetch_supply over (scan har TV-float)
+        supply_data=None,       # NY: hvis givet, spring fetch_supply over (scan har TV-float)
+        with_chart: bool = True) -> dict:   # NY: scanneren saetter False (sparer chart-bygning)
 
     # 1. Data (spy_bars/supply_data kan vaere genbrugt af scanneren -> spring fetch over)
     bars = await fetch_intraday_bars(ib, symbol, timeframe=timeframe, duration=duration, end=end)
@@ -196,6 +197,7 @@ async def compute_intradag_report(
     headlines = await fetch_catalyst_news(ib, symbol)    # Finnhub + IBKR DJ, flettet (robust)
     cat_res = compute_catalyst_intraday(_build_catalyst_data(headlines, halted_raw))
     layers = {"technical": tech_res, "supply": supply_res, "catalyst": cat_res}
+    chart = chart_data_intraday(bars, spy_bars, daily) if with_chart else None   # side-output til UI
 
     # 3. Gate-input. Halt zeroer handelbarhed (kan ikke handle en haltet aktie LIGE NU);
     # halt_state-FAKTOREN flagger samtidig eventet positivt -> begge er rigtige.
@@ -233,6 +235,7 @@ async def compute_intradag_report(
             "catalyst": {**cat_res, "weight": comb["weights_used"].get("catalyst")},
         },
         "drivers": comb["drivers"],
+        "chart": chart,
     }
 
 
@@ -319,6 +322,7 @@ def report_to_json(report: dict) -> dict:
             "catalyst": _layer(layers["catalyst"], layers["catalyst"].get("weight")),
         },
         "drivers": {"positive": _drivers(True), "negative": _drivers(False)},
+        "chart": report.get("chart"),
         "info": {
             "float_shares": report.get("float_shares"),
             "float_pct": report.get("float_pct"),

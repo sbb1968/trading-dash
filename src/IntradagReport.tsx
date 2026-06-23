@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { IntradagChart } from "./IntradagChart";
 
 const API_JSON = "http://127.0.0.1:8000/intradag/analyze_json";
 // PDF: den paene rapport aabnes i EKSTERN browser (print sker der -> app-vinduet
@@ -21,6 +22,7 @@ interface IntradagData {
   combined: number | null; gate: number; gate_straf: number;
   layers: { technical: Layer; supply: Layer; catalyst: Layer };
   drivers: { positive: Driver[]; negative: Driver[] };
+  chart: any | null;
   info: {
     float_shares: number | null; float_pct: number | null;
     spread_pct: number | null; gate_inputs: GateInputs; manual: number | null;
@@ -282,6 +284,11 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
               <span>→</span>
               <span>Samlet <b style={{ color: bandColor(data.final_band) }}>{data.final == null ? "—" : signed(data.final)}</b></span>
             </div>
+
+            {/* Annoteret chart (candlesticks + VWAP/EMA/ORB/PDH-PDL + volumen) */}
+            {data.chart && data.chart.bars?.length > 0 && (
+              <IntradagChart data={data.chart} />
+            )}
 
             {/* Tre lag */}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

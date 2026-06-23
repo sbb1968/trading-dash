@@ -692,6 +692,51 @@ def _series_from_ctx(ctx: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def chart_data_intraday(bars, spy_bars, daily, *, params: IntradayParams = DEFAULT_PARAMS,
+                        window: int = 120) -> dict:
+    """SIDE-output til UI-charten: candlesticks + VWAP/EMA9/EMA20-overlays + niveauer
+    (ORB/PDH/PDL/PDC/HOD). Genbruger _build_context (samme kontekst som scoreren) men
+    roerer IKKE scoring-stien/-kontrakterne. Overlays er per-bar arrays aligned med bars
+    (None hvor udefineret -> frontend bryder linjen); niveauer er den seneste vaerdi."""
+    if bars is None or len(bars) == 0:
+        return {"current_price": None, "tz": _ET, "bars": [], "overlays": {}, "levels": []}
+    ctx = _build_context(bars, spy_bars, daily, params)
+    win = ctx.iloc[-window:] if len(ctx) > window else ctx
+
+    def col(name):
+        return [None if pd.isna(x) else round(float(x), 4) for x in win[name].to_numpy()]
+
+    def level(name):
+        s = ctx[name].dropna()
+        return round(float(s.iloc[-1]), 4) if len(s) else None
+
+    o = win["open"].to_numpy(); h = win["high"].to_numpy(); l = win["low"].to_numpy()
+    c = win["close"].to_numpy(); v = win["volume"].to_numpy()
+    bars_out = [{"t": ts.strftime("%H:%M"),
+                 "o": round(float(o[i]), 4), "h": round(float(h[i]), 4),
+                 "l": round(float(l[i]), 4), "c": round(float(c[i]), 4),
+                 "v": float(v[i])} for i, ts in enumerate(win.index)]
+
+    levels = [
+        {"kind": "orb_high", "label": "ORB H", "price": level("orb_high")},
+        {"kind": "orb_low",  "label": "ORB L", "price": level("orb_low")},
+        {"kind": "pdh",      "label": "PDH",   "price": level("prev_day_high")},
+        {"kind": "pdl",      "label": "PDL",   "price": level("prev_day_low")},
+        {"kind": "pdc",      "label": "PDC",   "price": level("prev_day_close")},
+        {"kind": "hod",      "label": "HOD",   "price": level("day_high")},
+    ]
+    levels = [lv for lv in levels if lv["price"] is not None]
+
+    return {
+        "current_price": round(float(win["close"].iloc[-1]), 2),
+        "tz": _ET,
+        "bars": bars_out,
+        "overlays": {"vwap": col("vwap"), "ema9": col("ema9"), "ema20": col("ema20"),
+                     "vw_upper": col("vw_upper"), "vw_lower": col("vw_lower")},
+        "levels": levels,
+    }
+
+
 def _band(score) -> str:
     if score is None:
         return "ingen data"

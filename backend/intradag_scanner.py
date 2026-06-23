@@ -188,7 +188,8 @@ async def run_scan(ib) -> None:
             }
             try:
                 rep = await compute_intradag_report(
-                    ib, sym, timeframe=SCAN_TF, spy_bars=spy_bars, supply_data=supply_data)
+                    ib, sym, timeframe=SCAN_TF, spy_bars=spy_bars, supply_data=supply_data,
+                    with_chart=False)
                 if rep["final"] is not None:
                     scored.append({
                         "symbol": sym,
