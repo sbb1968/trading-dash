@@ -1,49 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
-import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow } from "./FloatingWindow";
-import { PaperTradingPanel } from "./PaperTrading";
+import { LiveLogProvider } from "./LiveLogContext";
 import { useMarketData } from "./useMarketData";
+import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
 import {
   WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId,
 } from "./layouts";
 
-// ── Samme hjælpefunktioner som i App.tsx ──────────────────────
-const WATCHLIST_COLUMNS = [
-  { id: "price",  label: "Price"    },
-  { id: "change", label: "Change %" },
-  { id: "volume", label: "Volume"   },
-  { id: "float",  label: "Float"    },
-  { id: "relvol", label: "RelVol"   },
-  { id: "gap",    label: "Gap %"    },
-];
-
-const DEFAULT_COLUMNS = ["price","change","volume","float","relvol","gap"];
-
-function getWindowTitle(id: WindowId, ticker: string): string {
-  const titles: Partial<Record<WindowId, string>> = {
-    chart1min:   `${ticker} — 1 min`,
-    chart2min:   `${ticker} — 2 min`,
-    chart3min:   `${ticker} — 3 min`,
-    chart5min:   `${ticker} — 5 min`,
-    chart10min:  `${ticker} — 10 min`,
-    chart15min:  `${ticker} — 15 min`,
-    chart30min:  `${ticker} — 30 min`,
-    chart1time:  `${ticker} — 1 time`,
-    chart4time:  `${ticker} — 4 time`,
-    chartdaily:  `${ticker} — Daily`,
-    chartweekly: `${ticker} — Weekly`,
-    level2:      `Level 2 — ${ticker}`,
-    timesales:   `Time & Sales — ${ticker}`,
-  };
-  return titles[id] ?? WINDOW_LABELS[id];
-}
-
-function isChartWindow(id: WindowId): boolean {
-  return id.startsWith("chart");
-}
-
 // ── Screen2 komponent ─────────────────────────────────────────
+// Selvstaendigt Tauri-vindue (egen React-rod). Genbruger skaerm 1's fulde
+// renderWindowContent + getWindowTitle (eksporteret fra App.tsx), saa ALLE
+// vinduestyper virker praecis som paa skaerm 1 — ikke en forenklet delmaengde.
 export default function Screen2() {
   const [selectedTicker, setSelectedTicker] = useState<string>(
     () => localStorage.getItem("selectedTicker") || "NVDA"
@@ -56,8 +24,13 @@ export default function Screen2() {
   });
   const [addMenuOpen, setAddMenuOpen] = useState(false);
 
-  const { stocksArray, portfolio, buyStock, sellStock, resetPortfolio } =
+  const { stocksArray, news, portfolio, buyStock, sellStock, resetPortfolio } =
     useMarketData();
+
+  const [watchlist, setWatchlist] = useState<string[]>(() => {
+    const s = localStorage.getItem("watchlist");
+    return s ? JSON.parse(s) : ["NVDA", "TSLA", "AAPL"];
+  });
 
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
 
@@ -71,6 +44,9 @@ export default function Screen2() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  // Hold valgt ticker i sync til skærm 1 (samme localStorage-nøgle)
+  useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
 
   // Gem vinduer til layoutet når de ændres
   const saveWindows = useCallback((newWindows: WindowConfig[]) => {
@@ -153,69 +129,17 @@ export default function Screen2() {
     });
   }
 
-  function renderContent(id: WindowId) {
-    switch (id) {
-      case "scanner1":
-      case "scanner2": {
-        const sortBy = id === "scanner1" ? "momentum" : "gainers";
-        const sorted = [...stocksArray].sort((a, b) =>
-          sortBy === "momentum"
-            ? Math.abs(b.rel_vol_5min) - Math.abs(a.rel_vol_5min)
-            : b.change_percent - a.change_percent
-        ).slice(0, 20);
-        return (
-          <div className="scanner-panel">
-            <div className="scanner-scroll scanner-scroll-both">
-              <table className="scanner-table">
-                <thead><tr><th>Symbol</th>{DEFAULT_COLUMNS.map(c => <th key={c}>{WATCHLIST_COLUMNS.find(wc => wc.id === c)?.label ?? c}</th>)}</tr></thead>
-                <tbody>
-                  {sorted.map(s => (
-                    <tr key={s.ticker}
-                      className={[s.change_percent >= 0 ? "row-up" : "row-down", s.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
-                      onClick={() => setSelectedTicker(s.ticker)}
-                    >
-                      <td className="sym-cell">{s.ticker}</td>
-                      <td>${s.price.toFixed(2)}</td>
-                      <td className={s.change_percent >= 0 ? "positive" : "negative"}>{s.change_percent >= 0 ? "+" : ""}{s.change_percent.toFixed(2)}%</td>
-                      <td>{(s.volume/1000000).toFixed(1)}M</td>
-                      <td>{s.float}</td>
-                      <td>{s.rel_vol_daily}x</td>
-                      <td className={s.gap_percent >= 0 ? "positive" : "negative"}>{s.gap_percent >= 0 ? "+" : ""}{s.gap_percent.toFixed(1)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      }
-      case "chart1min":   return <TradingViewWidget ticker={selectedTicker} timeframe="1 min" />;
-      case "chart2min":   return <TradingViewWidget ticker={selectedTicker} timeframe="2 min" />;
-      case "chart3min":   return <TradingViewWidget ticker={selectedTicker} timeframe="3 min" />;
-      case "chart5min":   return <TradingViewWidget ticker={selectedTicker} timeframe="5 min" />;
-      case "chart10min":  return <TradingViewWidget ticker={selectedTicker} timeframe="10 min" />;
-      case "chart15min":  return <TradingViewWidget ticker={selectedTicker} timeframe="15 min" />;
-      case "chart30min":  return <TradingViewWidget ticker={selectedTicker} timeframe="30 min" />;
-      case "chart1time":  return <TradingViewWidget ticker={selectedTicker} timeframe="1 time" />;
-      case "chart4time":  return <TradingViewWidget ticker={selectedTicker} timeframe="4 time" />;
-      case "chartdaily":  return <TradingViewWidget ticker={selectedTicker} timeframe="Daily" />;
-      case "chartweekly": return <TradingViewWidget ticker={selectedTicker} timeframe="Weekly" />;
-      case "papertrading":
-        return (
-          <PaperTradingPanel
-            portfolio={portfolio}
-            selectedTicker={selectedTicker}
-            currentPrice={currentPrice}
-            onBuy={buyStock}
-            onSell={sellStock}
-            onReset={resetPortfolio}
-            onSelectTicker={setSelectedTicker}
-          />
-        );
-      default:
-        return <div className="pt-empty">{WINDOW_LABELS[id]}</div>;
-    }
-  }
+  // Samme props-form som skærm 1 (App.tsx). Order-confirm-modalen findes kun
+  // paa skærm 1 -> onRequestOrder er en no-op her (vinduet virker stadig).
+  const windowProps = {
+    stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
+    onAddTicker:    (t: string) => setWatchlist(w => w.includes(t) ? w : [...w, t]),
+    onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
+    news, portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
+    onAddWindow:    handleAddWindow,
+    onCloseWindow:  (id: WindowId) => updateWindowState(id, { closed: true }),
+    onRequestOrder: () => {},
+  };
 
   const activeWindowIds = windows.filter(w => !w.closed).map(w => w.id as WindowId);
 
@@ -278,33 +202,35 @@ export default function Screen2() {
       </div>
 
       {/* Desktop */}
-      <div className="desktop-area" style={{ position: "absolute", top: 32, left: 0, right: 0, bottom: 0 }}>
-        {windows.filter(w => !w.closed).map(win => (
-          <FloatingWindow
-            key={win.id}
-            id={`s2_${win.id}`}
-            title={getWindowTitle(win.id as WindowId, selectedTicker)}
-            defaultState={win}
-            onClose={() => updateWindowState(win.id as WindowId, { closed: true })}
-            tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
-            onStateChange={(state) => updateWindowState(win.id as WindowId, state)}
-          >
-            {renderContent(win.id as WindowId)}
-          </FloatingWindow>
-        ))}
+      <LiveLogProvider>
+        <div className="desktop-area" style={{ position: "absolute", top: 32, left: 0, right: 0, bottom: 0 }}>
+          {windows.filter(w => !w.closed).map(win => (
+            <FloatingWindow
+              key={win.id}
+              id={`s2_${win.id}`}
+              title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray)}
+              defaultState={win}
+              onClose={() => updateWindowState(win.id as WindowId, { closed: true })}
+              tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
+              onStateChange={(state) => updateWindowState(win.id as WindowId, state)}
+            >
+              {renderWindowContent(win.id as WindowId, windowProps)}
+            </FloatingWindow>
+          ))}
 
-        {windows.filter(w => !w.closed).length === 0 && (
-          <div style={{
-            position: "absolute", top: "50%", left: "50%",
-            transform: "translate(-50%, -50%)",
-            textAlign: "center", color: "var(--text-muted)",
-          }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🖥</div>
-            <div style={{ fontSize: 14, marginBottom: 8 }}>Skærm 2 er tom</div>
-            <div style={{ fontSize: 12 }}>Brug <strong style={{ color: "var(--text-secondary)" }}>+ Vindue</strong> ovenfor til at tilføje paneler</div>
-          </div>
-        )}
-      </div>
+          {windows.filter(w => !w.closed).length === 0 && (
+            <div style={{
+              position: "absolute", top: "50%", left: "50%",
+              transform: "translate(-50%, -50%)",
+              textAlign: "center", color: "var(--text-muted)",
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>🖥</div>
+              <div style={{ fontSize: 14, marginBottom: 8 }}>Skærm 2 er tom</div>
+              <div style={{ fontSize: 12 }}>Brug <strong style={{ color: "var(--text-secondary)" }}>+ Vindue</strong> ovenfor til at tilføje paneler</div>
+            </div>
+          )}
+        </div>
+      </LiveLogProvider>
     </div>
   );
 }

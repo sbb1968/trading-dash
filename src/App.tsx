@@ -1211,7 +1211,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
   );
 }
 // ── Window Renderer ───────────────────────────────────────────
-function renderWindowContent(id: WindowId, props: {
+export function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
   news: any[]; portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
@@ -1252,7 +1252,7 @@ function renderWindowContent(id: WindowId, props: {
   }
 }
 
-function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[], tickerName?: string): string {
+export function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[], tickerName?: string): string {
   const isHistorical = stocks && stocks.length > 0 && stocks[0]?.source === "historical";
   const scannerSuffix = isHistorical ? " ⚠ Hist." : "";
   const withName = tickerName ? `${selectedTicker} · ${tickerName}` : selectedTicker;
@@ -1277,7 +1277,7 @@ function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[], ti
   return t[id] ?? WINDOW_LABELS[id];
 }
 
-function isChartWindow(id: WindowId): boolean { return id.startsWith("chart"); }
+export function isChartWindow(id: WindowId): boolean { return id.startsWith("chart"); }
 
 // ── Main App ──────────────────────────────────────────────────
 function App() {
