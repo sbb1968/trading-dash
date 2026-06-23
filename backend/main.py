@@ -1388,12 +1388,12 @@ def _intradag_report_html(d: dict) -> str:
         f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{finaltxt}</div>'
         f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(bl(d.get("final_band")))}</div></div></div>'
         f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{combtxt}</b> &times; Handelbarheds-gate <b>{d["gate"]:.3f}</b> &rarr; Samlet <b style="color:{fbc}">{finaltxt}</b></div>'
-        f'{chart_block}'
         '<div style="display:flex;gap:10px;flex-wrap:wrap">'
         f'{layer_html("Teknisk", d["layers"]["technical"])}{layer_html("Forsyning", d["layers"]["supply"])}{layer_html("Katalysator", d["layers"]["catalyst"])}</div>'
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{chips}</div>'
+        f'{chart_block}'
         f'</div>{chart_script}</body></html>'
     )
 

@@ -285,11 +285,6 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
               <span>Samlet <b style={{ color: bandColor(data.final_band) }}>{data.final == null ? "—" : signed(data.final)}</b></span>
             </div>
 
-            {/* Annoteret chart (candlesticks + VWAP/EMA/ORB/PDH-PDL + volumen) */}
-            {data.chart && data.chart.bars?.length > 0 && (
-              <IntradagChart data={data.chart} />
-            )}
-
             {/* Tre lag */}
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <LayerCard title="Teknisk" layer={data.layers.technical} />
@@ -312,6 +307,9 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
               <Chip label="ADV (20d)" value={fmtShares(data.info.gate_inputs.adv20)} />
               {data.info.gate_inputs.market_cap != null && <Chip label="Market cap" value={fmtUSD(data.info.gate_inputs.market_cap)} />}
             </div>
+
+            {/* Annoteret chart (candlesticks + VWAP/EMA/ORB/PDH-PDL + volumen) — nederst som swing */}
+            {data.chart && data.chart.bars?.length > 0 && <IntradagChart data={data.chart} />}
           </div>
         )}
       </div>
