@@ -29,10 +29,10 @@ from technical_intraday import (
     compute_technical_intraday, format_technical_report, ParamResult, _band,
 )
 from supply_score import compute_supply, format_supply_report
-from catalyst_intraday import compute_catalyst_intraday, fetch_catalyst, format_catalyst_report
+from catalyst_intraday import compute_catalyst_intraday, _build_catalyst_data, format_catalyst_report
 from data_source_intraday import (
     fetch_intraday_bars, fetch_benchmark_bars, fetch_daily_aggregates,
-    fetch_supply, fetch_spread,
+    fetch_supply, fetch_quote, fetch_catalyst_news,
 )
 
 
@@ -182,27 +182,33 @@ async def compute_intradag_report(
         spy_bars = await fetch_benchmark_bars(ib, symbol=spy, timeframe=timeframe, duration=duration, end=end)
     daily = await fetch_daily_aggregates(ib, symbol, duration=daily_duration, end=end)
 
-    # 2. Lag
+    # 2. Lag: teknisk + forsyning + katalysator (quote giver spaend OG halt i eet kald)
     tech_res = compute_technical_intraday(bars, spy_bars, daily)
     if supply_data is None:
         # fetch_supply er et SYNC TV-screener-HTTP-kald -> to_thread saa det ikke
         # blokerer appens event-loop (samme backend kan koere LIVE algoer).
         supply_data = await asyncio.to_thread(fetch_supply, symbol)
     supply_res = compute_supply(supply_data)
-    cat_res = compute_catalyst_intraday(fetch_catalyst(symbol))
+
+    quote = await fetch_quote(ib, symbol)                # spaend + halt i EET reqTickers-kald
+    spread_pct = quote["spread_pct"]
+    halted_raw = quote["halted"]
+    headlines = await fetch_catalyst_news(ib, symbol)    # Finnhub + IBKR DJ, flettet (robust)
+    cat_res = compute_catalyst_intraday(_build_catalyst_data(headlines, halted_raw))
     layers = {"technical": tech_res, "supply": supply_res, "catalyst": cat_res}
 
-    # 3. Gate-input
+    # 3. Gate-input. Halt zeroer handelbarhed (kan ikke handle en haltet aktie LIGE NU);
+    # halt_state-FAKTOREN flagger samtidig eventet positivt -> begge er rigtige.
     last_close = float(bars["close"].iloc[-1]) if len(bars) else None
     adv20 = None
     if "adv20" in daily.columns and len(daily):
         v = daily["adv20"].iloc[-1]
         adv20 = float(v) if pd.notna(v) else None
     dollar_vol = (adv20 * last_close) if (adv20 and last_close) else None
-    spread_pct = await fetch_spread(ib, symbol)
     market_cap = supply_data.get("market_cap")     # None indtil evt. tilfoejet -> fallback
+    halted_bool = halted_raw in (1, 2)
     gate = compute_gate(adv_shares=adv20, dollar_vol=dollar_vol, price=last_close,
-                        spread_pct=spread_pct, market_cap=market_cap, halted=None)
+                        spread_pct=spread_pct, market_cap=market_cap, halted=halted_bool)
 
     # 4. Manuel overlay (default None)
     manual = manual_overlay(sr=sr, chart_pattern=chart_pattern, candlestick=candlestick)
@@ -219,7 +225,7 @@ async def compute_intradag_report(
         "combined": comb["combined"], "weights_used": comb["weights_used"],
         "gate": gate, "gate_straf": comb["gate_straf"],
         "gate_inputs": {"adv20": adv20, "dollar_vol": dollar_vol, "price": last_close,
-                        "spread_pct": spread_pct, "market_cap": market_cap, "halted": None},
+                        "spread_pct": spread_pct, "market_cap": market_cap, "halted": halted_bool},
         "manual": manual,
         "layers": {
             "technical": {**tech_res, "weight": comb["weights_used"].get("technical")},
@@ -385,6 +391,23 @@ def _run_selftest():
                 gate=1.0, manual=None)
     check("8 kun teknisk: weights_used == {tech 1.0}", wdict(c["weights_used"], {"technical": 1.0}))
     check("8 kun teknisk: combined == 50.0", approx(c["combined"], 50.0))
+
+    # 9. Katalysator LIVE: fersk nyhed -> lag positiv; joiner konfluensen (0.60/0.15/0.25)
+    cc = compute_catalyst_intraday({"news_age_min": 10, "sentiment": {"bull": 2, "bear": 0, "total": 2}, "halted": 0})
+    check("9 katalysator nyhed: lag ~100 (news_fresh+impact, halt ekskl.)", approx(cc["lag_score"], 100.0, 0.1))
+    c = combine({"technical": _mk_layer(50.0), "supply": _mk_layer(-20.0), "catalyst": _mk_layer(cc["lag_score"])},
+                gate=1.0, manual=None)
+    check("9 alle tre m. katalysator: weights {0.60,0.15,0.25}",
+          wdict(c["weights_used"], {"technical": 0.60, "supply": 0.15, "catalyst": 0.25}))
+    check("9 combined == 52.0 (30 -3 +25)", approx(c["combined"], 52.0))
+
+    # 10. Ingen nyhed/halt -> lag None -> renorm'es UD (= dagens 0.80/0.20)
+    cc0 = compute_catalyst_intraday({"news_age_min": None, "sentiment": None, "halted": 0})
+    check("10 ingen nyhed/halt: lag_score None", cc0["lag_score"] is None)
+
+    # 11. News-halt -> halt_state-faktor 90 (gaten zeroer separat, jf. case 5)
+    cch = compute_catalyst_intraday({"news_age_min": None, "sentiment": None, "halted": 2})
+    check("11 news-halt: halt_state lag == 90", approx(cch["lag_score"], 90.0))
 
     print(f"\nRESULTAT: {'GROEN' if not fails else 'ROED (' + str(len(fails)) + ' fejl)'}")
     sys.exit(0 if not fails else 1)

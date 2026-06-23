@@ -32,6 +32,7 @@ ASCII i kode + konsol (Windows cp1252); dansk prosa.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -159,25 +160,137 @@ async def load_intraday_context(ib, symbol, *, timeframe="5 mins", duration="5 D
     return bars, spy_bars, daily
 
 
-# === Live bid/ask-spaend (IBKR, til gaten) =================================
-async def fetch_spread(ib, symbol: str) -> float | None:
-    """Live bid/ask-spaend i DECIMAL ((ask-bid)/mid). None ved enhver fejl/manglende
-    quote -> gaten degraderer til adv+pris ('intet braekker hvis spaendet mangler').
-    Bruges af intradag_report's gate. Begge TWS-kald har timeout (haeng -> None)."""
+# === Live quote: spaend + halt (IBKR, eet reqTickers-kald) =================
+async def fetch_quote(ib, symbol: str) -> dict:
+    """Spaend (decimal) + halt-status i EET reqTickers-snapshot.
+    -> {'spread_pct': float|None, 'halted': int}. halted: -1 ukendt, 0 ikke haltet,
+    1 alm. halt, 2 news-halt. Fejler ALDRIG (alt None/-1 ved fejl)."""
     try:
         contract = Stock(symbol, "SMART", "USD")
         await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=10.0)
         tickers = await asyncio.wait_for(ib.reqTickersAsync(contract), timeout=10.0)
         if not tickers:
-            return None
+            return {"spread_pct": None, "halted": -1}
         tkr = tickers[0]
         bid, ask = tkr.bid, tkr.ask
-        if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
-            return None
-        mid = (bid + ask) / 2.0
-        return (ask - bid) / mid if mid > 0 else None
+        spread_pct = None
+        if bid and ask and bid > 0 and ask > 0 and ask >= bid:
+            mid = (bid + ask) / 2.0
+            spread_pct = (ask - bid) / mid if mid > 0 else None
+        h = getattr(tkr, "halted", -1)
+        try:
+            h = int(h) if h == h else -1            # NaN-guard
+        except (TypeError, ValueError):
+            h = -1
+        return {"spread_pct": spread_pct, "halted": h}
     except Exception:
+        return {"spread_pct": None, "halted": -1}
+
+
+async def fetch_spread(ib, symbol: str) -> float | None:
+    """Tynd bagudkompat-wrapper: kun spaendet fra fetch_quote."""
+    return (await fetch_quote(ib, symbol))["spread_pct"]
+
+
+# === Katalysator-nyheder: Finnhub company-news + IBKR Dow Jones (flettet) ===
+# Moenstre KOPIERET fra finnhub_news / catalyst_history_probe (intradag-laget er
+# selvstaendigt). Finnhub-noeglen GENBRUGES via import (allerede committet i
+# finnhub_news; ingen ny secret-kopi) - som fundamental_score goer.
+_DJ_HISTORICAL_CANDIDATES = ["DJ-N", "DJ-RTG", "DJ-RTPRO", "DJ-RTA", "DJ-RTE", "DJ-RTW"]
+_DJ_SKIP_PROVIDERS = {"BRFG", "BRFUPDN", "DJNL", "FLY"}
+_dj_provider_str = None   # cache paa modul-niveau (providere aendrer sig ikke)
+
+
+def _parse_ibkr_news_time(t):
+    s = str(t)[:19]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
         return None
+
+
+async def _finnhub_company_news(symbol: str, max_age_hours: int) -> list[dict]:
+    """Finnhub company-news (REST; ingen IBKR-pacing). Tom liste ved enhver fejl."""
+    try:
+        import aiohttp
+        from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE   # genbrug noeglen
+    except Exception:
+        return []
+    to_date = datetime.now().date()
+    from_date = to_date - timedelta(days=2)
+    params = {"symbol": symbol, "from": from_date.isoformat(),
+              "to": to_date.isoformat(), "token": FINNHUB_API_KEY}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{FINNHUB_BASE}/company-news", params=params,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return []
+                items = await resp.json()
+    except Exception:
+        return []
+    if not isinstance(items, list):
+        return []
+    cutoff = datetime.now(timezone.utc).timestamp() - max_age_hours * 3600
+    out = []
+    for it in items:
+        ts = it.get("datetime", 0)
+        hl = (it.get("headline") or "").strip()
+        if not ts or ts < cutoff or not hl:
+            continue
+        out.append({"ts_utc": datetime.fromtimestamp(ts, timezone.utc),
+                    "headline": hl, "provider": "Finnhub"})
+    return out
+
+
+async def _ibkr_dj_news(ib, symbol: str, max_age_hours: int) -> list[dict]:
+    """IBKR Dow Jones historisk news (eet news-kald paa delt ib). Tom liste ved fejl."""
+    global _dj_provider_str
+    try:
+        if _dj_provider_str is None:
+            providers = await asyncio.wait_for(ib.reqNewsProvidersAsync(), timeout=10.0)
+            eligible = {getattr(p, "code", "") for p in providers}
+            use = [c for c in _DJ_HISTORICAL_CANDIDATES if c in eligible and c not in _DJ_SKIP_PROVIDERS]
+            _dj_provider_str = "+".join(use)            # "" hvis ingen DJ-provider berettiget
+        if not _dj_provider_str:
+            return []
+        contract = Stock(symbol, "SMART", "USD")
+        await asyncio.wait_for(ib.qualifyContractsAsync(contract), timeout=10.0)
+        conid = getattr(contract, "conId", None)
+        if not conid:
+            return []
+        items = await asyncio.wait_for(
+            ib.reqHistoricalNewsAsync(conid, _dj_provider_str, "", "", 20), timeout=20.0)
+    except Exception:
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    out = []
+    for it in (items or []):
+        dt = _parse_ibkr_news_time(getattr(it, "time", ""))
+        hl = str(getattr(it, "headline", "") or "").strip()
+        if dt is None or not hl or dt < cutoff:
+            continue
+        out.append({"ts_utc": dt, "headline": hl, "provider": getattr(it, "providerCode", "DJ")})
+    return out
+
+
+async def fetch_catalyst_news(ib, symbol: str, *, max_age_hours: int = 12) -> list[dict]:
+    """Flettet, dedup'et liste af nylige overskrifter fra Finnhub + IBKR DJ.
+    Hver: {ts_utc: datetime(UTC), headline: str, provider: str}. Nyeste foerst.
+    Fejler ALDRIG kalderen (en kilde-fejl -> bare den anden kildes resultater)."""
+    sym = symbol.strip().upper()
+    finn = await _finnhub_company_news(sym, max_age_hours)
+    ibkr = await _ibkr_dj_news(ib, sym, max_age_hours)
+    seen, out = set(), []
+    for h in finn + ibkr:
+        key = (h["ts_utc"].replace(second=0, microsecond=0),
+               " ".join(h["headline"].lower().split())[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    out.sort(key=lambda h: h["ts_utc"], reverse=True)
+    return out
 
 
 # === Forsyningsdata (float fra TradingViews screener — IKKE IBKR) ==========
