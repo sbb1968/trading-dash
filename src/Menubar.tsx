@@ -40,9 +40,9 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
   {
     label: "Scannere",
     items: [
-      { id: "scanner1",     shortcut: "S" },
-      { id: "scanner2",     shortcut: "G" },
-      { id: "haltscanner",  shortcut: "H" },
+      { id: "swingtop10",    shortcut: "S" },   // Swing Top-10 (konfluens)
+      { id: "intradagtop10", shortcut: "I" },   // Day trading Top-10 (konfluens)
+      { id: "haltscanner",   shortcut: "H" },   // Live halt-scanner
     ],
   },
   {
@@ -66,8 +66,6 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
       { id: "swing",        shortcut: "W" },
       { id: "intradagreport", shortcut: "T" },
       { id: "dagenslog",    shortcut: "E" },
-      { id: "swingtop10",   shortcut: "I" },
-      { id: "intradagtop10", shortcut: "0" },
     ],
   },
 ];

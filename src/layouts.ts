@@ -1,6 +1,6 @@
 // ── Window ID typer ───────────────────────────────────────────
 export type WindowId =
-  | "scanner1" | "scanner2" | "watchlist" | "newsroom" | "papertrading"
+  | "watchlist" | "newsroom" | "papertrading"
   | "chart1min" | "chart2min" | "chart3min" | "chart5min" | "chart10min"
   | "chart15min" | "chart30min"
   | "chart1time" | "chart4time"
@@ -19,8 +19,6 @@ export type WindowId =
   | "haltscanner";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
-  scanner1:     "Small Cap Scanner",
-  scanner2:     "Top Gainers",
   watchlist:    "Watchlist",
   newsroom:     "News Room",
   papertrading: "Paper Trading",
@@ -121,7 +119,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
     {
       id: "ibens-orb", name: "Ibens ORB", isDefault: true,
       windows: [
-        { id: "scanner1",  x: 0,                   y: 0,                   width: Math.floor(aw*0.22), height: ah,                  minimized:false, maximized:false, closed:false },
         { id: "chart1min", x: Math.floor(aw*0.22), y: 0,                   width: Math.floor(aw*0.52), height: Math.floor(ah*0.65), minimized:false, maximized:false, closed:false },
         { id: "newsroom",  x: Math.floor(aw*0.74), y: 0,                   width: Math.floor(aw*0.26), height: Math.floor(ah*0.5),  minimized:false, maximized:false, closed:false },
         { id: "level2",    x: Math.floor(aw*0.22), y: Math.floor(ah*0.65), width: Math.floor(aw*0.26), height: Math.floor(ah*0.35), minimized:false, maximized:false, closed:false },
@@ -132,8 +129,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
     {
       id: "ibens-daytrading", name: "Ibens daytrading", isDefault: true,
       windows: [
-        { id: "scanner1",  x: 0,                   y: 0,                   width: Math.floor(aw*0.20), height: Math.floor(ah*0.5),  minimized:false, maximized:false, closed:false },
-        { id: "scanner2",  x: 0,                   y: Math.floor(ah*0.5),  width: Math.floor(aw*0.20), height: Math.floor(ah*0.5),  minimized:false, maximized:false, closed:false },
         { id: "chart1min", x: Math.floor(aw*0.20), y: 0,                   width: Math.floor(aw*0.40), height: Math.floor(ah*0.6),  minimized:false, maximized:false, closed:false },
         { id: "chart5min", x: Math.floor(aw*0.60), y: 0,                   width: Math.floor(aw*0.40), height: Math.floor(ah*0.6),  minimized:false, maximized:false, closed:false },
         { id: "watchlist", x: Math.floor(aw*0.20), y: Math.floor(ah*0.6),  width: Math.floor(aw*0.40), height: Math.floor(ah*0.4),  minimized:false, maximized:false, closed:false },
@@ -147,15 +142,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
         { id: "chart1min", x: 0,                  y: 0, width: Math.floor(aw*0.6), height: ah, minimized:false, maximized:false, closed:false },
         { id: "level2",    x: Math.floor(aw*0.6), y: 0, width: Math.floor(aw*0.2), height: ah, minimized:false, maximized:false, closed:false },
         { id: "timesales", x: Math.floor(aw*0.8), y: 0, width: Math.floor(aw*0.2), height: ah, minimized:false, maximized:false, closed:false },
-      ],
-      screen2Windows: [],
-    },
-    {
-      id: "scanner-mode", name: "Scanner mode", isDefault: true,
-      windows: [
-        { id: "scanner1",  x: 0,                  y: 0,                   width: Math.floor(aw*0.5), height: Math.floor(ah*0.6), minimized:false, maximized:false, closed:false },
-        { id: "scanner2",  x: Math.floor(aw*0.5), y: 0,                   width: Math.floor(aw*0.5), height: Math.floor(ah*0.6), minimized:false, maximized:false, closed:false },
-        { id: "newsroom",  x: 0,                  y: Math.floor(ah*0.6),  width: aw,                 height: Math.floor(ah*0.4), minimized:false, maximized:false, closed:false },
       ],
       screen2Windows: [],
     },

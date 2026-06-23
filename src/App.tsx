@@ -35,21 +35,6 @@ import { useTickerName } from "./useTickerName";
 // ── Konstanter ────────────────────────────────────────────────
 type ActiveView = "scanners" | "watchlist" | "charting" | "newsroom" | "konfigurator" | "papertrading";
 
-const ALL_COLUMNS = [
-  { id: "price",      label: "Price"        },
-  { id: "change",     label: "Change %"     },
-  { id: "volume",     label: "Volume"       },
-  { id: "float",      label: "Float"        },
-  { id: "relvol",     label: "RelVol Daily" },
-  { id: "relvol5",    label: "RelVol 5min"  },
-  { id: "gap",        label: "Gap %"        },
-  { id: "prevclose",  label: "Prev Close"   },
-  { id: "high",       label: "High"         },
-  { id: "low",        label: "Low"          },
-];
-
-const DEFAULT_COLUMNS = ["price","change","volume","float","relvol","relvol5","gap"];
-
 // ── Font-størrelse system ─────────────────────────────────────
 const FONT_WINDOW_TYPES = [
   { id: "menubar",   label: "Menubar" },
@@ -87,7 +72,6 @@ function applyAllFonts() {
 }
 
 function getWindowType(id: WindowId): string {
-  if (id === "scanner1" || id === "scanner2") return "scanner";
   if (id === "watchlist")    return "watchlist";
   if (id === "newsroom")     return "newsroom";
   if (id.startsWith("chart")) return "chart";
@@ -164,157 +148,6 @@ function ConnectionStatus({ status }: { status: string }) {
   };
   const label = labels[status] || labels.disconnected;
   return <div className={`status-item ${label.cls}`}>{label.text}</div>;
-}
-
-// ── TickerCell — viser ticker + firma-navn nedenunder ─────────
-function TickerCell({ ticker }: { ticker: string }) {
-  const name = useTickerName(ticker);
-  return (
-    <td className="sym-cell">
-      <div style={{ fontWeight: 700 }}>{ticker}</div>
-      <div style={{
-        fontSize: "calc(var(--fs-content-scanner, 13px) * 0.78)",
-        color: "var(--text-muted)",
-        fontWeight: 400,
-        marginTop: 1,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        maxWidth: "180px",
-      }}>
-        {name || "\u00A0"}
-      </div>
-    </td>
-  );
-}
-
-// ── Scanner Table ─────────────────────────────────────────────
-function ScannerTable({ stocks, sortBy, selectedTicker, onSelectTicker, scannerId }: {
-  stocks: any[]; sortBy: "momentum" | "gainers"; selectedTicker: string;
-  onSelectTicker: (ticker: string) => void; scannerId: string;
-}) {
-  const [visibleCols, setVisibleCols] = useState<string[]>(() => {
-    const saved = localStorage.getItem(`columns_${scannerId}`);
-    return saved ? JSON.parse(saved) : DEFAULT_COLUMNS;
-  });
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === `columns_${scannerId}` && e.newValue) setVisibleCols(JSON.parse(e.newValue));
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [scannerId]);
-
-  const sortedRef = useRef<StockData[]>([]);
-  const lastSortTime = useRef(0);
-
-  const now = Date.now();
-  if (now - lastSortTime.current > 30000 || sortedRef.current.length === 0) {
-    sortedRef.current = [...stocks].sort((a, b) => {
-      if (sortBy === "momentum") {
-        const volDiff = Math.abs(b.rel_vol_5min) - Math.abs(a.rel_vol_5min);
-        if (volDiff !== 0) return volDiff;
-        return b.change_percent - a.change_percent;  // ← fjern Math.abs
-      }
-      return b.change_percent - a.change_percent;
-    }).slice(0, 20);
-    lastSortTime.current = now;
-  }
-
-  const sorted = sortedRef.current.map(s => stocks.find(x => x.ticker === s.ticker) || s);
-
-  function renderCell(stock: any, colId: string) {
-    switch(colId) {
-      case "price":     return <td key={colId}>${stock.price.toFixed(2)}</td>;
-      case "change":    return <td key={colId} className={stock.change_percent >= 0 ? "positive" : "negative"}>{stock.change_percent >= 0 ? "+" : ""}{stock.change_percent.toFixed(2)}%</td>;
-      case "volume":    return <td key={colId}>{(stock.volume / 1000000).toFixed(1)}M</td>;
-      case "float":     return <td key={colId}>{stock.float}</td>;
-      case "relvol":    return <td key={colId} className={stock.rel_vol_daily > 2 ? "highlight" : ""}>{stock.rel_vol_daily}x</td>;
-      case "relvol5":   return <td key={colId} className={stock.rel_vol_5min > 3 ? "positive" : ""}>{stock.rel_vol_5min}x</td>;
-      case "gap":       return <td key={colId} className={stock.gap_percent >= 0 ? "positive" : "negative"}>{stock.gap_percent >= 0 ? "+" : ""}{stock.gap_percent.toFixed(1)}%</td>;
-      case "prevclose": return <td key={colId}>${(stock.price * (1 - stock.change_percent/100)).toFixed(2)}</td>;
-      case "high":      return <td key={colId} className="positive">${(stock.price * 1.005).toFixed(2)}</td>;
-      case "low":       return <td key={colId} className="negative">${(stock.price * 0.995).toFixed(2)}</td>;
-      default:          return <td key={colId}>—</td>;
-    }
-  }
-  const [isMarketClosed, setIsMarketClosed] = useState(false);
-  useEffect(() => {
-    function update() {
-      const now = new Date();
-      const day = now.getDay();
-      const et  = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-      const mins = et.getHours() * 60 + et.getMinutes();
-      if (day === 0 || day === 6) { setIsMarketClosed(true); return; }
-      if (mins < 240 || mins >= 1200) { setIsMarketClosed(true); return; }
-      setIsMarketClosed(false);
-    }
-    update();
-    const interval = setInterval(update, 30000);
-    return () => clearInterval(interval);
-  }, []);
-  return (
-    <div className="scanner-panel" style={{ position: "relative" }}>
-      {isMarketClosed && (
-        <div style={{
-          position: "absolute",
-          top: 0, left: 0, right: 0, bottom: 0,
-          background: "rgba(0, 0, 0, 0.75)",
-          zIndex: 10,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-          padding: 20,
-          pointerEvents: "none",
-        }}>
-          <div style={{
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--text-primary)",
-            marginBottom: 6,
-          }}>
-            🌙 Marked lukket
-          </div>
-          <div style={{
-            fontSize: 12,
-            color: "var(--text-muted)",
-          }}>
-            Scanner aktiveres når NYSE/NASDAQ åbner
-          </div>
-          <div style={{
-            fontSize: 11,
-            color: "var(--text-muted)",
-            marginTop: 4,
-          }}>
-            (15:30 dansk tid på hverdage)
-          </div>
-        </div>
-      )}
-      <div className="scanner-scroll scanner-scroll-both">
-        <table className="scanner-table">
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              {visibleCols.map(colId => { const col = ALL_COLUMNS.find(c => c.id === colId); return <th key={colId}>{col?.label}</th>; })}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(stock => (
-              <tr key={stock.ticker}
-                className={[stock.change_percent >= 0 ? "row-up" : "row-down", stock.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
-                onClick={() => onSelectTicker(stock.ticker)}
-              >
-                <TickerCell ticker={stock.ticker} />
-                {visibleCols.map(colId => renderCell(stock, colId))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
 }
 
 // ── Watchlist Panel ───────────────────────────────────────────
@@ -653,8 +486,6 @@ function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
 // ── Konfigurator ──────────────────────────────────────────────
 function Konfigurator({ onClose }: { onClose: () => void }) {
   const originals = useRef({
-    cols1:         JSON.parse(localStorage.getItem("columns_scanner1")  || JSON.stringify(DEFAULT_COLUMNS)),
-    cols2:         JSON.parse(localStorage.getItem("columns_scanner2")  || JSON.stringify(DEFAULT_COLUMNS)),
     colsWatchlist: JSON.parse(localStorage.getItem("columns_watchlist") || JSON.stringify(DEFAULT_WATCHLIST_COLUMNS)),
     colsLevel2:    JSON.parse(localStorage.getItem("columns_level2")    || JSON.stringify(DEFAULT_LEVEL2_COLUMNS)),
     colsTimeSales: JSON.parse(localStorage.getItem("columns_timesales") || JSON.stringify(DEFAULT_TIMESALES_COLUMNS)),
@@ -666,8 +497,6 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
     })),
   });
 
-  const [cols1,         setCols1]         = useState<string[]>(originals.current.cols1);
-  const [cols2,         setCols2]         = useState<string[]>(originals.current.cols2);
   const [colsWatchlist, setColsWatchlist] = useState<string[]>(originals.current.colsWatchlist);
   const [colsLevel2,    setColsLevel2]    = useState<string[]>(originals.current.colsLevel2);
   const [colsTimeSales, setColsTimeSales] = useState<string[]>(originals.current.colsTimeSales);
@@ -680,8 +509,6 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
     return obj;
   });
 
-  useEffect(() => { localStorage.setItem("columns_scanner1",  JSON.stringify(cols1)); }, [cols1]);
-  useEffect(() => { localStorage.setItem("columns_scanner2",  JSON.stringify(cols2)); }, [cols2]);
   useEffect(() => { localStorage.setItem("columns_watchlist", JSON.stringify(colsWatchlist)); }, [colsWatchlist]);
   useEffect(() => { localStorage.setItem("columns_level2",    JSON.stringify(colsLevel2)); }, [colsLevel2]);
   useEffect(() => { localStorage.setItem("columns_timesales", JSON.stringify(colsTimeSales)); }, [colsTimeSales]);
@@ -703,8 +530,6 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
   }
 
   function handleCancel() {
-    localStorage.setItem("columns_scanner1",  JSON.stringify(originals.current.cols1));
-    localStorage.setItem("columns_scanner2",  JSON.stringify(originals.current.cols2));
     localStorage.setItem("columns_watchlist", JSON.stringify(originals.current.colsWatchlist));
     localStorage.setItem("columns_level2",    JSON.stringify(originals.current.colsLevel2));
     localStorage.setItem("columns_timesales", JSON.stringify(originals.current.colsTimeSales));
@@ -791,10 +616,6 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="konfigurator-divider" />
-        <ColSection title="Small Cap Scanner — Kolonner" columns={ALL_COLUMNS} selected={cols1} setSelected={setCols1} />
-        <div className="konfigurator-divider" />
-        <ColSection title="Top Gainers — Kolonner"       columns={ALL_COLUMNS} selected={cols2} setSelected={setCols2} />
         <div className="konfigurator-divider" />
         <ColSection title="Watchlist — Kolonner"         columns={WATCHLIST_COLUMNS} selected={colsWatchlist} setSelected={setColsWatchlist} />
         <div className="konfigurator-divider" />
@@ -1221,8 +1042,6 @@ export function renderWindowContent(id: WindowId, props: {
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
   switch(id) {
-    case "scanner1":    return <ScannerTable stocks={props.stocks} sortBy="momentum" selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} scannerId="scanner1" />;
-    case "scanner2":    return <ScannerTable stocks={props.stocks} sortBy="gainers"  selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} scannerId="scanner2" />;
     case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
     case "newsroom":    return <NewsRoom news={props.news} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} />;
     case "papertrading":return <PaperTradingPanel portfolio={props.portfolio} selectedTicker={props.selectedTicker} currentPrice={props.currentPrice} onBuy={props.buyStock} onSell={props.sellStock} onReset={props.resetPortfolio} onSelectTicker={props.onSelectTicker} />;
@@ -1257,13 +1076,9 @@ export function renderWindowContent(id: WindowId, props: {
 }
 
 export function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: any[], tickerName?: string): string {
-  const isHistorical = stocks && stocks.length > 0 && stocks[0]?.source === "historical";
-  const scannerSuffix = isHistorical ? " ⚠ Hist." : "";
   const withName = tickerName ? `${selectedTicker} · ${tickerName}` : selectedTicker;
 
   const t: Partial<Record<WindowId, string>> = {
-    scanner1:    `Small Cap Scanner${scannerSuffix}`,
-    scanner2:    `Top Gainers${scannerSuffix}`,
     chart1min:   `${withName} — 1 min`,
     chart2min:   `${withName} — 2 min`,
     chart3min:   `${withName} — 3 min`,
