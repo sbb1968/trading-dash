@@ -26,6 +26,7 @@ import { IntradagReport } from "./IntradagReport";
 import { IntradagTop10 } from "./IntradagTop10";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
+import { HaltScanner } from "./HaltScanner";
 import { HelpAssistant } from "./HelpAssistant";
 import { SwingTop10 } from "./SwingTop10";
 import { useTickerName } from "./useTickerName";
@@ -1248,6 +1249,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
     case "dagenslog": return <DagensLogWindow />;
+    case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
     case "assistent": return <HelpAssistant />;
     case "swingtop10": return <SwingTop10 />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;

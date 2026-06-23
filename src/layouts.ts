@@ -15,7 +15,8 @@ export type WindowId =
   | "swingtop10"
   | "intradagreport"
   | "intradagtop10"
-  | "dagenslog";
+  | "dagenslog"
+  | "haltscanner";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   scanner1:     "Small Cap Scanner",
@@ -48,6 +49,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   intradagreport:  "Day trading-rapport",
   intradagtop10:   "Day trading Top-10",
   dagenslog:       "Dagens log",
+  haltscanner:     "Halt-scanner",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────
