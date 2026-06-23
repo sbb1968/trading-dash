@@ -56,7 +56,7 @@ function scoreColor(v: number | string): string {
 
 // Backend sender ASCII-baand; vis dem pyntet på dansk (som swing-rapporten).
 const BAND_LABEL: Record<string, string> = {
-  "STAERK SWING-KANDIDAT": "Stærk swing-kandidat",
+  "STAERK SWING-KANDIDAT": "Stærk swing trading-kandidat",
   "EGNET MED FORBEHOLD": "Egnet med forbehold",
   "NEUTRAL / AFVENT": "Neutral – afvent",
   "SVAG": "Svag",
@@ -133,7 +133,7 @@ export function SwingTop10() {
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Swing top-10</div>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Swing trading Top-10</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
             {data?.generated_local
               ? `Genereret ${data.generated_local} · kilde: ${data.source ?? "?"} · ${ageText(data.generated_utc)}`
@@ -157,7 +157,7 @@ export function SwingTop10() {
 
       {/* Forklarende legende (som swing-rapportens kontekst) */}
       <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, borderBottom: "1px solid var(--border-subtle)" }}>
-        De 10 højest-scorende swing-kandidater fra hele det likvide US-univers. Alle scores er
+        De 10 højest-scorende swing trading-kandidater fra hele det likvide US-univers. Alle scores er
         <b> −100…+100</b> (grøn = medvind, rød = modvind). <b>Samlet</b> = teknisk (55%) + fundamental (20%)
         + katalysator (25%), ganget med <b>handelbarheden</b> (0–1, likviditet/spænd). Listen er forfiltreret
         på 3-måneders relativ styrke før den fulde scoring.

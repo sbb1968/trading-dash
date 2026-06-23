@@ -40,10 +40,10 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   marketoverview:  "marketoverview",
   account:         "Konto",
   orders:          "Ordrer",
-  swing:           "Swing-rapport",
+  swing:           "Swing trading-rapport",
   docs:            "Dokumentation",
   assistent:       "Hjælp (Claude)",
-  swingtop10:      "Swing top-10",
+  swingtop10:      "Swing trading Top-10",
   intradagreport:  "Day trading-rapport",
   intradagtop10:   "Day trading Top-10",
 };

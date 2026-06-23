@@ -867,7 +867,7 @@ async def swing_analyze(req: SwingAnalyzeRequest):
         # fx ingen prisdata for tickeren (delisted/ukendt/TWS nede)
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Swing-analyse fejlede: {e}")
+        raise HTTPException(status_code=500, detail=f"Swing trading-analyse fejlede: {e}")
     return {"ticker": ticker, "report": report}
 
 
@@ -895,7 +895,7 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Swing-analyse fejlede: {e}")
+        raise HTTPException(status_code=500, detail=f"Swing trading-analyse fejlede: {e}")
     return data
 
 
@@ -1051,7 +1051,7 @@ def _swing_report_html(d: dict) -> str:
     esc = _html.escape
     BULL, BEAR, NEU, MUT = "#15803d", "#b91c1c", "#b45309", "#6b7280"
     BAND = {
-        "STAERK SWING-KANDIDAT": "Staerk swing-kandidat", "EGNET MED FORBEHOLD": "Egnet med forbehold",
+        "STAERK SWING-KANDIDAT": "Staerk swing trading-kandidat", "EGNET MED FORBEHOLD": "Egnet med forbehold",
         "NEUTRAL-AFVENT": "Neutral - afvent", "SVAG": "Svag", "FRARAADES": "Fraraades",
         "Staerk": "Staerk", "Medvind": "Medvind", "Neutral": "Neutral", "Fraraades": "Fraraades",
     }
@@ -1155,7 +1155,7 @@ def _swing_report_html(d: dict) -> str:
     )
     chart_script = '<script>const CHART=' + _json.dumps(d.get("chart")) + ';' + SWING_CHART_JS + '</script>'
     return (
-        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>SWING_{t}</title>'
+        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Swing trading - {t}</title>'
         f'<style>{css}</style></head><body>'
         '<div class="bar">Gem som PDF: <button onclick="window.print()">Gem / Print</button>'
         '<span>(eller Ctrl+P -&gt; "Gem som PDF")</span></div><div class="wrap">'
@@ -1188,7 +1188,7 @@ async def swing_report_html(ticker: str, sr: float | None = None,
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Swing-rapport fejlede: {e}")
+        raise HTTPException(status_code=500, detail=f"Swing trading-rapport fejlede: {e}")
     return HTMLResponse(_swing_report_html(d))
 
 

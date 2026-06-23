@@ -63,7 +63,7 @@ export function HelpAssistant() {
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
         {messages.length === 0 && (
           <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>
-            Stil et spørgsmål om hvordan Trading Dash bruges – fx "Hvordan åbner jeg swing-rapporten?" eller "Hvorfor bytter den rundt på vinduerne?".
+            Stil et spørgsmål om hvordan Trading Dash bruges – fx "Hvordan åbner jeg Swing trading-rapporten?" eller "Hvorfor bytter den rundt på vinduerne?".
           </div>
         )}
         {messages.map((m, i) => (

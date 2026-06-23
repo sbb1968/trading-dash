@@ -40,7 +40,7 @@ interface SwingData {
 // ---- Smaa hjaelpere ---------------------------------------------------------
 // Backend sender ASCII-translittererede baand-navne; vis dem pyntet paa dansk.
 const BAND_LABEL: Record<string, string> = {
-  "STAERK SWING-KANDIDAT": "Stærk swing-kandidat",
+  "STAERK SWING-KANDIDAT": "Stærk swing trading-kandidat",
   "EGNET MED FORBEHOLD": "Egnet med forbehold",
   "NEUTRAL-AFVENT": "Neutral – afvent",
   "SVAG": "Svag",
@@ -261,7 +261,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
           <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter daglige bars (IBKR), fundamentaler og float ... tager et par sekunder.</div>
         )}
         {!error && !loading && !data && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. Rapporten scorer aktien for swing-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. Rapporten scorer aktien for swing trading-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
         )}
         {!error && !loading && data && (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
