@@ -85,11 +85,22 @@ function bandColor(b: string): string {
 const thStyle: CSSProperties = { padding: "8px 10px", textAlign: "right", verticalAlign: "bottom", whiteSpace: "nowrap" };
 const tdStyle: CSSProperties = { padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" };
 
-function Th({ title, sub, left = false }: { title: string; sub?: string; left?: boolean }) {
+function Th({ title, sub, tip, left = false }: { title: string; sub?: string; tip?: string; left?: boolean }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   return (
-    <th style={{ ...thStyle, textAlign: left ? "left" : "right" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>{title}</div>
+    <th style={{ ...thStyle, textAlign: left ? "left" : "right" }}
+      onMouseEnter={tip ? (e) => { const r = e.currentTarget.getBoundingClientRect(); setPos({ x: r.left, y: r.bottom }); } : undefined}
+      onMouseLeave={tip ? () => setPos(null) : undefined}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "inline-block", cursor: tip ? "help" : "default", borderBottom: tip ? "1px dotted var(--text-muted)" : undefined }}>{title}</div>
       {sub && <div style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", marginTop: 1 }}>{sub}</div>}
+      {tip && pos && (
+        <div style={{
+          position: "fixed", left: Math.min(pos.x, window.innerWidth - 280), top: pos.y + 4, zIndex: 2000,
+          maxWidth: 260, background: "var(--bg-elevated)", border: "1px solid var(--border-strong)", borderRadius: 6,
+          padding: "8px 10px", fontSize: 12, fontWeight: 400, color: "var(--text-primary)", lineHeight: 1.45,
+          textAlign: "left", whiteSpace: "normal", boxShadow: "0 6px 18px rgba(0,0,0,0.45)", pointerEvents: "none",
+        }}>{tip}</div>
+      )}
     </th>
   );
 }
@@ -190,15 +201,15 @@ export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string)
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr>
-                <Th title="#" left />
-                <Th title="Symbol" left />
-                <Th title="Samlet" sub="gated konfluens" />
-                <Th title="Vurdering" sub="bånd" left />
-                <Th title="Gate" sub="handelbarhed" />
-                <Th title="Gap %" sub="i dag" />
-                <Th title="RVOL" sub="rel. volumen" />
-                <Th title="Float" sub="frie aktier" />
-                <Th title="Spænd" sub="bid/ask" />
+                <Th title="#" left tip="Rangering efter Samlet score — 1 = den bedste opstilling lige nu." />
+                <Th title="Symbol" left tip="Aktiens ticker. Klik på rækken for at sætte symbolet i de andre vinduer (charts, level 2 osv.)." />
+                <Th title="Samlet" sub="gated konfluens" tip="Den samlede day trading-konfluens (−100…+100): teknisk + forsyning + katalysator vægtet sammen og ganget med handelbarheds-gaten. Det ene tal du dømmer på." />
+                <Th title="Vurdering" sub="bånd" left tip="Ord-bånd for Samlet: ≥50 Stærk · ≥20 Medvind · >−20 Neutral · >−50 Svag · ellers Frarådes." />
+                <Th title="Gate" sub="handelbarhed" tip="Handelbarhed 0–1: er aktien reelt til at handle? Den mindste delfaktor styrer (likviditet, dollar-volumen, pris, bid/ask-spænd, halt). Lav gate trækker Samlet kraftigt ned — en illikvid gapper med vildt gap kan stadig score lavt." />
+                <Th title="Gap %" sub="i dag" tip="Kursændring i dag (åbning vs forrige luk). Momentum-proxy; skal være > 5% for at komme på listen." />
+                <Th title="RVOL" sub="rel. volumen" tip="Relativ volumen — dagens volumen ift. det normale. > 2× = usædvanlig aktivitet (krav for at komme på listen)." />
+                <Th title="Float" sub="frie aktier" tip="Antal frit omsættelige aktier. Lav float (< 10M) giver eksplosive bevægelser — kernen i Ross Cameron / Warrior-momentum." />
+                <Th title="Spænd" sub="bid/ask" tip="Bid/ask-spænd i procent. Bredt spænd = slippage og dårlig handelbarhed; ~1% nulstiller gaten." />
               </tr>
             </thead>
             <tbody>

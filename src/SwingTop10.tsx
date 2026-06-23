@@ -74,11 +74,22 @@ const thStyle: CSSProperties = { padding: "8px 10px", textAlign: "right", vertic
 const tdStyle: CSSProperties = { padding: "8px 10px", textAlign: "right", whiteSpace: "nowrap" };
 
 // Kolonne-header med beskrivende titel + lille under-tekst (forklaring).
-function Th({ title, sub, left = false }: { title: string; sub?: string; left?: boolean }) {
+function Th({ title, sub, tip, left = false }: { title: string; sub?: string; tip?: string; left?: boolean }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   return (
-    <th style={{ ...thStyle, textAlign: left ? "left" : "right" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>{title}</div>
+    <th style={{ ...thStyle, textAlign: left ? "left" : "right" }}
+      onMouseEnter={tip ? (e) => { const r = e.currentTarget.getBoundingClientRect(); setPos({ x: r.left, y: r.bottom }); } : undefined}
+      onMouseLeave={tip ? () => setPos(null) : undefined}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "inline-block", cursor: tip ? "help" : "default", borderBottom: tip ? "1px dotted var(--text-muted)" : undefined }}>{title}</div>
       {sub && <div style={{ fontSize: 9, fontWeight: 400, color: "var(--text-muted)", marginTop: 1 }}>{sub}</div>}
+      {tip && pos && (
+        <div style={{
+          position: "fixed", left: Math.min(pos.x, window.innerWidth - 280), top: pos.y + 4, zIndex: 2000,
+          maxWidth: 260, background: "var(--bg-elevated)", border: "1px solid var(--border-strong)", borderRadius: 6,
+          padding: "8px 10px", fontSize: 12, fontWeight: 400, color: "var(--text-primary)", lineHeight: 1.45,
+          textAlign: "left", whiteSpace: "normal", boxShadow: "0 6px 18px rgba(0,0,0,0.45)", pointerEvents: "none",
+        }}>{tip}</div>
+      )}
     </th>
   );
 }
@@ -183,15 +194,15 @@ export function SwingTop10() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr>
-                <Th title="#" left />
-                <Th title="Aktie" sub="ticker · firmanavn" left />
-                <Th title="Samlet" sub="vægtet + gated" />
-                <Th title="Vurdering" sub="samlet bånd" left />
-                <Th title="Handelbarhed" sub="likviditet 0–1" />
-                <Th title="Teknisk" sub="55% vægt" />
-                <Th title="Fundamental" sub="20% vægt" />
-                <Th title="Katalysator" sub="25% vægt" />
-                <Th title="Rel. styrke" sub="3 mdr vs S&P 500" />
+                <Th title="#" left tip="Rangering efter Samlet score — 1 = bedste swing trading-kandidat." />
+                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn." />
+                <Th title="Samlet" sub="vægtet + gated" tip="Vægtet lag-score (teknisk 55% + fundamental 20% + katalysator 25%) ganget med handelbarheds-gaten (−100…+100). Det samlede swing trading-tal." />
+                <Th title="Vurdering" sub="samlet bånd" left tip="Ord-bånd for Samlet: Stærk swing trading-kandidat · Egnet med forbehold · Neutral – afvent · Svag · Frarådes." />
+                <Th title="Handelbarhed" sub="likviditet 0–1" tip="Gate 0–1: likviditet og bid/ask-spænd. Lav handelbarhed trækker Samlet ned — en flot opstilling i en illikvid aktie scorer stadig lavt." />
+                <Th title="Teknisk" sub="55% vægt" tip="Teknisk lag (55% af helheden): trend, momentum, struktur, relativ styrke, volatilitet, volumen — på dagsbars." />
+                <Th title="Fundamental" sub="20% vægt" tip="Fundamentalt lag (20%): kvalitet (marginer/gæld/ROE), vækst (EPS/omsætning), værdiansættelse (P/E, PEG)." />
+                <Th title="Katalysator" sub="25% vægt" tip="Katalysator-lag (25%): nyheder/begivenheder der kan drive aktien." />
+                <Th title="Rel. styrke" sub="3 mdr vs S&P 500" tip="3-måneders relativ styrke vs S&P 500. Hele universet er forfiltreret på dette før den fulde scoring." />
               </tr>
             </thead>
             <tbody>
