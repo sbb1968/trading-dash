@@ -14,7 +14,6 @@ import {
   WATCHLIST_COLUMNS, LEVEL2_COLUMNS, TIMESALES_COLUMNS,
   DEFAULT_WATCHLIST_COLUMNS, DEFAULT_LEVEL2_COLUMNS, DEFAULT_TIMESALES_COLUMNS,
 } from "./layouts";
-import { TradeJournal } from "./TradeJournal";
 import { LiveAlgo } from "./LiveAlgo";
 import { LiveLogProvider } from "./LiveLogContext";
 import { MarketOverview } from "./MarketOverview";
@@ -43,7 +42,6 @@ const FONT_WINDOW_TYPES = [
   { id: "level2",    label: "Level 2" },
   { id: "timesales", label: "Time & Sales" },
   { id: "paper",     label: "Paper Trading" },
-  { id: "journal",   label: "Trade Journal" },
   { id: "livealgo",  label: "Live Algo" },
   { id: "marketoverview", label: "Markedsoverblik" },
   { id: "account",   label: "Konto" },
@@ -929,7 +927,6 @@ export function renderWindowContent(id: WindowId, props: {
     case "chartweekly": return <TradingViewWidget ticker={props.selectedTicker} timeframe="Weekly" />;
     case "level2":      return <Level2Panel ticker={props.selectedTicker} />;
     case "timesales":   return <TimeSalesPanel ticker={props.selectedTicker} />;
-    case "journal":     return <TradeJournal />;
     case "livealgo":    return <LiveAlgo />;
     case "marketoverview": return <MarketOverview />;
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
