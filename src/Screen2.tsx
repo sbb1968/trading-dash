@@ -8,6 +8,19 @@ import {
   loadLayouts, saveLayouts, getActiveLayoutId,
 } from "./layouts";
 
+// ── Hjælper: understreg shortcut-bogstav (samme som Menubar paa skaerm 1) ──
+function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: string }) {
+  const idx = text.toUpperCase().indexOf(shortcut.toUpperCase());
+  if (idx === -1) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <u style={{ textDecorationStyle: "solid" }}>{text[idx]}</u>
+      {text.slice(idx + 1)}
+    </>
+  );
+}
+
 // ── Screen2 komponent ─────────────────────────────────────────
 // Selvstaendigt Tauri-vindue (egen React-rod). Genbruger skaerm 1's fulde
 // renderWindowContent + getWindowTitle (eksporteret fra App.tsx), saa ALLE
@@ -47,6 +60,16 @@ export default function Screen2() {
 
   // Hold valgt ticker i sync til skærm 1 (samme localStorage-nøgle)
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
+
+  // ALT-genveje som paa skaerm 1: ALT+T = Tilføj vindue, ALT+A = Auto-arrange
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.altKey && e.key.toUpperCase() === "T") { e.preventDefault(); setAddMenuOpen(o => !o); }
+      else if (e.altKey && e.key.toUpperCase() === "A") { e.preventDefault(); autoArrange(); }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [windows]);
 
   // Gem vinduer til layoutet når de ændres
   const saveWindows = useCallback((newWindows: WindowConfig[]) => {
@@ -160,7 +183,7 @@ export default function Screen2() {
             className="menu-btn"
             onClick={() => setAddMenuOpen(o => !o)}
           >
-            + Vindue <span className="menu-arrow">{addMenuOpen ? "▲" : "▼"}</span>
+            <LabelWithShortcut text="Tilføj vindue" shortcut="T" /> <span className="menu-arrow">{addMenuOpen ? "▲" : "▼"}</span>
           </button>
           {addMenuOpen && (
             <div className="menu-dropdown" onClick={() => setAddMenuOpen(false)}>
@@ -189,9 +212,9 @@ export default function Screen2() {
         <button
           className="menu-btn"
           onClick={autoArrange}
-          title="Arrangér alle vinduer automatisk"
+          title="Arrangér alle vinduer automatisk (ALT+A)"
         >
-          ⊞ Auto-arrange
+          ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
         </button>
 
         {/* Valgt ticker */}
