@@ -187,7 +187,7 @@ export default function Screen2() {
           </button>
           {addMenuOpen && (
             <div className="menu-dropdown" onClick={() => setAddMenuOpen(false)}>
-              {(Object.keys(WINDOW_LABELS) as WindowId[]).map(id => {
+              {(Object.keys(WINDOW_LABELS) as WindowId[]).filter(id => id !== "docs" && id !== "assistent").map(id => {
                 const isActive = activeWindowIds.includes(id);
                 return (
                   <div
@@ -215,6 +215,14 @@ export default function Screen2() {
           title="Arrangér alle vinduer automatisk (ALT+A)"
         >
           ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
+        </button>
+
+        {/* Dokumentation + Hjælp — direkte synlige knapper (nemt for Iben) */}
+        <button className="menu-btn" onClick={() => handleAddWindow("docs")} title="Åbn dokumentation">
+          📄 {WINDOW_LABELS["docs"]}
+        </button>
+        <button className="menu-btn" onClick={() => handleAddWindow("assistent")} title="Åbn hjælp fra Claude">
+          💬 {WINDOW_LABELS["assistent"]}
         </button>
 
         {/* Valgt ticker */}

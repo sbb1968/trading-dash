@@ -64,8 +64,6 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
       { id: "orders",       shortcut: "D" },
       { id: "swing",        shortcut: "W" },
       { id: "intradagreport", shortcut: "T" },
-      { id: "docs",         shortcut: "K" },
-      { id: "assistent",    shortcut: "H" },
       { id: "swingtop10",   shortcut: "I" },
       { id: "intradagtop10", shortcut: "0" },
     ],
@@ -445,7 +443,15 @@ export function Menubar({
       <button className="menu-btn" onClick={onAutoArrange} title="Auto-arrange (ALT+A)">
         ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
       </button>
-      
+
+      {/* ── Dokumentation + Hjælp — direkte synlige knapper (nemt for Iben) ── */}
+      <button className="menu-btn" onClick={() => onAddWindow("docs")} title="Åbn dokumentation">
+        📄 {WINDOW_LABELS["docs"]}
+      </button>
+      <button className="menu-btn" onClick={() => onAddWindow("assistent")} title="Åbn hjælp fra Claude">
+        💬 {WINDOW_LABELS["assistent"]}
+      </button>
+
       {/* ── Studio — åbner browser-baseret admin/analyse-app ── */}
       <button
         className="menu-btn"
