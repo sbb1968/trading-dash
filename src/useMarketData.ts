@@ -34,57 +34,7 @@ export interface NewsData {
   isNew?:    boolean;
 }
 
-export interface Position {
-  ticker:             string;
-  shares:             number;
-  avg_price:          number;
-  entry_price:        number;
-  current_price:      number;
-  position_value:     number;
-  unrealized_pnl:     number;
-  unrealized_pnl_pct: number;
-  opened_at:          string;
-}
-
-export interface Trade {
-  ticker:      string;
-  action:      string;
-  shares:      number;
-  entry_price: number;
-  exit_price:  number;
-  proceeds:    number;
-  cost_basis:  number;
-  pnl:         number;
-  pnl_pct:     number;
-  opened_at:   string;
-  closed_at:   string;
-}
-
-export interface Portfolio {
-  balance:              number;
-  starting_balance:     number;
-  total_position_value: number;
-  total_equity:         number;
-  total_pnl:            number;
-  total_pnl_pct:        number;
-  unrealized_pnl:       number;
-  realized_pnl:         number;
-  positions:            Position[];
-  trades:               Trade[];
-  num_positions:        number;
-  num_trades:           number;
-}
-
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
-
-const EMPTY_PORTFOLIO: Portfolio = {
-  balance: 100000, starting_balance: 100000,
-  total_position_value: 0, total_equity: 100000,
-  total_pnl: 0, total_pnl_pct: 0,
-  unrealized_pnl: 0, realized_pnl: 0,
-  positions: [], trades: [],
-  num_positions: 0, num_trades: 0,
-};
 
 // ── IBKR ordre-resultat (fra manuel watchlist-handel) ─────────
 export interface IbkrOrderResult {
@@ -103,7 +53,6 @@ export interface IbkrOrderResult {
 export function useMarketData() {
   const [stocks,    setStocks]    = useState<Map<string, StockData>>(new Map());
   const [news,      setNews]      = useState<NewsData[]>([]);
-  const [portfolio, setPortfolio] = useState<Portfolio>(EMPTY_PORTFOLIO);
   const [status,    setStatus]    = useState<ConnectionStatus>("connecting");
   const [lastOrderResult, setLastOrderResult] = useState<IbkrOrderResult | null>(null);
 
@@ -146,9 +95,6 @@ export function useMarketData() {
             setNews(prev => prev.map(n => n.id === item.id ? { ...n, isNew: false } : n));
           }, 3000);
 
-        } else if (message.type === "portfolio") {
-          setPortfolio(message.data as Portfolio);
-
         } else if (message.type === "ibkr_order_result") {
           // Manuel watchlist-ordre — gem resultat så UI kan vise toast
           setLastOrderResult(message as IbkrOrderResult);
@@ -170,23 +116,6 @@ export function useMarketData() {
     }
   }, []);
 
-  const buyStock = useCallback((ticker: string, shares: number, price: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "buy", ticker, shares, price }));
-    }
-  }, []);
-
-  const sellStock = useCallback((ticker: string, shares: number, price: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "sell", ticker, shares, price }));
-    }
-  }, []);
-
-  const resetPortfolio = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "reset_portfolio" }));
-    }
-  }, []);
 
   // ── IBKR direkte ordrer (fra watchlist-rækker) ──────────────
   const ibkrBuy = useCallback((ticker: string, shares: number) => {
@@ -205,8 +134,7 @@ export function useMarketData() {
 
   const stocksArray = Array.from(stocks.values());
   return {
-    stocksArray, news, portfolio, status, sendMessage,
-    buyStock, sellStock, resetPortfolio,
+    stocksArray, news, status, sendMessage,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
   };
 }

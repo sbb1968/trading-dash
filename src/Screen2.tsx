@@ -21,8 +21,7 @@ export default function Screen2() {
     () => loadWorkspace2(window.innerWidth, window.innerHeight)
   );
 
-  const { stocksArray, news, portfolio, buyStock, sellStock, resetPortfolio } =
-    useMarketData();
+  const { stocksArray } = useMarketData();
 
   const [watchlist, setWatchlist] = useState<string[]>(() => {
     const s = localStorage.getItem("watchlist");
@@ -140,7 +139,7 @@ export default function Screen2() {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker:    (t: string) => setWatchlist(w => w.includes(t) ? w : [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
-    news, portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
+    currentPrice,
     onAddWindow:    handleAddWindow,
     onCloseWindow:  (id: WindowId) => updateWindowState(id, { closed: true }),
     onRequestOrder: () => {},

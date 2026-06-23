@@ -6,7 +6,6 @@ import type { StockData } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
-import { PaperTradingPanel } from "./PaperTrading";
 import {
   Layout, WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId, setActiveLayoutId,
@@ -33,7 +32,7 @@ import { useTickerName } from "./useTickerName";
 
 
 // ── Konstanter ────────────────────────────────────────────────
-type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator" | "papertrading";
+type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator";
 
 // ── Font-størrelse system ─────────────────────────────────────
 const FONT_WINDOW_TYPES = [
@@ -75,7 +74,6 @@ function getWindowType(id: WindowId): string {
   if (id.startsWith("chart")) return "chart";
   if (id === "level2")       return "level2";
   if (id === "timesales")    return "timesales";
-  if (id === "papertrading") return "paper";
   if (id === "marketoverview") return "marketoverview";
   if (id === "account") return "account";
   return "scanner";
@@ -912,13 +910,12 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
 export function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
-  portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
+  currentPrice: number;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
   switch(id) {
     case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
-    case "papertrading":return <PaperTradingPanel portfolio={props.portfolio} selectedTicker={props.selectedTicker} currentPrice={props.currentPrice} onBuy={props.buyStock} onSell={props.sellStock} onReset={props.resetPortfolio} onSelectTicker={props.onSelectTicker} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
     case "chart3min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="3 min" />;
@@ -996,8 +993,7 @@ function App() {
   useEffect(() => { applyAllFonts(); }, []);
 
   const {
-    stocksArray, portfolio, status,
-    buyStock, sellStock, resetPortfolio,
+    stocksArray, status,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
   } = useMarketData();
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
@@ -1085,7 +1081,7 @@ function App() {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
-    portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
+    currentPrice,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {

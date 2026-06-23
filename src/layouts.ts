@@ -1,6 +1,6 @@
 // ── Window ID typer ───────────────────────────────────────────
 export type WindowId =
-  | "watchlist" | "papertrading"
+  | "watchlist"
   | "chart1min" | "chart2min" | "chart3min" | "chart5min" | "chart10min"
   | "chart15min" | "chart30min"
   | "chart1time" | "chart4time"
@@ -20,7 +20,6 @@ export type WindowId =
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   watchlist:    "Watchlist",
-  papertrading: "Paper Trading",
   chart1min:    "Chart 1 min",
   chart2min:    "Chart 2 min",
   chart3min:    "Chart 3 min",
@@ -139,14 +138,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
         { id: "chart1min", x: 0,                  y: 0, width: Math.floor(aw*0.6), height: ah, minimized:false, maximized:false, closed:false },
         { id: "level2",    x: Math.floor(aw*0.6), y: 0, width: Math.floor(aw*0.2), height: ah, minimized:false, maximized:false, closed:false },
         { id: "timesales", x: Math.floor(aw*0.8), y: 0, width: Math.floor(aw*0.2), height: ah, minimized:false, maximized:false, closed:false },
-      ],
-      screen2Windows: [],
-    },
-    {
-      id: "paper-trading", name: "Paper Trading", isDefault: true,
-      windows: [
-        { id: "papertrading", x: 0,                   y: 0, width: Math.floor(aw*0.35), height: ah, minimized:false, maximized:false, closed:false },
-        { id: "chart1min",    x: Math.floor(aw*0.35), y: 0, width: Math.floor(aw*0.65), height: ah, minimized:false, maximized:false, closed:false },
       ],
       screen2Windows: [],
     },

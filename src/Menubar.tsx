@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Layout, WindowId, WINDOW_LABELS } from "./layouts";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator" | "papertrading";
+type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator";
 
 interface Props {
   activeView: ActiveView;
@@ -57,7 +57,6 @@ const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
     items: [
       { id: "watchlist",    shortcut: "A" },
       { id: "account",      shortcut: "U" },
-      { id: "papertrading", shortcut: "P" },
       { id: "journal",      shortcut: "J" },
       { id: "livealgo",     shortcut: "O" },
       { id: "marketoverview", shortcut: "R" },

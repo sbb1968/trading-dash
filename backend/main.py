@@ -5,7 +5,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from alert_engine import AlertEngine
-from paper_trading import PaperTrading
 from strategy_manager import StrategyManager
 from strategy_base    import StrategyStatus
 from risk_manager import RiskConfig
@@ -114,7 +113,6 @@ def require_studio_auth(authorization: str = Header(None),
     if token not in _studio_tokens:
         raise HTTPException(status_code=401, detail="Ugyldig session")
     
-paper_trading     = PaperTrading()
 connected_clients: list[WebSocket] = []
 current_prices:   dict[str, float] = {}
 
@@ -219,15 +217,6 @@ async def mock_data_loop():
             news_id_counter += 1
             news_item = generate_news_item(news_id_counter)
             await broadcast({"type": "news", "data": news_item})
-
-
-# ── Portfolio loop ────────────────────────────────────────────
-async def portfolio_loop():
-    while True:
-        await asyncio.sleep(5)
-        if connected_clients:
-            summary = paper_trading.get_summary(current_prices)
-            await broadcast({"type": "portfolio", "data": summary})
 
 
 # ── Algo ──────────────────────────────────────────────────────
@@ -372,7 +361,6 @@ async def startup():
         buythedip._broadcast_fn = broadcast_algo_sync
         print(f"[Server] BuyTheDip registreret — buy-the-dip, forbruger K2-univers")
 
-    asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
@@ -479,11 +467,11 @@ async def shutdown():
                 print(f"[Server] {_task_name} afsluttede med fejl: {e}")
             print(f"[Server] {_task_name} annulleret")
 
-    # 6. Annullér KUN vores egne baggrunds-loops ved navn (portfolio_loop,
-    #    mock_data_loop). Vi maa IKKE feje alle tasks, for det rammer ogsaa
+    # 6. Annullér KUN vores egne baggrunds-loops ved navn (mock_data_loop).
+    #    Vi maa IKKE feje alle tasks, for det rammer ogsaa
     #    uvicorns egen lifespan-task og giver CancelledError-traceback.
     #    Identificér ved coroutine-navn, spring shutdown selv over.
-    _OURS = {"portfolio_loop", "mock_data_loop"}
+    _OURS = {"mock_data_loop"}
     _current = asyncio.current_task()
     _to_cancel = []
     for _t in asyncio.all_tasks():
@@ -537,8 +525,6 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
     print(f"[Server] Klient forbundet — {len(connected_clients)} aktive")
 
-    summary = paper_trading.get_summary(current_prices)
-    await websocket.send_text(json.dumps({"type": "portfolio", "data": summary}))
     await websocket.send_text(json.dumps({"type": "ibkr_status", "connected": ibkr_connected}))
 
     try:
@@ -551,28 +537,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif message["type"] == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
-
-            elif message["type"] == "buy":
-                result = paper_trading.buy(
-                    ticker=message["ticker"],
-                    shares=float(message["shares"]),
-                    price=float(message["price"]),
-                )
-                await websocket.send_text(json.dumps({"type": "trade_result", "data": result}))
-                if result["success"]:
-                    summary = paper_trading.get_summary(current_prices)
-                    await broadcast({"type": "portfolio", "data": summary})
-
-            elif message["type"] == "sell":
-                result = paper_trading.sell(
-                    ticker=message["ticker"],
-                    shares=float(message["shares"]),
-                    price=float(message["price"]),
-                )
-                await websocket.send_text(json.dumps({"type": "trade_result", "data": result}))
-                if result["success"]:
-                    summary = paper_trading.get_summary(current_prices)
-                    await broadcast({"type": "portfolio", "data": summary})
 
             elif message["type"] in ("ibkr_buy", "ibkr_sell"):
                 # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR
@@ -681,11 +645,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         "avg_fill": result.get("avg_fill"),
                     },
                 )
-
-            elif message["type"] == "reset_portfolio":
-                paper_trading.reset()
-                summary = paper_trading.get_summary(current_prices)
-                await broadcast({"type": "portfolio", "data": summary})
 
     except WebSocketDisconnect:
         pass  # Normal frakobling
