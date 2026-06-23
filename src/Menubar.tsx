@@ -106,7 +106,7 @@ function useTheme() {
 }
 
 // ── Hjælper: understreg shortcut-bogstav ─────────────────────
-function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: string }) {
+export function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: string }) {
   const idx = text.toUpperCase().indexOf(shortcut.toUpperCase());
   if (idx === -1) return <>{text}</>;
   return (
@@ -248,6 +248,42 @@ function ChartSubmenu({ onAddWindow }: { onAddWindow: (id: WindowId) => void }) 
   );
 }
 
+// ── "Tilføj vindue"-menu (DELT mellem skaerm 1 og skaerm 2) ───
+// Eksporteres saa Screen2 faar PRAECIS samme grupperede dropdown (ChartSubmenu
+// med tidsramme-vaelger + Scannere/Markedsdata/Øvrige), ALT+T og item-genveje.
+export function AddWindowMenu({ onAddWindow, activeWindowIds }: {
+  onAddWindow: (id: WindowId) => void;
+  activeWindowIds: WindowId[];
+}) {
+  const itemShortcuts: Record<string, () => void> = {};
+  ALL_WIN_SHORTCUTS.forEach(({ id, shortcut }) => {
+    itemShortcuts[shortcut.toUpperCase()] = () => onAddWindow(id);
+  });
+  return (
+    <DropdownMenu label="Tilføj vindue" altKey="T" itemShortcuts={itemShortcuts}>
+      <ChartSubmenu onAddWindow={onAddWindow} />
+      {NON_CHART_GROUPS.map((group) => (
+        <div key={group.label}>
+          <div className="menu-dropdown-divider" />
+          <div className="menu-dropdown-section-title">{group.label}</div>
+          {group.items.map(({ id, shortcut }) => {
+            const isOpen = activeWindowIds.includes(id);
+            return (
+              <DropdownItem
+                key={id}
+                label={WINDOW_LABELS[id]}
+                shortcut={shortcut}
+                isOpen={isOpen}
+                onClick={() => onAddWindow(id)}
+              />
+            );
+          })}
+        </div>
+      ))}
+    </DropdownMenu>
+  );
+}
+
 // ── Tema-sektion inde i Værktøjer ─────────────────────────────
 function ThemeSection({ theme, setTheme }: { theme: string; setTheme: (t: string) => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -328,12 +364,6 @@ export function Menubar({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onAutoArrange]);
 
-  // Item-shortcuts til "Tilføj vindue" dropdown
-  const tilfoejShortcuts: Record<string, () => void> = {};
-  ALL_WIN_SHORTCUTS.forEach(({ id, shortcut }) => {
-    tilfoejShortcuts[shortcut.toUpperCase()] = () => onAddWindow(id);
-  });
-
   // Item-shortcuts til "Værktøjer" dropdown
   const vaerktoejShortcuts: Record<string, () => void> = {
     "K": () => onViewChange("konfigurator"),
@@ -343,32 +373,8 @@ export function Menubar({
   return (
     <div className="menubar">
 
-      {/* ── Tilføj vindue — ALT+T ── */}
-      <DropdownMenu
-        label="Tilføj vindue"
-        altKey="T"
-        itemShortcuts={tilfoejShortcuts}
-      >
-        <ChartSubmenu onAddWindow={onAddWindow} />
-        {NON_CHART_GROUPS.map((group) => (
-          <div key={group.label}>
-            <div className="menu-dropdown-divider" />
-            <div className="menu-dropdown-section-title">{group.label}</div>
-            {group.items.map(({ id, shortcut }) => {
-              const isOpen = activeWindowIds.includes(id);
-              return (
-                <DropdownItem
-                  key={id}
-                  label={WINDOW_LABELS[id]}
-                  shortcut={shortcut}
-                  isOpen={isOpen}
-                  onClick={() => onAddWindow(id)}
-                />
-              );
-            })}
-          </div>
-        ))}
-      </DropdownMenu>
+      {/* ── Tilføj vindue — ALT+T (delt komponent, ogsaa paa skaerm 2) ── */}
+      <AddWindowMenu onAddWindow={onAddWindow} activeWindowIds={activeWindowIds} />
 
       {/* ── Værktøjer — ALT+V ── */}
       <DropdownMenu

@@ -3,23 +3,11 @@ import { FloatingWindow } from "./FloatingWindow";
 import { LiveLogProvider } from "./LiveLogContext";
 import { useMarketData } from "./useMarketData";
 import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
+import { AddWindowMenu, LabelWithShortcut } from "./Menubar";
 import {
   WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId,
 } from "./layouts";
-
-// ── Hjælper: understreg shortcut-bogstav (samme som Menubar paa skaerm 1) ──
-function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: string }) {
-  const idx = text.toUpperCase().indexOf(shortcut.toUpperCase());
-  if (idx === -1) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, idx)}
-      <u style={{ textDecorationStyle: "solid" }}>{text[idx]}</u>
-      {text.slice(idx + 1)}
-    </>
-  );
-}
 
 // ── Screen2 komponent ─────────────────────────────────────────
 // Selvstaendigt Tauri-vindue (egen React-rod). Genbruger skaerm 1's fulde
@@ -35,7 +23,6 @@ export default function Screen2() {
     const active   = layouts.find(l => l.id === layoutId);
     return active?.screen2Windows ?? [];
   });
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   const { stocksArray, news, portfolio, buyStock, sellStock, resetPortfolio } =
     useMarketData();
@@ -61,11 +48,10 @@ export default function Screen2() {
   // Hold valgt ticker i sync til skærm 1 (samme localStorage-nøgle)
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
 
-  // ALT-genveje som paa skaerm 1: ALT+T = Tilføj vindue, ALT+A = Auto-arrange
+  // ALT+A = Auto-arrange (ALT+T haandteres af den delte AddWindowMenu)
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.altKey && e.key.toUpperCase() === "T") { e.preventDefault(); setAddMenuOpen(o => !o); }
-      else if (e.altKey && e.key.toUpperCase() === "A") { e.preventDefault(); autoArrange(); }
+      if (e.altKey && e.key.toUpperCase() === "A") { e.preventDefault(); autoArrange(); }
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
@@ -90,7 +76,6 @@ export default function Screen2() {
   }
 
   function handleAddWindow(id: WindowId) {
-    setAddMenuOpen(false);
     const existing = windows.find(w => w.id === id);
     if (existing) {
       updateWindowState(id, { closed: false, minimized: false });
@@ -177,36 +162,8 @@ export default function Screen2() {
 
         <div style={{ width: "1px", height: "16px", background: "var(--border-default)", margin: "0 4px" }} />
 
-        {/* + Vindue dropdown */}
-        <div className="menu-item-wrapper" style={{ position: "relative" }}>
-          <button
-            className="menu-btn"
-            onClick={() => setAddMenuOpen(o => !o)}
-          >
-            <LabelWithShortcut text="Tilføj vindue" shortcut="T" /> <span className="menu-arrow">{addMenuOpen ? "▲" : "▼"}</span>
-          </button>
-          {addMenuOpen && (
-            <div className="menu-dropdown" onClick={() => setAddMenuOpen(false)}>
-              {(Object.keys(WINDOW_LABELS) as WindowId[]).filter(id => id !== "docs" && id !== "assistent").map(id => {
-                const isActive = activeWindowIds.includes(id);
-                return (
-                  <div
-                    key={id}
-                    className={`menu-dropdown-item ${isActive ? "menu-window-active" : ""}`}
-                    onClick={() => !isActive && handleAddWindow(id)}
-                  >
-                    {isActive
-                      ? <span className="menu-check">✓</span>
-                      : <span className="menu-check-empty" />
-                    }
-                    {WINDOW_LABELS[id]}
-                    {isActive && <span className="menu-layout-badge">åben</span>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {/* Tilføj vindue — DELT komponent (præcis som skærm 1: ChartSubmenu + grupper) */}
+        <AddWindowMenu onAddWindow={handleAddWindow} activeWindowIds={activeWindowIds} />
 
         {/* Auto-arrange knap */}
         <button
