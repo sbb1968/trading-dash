@@ -3255,24 +3255,45 @@ async def account_dash_snapshot():
                 pnl_pct = None
 
             enriched.append({
-                "ticker":     p["ticker"],
-                "position":   qty,
-                "avg_cost":   cost,
-                "last_price": price,
-                "pnl":        pnl,
-                "pnl_pct":    pnl_pct,
+                "ticker":        p["ticker"],
+                "position":      qty,
+                "avg_cost":      cost,
+                "last_price":    price,
+                "current_price": safe_float(price),
+                "market_value":  safe_float(price * qty) if price is not None else None,
+                "pnl":           pnl,
+                "pnl_pct":       pnl_pct,
             })
 
+        # Risiko-graenseforbrug pr. strategi (unik vaerdi — TWS kender ikke vores
+        # graenser). Per-strategi-graensen hentes fra strategiens egen config.
+        risk_status = strategy_manager.risk_manager.get_status_dict()
+        per_strategy = []
+        for s, pnl_today in risk_status.get("pnl_by_strategy", {}).items():
+            strat = strategy_manager._strategies.get(s)
+            limit = getattr(strat.config, "max_daily_loss", None) if strat else None
+            per_strategy.append({"strategy": s, "pnl_today": pnl_today, "limit": limit})
+
         return {
-            "ok":              True,
-            "ibkr_account":    identity.ibkr_account,
-            "paper_trading":   identity.paper_trading,
-            "net_liquidation": summary["net_liquidation"],
-            "cash_balance":    summary["cash_balance"],
-            "unrealized_pnl":  summary["unrealized_pnl"],
-            "realized_pnl":    summary["realized_pnl"],
-            "positions":       enriched,
-            "checked_at":      datetime.now().isoformat(),
+            "ok":                   True,
+            "ibkr_account":         identity.ibkr_account,
+            "paper_trading":        identity.paper_trading,
+            "net_liquidation":      summary["net_liquidation"],
+            "cash_balance":         summary["cash_balance"],
+            "unrealized_pnl":       summary["unrealized_pnl"],
+            "realized_pnl":         summary["realized_pnl"],
+            "buying_power":         summary.get("buying_power", 0),
+            "available_funds":      summary.get("available_funds", 0),
+            "excess_liquidity":     summary.get("excess_liquidity", 0),
+            "maint_margin":         summary.get("maint_margin", 0),
+            "gross_position_value": summary.get("gross_position_value", 0),
+            "positions":            enriched,
+            "risk": {
+                "total_pnl_today":  risk_status.get("total_pnl_today", 0),
+                "daily_loss_limit": risk_status.get("daily_loss_limit", 0),
+                "per_strategy":     per_strategy,
+            },
+            "checked_at":           datetime.now().isoformat(),
         }
 
     except Exception as e:

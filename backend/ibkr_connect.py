@@ -223,10 +223,15 @@ class IBKRConnection:
         values  = self.ib.accountValues()
         summary = {v.tag: v.value for v in values}
         return {
-            "net_liquidation": float(summary.get("NetLiquidation", 0)),
-            "cash_balance":    float(summary.get("CashBalance", 0)),
-            "unrealized_pnl":  float(summary.get("UnrealizedPnL", 0)),
-            "realized_pnl":    float(summary.get("RealizedPnL", 0)),
+            "net_liquidation":      float(summary.get("NetLiquidation", 0)),
+            "cash_balance":         float(summary.get("CashBalance", 0)),
+            "unrealized_pnl":       float(summary.get("UnrealizedPnL", 0)),
+            "realized_pnl":         float(summary.get("RealizedPnL", 0)),
+            "buying_power":         float(summary.get("BuyingPower", 0)),         # sizing-tallet
+            "available_funds":      float(summary.get("AvailableFunds", 0)),
+            "excess_liquidity":     float(summary.get("ExcessLiquidity", 0)),
+            "maint_margin":         float(summary.get("MaintMarginReq", 0)),
+            "gross_position_value": float(summary.get("GrossPositionValue", 0)),
         }
 
     def get_positions(self) -> list:
