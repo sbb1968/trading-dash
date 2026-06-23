@@ -11,7 +11,7 @@ import {
   Layout, WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId, setActiveLayoutId,
   saveCurrentAsLayout, deleteLayout,
-  loadWorkspace, saveWorkspace, clampWindows, migrateLayoutsOnce,
+  loadWorkspace, saveWorkspace, loadWorkspace2, saveWorkspace2, clampWindows, migrateLayoutsOnce,
   WATCHLIST_COLUMNS, LEVEL2_COLUMNS, TIMESALES_COLUMNS,
   DEFAULT_WATCHLIST_COLUMNS, DEFAULT_LEVEL2_COLUMNS, DEFAULT_TIMESALES_COLUMNS,
 } from "./layouts";
@@ -1325,6 +1325,9 @@ function App() {
     const layout = layouts.find(l => l.id === id);
     if (layout) {
       setWorkspace(clampWindows(layout.windows.map(w => ({ ...w })), window.innerWidth, window.innerHeight));
+      // Anvend ogsaa skærm 2's del — saveWorkspace2 fyrer et storage-event som
+      // skærm 2-vinduet lytter paa og opdaterer sig efter.
+      saveWorkspace2((layout.screen2Windows ?? []).map(w => ({ ...w })));
     }
     setActiveLayoutId(id); setActiveLayoutIdState(id);
   }
@@ -1332,8 +1335,9 @@ function App() {
   function handleSaveLayout(name: string) {
     if (name.startsWith("__overwrite__")) {
       const id = name.replace("__overwrite__", "");
-      // Snapshot den aktuelle workspace ind i det navngivne layout.
-      const updated = layouts.map(l => l.id !== id ? l : { ...l, windows: workspace.map(w => ({ ...w })) });
+      // Snapshot baade skærm 1 (workspace) og skærm 2 (workspace2) ind i layoutet.
+      const s2 = loadWorkspace2(window.innerWidth, window.innerHeight);
+      const updated = layouts.map(l => l.id !== id ? l : { ...l, windows: workspace.map(w => ({ ...w })), screen2Windows: s2 });
       setLayouts(updated); saveLayouts(updated);
       const layoutName = layouts.find(l => l.id === id)?.name || "Layout";
       setLayoutToast(`✓ "${layoutName}" opdateret`);

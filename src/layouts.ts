@@ -261,6 +261,31 @@ export function saveWorkspace(windows: WindowConfig[]) {
   localStorage.setItem(WORKSPACE_KEY, JSON.stringify(windows));
 }
 
+// ── Workspace for skærm 2 (parallelt med skærm 1's) ───────────────────────────
+// Skærm 2 er et separat vindue; dens levende opsaetning persisteres her, saa den
+// genskabes ved exit PRAECIS som skærm 1 (uafhaengigt af hvilket layout der er
+// aktivt). Layout-anvendelse paa skærm 1 skriver ogsaa hertil, saa skærm 2 foelger.
+export const WORKSPACE2_KEY = "td_workspace_screen2";
+
+export function loadWorkspace2(W: number, H: number): WindowConfig[] {
+  try {
+    const saved = localStorage.getItem(WORKSPACE2_KEY);
+    if (saved !== null) {
+      const parsed: WindowConfig[] = JSON.parse(saved);
+      if (Array.isArray(parsed)) return clampWindows(parsed, W, H);
+    }
+    // Bro fra den gamle model: foerste gang arves det aktive layouts screen2Windows.
+    const active = loadLayouts(W, H).find(l => l.id === getActiveLayoutId());
+    return active?.screen2Windows ? clampWindows(active.screen2Windows, W, H) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveWorkspace2(windows: WindowConfig[]) {
+  localStorage.setItem(WORKSPACE2_KEY, JSON.stringify(windows));
+}
+
 export function saveLayouts(layouts: Layout[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts));
 }
@@ -275,7 +300,8 @@ export function setActiveLayoutId(id: string) {
 
 export function saveCurrentAsLayout(name: string, windows: WindowConfig[], W: number, H: number): Layout {
   const id = `custom_${Date.now()}`;
-  const newLayout: Layout = { id, name, windows, screen2Windows: [], isDefault: false };
+  // Tag skærm 2's levende opsaetning med i det navngivne layout.
+  const newLayout: Layout = { id, name, windows, screen2Windows: loadWorkspace2(W, H), isDefault: false };
   const existing = loadLayouts(W, H);
   const updated  = [...existing, newLayout];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));

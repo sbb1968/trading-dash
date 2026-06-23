@@ -6,7 +6,7 @@ import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
 import { AddWindowMenu, LabelWithShortcut } from "./Menubar";
 import {
   WindowConfig, WindowId, WINDOW_LABELS,
-  loadLayouts, saveLayouts, getActiveLayoutId,
+  loadWorkspace2, saveWorkspace2, clampWindows, WORKSPACE2_KEY,
 } from "./layouts";
 
 // ── Screen2 komponent ─────────────────────────────────────────
@@ -17,12 +17,9 @@ export default function Screen2() {
   const [selectedTicker, setSelectedTicker] = useState<string>(
     () => localStorage.getItem("selectedTicker") || "NVDA"
   );
-  const [windows, setWindows] = useState<WindowConfig[]>(() => {
-    const layoutId = getActiveLayoutId();
-    const layouts  = loadLayouts(window.innerWidth, window.innerHeight);
-    const active   = layouts.find(l => l.id === layoutId);
-    return active?.screen2Windows ?? [];
-  });
+  const [windows, setWindows] = useState<WindowConfig[]>(
+    () => loadWorkspace2(window.innerWidth, window.innerHeight)
+  );
 
   const { stocksArray, news, portfolio, buyStock, sellStock, resetPortfolio } =
     useMarketData();
@@ -39,6 +36,10 @@ export default function Screen2() {
     function onStorage(e: StorageEvent) {
       if (e.key === "selectedTicker" && e.newValue) {
         setSelectedTicker(e.newValue);
+      }
+      // Skærm 1 anvendte et layout -> opdater skærm 2 efter den nye opsaetning.
+      if (e.key === WORKSPACE2_KEY && e.newValue) {
+        try { setWindows(clampWindows(JSON.parse(e.newValue), window.innerWidth, window.innerHeight)); } catch { /* ignore */ }
       }
     }
     window.addEventListener("storage", onStorage);
@@ -57,14 +58,9 @@ export default function Screen2() {
     return () => document.removeEventListener("keydown", handleKey);
   }, [windows]);
 
-  // Gem vinduer til layoutet når de ændres
+  // Gem skærm 2's levende opsaetning (egen workspace, parallelt med skærm 1).
   const saveWindows = useCallback((newWindows: WindowConfig[]) => {
-    const layoutId = getActiveLayoutId();
-    const layouts  = loadLayouts(window.innerWidth, window.innerHeight);
-    const updated  = layouts.map(l =>
-      l.id === layoutId ? { ...l, screen2Windows: newWindows } : l
-    );
-    saveLayouts(updated);
+    saveWorkspace2(newWindows);
   }, []);
 
   function updateWindowState(id: WindowId, state: Partial<WindowConfig>) {
