@@ -36,35 +36,32 @@ const CHART_TIMEFRAMES: { id: WindowId; label: string }[] = [
 
 // ── Ikke-chart vinduer med shortcuts ─────────────────────────
 interface WinEntry { id: WindowId; shortcut: string }
-const NON_CHART_GROUPS: { label: string; items: WinEntry[] }[] = [
-  {
-    label: "Scannere",
-    items: [
-      { id: "swingtop10",    shortcut: "S" },   // Swing Top-10 (konfluens)
-      { id: "intradagtop10", shortcut: "I" },   // Day trading Top-10 (konfluens)
-      { id: "haltscanner",   shortcut: "H" },   // Live halt-scanner
-    ],
-  },
-  {
-    label: "Markedsdata",
-    items: [
-      { id: "level2",       shortcut: "L" },
-      { id: "timesales",    shortcut: "M" },
-    ],
-  },
-  {
-    label: "Øvrige",
-    items: [
-      { id: "watchlist",    shortcut: "A" },
-      { id: "account",      shortcut: "U" },
-      { id: "livealgo",     shortcut: "O" },
-      { id: "marketoverview", shortcut: "R" },
-      { id: "orders",       shortcut: "D" },
-      { id: "swing",        shortcut: "W" },
-      { id: "intradagreport", shortcut: "T" },
-      { id: "dagenslog",    shortcut: "E" },
-    ],
-  },
+// Seks logiske grupper i arbejdsgang-raekkefoelge (Charts indsaettes som #2 af
+// AddWindowMenu via ChartSubmenu). Genvejstaster bevaret for muskelhukommelse.
+const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
+  { label: "Scannere", icon: "🔍", items: [
+    { id: "swingtop10",    shortcut: "S" },   // Swing Top-10
+    { id: "intradagtop10", shortcut: "I" },   // Intradag Top-10
+    { id: "haltscanner",   shortcut: "H" },   // Halt-scanner
+  ]},
+  { label: "Markedsdata", icon: "📊", items: [
+    { id: "watchlist",      shortcut: "A" },
+    { id: "level2",         shortcut: "L" },
+    { id: "timesales",      shortcut: "M" },
+    { id: "marketoverview", shortcut: "R" },
+  ]},
+  { label: "Analyse", icon: "🎯", items: [
+    { id: "swing",          shortcut: "W" },   // Swing-rapport
+    { id: "intradagreport", shortcut: "T" },   // Intradag-rapport
+  ]},
+  { label: "Konto & ordrer", icon: "💼", items: [
+    { id: "account",        shortcut: "U" },
+    { id: "orders",         shortcut: "D" },
+  ]},
+  { label: "Algo & log", icon: "⚙", items: [
+    { id: "livealgo",       shortcut: "O" },
+    { id: "dagenslog",      shortcut: "E" },
+  ]},
 ];
 
 // Flad liste af alle shortcut-entries til brug i keydown-listener
@@ -212,8 +209,7 @@ function DropdownItem({ label, shortcut, active, isOpen, onClick }: {
 function ChartSubmenu({ onAddWindow }: { onAddWindow: (id: WindowId) => void }) {
   const [selected, setSelected] = useState<WindowId>("chart5min");
   return (
-    <div style={{ padding: "8px 10px" }} onClick={e => e.stopPropagation()}>
-      <div className="menu-dropdown-section-title" style={{ marginBottom: 6 }}>Charts</div>
+    <div style={{ padding: "4px 10px 8px" }} onClick={e => e.stopPropagation()}>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <select
           value={selected}
@@ -248,6 +244,28 @@ function ChartSubmenu({ onAddWindow }: { onAddWindow: (id: WindowId) => void }) 
 // ── "Tilføj vindue"-menu (DELT mellem skaerm 1 og skaerm 2) ───
 // Eksporteres saa Screen2 faar PRAECIS samme grupperede dropdown (ChartSubmenu
 // med tidsramme-vaelger + Scannere/Markedsdata/Øvrige), ALT+T og item-genveje.
+// Een gruppe i "Tilfoej vindue": skillelinje (undtagen first), ikon-titel, items.
+function Group({ group, first, activeWindowIds, onAddWindow }: {
+  group: { label: string; icon: string; items: WinEntry[] };
+  first?: boolean; activeWindowIds: WindowId[]; onAddWindow: (id: WindowId) => void;
+}) {
+  return (
+    <>
+      {!first && <div className="menu-dropdown-divider" />}
+      <div className="menu-dropdown-section-title">{group.icon} {group.label}</div>
+      {group.items.map(({ id, shortcut }) => (
+        <DropdownItem
+          key={id}
+          label={WINDOW_LABELS[id]}
+          shortcut={shortcut}
+          isOpen={activeWindowIds.includes(id)}
+          onClick={() => onAddWindow(id)}
+        />
+      ))}
+    </>
+  );
+}
+
 export function AddWindowMenu({ onAddWindow, activeWindowIds }: {
   onAddWindow: (id: WindowId) => void;
   activeWindowIds: WindowId[];
@@ -258,24 +276,15 @@ export function AddWindowMenu({ onAddWindow, activeWindowIds }: {
   });
   return (
     <DropdownMenu label="Tilføj vindue" altKey="T" itemShortcuts={itemShortcuts}>
+      {/* 1. Scannere */}
+      <Group group={NON_CHART_GROUPS[0]} first activeWindowIds={activeWindowIds} onAddWindow={onAddWindow} />
+      {/* 2. Charts */}
+      <div className="menu-dropdown-divider" />
+      <div className="menu-dropdown-section-title">📈 Charts</div>
       <ChartSubmenu onAddWindow={onAddWindow} />
-      {NON_CHART_GROUPS.map((group) => (
-        <div key={group.label}>
-          <div className="menu-dropdown-divider" />
-          <div className="menu-dropdown-section-title">{group.label}</div>
-          {group.items.map(({ id, shortcut }) => {
-            const isOpen = activeWindowIds.includes(id);
-            return (
-              <DropdownItem
-                key={id}
-                label={WINDOW_LABELS[id]}
-                shortcut={shortcut}
-                isOpen={isOpen}
-                onClick={() => onAddWindow(id)}
-              />
-            );
-          })}
-        </div>
+      {/* 3-6. Markedsdata, Analyse, Konto & ordrer, Algo & log */}
+      {NON_CHART_GROUPS.slice(1).map((g) => (
+        <Group key={g.label} group={g} activeWindowIds={activeWindowIds} onAddWindow={onAddWindow} />
       ))}
     </DropdownMenu>
   );
@@ -447,23 +456,23 @@ export function Menubar({
         ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
       </button>
 
-      {/* ── Dokumentation + Hjælp — direkte synlige knapper (nemt for Iben) ── */}
-      <button className="menu-btn" onClick={() => onAddWindow("docs")} title="Åbn dokumentation">
-        📄 {WINDOW_LABELS["docs"]}
-      </button>
-      <button className="menu-btn" onClick={() => onAddWindow("assistent")} title="Åbn hjælp fra Claude">
-        💬 {WINDOW_LABELS["assistent"]}
-      </button>
-
-      {/* ── Studio — åbner browser-baseret admin/analyse-app ── */}
-      <button
-        className="menu-btn"
-        onClick={() => openUrl("http://127.0.0.1:8000/studio")}
-        title="Åbn Studio (admin og analyse i browser)"
-      >
-        🎛 Studio
-      </button>
-
+      {/* ── HOEJRE: platform & hjaelp (doere, ikke vinduer) ── */}
+      <div className="menubar-right">
+        <span className="menubar-sep" />
+        <button className="menu-btn menu-btn-door menu-btn-door-primary"
+                onClick={() => openUrl("http://127.0.0.1:8000/studio")}
+                title="Åbn Studio (admin og analyse i browser)">
+          🎛 Studio
+        </button>
+        <button className="menu-btn menu-btn-door"
+                onClick={() => onAddWindow("docs")} title="Åbn dokumentation">
+          📄 {WINDOW_LABELS["docs"]}
+        </button>
+        <button className="menu-btn menu-btn-door"
+                onClick={() => onAddWindow("assistent")} title="Åbn hjælp fra Claude">
+          💬 {WINDOW_LABELS["assistent"]}
+        </button>
+      </div>
 
     </div>
   );

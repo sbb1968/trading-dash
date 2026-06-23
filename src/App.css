@@ -134,13 +134,18 @@ button {
 .menubar {
   display:       flex;
   align-items:   center;
-  gap:           2px;
-  height:        32px;
-  padding:       0 6px;
+  gap:           3px;
+  height:        36px;
+  padding:       0 8px;
   background:    var(--bg-surface);
   border-bottom: 1px solid var(--border-default);
+  box-shadow:    0 1px 3px rgba(0,0,0,0.18);
   flex-shrink:   0;
 }
+
+/* Hoejre-zone: platform-doere skubbet til hoejre */
+.menubar-right { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.menubar-sep   { width: 1px; height: 18px; background: var(--border-subtle); margin: 0 8px 0 2px; }
 
 .menu-item-wrapper {
   position: relative;
@@ -149,19 +154,26 @@ button {
 .menu-btn {
   display:       flex;
   align-items:   center;
-  gap:           4px;
-  padding:       3px 10px;
+  gap:           5px;
+  padding:       4px 11px;
   background:    transparent;
   border:        1px solid transparent;
-  border-radius: 3px;
+  border-radius: 4px;
   color:         var(--text-secondary);
   font-size:     12px;
+  font-weight:   500;
   white-space:   nowrap;
-  transition:    background 0.1s, color 0.1s, border-color 0.1s;
+  transition:    background 0.12s, color 0.12s, border-color 0.12s;
 }
 .menu-btn:hover,
 .menu-btn-open   { background: var(--bg-overlay); color: var(--text-primary); }
 .menu-btn-active { background: var(--accent-border); color: #fff; border-color: var(--accent-border); }
+
+/* Doer-knapper (Studio/Dokumentation/Hjaelp): outline-look */
+.menu-btn-door               { background: var(--bg-elevated); border-color: var(--border-default); color: var(--text-secondary); }
+.menu-btn-door:hover         { background: var(--bg-overlay); border-color: var(--accent); color: var(--text-primary); }
+.menu-btn-door-primary       { border-color: var(--accent-border); color: var(--text-primary); }
+.menu-btn-door-primary:hover { background: var(--accent-bg); border-color: var(--accent); }
 .menu-btn-highlight { color: var(--accent); }
 .menu-btn-highlight:hover { color: var(--text-primary); }
 
@@ -171,7 +183,8 @@ button {
   position:      absolute;
   top:           calc(100% + 3px);
   left:          0;
-  min-width:     200px;
+  min-width:     224px;
+  padding:       4px 0;
   background:    var(--bg-elevated);
   border:        1px solid var(--border-strong);
   border-radius: 5px;
@@ -184,14 +197,14 @@ button {
   display:     flex;
   align-items: center;
   gap:         6px;
-  padding:     6px 12px;
+  padding:     7px 13px;
   color:       var(--text-secondary);
   font-size:   12px;
   cursor:      pointer;
   transition:  background 0.08s, color 0.08s;
   white-space: nowrap;
 }
-.menu-dropdown-item:hover        { background: var(--bg-overlay); color: var(--text-primary); }
+.menu-dropdown-item:hover        { background: var(--bg-overlay); color: var(--text-primary); box-shadow: inset 2px 0 0 var(--accent); }
 .menu-dropdown-item-active       { color: var(--accent); }
 .menu-dropdown-item-active:hover { background: var(--accent-bg); }
 .menu-dropdown-item-danger       { color: var(--bear); }
@@ -207,16 +220,19 @@ button {
 .menu-dropdown-divider {
   height:     1px;
   background: var(--border-subtle);
-  margin:     3px 0;
+  margin:     5px 0;
 }
 
 .menu-dropdown-section-title {
-  padding:        5px 12px 3px;
-  font-size:      9px;
-  font-weight:    600;
-  color:          var(--text-muted);
+  display:        flex;
+  align-items:    center;
+  gap:            6px;
+  padding:        7px 13px 4px;
+  font-size:      10px;
+  font-weight:    700;
+  color:          var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.7px;
 }
 
 .menu-check       { color: var(--accent); font-size: 11px; width: 14px; flex-shrink: 0; }
