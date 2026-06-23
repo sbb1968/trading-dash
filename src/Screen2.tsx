@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { FloatingWindow } from "./FloatingWindow";
+import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { LiveLogProvider } from "./LiveLogContext";
 import { useMarketData } from "./useMarketData";
 import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
@@ -74,7 +74,7 @@ export default function Screen2() {
   function handleAddWindow(id: WindowId) {
     const existing = windows.find(w => w.id === id);
     if (existing) {
-      updateWindowState(id, { closed: false, minimized: false });
+      updateWindowState(id, { closed: false, minimized: false, zIndex: getNextZ() });
       return;
     }
     const w = window.innerWidth;
@@ -88,6 +88,7 @@ export default function Screen2() {
       minimized: false,
       maximized: false,
       closed:    false,
+      zIndex:    getNextZ(),
     };
     setWindows(prev => {
       const updated = [...prev, newWin];

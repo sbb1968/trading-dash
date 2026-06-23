@@ -4,7 +4,7 @@ import "./App.css";
 import { useMarketData } from "./useMarketData";
 import type { NewsData, StockData } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
-import { FloatingWindow } from "./FloatingWindow";
+import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
 import { PaperTradingPanel } from "./PaperTrading";
 import {
@@ -1379,8 +1379,8 @@ function App() {
   function handleAddWindow(id: WindowId) {
     const w = window.innerWidth - 200, h = window.innerHeight - 100;
     const existing = workspace.find(win => win.id === id);
-    if (existing) { updateWindowState(id, { closed: false, minimized: false }); return; }
-    const newWindow: WindowConfig = { id, x: Math.floor(w/4), y: Math.floor(h/4), width: Math.floor(w/2), height: Math.floor(h/2), minimized: false, maximized: false, closed: false };
+    if (existing) { updateWindowState(id, { closed: false, minimized: false, zIndex: getNextZ() }); return; }
+    const newWindow: WindowConfig = { id, x: Math.floor(w/4), y: Math.floor(h/4), width: Math.floor(w/2), height: Math.floor(h/2), minimized: false, maximized: false, closed: false, zIndex: getNextZ() };
     setWorkspace(ws => [...ws, newWindow]);
   }
 

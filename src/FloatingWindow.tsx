@@ -26,7 +26,7 @@ const MIN_WIDTH  = 200;
 const MIN_HEIGHT = 120;
 
 let zCounter = 100;
-function getNextZ() { return ++zCounter; }
+export function getNextZ() { return ++zCounter; }
 
 export function FloatingWindow({ id, title, children, defaultState, onClose, tradingViewTicker, onStateChange, windowType }: Props) {
   const [state, setState]             = useState<WindowState>(defaultState);
