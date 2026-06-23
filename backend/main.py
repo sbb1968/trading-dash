@@ -1192,6 +1192,84 @@ async def swing_report_html(ticker: str, sr: float | None = None,
     return HTMLResponse(_swing_report_html(d))
 
 
+# Vanilla-JS draw-script til intradag-PDF'en — PORT af IntradagChart.tsx (samme
+# skalaer/candlestick/polylinje/niveau/volumen-logik) men med PRINT-farver (lyst
+# tema) og fast 900x460 viewBox. Browseren tegner SVG'en naar report.html aabnes ->
+# med i print. CHART injiceres som JSON foran scriptet i _intradag_report_html.
+INTRADAG_CHART_JS = r"""(function(){
+  if(!CHART || !CHART.bars || !CHART.bars.length) return;
+  var W=900, H=460, TOP=22, BOTM=46, XL=14, GUTTER=58, VOL_H=70, PILL_H=20;
+  var BULL="#15803d", BEAR="#b91c1c", GRID="#e5e7eb", MUT="#6b7280", PILLBG="#fff", TAGBG="#374151";
+  var OVS={vwap:{c:"#7c3aed",w:1.6,o:0.95,d:"0"}, ema9:{c:"#d97706",w:1.4,o:0.9,d:"0"}, ema20:{c:"#2563eb",w:1.4,o:0.9,d:"0"}, vw_upper:{c:"#7c3aed",w:0.8,o:0.25,d:"4 4"}, vw_lower:{c:"#7c3aed",w:0.8,o:0.25,d:"4 4"}};
+  function pillW(t){return t.length*6.5+14;}
+  function esc(t){return String(t).replace(/[&<>"]/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch];});}
+  function lvCol(k){return (k==="orb_high"||k==="orb_low")?"#b45309":(k==="hod")?"#6b7280":"#475569";}
+  function lvDash(k){return (k==="orb_high"||k==="orb_low")?"5 4":(k==="hod")?"2 3":"0";}
+
+  var bars=CHART.bars, n=bars.length, xr=W-GUTTER;
+  var priceBot=H-BOTM-VOL_H, volTop=priceBot+8, volBot=H-BOTM;
+  var ov=CHART.overlays||{}, lvs=CHART.levels||[];
+  var lo=Infinity, hi=-Infinity, i, b, v, arr;
+  for(i=0;i<n;i++){b=bars[i]; if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h;}
+  lvs.forEach(function(L){if(L.price<lo)lo=L.price; if(L.price>hi)hi=L.price;});
+  ["vwap","ema9","ema20"].forEach(function(key){arr=ov[key]||[]; for(i=0;i<arr.length;i++){v=arr[i]; if(v!=null){if(v<lo)lo=v; if(v>hi)hi=v;}}});
+  if(!isFinite(lo)||!isFinite(hi)){lo=0;hi=1;}
+  var pad=(hi-lo)*0.06||1, pmin=lo-pad, pmax=hi+pad;
+  var slot=(xr-XL)/Math.max(n,1);
+  function x(idx){return XL+(idx+0.5)*slot;}
+  function y(p){return priceBot-(p-pmin)/(pmax-pmin)*(priceBot-TOP);}
+  var vmax=0; for(i=0;i<n;i++){if((bars[i].v||0)>vmax)vmax=bars[i].v||0;}
+  function vy(vv){return volBot-(vmax>0?vv/vmax:0)*(volBot-volTop);}
+  function segs(a){var out=[],cur=[],j; a=a||[]; for(j=0;j<a.length;j++){var vv=a[j]; if(vv==null){if(cur.length>1)out.push(cur.join(" ")); cur=[];} else cur.push(x(j).toFixed(1)+","+y(vv).toFixed(1));} if(cur.length>1)out.push(cur.join(" ")); return out;}
+
+  var ticks=[], span=pmax-pmin;
+  var step=span>400?100:span>200?50:span>80?25:span>30?10:span>12?5:span>5?2:span>2?1:0.5;
+  for(var pp0=Math.ceil(pmin/step)*step;pp0<pmax;pp0+=step)ticks.push(pp0);
+  var tt=[], everyN=Math.max(1,Math.round(n/8));
+  bars.forEach(function(bb,ii){if(ii%everyN===0)tt.push({x:x(ii),label:bb.t});});
+
+  var lvls=lvs.map(function(L){var txt=L.label+" "+L.price.toFixed(2); return {color:lvCol(L.kind),dash:lvDash(L.kind),lineY:y(L.price),txt:txt,w:pillW(txt)};}).sort(function(a,b){return a.lineY-b.lineY;});
+  var lp=[], lastB=-Infinity;
+  lvls.forEach(function(it){var y0=it.lineY-PILL_H/2; if(y0<lastB+2)y0=lastB+2; y0=Math.max(2,Math.min(y0,priceBot-PILL_H)); lastB=y0+PILL_H; lp.push({color:it.color,dash:it.dash,lineY:it.lineY,txt:it.txt,x0:xr-it.w,x1:xr,y0:y0});});
+
+  var bw=Math.min(7, slot*0.6);
+  var s='<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block">';
+  ticks.forEach(function(p){
+    s+='<line x1="'+XL+'" y1="'+y(p)+'" x2="'+xr+'" y2="'+y(p)+'" stroke="'+GRID+'" stroke-width="0.5"/>';
+    s+='<text x="'+(xr+5)+'" y="'+(y(p)+4)+'" font-size="12" fill="'+MUT+'">'+p.toFixed(p<10?1:0)+'</text>';
+  });
+  lp.forEach(function(it){ s+='<line x1="'+XL+'" y1="'+it.lineY+'" x2="'+xr+'" y2="'+it.lineY+'" stroke="'+it.color+'" stroke-width="1.2" stroke-dasharray="'+it.dash+'" opacity="0.85"/>'; });
+  bars.forEach(function(bb,ii){
+    var up=bb.c>=bb.o, col=up?BULL:BEAR, cx=x(ii);
+    var yb=y(Math.max(bb.o,bb.c)), hb=Math.max(Math.abs(y(bb.o)-y(bb.c)),1.2);
+    s+='<line x1="'+cx+'" y1="'+y(bb.h)+'" x2="'+cx+'" y2="'+y(bb.l)+'" stroke="'+col+'" stroke-width="1"/>';
+    s+='<rect x="'+(cx-bw/2)+'" y="'+yb+'" width="'+bw+'" height="'+hb+'" fill="'+col+'" rx="1"/>';
+  });
+  ["vw_upper","vw_lower","vwap","ema20","ema9"].forEach(function(key){
+    var st=OVS[key]; segs(ov[key]).forEach(function(pts){ s+='<polyline points="'+pts+'" fill="none" stroke="'+st.c+'" stroke-width="'+st.w+'" opacity="'+st.o+'" stroke-dasharray="'+st.d+'" stroke-linejoin="round" stroke-linecap="round"/>'; });
+  });
+  var yc=y(CHART.current_price);
+  s+='<line x1="'+XL+'" y1="'+yc+'" x2="'+xr+'" y2="'+yc+'" stroke="'+MUT+'" stroke-width="0.5" stroke-dasharray="2 3"/>';
+  s+='<rect x="'+(xr+2)+'" y="'+(yc-10)+'" width="'+(GUTTER-5)+'" height="20" rx="4" fill="'+TAGBG+'"/>';
+  s+='<text x="'+(xr+2+(GUTTER-5)/2)+'" y="'+(yc+4)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">'+CHART.current_price.toFixed(2)+'</text>';
+  lp.forEach(function(it){
+    s+='<rect x="'+it.x0+'" y="'+it.y0+'" width="'+(it.x1-it.x0)+'" height="'+PILL_H+'" rx="5" fill="'+PILLBG+'" stroke="'+it.color+'" stroke-width="1.1"/>';
+    s+='<text x="'+((it.x0+it.x1)/2)+'" y="'+(it.y0+14)+'" text-anchor="middle" font-size="11" font-weight="600" fill="'+it.color+'">'+esc(it.txt)+'</text>';
+  });
+  s+='<line x1="'+XL+'" y1="'+(volTop-3)+'" x2="'+xr+'" y2="'+(volTop-3)+'" stroke="'+GRID+'" stroke-width="0.5"/>';
+  bars.forEach(function(bb,ii){ var up=bb.c>=bb.o, vt=vy(bb.v); s+='<rect x="'+(x(ii)-bw/2)+'" y="'+vt+'" width="'+bw+'" height="'+Math.max(volBot-vt,0.5)+'" fill="'+(up?BULL:BEAR)+'" opacity="0.45"/>'; });
+  tt.forEach(function(tk){
+    s+='<line x1="'+tk.x+'" y1="'+volBot+'" x2="'+tk.x+'" y2="'+(volBot+4)+'" stroke="'+MUT+'" stroke-width="0.5"/>';
+    s+='<text x="'+tk.x+'" y="'+(volBot+18)+'" text-anchor="middle" font-size="12" fill="'+MUT+'">'+esc(tk.label)+'</text>';
+  });
+  s+='<text x="'+XL+'" y="13" font-size="11" font-weight="700" fill="#7c3aed">VWAP</text>';
+  s+='<text x="'+(XL+44)+'" y="13" font-size="11" font-weight="700" fill="#d97706">EMA9</text>';
+  s+='<text x="'+(XL+88)+'" y="13" font-size="11" font-weight="700" fill="#2563eb">EMA20</text>';
+  s+='</svg>';
+  document.getElementById("intradag-chart").innerHTML=s;
+})();"""
+
+
 def _intradag_report_html(d: dict) -> str:
     """Render intradag report_to_json som en paen, print-venlig HTML-side (lyst tema),
     aabnet i EKSTERN browser fra Print-knappen. Spejler _swing_report_html. INGEN chart
@@ -1296,6 +1374,10 @@ def _intradag_report_html(d: dict) -> str:
     fbc = bandcolor(d.get("final_band"))
     finaltxt = "—" if d.get("final") is None else sg(d["final"])
     combtxt = "—" if d.get("combined") is None else sg(d["combined"])
+    chart = d.get("chart")
+    has_chart = bool(chart and chart.get("bars"))
+    chart_block = '<div id="intradag-chart" style="margin:6px 0"></div>' if has_chart else ''
+    chart_script = ('<script>const CHART=' + _json.dumps(chart) + ';' + INTRADAG_CHART_JS + '</script>') if has_chart else ''
     return (
         f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Day trading - {t}</title>'
         f'<style>{css}</style></head><body>'
@@ -1306,12 +1388,13 @@ def _intradag_report_html(d: dict) -> str:
         f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{finaltxt}</div>'
         f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(bl(d.get("final_band")))}</div></div></div>'
         f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{combtxt}</b> &times; Handelbarheds-gate <b>{d["gate"]:.3f}</b> &rarr; Samlet <b style="color:{fbc}">{finaltxt}</b></div>'
+        f'{chart_block}'
         '<div style="display:flex;gap:10px;flex-wrap:wrap">'
         f'{layer_html("Teknisk", d["layers"]["technical"])}{layer_html("Forsyning", d["layers"]["supply"])}{layer_html("Katalysator", d["layers"]["catalyst"])}</div>'
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{chips}</div>'
-        '</div></body></html>'
+        f'</div>{chart_script}</body></html>'
     )
 
 
