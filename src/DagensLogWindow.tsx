@@ -1,9 +1,13 @@
-import { useState, type CSSProperties } from "react";
+import { useState, useEffect, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 
 const API = "http://127.0.0.1:8000";
 
-interface Meta { from: string; to: string; n_trades: number; }
+interface Peer {
+  id: string; name: string; host: string | null; url: string | null;
+  enabled: boolean; is_self: boolean; selectable: boolean;
+}
+interface Machine { id: string; name: string; ok: boolean; n_trades: number; }
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -30,25 +34,59 @@ const inp: CSSProperties = {
 };
 
 export function DagensLogWindow() {
-  const [from, setFrom]       = useState(today);
-  const [to, setTo]           = useState(today);
+  const [peers, setPeers]       = useState<Peer[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [peersErr, setPeersErr] = useState("");
+
+  const [from, setFrom]         = useState(today);
+  const [to, setTo]             = useState(today);
   const [markdown, setMarkdown] = useState("");
-  const [meta, setMeta]       = useState<Meta | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  const [copied, setCopied]   = useState(false);
+  const [machines, setMachines] = useState<Machine[] | null>(null);
+  const [period, setPeriod]     = useState<{ from: string; to: string } | null>(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState("");
+  const [copied, setCopied]     = useState(false);
+
+  // Hent maskin-listen ved aabning; forvaelg alle valgbare (enabled + url).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/fleet/peers`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const ps: Peer[] = data.peers || [];
+        if (!alive) return;
+        setPeers(ps);
+        setSelected(new Set(ps.filter(p => p.selectable).map(p => p.id)));
+      } catch (e: any) {
+        if (alive) setPeersErr(`Kunne ikke hente maskin-listen fra backenden (:8000): ${e?.message || e}`);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   async function run() {
     setLoading(true); setError(""); setCopied(false);
     try {
-      const r = await fetch(`${API}/dagenslog/report?from=${from}&to=${to}`);
+      const peersParam = encodeURIComponent([...selected].join(","));
+      const r = await fetch(`${API}/dagenslog/report_fleet?from=${from}&to=${to}&peers=${peersParam}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       setMarkdown(data.markdown || "");
-      setMeta({ from: data.from, to: data.to, n_trades: data.n_trades });
+      setMachines(data.machines || []);
+      setPeriod({ from: data.from, to: data.to });
     } catch (e: any) {
       setError(`Kunne ikke hente dagens log fra backenden (:8000): ${e?.message || e}`);
-      setMarkdown(""); setMeta(null);
+      setMarkdown(""); setMachines(null); setPeriod(null);
     } finally {
       setLoading(false);
     }
@@ -70,6 +108,10 @@ export function DagensLogWindow() {
     setTimeout(() => setCopied(false), 1500);
   }
 
+  const statusLine = machines && machines.length
+    ? machines.map(m => `${m.name} ${m.ok ? `OK (${m.n_trades})` : "kunne ikke naas"}`).join(" · ")
+    : "";
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column",
                   background: "var(--bg-base)", color: "var(--text-primary)" }}>
@@ -78,9 +120,31 @@ export function DagensLogWindow() {
       <div style={{ padding: "10px 12px", fontSize: 12.5, lineHeight: 1.5,
                     color: "var(--text-secondary)", background: "var(--bg-surface)",
                     borderBottom: "1px solid var(--border-default)" }}>
-        Vælg evt. et dato-interval (default er i dag) og tryk <strong style={{ color: "var(--text-primary)" }}>Kør dagens log</strong>.
+        Vælg hvilke maskiner der skal med (default er alle opsatte) og evt. et dato-interval (default i dag),
+        og tryk <strong style={{ color: "var(--text-primary)" }}>Kør dagens log</strong>.
         Tryk så <strong style={{ color: "var(--text-primary)" }}>Kopier til Claude</strong>, åbn en ny Claude-samtale,
         indsæt, og bed Claude om at <strong style={{ color: "var(--text-primary)" }}>fortolke dagens handler og komme med forslag</strong>.
+      </div>
+
+      {/* Maskin-afkrydsning */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+                    padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
+        <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>Maskiner:</span>
+        {peersErr && <span style={{ fontSize: 12, color: "var(--bear)" }}>{peersErr}</span>}
+        {peers.map(pe => (
+          <label key={pe.id}
+            title={pe.selectable ? undefined : "Ikke opsat endnu"}
+            style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5,
+                     cursor: pe.selectable ? "pointer" : "not-allowed",
+                     color: pe.selectable ? "var(--text-secondary)" : "var(--text-muted)",
+                     opacity: pe.selectable ? 1 : 0.5 }}>
+            <input type="checkbox" disabled={!pe.selectable}
+              checked={selected.has(pe.id)} onChange={() => toggle(pe.id)} />
+            {pe.name}
+            {pe.is_self && <span style={{ color: "var(--text-muted)" }}>(denne maskine)</span>}
+            {!pe.selectable && <span style={{ color: "var(--text-muted)" }}>(ikke opsat)</span>}
+          </label>
+        ))}
       </div>
 
       {/* Kontrol-række */}
@@ -90,21 +154,25 @@ export function DagensLogWindow() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} />
         <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Til:</label>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} />
-        <button onClick={run} disabled={loading} style={{ ...btn, opacity: loading ? 0.6 : 1 }}>
+        <button onClick={run} disabled={loading || selected.size === 0}
+          style={{ ...btn, opacity: (loading || selected.size === 0) ? 0.6 : 1 }}>
           {loading ? "Henter…" : "Kør dagens log"}
         </button>
 
-        {meta && !loading && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              {meta.from}{meta.to !== meta.from ? ` → ${meta.to}` : ""} · {meta.n_trades} handler
-            </span>
-            <button onClick={copyToClaude} style={btn}>
-              {copied ? "Kopieret!" : "Kopier til Claude"}
-            </button>
-          </div>
+        {markdown && !loading && (
+          <button onClick={copyToClaude} style={{ ...btn, marginLeft: "auto" }}>
+            {copied ? "Kopieret!" : "Kopier til Claude"}
+          </button>
         )}
       </div>
+
+      {/* Status-linje pr. maskine */}
+      {statusLine && !loading && (
+        <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--text-muted)",
+                      borderBottom: "1px solid var(--border-subtle)" }}>
+          {period && <>{period.from}{period.to !== period.from ? ` → ${period.to}` : ""} · </>}{statusLine}
+        </div>
+      )}
 
       {/* Rapport */}
       <div style={{ flex: 1, overflow: "auto", padding: "12px 16px" }}>
@@ -117,7 +185,7 @@ export function DagensLogWindow() {
         )}
         {!loading && !error && !markdown && (
           <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            Vælg datoer og tryk <strong>Kør dagens log</strong> for at hente rapporten.
+            Vælg maskiner + datoer og tryk <strong>Kør dagens log</strong> for at hente rapporten.
           </div>
         )}
         {!loading && markdown && (

@@ -26,6 +26,7 @@ from pathlib import Path
 
 from contextlib import asynccontextmanager
 import aiosqlite
+import aiohttp
 
 import secrets
 from fastapi import HTTPException, Header
@@ -1687,7 +1688,9 @@ async def docs_file(name: str):
 
 
 # ── Dagens log (markdown-rapport over et dato-interval, read-only) ───────────
-@app.get("/dagenslog/report")
+# Beskyttet: paa algoserveren naas dette som fan-out-maal via X-Internal-Key
+# (vej 1 i require_studio_auth); paa en workstation slipper dev-mode (vej 2) igennem.
+@app.get("/dagenslog/report", dependencies=[Depends(require_studio_auth)])
 async def dagenslog_report(from_: str = Query(None, alias="from"),
                            to: str = Query(None, alias="to")):
     """Dagens log som markdown over et dato-interval (inkl. forensik, alle strategier)."""
@@ -1708,6 +1711,96 @@ async def dagenslog_report(from_: str = Query(None, alias="from"),
 
     md, n = await asyncio.to_thread(_run)   # sqlite er blokerende -> traad
     return {"markdown": md, "from": d_from, "to": d_to, "n_trades": n}
+
+
+# ── Dagens log paa tvaers af flaaden (vaelg maskiner, fan-out + flet) ─────────
+PEERS_PATH = Path(__file__).parent / "peers.json"
+
+
+def load_peers() -> list[dict]:
+    """peers.json er det eksisterende maskin-register (ingen nye hardkodede hosts)."""
+    try:
+        return json.loads(PEERS_PATH.read_text(encoding="utf-8")).get("peers", [])
+    except Exception:
+        return []
+
+
+@app.get("/fleet/peers", dependencies=[Depends(require_studio_auth)])
+async def fleet_peers():
+    """Maskin-liste til vinduets afkrydsning. self markeres; tomme slots = ikke valgbare."""
+    peers = load_peers()
+    for p in peers:
+        p["is_self"]    = (p.get("id") == identity.source_id)
+        p["selectable"] = bool(p.get("url")) and bool(p.get("enabled"))
+    return {"peers": peers, "self_id": identity.source_id}
+
+
+@app.get("/dagenslog/report_fleet", dependencies=[Depends(require_studio_auth)])
+async def dagenslog_report_fleet(from_: str = Query(None, alias="from"),
+                                 to: str = Query(None, alias="to"),
+                                 peers: str = Query("")):
+    """Henter dagens log fra de valgte maskiner (self lokalt, peers over Tailscale
+    med X-Internal-Key), robust mod en maskine der er nede, og fletter til een markdown."""
+    today = datetime.now().date().isoformat()
+    d_from = (from_ or today)[:10]
+    d_to   = (to or today)[:10]
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+
+    want = [pid for pid in peers.split(",") if pid.strip()]
+    reg  = {p["id"]: p for p in load_peers()}
+    selected = [reg[pid] for pid in want if pid in reg and reg[pid].get("url")]
+
+    async def fetch_one(p: dict) -> dict:
+        # SELF: koer lokalt (intet HTTP-hop, virker selv hvis eget hostname driller)
+        if p["id"] == identity.source_id:
+            def _run():
+                con = dagens_log.ro_connect(dagens_log.DB_PATH)
+                try:
+                    n = len(dagens_log.load_trades(con, d_from, d_to, None))
+                    return dagens_log.build_report_md(con, d_from, d_to, None, True), n
+                finally:
+                    con.close()
+            try:
+                md, n = await asyncio.to_thread(_run)
+                return {"peer": p, "md": md, "n": n, "ok": True}
+            except Exception as e:
+                return {"peer": p, "md": None, "n": 0, "ok": False, "err": str(e)[:140]}
+        # PEER: hent over Tailscale med X-Internal-Key
+        try:
+            url = f'{p["url"]}/dagenslog/report?from={d_from}&to={d_to}'
+            headers = {"X-Internal-Key": identity.internal_key}
+            timeout = aiohttp.ClientTimeout(total=12)
+            async with aiohttp.ClientSession(timeout=timeout) as s:
+                async with s.get(url, headers=headers) as r:
+                    r.raise_for_status()
+                    data = await r.json()
+            return {"peer": p, "md": data.get("markdown", ""),
+                    "n": data.get("n_trades", 0), "ok": True}
+        except Exception as e:
+            return {"peer": p, "md": None, "n": 0, "ok": False, "err": str(e)[:140]}
+
+    results = await asyncio.gather(*[fetch_one(p) for p in selected]) if selected else []
+
+    # --- flet til een markdown ---
+    period = d_from if d_from == d_to else f"{d_from} -> {d_to}"
+    status = " · ".join(
+        f'{r["peer"]["name"]} ' + (f"OK ({r['n']} handler)" if r["ok"] else "kunne ikke naas")
+        for r in results) or "ingen maskiner valgt"
+    parts = [f"# Dagens log (flaade) — {period}", "", f"**Maskiner:** {status}", ""]
+    for r in results:
+        nm = r["peer"]["name"]; hs = r["peer"].get("host") or r["peer"]["id"]
+        parts.append(f"\n\n## ==================  {nm}  ({hs})  ==================\n")
+        if r["ok"] and r["md"]:
+            parts.append(r["md"])
+        elif r["ok"]:
+            parts.append(f"_Ingen handler eller events for {nm} i perioden._")
+        else:
+            parts.append(f"_{nm}: kunne ikke naas ({r.get('err','offline/timeout')}). "
+                         f"Tjek at maskinen koerer og er paa Tailscale._")
+    machines = [{"id": r["peer"]["id"], "name": r["peer"]["name"], "ok": r["ok"], "n_trades": r["n"]}
+                for r in results]
+    return {"markdown": "\n".join(parts), "from": d_from, "to": d_to, "machines": machines}
 
 
 # ── Journal / Trades endpoints ────────────────────────────────
