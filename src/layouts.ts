@@ -1,6 +1,6 @@
 // ── Window ID typer ───────────────────────────────────────────
 export type WindowId =
-  | "watchlist" | "newsroom" | "papertrading"
+  | "watchlist" | "papertrading"
   | "chart1min" | "chart2min" | "chart3min" | "chart5min" | "chart10min"
   | "chart15min" | "chart30min"
   | "chart1time" | "chart4time"
@@ -20,7 +20,6 @@ export type WindowId =
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   watchlist:    "Watchlist",
-  newsroom:     "News Room",
   papertrading: "Paper Trading",
   chart1min:    "Chart 1 min",
   chart2min:    "Chart 2 min",
@@ -120,7 +119,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
       id: "ibens-orb", name: "Ibens ORB", isDefault: true,
       windows: [
         { id: "chart1min", x: Math.floor(aw*0.22), y: 0,                   width: Math.floor(aw*0.52), height: Math.floor(ah*0.65), minimized:false, maximized:false, closed:false },
-        { id: "newsroom",  x: Math.floor(aw*0.74), y: 0,                   width: Math.floor(aw*0.26), height: Math.floor(ah*0.5),  minimized:false, maximized:false, closed:false },
         { id: "level2",    x: Math.floor(aw*0.22), y: Math.floor(ah*0.65), width: Math.floor(aw*0.26), height: Math.floor(ah*0.35), minimized:false, maximized:false, closed:false },
         { id: "timesales", x: Math.floor(aw*0.48), y: Math.floor(ah*0.65), width: Math.floor(aw*0.26), height: Math.floor(ah*0.35), minimized:false, maximized:false, closed:false },
       ],
@@ -132,7 +130,6 @@ function makeDefaultLayouts(W: number, H: number): Layout[] {
         { id: "chart1min", x: Math.floor(aw*0.20), y: 0,                   width: Math.floor(aw*0.40), height: Math.floor(ah*0.6),  minimized:false, maximized:false, closed:false },
         { id: "chart5min", x: Math.floor(aw*0.60), y: 0,                   width: Math.floor(aw*0.40), height: Math.floor(ah*0.6),  minimized:false, maximized:false, closed:false },
         { id: "watchlist", x: Math.floor(aw*0.20), y: Math.floor(ah*0.6),  width: Math.floor(aw*0.40), height: Math.floor(ah*0.4),  minimized:false, maximized:false, closed:false },
-        { id: "newsroom",  x: Math.floor(aw*0.60), y: Math.floor(ah*0.6),  width: Math.floor(aw*0.40), height: Math.floor(ah*0.4),  minimized:false, maximized:false, closed:false },
       ],
       screen2Windows: [],
     },

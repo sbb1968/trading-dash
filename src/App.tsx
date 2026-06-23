@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import { useMarketData } from "./useMarketData";
-import type { NewsData, StockData } from "./useMarketData";
+import type { StockData } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
@@ -33,14 +33,13 @@ import { useTickerName } from "./useTickerName";
 
 
 // ── Konstanter ────────────────────────────────────────────────
-type ActiveView = "scanners" | "watchlist" | "charting" | "newsroom" | "konfigurator" | "papertrading";
+type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator" | "papertrading";
 
 // ── Font-størrelse system ─────────────────────────────────────
 const FONT_WINDOW_TYPES = [
   { id: "menubar",   label: "Menubar" },
   { id: "scanner",   label: "Scannere" },
   { id: "watchlist", label: "Watchlist" },
-  { id: "newsroom",  label: "Newsroom" },
   { id: "chart",     label: "Charts" },
   { id: "level2",    label: "Level 2" },
   { id: "timesales", label: "Time & Sales" },
@@ -73,7 +72,6 @@ function applyAllFonts() {
 
 function getWindowType(id: WindowId): string {
   if (id === "watchlist")    return "watchlist";
-  if (id === "newsroom")     return "newsroom";
   if (id.startsWith("chart")) return "chart";
   if (id === "level2")       return "level2";
   if (id === "timesales")    return "timesales";
@@ -357,129 +355,6 @@ function NewsTickerName({ ticker }: { ticker: string }) {
       <strong>{ticker}</strong>
       {name && <span style={{ marginLeft: 4, color: "var(--text-muted)", fontSize: 10 }}>· {name}</span>}
     </span>
-  );
-}
-
-// ── News Room ─────────────────────────────────────────────────
-function NewsRoom({ news, selectedTicker, onSelectTicker, watchlist }: {
-  news: (NewsData & { isNew?: boolean })[]; selectedTicker: string;
-  onSelectTicker: (ticker: string) => void; watchlist: string[];
-}) {
-  const [filter, setFilter] = useState<"all" | "watchlist">("all");
-  const filtered = news.filter(n => filter === "all" || watchlist.includes(n.ticker));
-  const grouped  = filter === "watchlist"
-    ? watchlist.map(ticker => ({ ticker, items: filtered.filter(n => n.ticker === ticker) })).filter(g => g.items.length > 0)
-    : null;
-
-  // Tjek om der findes nogen forsinkede nyheder — hvis ja vis advarsel
-  const hasDelayed = filtered.some(n => (n as any).delayed);
-
-  function handleNewsClick(item: any) {
-    if (item.url) {
-      openUrl(item.url);
-    } else {
-      // Fallback — søgning hvis ingen direkte URL
-      const query = encodeURIComponent(`${item.ticker} ${item.headline}`);
-      openUrl(`https://www.google.com/search?q=${query}+stock+news`);
-    }
-  }
-
-  return (
-    <div className="newsroom-container">
-      {/* ── Forsinket-data advarsel ── */}
-      {hasDelayed && (
-        <div style={{
-          padding: "6px 10px",
-          background: "rgba(245, 158, 11, 0.15)",
-          borderBottom: "1px solid rgba(245, 158, 11, 0.5)",
-          color: "#f59e0b",
-          fontSize: 11,
-          fontWeight: 600,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 13 }}>⚠</span>
-          <span>
-            FORSINKET DATA — Finnhub gratis tier · nyheder er typisk 15-30 min gamle ·
-            ikke egnet til live momentum trading
-          </span>
-        </div>
-      )}
-
-      <div className="newsroom-toolbar">
-        <div className="newsroom-filters">
-          <button className={`news-filter-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>Alle</button>
-          <button className={`news-filter-btn ${filter === "watchlist" ? "active" : ""}`} onClick={() => setFilter("watchlist")}>Watchlist</button>
-        </div>
-        <span className="newsroom-count">{filtered.length} nyheder</span>
-      </div>
-      <div className="newsroom-scroll">
-        {grouped && (
-          <div className="newsroom-grouped">
-            {grouped.map(group => (
-              <div key={group.ticker} className="newsroom-group">
-                <div className={`newsroom-group-header ${group.ticker === selectedTicker ? "newsroom-group-selected" : ""}`} onClick={() => onSelectTicker(group.ticker)}>
-                  <span className="newsroom-group-ticker">{group.ticker}</span>
-                  <span className="newsroom-group-count">{group.items.length} nyheder</span>
-                </div>
-                <table className="newsroom-table">
-                  <tbody>
-                    {group.items.map(item => (
-                      <tr 
-                        key={item.id} 
-                        className={[`news-row-${item.sentiment}`, item.isNew ? "news-row-new" : ""].join(" ")} 
-                        onClick={() => onSelectTicker(item.ticker)}
-                        onDoubleClick={() => handleNewsClick(item)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        <td className="news-time" style={{ width: "60px" }}>
-                          {item.time}
-                          {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
-                        </td>
-                        <td className="news-headline">{item.headline}</td>
-                        <td className="news-source" style={{ width: "100px" }}>{item.source}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
-        )}
-        {!grouped && (
-          <table className="newsroom-table">
-            <thead>
-              <tr><th style={{ width: "60px" }}>Tid</th><th>Overskrift</th><th style={{ width: "70px" }}>Ticker</th><th style={{ width: "100px" }}>Kilde</th></tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 && <tr><td colSpan={4} className="watchlist-empty">Ingen nyheder</td></tr>}
-              {filtered.map(item => (
-                <tr
-                  key={item.id}
-                  className={[`news-row-${item.sentiment}`, item.ticker === selectedTicker ? "row-selected" : "", item.isNew ? "news-row-new" : ""].join(" ")}
-                  onClick={() => onSelectTicker(item.ticker)}
-                  onDoubleClick={() => handleNewsClick(item)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td className="news-time">
-                    {item.time}
-                    {(item as any).delayed && <span style={{ marginLeft: 3, color: "#f59e0b", fontSize: 9 }} title="Forsinket data">⏱</span>}
-                  </td>
-                  <td className="news-headline">{item.headline}</td>
-                  <td className="news-ticker-cell">
-                    <span className={`news-sentiment-dot sentiment-${item.sentiment}`}>●</span>
-                    <NewsTickerName ticker={item.ticker} />
-                  </td>
-                  <td className="news-source">{item.source}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -1037,13 +912,12 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
 export function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
-  news: any[]; portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
+  portfolio: any; buyStock: any; sellStock: any; resetPortfolio: any; currentPrice: number;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
 }) {
   switch(id) {
     case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
-    case "newsroom":    return <NewsRoom news={props.news} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} />;
     case "papertrading":return <PaperTradingPanel portfolio={props.portfolio} selectedTicker={props.selectedTicker} currentPrice={props.currentPrice} onBuy={props.buyStock} onSell={props.sellStock} onReset={props.resetPortfolio} onSelectTicker={props.onSelectTicker} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
@@ -1122,7 +996,7 @@ function App() {
   useEffect(() => { applyAllFonts(); }, []);
 
   const {
-    stocksArray, news, portfolio, status,
+    stocksArray, portfolio, status,
     buyStock, sellStock, resetPortfolio,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
   } = useMarketData();
@@ -1211,7 +1085,7 @@ function App() {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
-    news, portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
+    portfolio, buyStock, sellStock, resetPortfolio, currentPrice,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {

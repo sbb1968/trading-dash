@@ -17,7 +17,6 @@ from scheduler    import AlgoScheduler
 from journal          import Journal
 from orders_tracker   import get_tracker
 
-from finnhub_news import FinnhubNewsFeed
 
 from accounts import identity
 
@@ -128,8 +127,6 @@ ibkr_conn      = None
 live_feed      = None
 live_feed_task = None
 ibkr_connected = False
-finnhub_feed:      FinnhubNewsFeed | None = None
-finnhub_feed_task                          = None
 journal = Journal("trading_dash.db")
 # ── Autonom drift: watchdog + scheduler ───────────────────────
 tws_watchdog: TWSWatchdog | None     = None
@@ -377,7 +374,6 @@ async def startup():
 
     asyncio.create_task(portfolio_loop())
     asyncio.create_task(start_ibkr_feed())
-    asyncio.create_task(start_finnhub_feed())
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
@@ -428,17 +424,6 @@ async def startup():
     #     tags     = "robot,green_circle",
     # )
 
-async def start_finnhub_feed():
-    """Start Finnhub news polling i baggrunden."""
-    global finnhub_feed, finnhub_feed_task
-
-    try:
-        finnhub_feed      = FinnhubNewsFeed(broadcast)
-        finnhub_feed_task = asyncio.create_task(finnhub_feed.start())
-        print("[FinnhubNews] Feed startet — poller hver 5. minut")
-    except Exception as e:
-        print(f"[FinnhubNews] Kunne ikke starte: {e}")
-
 # ── Shutdown ──────────────────────────────────────────────────
 @app.on_event("shutdown")
 async def shutdown():
@@ -482,9 +467,8 @@ async def shutdown():
         except Exception as e:
             print(f"[Server] Fejl ved live_feed-stop: {e}")
 
-    # 5. Annullér de gemte baggrunds-tasks (feed + finnhub)
-    for _task_name, _task in (("live_feed_task", live_feed_task),
-                              ("finnhub_feed_task", finnhub_feed_task)):
+    # 5. Annullér de gemte baggrunds-tasks (live feed)
+    for _task_name, _task in (("live_feed_task", live_feed_task),):
         if _task is not None and not _task.done():
             _task.cancel()
             try:
