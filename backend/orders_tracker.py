@@ -102,6 +102,10 @@ class OrdersTracker:
             "order_type":  order_type,
             "limit_price": limit_price,
             "placed_at":   datetime.now().isoformat(),
+            "status":      "Submitted",   # live-afstemning retter den straks for in-session-ordrer
+            "filled":      0,
+            "remaining":   int(shares),
+            "avg_fill":    0,
         }
         self._entries.append(entry)
         _save_log(self._entries)
@@ -111,6 +115,7 @@ class OrdersTracker:
         self,
         ibkr_conn,
         period_hours: int = 24,
+        sources=None,
     ) -> list[dict]:
         """
         Returnér alle ordrer fra de seneste `period_hours` timer, beriget
@@ -123,6 +128,7 @@ class OrdersTracker:
         recent = [
             e for e in self._entries
             if _parse_ts(e.get("placed_at")) >= cutoff
+            and (sources is None or e.get("source") in sources)
         ]
 
         if not recent:
@@ -143,17 +149,33 @@ class OrdersTracker:
             except Exception as e:
                 logger.warning(f"[OrdersTracker] Kunne ikke hente live status: {e}")
 
-        # Berig vores entries med live status
+        # Persistér live-status ind i entryen mens ordren stadig er i sessionen.
+        # recent-entries er REFERENCER ind i self._entries, saa mutationen rammer
+        # den gemte liste. Skriv kun ved aendring (ikke paa hver poll). Saa viser
+        # terminale ordrer fra tidligere sessioner deres GEMTE status efter en
+        # natlig genforbindelse/genstart i stedet for "UNKNOWN".
+        dirty = False
+        for e in recent:
+            live = live_status.get(e["order_id"])
+            if live and live["status"] != e.get("status"):
+                e["status"]    = live["status"]
+                e["filled"]    = live["filled"]
+                e["remaining"] = live["remaining"]
+                e["avg_fill"]  = live["avg_fill"]
+                dirty = True
+        if dirty:
+            _save_log(self._entries)
+
         out = []
         for e in sorted(recent, key=lambda x: x.get("placed_at", ""), reverse=True):
-            live = live_status.get(e["order_id"], {})
+            status = e.get("status", "UNKNOWN")   # gemt status, IKKE altid UNKNOWN
             out.append({
                 **e,
-                "status":    live.get("status", "UNKNOWN"),
-                "filled":    live.get("filled", 0),
-                "remaining": live.get("remaining", 0),
-                "avg_fill":  live.get("avg_fill", 0),
-                "status_group": _status_group(live.get("status", "UNKNOWN")),
+                "status":       status,
+                "filled":       e.get("filled", 0),
+                "remaining":    e.get("remaining", 0),
+                "avg_fill":     e.get("avg_fill", 0),
+                "status_group": _status_group(status),
             })
         return out
 

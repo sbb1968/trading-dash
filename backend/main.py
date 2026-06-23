@@ -758,11 +758,18 @@ class CancelOrderRequest(BaseModel):
     order_id: int
 
 
+# Ordrer-vinduet viser KUN ordrer oprettet i Trading Dash (manuelle). Algo-ordrer
+# registreres stadig i trackeren (orders_log.json) til dagens_log/journal, men hoerer
+# ikke til her — de ses i dagens_log/Studio.
+MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual"}
+
+
 @app.get("/orders/list")
 async def get_orders_list(period_hours: int = 24):
-    """Returnér alle Trading Dash-ordrer i de seneste N timer med live status."""
+    """Returnér Trading Dash's MANUELLE ordrer i de seneste N timer med holdbar status."""
     ibkr = strategy_manager.get_ibkr()
-    orders = await get_tracker().get_all_orders(ibkr, period_hours=period_hours)
+    orders = await get_tracker().get_all_orders(
+        ibkr, period_hours=period_hours, sources=MANUAL_ORDER_SOURCES)
     return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
 
 

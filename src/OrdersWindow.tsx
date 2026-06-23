@@ -59,7 +59,7 @@ function statusColor(group: string): string {
 }
 
 function sourceLabel(source: string): string {
-  if (source === "manual_watchlist") return "Manuel";
+  if (source === "manual_watchlist" || source === "manual") return "Manuel";
   return source;
 }
 
@@ -67,9 +67,9 @@ function statusText(status: string): string {
   // Oversæt IBKR's tekniske statusser til menneskeligt sprog
   const map: Record<string, string> = {
     "Filled":         "Udført",
-    "Submitted":      "Afventer",
-    "PreSubmitted":   "Afventer (pre-market)",
-    "PendingSubmit":  "Sender...",
+    "Submitted":      "Afsendt",
+    "PreSubmitted":   "Afsendt",
+    "PendingSubmit":  "Afsendt",
     "PendingCancel":  "Annullerer...",
     "Cancelled":      "Annulleret",
     "ApiCancelled":   "Annulleret",
