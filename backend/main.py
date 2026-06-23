@@ -1629,20 +1629,43 @@ async def company_website(ticker: str):
 DOCS_DIR = Path(__file__).parent / "docs"
 
 
+# Kategori-praefiks i filnavnet styrer sektionen i docs-vinduet. Filnavn-moenster:
+#   <kategori>_<NN>_<titel>.pdf   fx  swing_02_konfluens_v1_referenceguide.pdf
+# Kategorien stripper ud af titlen (sektions-overskriften baerer den i stedet).
+_DOC_CATEGORIES = [("swing", "Swing Trading"), ("day", "Day Trading")]
+_DOC_CAT_LABEL = dict(_DOC_CATEGORIES)
+_DOC_CAT_ORDER = {key: i for i, (key, _) in enumerate(_DOC_CATEGORIES)}
+
+
 @app.get("/docs/list")
 async def docs_list():
-    """Lister PDF'er i backend/docs/. Returnerer {docs: [{name, title}]} sorteret."""
+    """Lister PDF'er i backend/docs/, grupperet. Returnerer {docs: [{name, title,
+    category}]} sorteret paa (kategori-raekkefoelge, NN-praefiks, filnavn)."""
     if not DOCS_DIR.is_dir():
         return {"docs": []}
     items = []
-    for p in sorted(DOCS_DIR.glob("*.pdf")):
+    for p in DOCS_DIR.glob("*.pdf"):
         stem = p.stem
-        # Strip ledende sorterings-praefiks "NN_" (styrer raekkefoelgen, vises ikke).
+        # 1) Kategori-praefiks "swing_"/"day_" (valgfri) -> sektion, strippes af titlen.
+        cat_key = ""
+        if "_" in stem and stem.split("_", 1)[0].lower() in _DOC_CAT_LABEL:
+            cat_key = stem.split("_", 1)[0].lower()
+            stem = stem.split("_", 1)[1]
+        # 2) Sorterings-praefiks "NN_" (valgfri) -> raekkefoelge i sektionen, vises ikke.
+        order = 999
         if "_" in stem and stem.split("_", 1)[0].isdigit():
+            order = int(stem.split("_", 1)[0])
             stem = stem.split("_", 1)[1]
         title = stem.replace("_", " ").replace("-", " ").strip()
         title = (title[:1].upper() + title[1:]) if title else p.name
-        items.append({"name": p.name, "title": title})
+        items.append({
+            "name": p.name, "title": title,
+            "category": _DOC_CAT_LABEL.get(cat_key, ""),
+            "_catorder": _DOC_CAT_ORDER.get(cat_key, 99), "_order": order,
+        })
+    items.sort(key=lambda d: (d["_catorder"], d["_order"], d["name"].lower()))
+    for d in items:
+        d.pop("_catorder"); d.pop("_order")
     return {"docs": items}
 
 
