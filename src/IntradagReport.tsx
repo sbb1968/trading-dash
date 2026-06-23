@@ -1,6 +1,10 @@
 import { useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 const API_JSON = "http://127.0.0.1:8000/intradag/analyze_json";
+// PDF: den paene rapport aabnes i EKSTERN browser (print sker der -> app-vinduet
+// rammes ikke, saa man ikke ved et uheld lukker Trading Dash via dets X).
+const API_HTML = "http://127.0.0.1:8000/intradag/report.html";
 
 // ---- Typer (matcher backendens /intradag/analyze_json) ---------------------
 interface Factor { name: string; raw: number | string | null; signal: number; weight: number; weighted: number; }
@@ -193,6 +197,16 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
     }
   }
 
+  function exportPdf() {
+    const s = symbol.trim().toUpperCase();
+    if (!s) return;
+    const p = new URLSearchParams({ symbol: s, timeframe });
+    // overlay sendes KUN naar fluebenet er TIL -> overlay-FRA defaulter None i handleren
+    // -> PDF identisk med skaermen (Fix A).
+    if (useOverlay) { p.set("sr", String(sr)); p.set("pattern", String(pattern)); p.set("candle", String(candle)); }
+    openUrl(`${API_HTML}?${p.toString()}`);   // EKSTERN browser
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       {/* Kontrol-bar */}
@@ -209,6 +223,11 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
           <button onClick={analyze} disabled={loading}
             style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
             {loading ? "Henter..." : "Opdater"}
+          </button>
+          <button onClick={exportPdf} disabled={!data || loading}
+            title="Aabn den paene rapport i browseren og gem som PDF"
+            style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+            Print
           </button>
         </div>
 
