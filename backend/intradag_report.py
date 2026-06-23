@@ -178,7 +178,9 @@ async def compute_intradag_report(
 
     # 2. Lag
     tech_res = compute_technical_intraday(bars, spy_bars, daily)
-    supply_data = fetch_supply(symbol)
+    # fetch_supply er et SYNC TV-screener-HTTP-kald -> to_thread saa det ikke
+    # blokerer appens event-loop (samme backend kan koere LIVE algoer).
+    supply_data = await asyncio.to_thread(fetch_supply, symbol)
     supply_res = compute_supply(supply_data)
     cat_res = compute_catalyst_intraday(fetch_catalyst(symbol))
     layers = {"technical": tech_res, "supply": supply_res, "catalyst": cat_res}
@@ -204,6 +206,8 @@ async def compute_intradag_report(
     asof = bars.index[-1].isoformat() if len(bars) else None
     return {
         "symbol": symbol, "asof": asof, "price": last_close, "timeframe": timeframe,
+        "float_shares": supply_data.get("float_shares"),   # surfaces til report_to_json
+        "float_pct": supply_data.get("float_pct"),
         "final": comb["final"], "band": _band(comb["final"]),
         "combined": comb["combined"], "weights_used": comb["weights_used"],
         "gate": gate, "gate_straf": comb["gate_straf"],
@@ -239,6 +243,77 @@ def format_intradag_report(report: dict) -> str:
     for layer, name, contrib, sig in sorted(report["drivers"], key=lambda d: abs(d[2]), reverse=True)[:5]:
         L.append(f"  {LABEL.get(layer, layer):<11}{name:<24}{contrib:>+7.1f}  (sig {sig:+.0f})")
     return "\n".join(L)
+
+
+# === UI-serialisering (spejler swing_report._report_to_json) ===============
+def report_to_json(report: dict) -> dict:
+    """Strukturér compute_intradag_report-output til UI-JSON. Samme form som
+    /swing/analyze_json (lag keyes technical/supply/catalyst), saa IntradagReport.tsx
+    kan genbruge SwingReport.tsx's render. _band bruges til baade slut- OG lag-baand
+    (eet vokabular i intradag-domaenet); _band(None) -> 'ingen data' (pending katalysator)."""
+
+    def _layer(res: dict, weight) -> dict:
+        groups, gmap = [], {}
+        for r in res["results"]:                       # r = ParamResult
+            g = gmap.get(r.group)
+            if g is None:
+                g = {"name": r.group, "score": 0.0, "factors": []}
+                gmap[r.group] = g
+                groups.append(g)
+            g["factors"].append({
+                "name": r.name, "raw": r.raw,
+                "signal": round(r.signal, 1),
+                "weight": round(r.weight, 4),
+                "weighted": round(r.weighted, 2),
+            })
+            g["score"] += r.weighted
+        for g in groups:
+            g["score"] = round(g["score"], 1)
+        lag = res["lag_score"]
+        return {
+            "score": round(lag, 1) if lag is not None else None,
+            "band": _band(lag),
+            "groups": groups,
+            "excluded": [{"name": n, "why": w} for n, w in res["excluded"]],
+            "weight": weight,
+        }
+
+    def _drivers(positive: bool):
+        ds = report["drivers"]                          # (layer, name, contribution, signal)
+        if positive:
+            sel = sorted([d for d in ds if d[2] > 0], key=lambda x: -x[2])[:5]
+        else:
+            sel = sorted([d for d in ds if d[2] < 0], key=lambda x: x[2])[:5]
+        return [{"layer": l, "name": n, "contribution": round(ct, 1), "signal": round(s, 1)}
+                for (l, n, ct, s) in sel]
+
+    final = report["final"]
+    layers = report["layers"]
+    gi = report.get("gate_inputs", {})
+    return {
+        "symbol": report["symbol"],
+        "asof": report.get("asof"),
+        "timeframe": report.get("timeframe"),
+        "price": round(report["price"], 2) if report.get("price") is not None else None,
+        "final": round(final, 1) if final is not None else None,
+        "final_band": report.get("band"),               # allerede _band(final) fra trin 4
+        "combined": round(report["combined"], 1) if report.get("combined") is not None else None,
+        "gate": round(report["gate"], 3),               # .3f: 0.998 skal IKKE vise som 1.00
+        "gate_straf": round(report.get("gate_straf", 0.0), 1),
+        "layers": {
+            "technical": _layer(layers["technical"], layers["technical"].get("weight")),
+            "supply": _layer(layers["supply"], layers["supply"].get("weight")),
+            "catalyst": _layer(layers["catalyst"], layers["catalyst"].get("weight")),
+        },
+        "drivers": {"positive": _drivers(True), "negative": _drivers(False)},
+        "info": {
+            "float_shares": report.get("float_shares"),
+            "float_pct": report.get("float_pct"),
+            "spread_pct": gi.get("spread_pct"),
+            "gate_inputs": gi,        # adv20, dollar_vol, price, spread_pct, market_cap, halted
+            "manual": report.get("manual"),
+        },
+    }
 
 
 # === Selftest (deterministisk, ingen IBKR) =================================

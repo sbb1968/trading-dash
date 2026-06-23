@@ -899,6 +899,41 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     return data
 
 
+class IntradagAnalyzeRequest(BaseModel):
+    symbol:    str
+    timeframe: str = "5 mins"            # "1 min" / "3 mins" / "5 mins"
+    sr:        float | None = None       # manuelle chart-overlays (default FRA)
+    pattern:   float | None = None
+    candle:    float | None = None
+
+
+@app.post("/intradag/analyze_json")
+async def intradag_analyze_json(req: IntradagAnalyzeRequest):
+    """Intradag-konfluens for EET symbol -> struktureret JSON (UI). Genbruger appens
+    DELTE IBKR-forbindelse. compute_intradag_report er native-async paa den forbindelses
+    event-loop -> await DIREKTE, ALDRIG asyncio.to_thread (modsat /swing/analyze, hvor
+    swing_report er SYNC og derfor MAA to_thread'es paa det koerende loop)."""
+    import intradag_report
+    symbol = (req.symbol or "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Mangler symbol")
+
+    await strategy_manager.connect_ibkr(paper_trading=True)   # selv-helende, no-op hvis levende
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        return {"error": "IBKR ikke forbundet (er TWS/Gateway logget ind paa 7497?)",
+                "ibkr_connected": False}
+    try:
+        report = await intradag_report.compute_intradag_report(
+            conn.ib, symbol, timeframe=req.timeframe,
+            sr=req.sr, chart_pattern=req.pattern, candlestick=req.candle)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Intradag-analyse fejlede: {e}")
+    return intradag_report.report_to_json(report)
+
+
 # Vanilla-JS der tegner den annoterede swing-chart i PDF-siden. Samme layout som
 # SwingChart.tsx (skalaer, anker-mapping, kollisionsfri etiketter), men print-
 # farver (lyst tema) og fast 900x420 viewBox skaleret til sidebredden. CHART
