@@ -2,12 +2,15 @@
 dagens_log.py — fuldt overblik over dagens journal-events + dyb per-handel-forensik.
 
 Brug:
-    python dagens_log.py                       # alle strategier, i dag
-    python dagens_log.py Konfluens             # filtrer på én strategi
-    python dagens_log.py Konfluens 2026-05-27  # specifik dato
-    python dagens_log.py --forensics           # + dyb per-handel-forensik i terminalen
-    python dagens_log.py 2026-06-12 --forensics
+    python dagens_log.py                            # alle strategier, i dag
+    python dagens_log.py Konfluens                  # filtrer på én strategi
+    python dagens_log.py Konfluens 2026-05-27       # specifik dato
+    python dagens_log.py --forensics                # + dyb per-handel-forensik
+    python dagens_log.py 2026-06-12 --forensics     # én dag
+    python dagens_log.py 2026-06-01 2026-06-12 --forensics   # dato-INTERVAL (inklusivt)
 
+Output er MARKDOWN (overskrifter + punkter — ikke monospace-kolonner): bygges af
+build_report_md() saa terminal og "Dagens log"-vinduet deler nøjagtig samme rapport.
 Strengt READ-ONLY (sqlite mode=ro) — sikker at køre ved siden af en kørende strategi.
 
 Overblik (altid) viser i rækkefølge:
@@ -96,16 +99,12 @@ def _et_naive(s: str | None) -> datetime | None:
         return None
 
 
-def section(title: str) -> None:
-    print(f"\n{'='*72}\n  {title}\n{'='*72}")
-
-
 # ─────────────────────────────────────────────────────────────────
-# Indlæsning
+# Indlæsning — dato-INTERVAL (inklusivt), substr-prefiks BETWEEN
 # ─────────────────────────────────────────────────────────────────
-def load_events(con, date_filter, strategy_filter):
-    where = ["ts_local LIKE ?"]
-    params = [f"{date_filter}%"]
+def load_events(con, d_from, d_to, strategy_filter):
+    where = ["substr(ts_local, 1, 10) BETWEEN ? AND ?"]
+    params = [d_from, d_to]
     if strategy_filter:
         where.append("source LIKE ?")
         params.append(f"%{strategy_filter}%")
@@ -114,10 +113,10 @@ def load_events(con, date_filter, strategy_filter):
     return con.execute(sql, params).fetchall()
 
 
-def load_trades(con, date_filter, strategy_filter):
-    """Dagens handler fra den kanoniske trades-tabel (entry-dag = handelsdag)."""
-    where = ["entry_time_et LIKE ?"]
-    params = [f"{date_filter}%"]
+def load_trades(con, d_from, d_to, strategy_filter):
+    """Handler i dato-intervallet fra den kanoniske trades-tabel (entry-dag = handelsdag)."""
+    where = ["substr(entry_time_et, 1, 10) BETWEEN ? AND ?"]
+    params = [d_from, d_to]
     if strategy_filter:
         where.append("source LIKE ?")
         params.append(f"%{strategy_filter}%")
@@ -166,40 +165,45 @@ def match_snapshots(con, tr) -> tuple[dict | None, dict | None]:
 # ─────────────────────────────────────────────────────────────────
 # Overblik (sektion 1–9)
 # ─────────────────────────────────────────────────────────────────
-def print_overview(rows, trades, date_filter, strategy_filter):
+def _overview_md(rows, trades, strategy_filter, forensics):
+    """Bygger overblikket (sektion 1-9) som markdown-linjer (ingen monospace)."""
     by_type = defaultdict(list)
     for r in rows:
         by_type[r["event_type"]].append(r)
-
-    section(f"DAGENS LOG — {date_filter}"
-            + (f" — {strategy_filter}" if strategy_filter else ""))
-    print(f"Maskine: {rows[0]['instance_id']}   Events i alt: {len(rows)}")
+    out = []
 
     # 1. Livscyklus
-    section("1. STRATEGI-LIVSCYKLUS")
+    out.append("## 1. Strategi-livscyklus")
     lifecycle = (by_type.get("strategy_started", []) + by_type.get("strategy_stopped", [])
                  + by_type.get("strategy_emergency_stop", []))
-    for ev in lifecycle:
-        kind = ev["event_type"].replace("strategy_", "").upper()
-        print(f"  {t(ev['ts_local'])}  {ev['source']:<15} {kind}")
-    if not lifecycle:
-        print("  (ingen livscyklus-events)")
+    if lifecycle:
+        for ev in lifecycle:
+            kind = ev["event_type"].replace("strategy_", "").upper()
+            out.append(f"- {t(ev['ts_local'])} · **{ev['source']}** {kind}")
+    else:
+        out.append("_(ingen livscyklus-events)_")
+    out.append("")
 
     # 2. Univers
-    section("2. UNIVERS (Lag A)")
-    for ev in by_type.get("universe_selected", []):
-        d = p(ev)
-        tickers = d.get("tickers", [])
-        print(f"  {t(ev['ts_local'])}  {ev['source']}: {len(tickers)} af {d.get('raw_count','?')} rå")
-        print(f"     {', '.join(tickers)}")
-    if not by_type.get("universe_selected"):
-        print("  (ingen universe-events)")
+    out.append("## 2. Univers (Lag A)")
+    universe = by_type.get("universe_selected", [])
+    if universe:
+        for ev in universe:
+            d = p(ev)
+            tickers = d.get("tickers", [])
+            out.append(f"- {t(ev['ts_local'])} · **{ev['source']}**: {len(tickers)} af {d.get('raw_count','?')} raa")
+            if tickers:
+                out.append(f"  - {', '.join(tickers)}")
+    else:
+        out.append("_(ingen universe-events)_")
+    out.append("")
 
     # 3. Handler — fra trades-tabellen (kanonisk)
-    section("3. HANDLER")
+    out.append("## 3. Handler")
     closed = [tr for tr in trades if tr["exit_time_et"]]
     open_only = [tr for tr in trades if not tr["exit_time_et"]]
-    print(f"  Handler i alt: {len(trades)}   Lukkede: {len(closed)}   Åbne: {len(open_only)}")
+    out.append(f"Handler i alt: **{len(trades)}** · lukkede: {len(closed)} · aabne: {len(open_only)}")
+    out.append("")
     total = wins = losses = 0
     for tr in trades:
         pnl = tr["pnl"] if tr["pnl"] is not None else 0.0
@@ -208,33 +212,42 @@ def print_overview(rows, trades, date_filter, strategy_filter):
             wins += 1
         elif pnl < 0:
             losses += 1
-        et = t(tr["entry_time_et"])
-        xt = t(tr["exit_time_et"]) if tr["exit_time_et"] else "ÅBEN"
-        print(f"  {et}→{xt}  {tr['symbol']:<6} {tr['side']:<5} "
-              f"P&L ${pnl:>+8.2f}  ({tr['exit_reason'] or '—'})  [{tr['source']}]")
+        et_dk, et_et = dansk(tr["entry_time_utc"]) or "—", t(tr["entry_time_et"])
+        if tr["exit_time_et"]:
+            xt_dk, xt_et = dansk(tr["exit_time_utc"]) or "—", t(tr["exit_time_et"])
+            exit_part = f"-> exit ${tr['exit_price']} ({xt_dk} dansk / {xt_et} ET)"
+        else:
+            exit_part = "-> **ÅBEN**"
+        dur = tr["duration_sec"]
+        durtxt = f" · {dur//60} min" if dur is not None else ""
+        pnlpct = f" ({tr['pnl_pct']:+.2f} %)" if tr["pnl_pct"] is not None else ""
+        out.append(f"- **{tr['symbol']}** · {tr['side']} · entry ${tr['entry_price']} ({et_dk} dansk / {et_et} ET) "
+                   f"{exit_part} · P&L **${pnl:+.2f}**{pnlpct} · {tr['exit_reason'] or '—'}{durtxt} · [{tr['source']}]")
     if trades:
-        wr = f"   Win rate: {wins/(wins+losses)*100:.1f}%" if (wins + losses) else ""
-        print(f"\n  TOTAL: ${total:+.2f}   Wins: {wins}   Losses: {losses}{wr}")
+        wr = f" · win rate {wins/(wins+losses)*100:.1f} %" if (wins + losses) else ""
+        out.append("")
+        out.append(f"**TOTAL: ${total:+.2f}** · wins {wins} · losses {losses}{wr}")
     else:
-        print("  (ingen handler)")
+        out.append("_(ingen handler)_")
+    out.append("")
 
     # 4. Trade forensics — kort oversigt
-    section("4. TRADE FORENSICS (Lag C)")
-    forensics = by_type.get("trade_forensics", [])
-    if forensics:
-        print(f"  {len(forensics)} forensics-events. Fuld per-handel-dump:")
-        print(f"     python dagens_log.py {strategy_filter or ''} {date_filter} --forensics".replace("  ", " "))
-        for ev in forensics[:5]:
+    out.append("## 4. Trade forensics (Lag C)")
+    forensics_ev = by_type.get("trade_forensics", [])
+    if forensics_ev:
+        note = "fuldt per-handel-dump nedenfor." if forensics else "koer med --forensics for fuldt dump."
+        out.append(f"{len(forensics_ev)} forensics-events — {note}")
+        for ev in forensics_ev[:5]:
             d = p(ev)
-            phase = d.get("phase", "?")
-            print(f"  {t(ev['ts_local'])}  {ev['symbol']:<6} {phase}")
-        if len(forensics) > 5:
-            print(f"  ... og {len(forensics)-5} mere")
+            out.append(f"- {t(ev['ts_local'])} · **{ev['symbol']}** {d.get('phase','?')}")
+        if len(forensics_ev) > 5:
+            out.append(f"- ... og {len(forensics_ev)-5} mere")
     else:
-        print("  (ingen forensics)")
+        out.append("_(ingen forensics)_")
+    out.append("")
 
     # 5. Afvisninger
-    section("5. ENTRY-AFVISNINGER (Lag B)")
+    out.append("## 5. Entry-afvisninger (Lag B)")
     rejects = by_type.get("entry_rejected", [])
     if rejects:
         agg = defaultdict(int)
@@ -243,73 +256,78 @@ def print_overview(rows, trades, date_filter, strategy_filter):
             sym = ev["symbol"] or d.get("ticker", "?")
             reason = d.get("detail") or d.get("reason") or "?"
             agg[(sym, reason[:60])] += 1
-        print(f"  {len(rejects)} afvisninger på {len(agg)} unikke kombinationer:")
+        out.append(f"{len(rejects)} afvisninger paa {len(agg)} unikke kombinationer:")
         for (sym, reason), n in sorted(agg.items(), key=lambda x: -x[1])[:20]:
-            print(f"    {sym:<6} ×{n:<4} {reason}")
+            out.append(f"- **{sym}** ×{n} · {reason}")
         if len(agg) > 20:
-            print(f"    ... og {len(agg)-20} flere kombinationer")
+            out.append(f"- ... og {len(agg)-20} flere kombinationer")
     else:
-        print("  (ingen afvisninger)")
+        out.append("_(ingen afvisninger)_")
+    out.append("")
 
     # 6. Ordrer
-    section("6. ORDRER")
+    out.append("## 6. Ordrer")
     errors = by_type.get("ibkr_order_error", [])
-    print(f"  Godkendte: {len(by_type.get('order_approved', []))}   "
-          f"Afviste: {len(by_type.get('order_rejected', []))}   "
-          f"Placeret hos IBKR: {len(by_type.get('ibkr_order_placed', []))}   "
-          f"IBKR-fejl: {len(errors)}")
+    out.append(f"Godkendte: {len(by_type.get('order_approved', []))} · "
+               f"afviste: {len(by_type.get('order_rejected', []))} · "
+               f"placeret hos IBKR: {len(by_type.get('ibkr_order_placed', []))} · "
+               f"IBKR-fejl: {len(errors)}")
     for ev in errors:
         d = p(ev)
         msg = d.get("error") or d.get("message", "?")
-        print(f"    FEJL  {t(ev['ts_local'])}  {ev['symbol'] or '?'}: {msg[:100]}")
+        out.append(f"- **FEJL** {t(ev['ts_local'])} · {ev['symbol'] or '?'}: {msg[:100]}")
+    out.append("")
 
     # 7. System-events
-    section("7. SYSTEM-EVENTS")
+    out.append("## 7. System-events")
     sys_events = (by_type.get("emergency_stop", []) + by_type.get("daily_limit_reached", [])
                   + by_type.get("ibkr_connect_attempt", []))
     if sys_events:
         for ev in sys_events:
             d = p(ev)
             msg = d.get("message") or d.get("reason") or json.dumps(d)[:80]
-            print(f"  {t(ev['ts_local'])}  {ev['event_type']:<25} {msg}")
+            out.append(f"- {t(ev['ts_local'])} · **{ev['event_type']}** {msg}")
     else:
-        print("  (ingen system-events)")
+        out.append("_(ingen system-events)_")
+    out.append("")
 
     # 8. Diagnostik
-    section("8. DIAGNOSTIK (Lag C)")
+    out.append("## 8. Diagnostik (Lag C)")
     diags = by_type.get("daily_diagnostics", [])
     if diags:
         for ev in diags:
             d = p(ev)
-            print(f"  {t(ev['ts_local'])}  {ev['source']}  (stop: {d.get('shutdown_reason','?')})")
-            print(f"     Univers: {d.get('universe_size',0)} aktier")
-            print(f"     Evalueringer: {d.get('evaluations',0)}   Scorede bars: {d.get('scored_bars',0)}")
-            print(f"     Entries: {d.get('entries',0)}   Handler: {d.get('trades',0)}")
+            out.append(f"- {t(ev['ts_local'])} · **{ev['source']}** (stop: {d.get('shutdown_reason','?')})")
+            out.append(f"  - Univers: {d.get('universe_size',0)} aktier")
+            out.append(f"  - Evalueringer: {d.get('evaluations',0)} · scorede bars: {d.get('scored_bars',0)}")
+            out.append(f"  - Entries: {d.get('entries',0)} · handler: {d.get('trades',0)}")
             peak = d.get("peak_score")
             if peak is not None:
-                print(f"     Peak score: {peak}/6")
+                out.append(f"  - Peak score: {peak}/6")
             mbc = d.get("missing_by_condition")
             if mbc:
-                print("     Pr. betingelse (antal bars hvor den manglede):")
+                out.append("  - Pr. betingelse (antal bars hvor den manglede):")
                 for cond, n in mbc.items():
-                    print(f"        {cond:<14} {n}")
+                    out.append(f"    - {cond}: {n}")
             if d.get("universe_size", 0) > 0 and d.get("evaluations", 0) == 0:
-                print(f"     ⚠ ADVARSEL: univers men 0 evalueringer → mistanke om bar-feed-problem.")
+                out.append("  - ⚠ **ADVARSEL:** univers men 0 evalueringer -> mistanke om bar-feed-problem.")
     else:
-        print("  (ingen diagnostik)")
+        out.append("_(ingen diagnostik)_")
+    out.append("")
 
     # 9. Heartbeat
-    section("9. HEARTBEAT (periodiske snapshots)")
+    out.append("## 9. Heartbeat (periodiske snapshots)")
     beats = by_type.get("diagnostics_heartbeat", [])
     if beats:
-        print(f"  {len(beats)} heartbeats. Seneste 8:")
+        out.append(f"{len(beats)} heartbeats. Seneste 8:")
         for ev in beats[-8:]:
             d = p(ev)
-            print(f"  {t(ev['ts_local'])}  evals={d.get('evaluations',0):<5} "
-                  f"scored={d.get('scored_bars',0):<5} entries={d.get('entries',0):<3} "
-                  f"pos={d.get('open_positions','?')}")
+            out.append(f"- {t(ev['ts_local'])} · evals={d.get('evaluations',0)} "
+                       f"scored={d.get('scored_bars',0)} entries={d.get('entries',0)} "
+                       f"pos={d.get('open_positions','?')}")
     else:
-        print("  (ingen heartbeats)")
+        out.append("_(ingen heartbeats)_")
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -325,34 +343,34 @@ def _g(d, *path, default=None):
     return cur if cur is not None else default
 
 
-def print_forensics(con, trades):
-    section("DYB PER-HANDEL-FORENSIK")
+def _forensics_md(con, trades):
+    """Bygger det dybe per-handel-dump som markdown — ALLE felter bevaret 1:1."""
+    out = ["## Dyb per-handel-forensik"]
     if not trades:
-        print("  (ingen handler at analysere)")
-        return
+        out.append("_(ingen handler at analysere)_")
+        return out
 
     for i, tr in enumerate(trades, 1):
         entry, exit_ = match_snapshots(con, tr)
         pnl = tr["pnl"] if tr["pnl"] is not None else 0.0
         verdict = "VINDER" if pnl > 0 else ("TABER" if pnl < 0 else "FLAD")
-        print(f"\n{'─'*72}")
-        print(f"  HANDEL {i}/{len(trades)}  {tr['symbol']}  [{tr['source']}"
-              + (f" · {tr['variant']}" if tr['variant'] else "") + "]")
-        print(f"{'─'*72}")
-        print(f"  {verdict}   P&L ${pnl:+.2f}"
-              + (f"  ({tr['pnl_pct']:+.2f}%)" if tr['pnl_pct'] is not None else "")
-              + f"   exit: {tr['exit_reason'] or '—'}")
+        variant = f" · {tr['variant']}" if tr["variant"] else ""
+        out.append("")
+        out.append(f"### {tr['symbol']} — {tr['side']} ({i}/{len(trades)})")
+        out.append(f"- **{verdict}** · P&L **${pnl:+.2f}**"
+                   + (f" ({tr['pnl_pct']:+.2f} %)" if tr["pnl_pct"] is not None else "")
+                   + f" · exit: {tr['exit_reason'] or '—'} · [{tr['source']}{variant}]")
 
-        # Tider
-        print(f"  Entry: {t(tr['entry_time_et'])} ET / {dansk(tr['entry_time_utc']) or '—'} dansk"
-              f"   @ ${tr['entry_price']}   {tr['side']} {tr['shares']} stk")
+        # Tider — dansk FOERST, ET i parentes
+        out.append(f"- Entry: {dansk(tr['entry_time_utc']) or '—'} dansk ({t(tr['entry_time_et'])} ET) "
+                   f"@ ${tr['entry_price']} · {tr['side']} {tr['shares']} stk")
         if tr["exit_time_et"]:
             dur = tr["duration_sec"]
             durtxt = f"{dur//60}m{dur%60}s" if dur is not None else "—"
-            print(f"  Exit:  {t(tr['exit_time_et'])} ET / {dansk(tr['exit_time_utc']) or '—'} dansk"
-                  f"   @ ${tr['exit_price']}   hold-tid {durtxt}")
+            out.append(f"- Exit: {dansk(tr['exit_time_utc']) or '—'} dansk ({t(tr['exit_time_et'])} ET) "
+                       f"@ ${tr['exit_price']} · hold-tid {durtxt}")
         else:
-            print("  Exit:  ÅBEN")
+            out.append("- Exit: **ÅBEN**")
 
         # Risiko / strategi-payload
         risk_bits = []
@@ -363,66 +381,94 @@ def print_forensics(con, trades):
         if tr["current_target"] is not None:
             risk_bits.append(f"target ${tr['current_target']:.2f}")
         if risk_bits:
-            print("  Risiko: " + "   ".join(risk_bits))
+            out.append("- Risiko: " + " · ".join(risk_bits))
         tp = p(tr)
         if tp:
-            print("  Strategi-data: " + "   ".join(f"{k}={v}" for k, v in tp.items()))
+            out.append("- Strategi-data: " + " · ".join(f"{k}={v}" for k, v in tp.items()))
 
         # Entry-snapshot — strategi-bevidst (K2 / Europa-reversion / BuyTheDip)
         if entry:
-            print("  ── Entry-snapshot ──")
+            out.append("- **Entry-snapshot**")
             _setup = entry.get("setup")                       # Konfluens 2 — KUN hvis reel
-            if isinstance(_setup, dict) and (_setup.get("entry_score") is not None     # score/bricks (den
-                                             or _setup.get("entry_bricks") is not None):  # delte builder laver
-                print(f"     [K2] score/bricks {_g(entry,'setup','entry_score', default='—')} / "  # altid en tom
-                      f"{_g(entry,'setup','entry_bricks', default='—')}")                            # 'setup' for alle)
-                print(f"          rel.vol {_g(entry,'setup','rel_vol_last_bar', default='—')}   "
-                      f"ATR {_g(entry,'setup','atr', default='—')}   "
-                      f"risk/aktie {_g(entry,'setup','risk_per_share', default='—')}   "
-                      f"init-stop {_g(entry,'setup','initial_stop', default='—')}")
+            if isinstance(_setup, dict) and (_setup.get("entry_score") is not None
+                                             or _setup.get("entry_bricks") is not None):
+                out.append(f"  - [K2] score/bricks {_g(entry,'setup','entry_score', default='—')} / "
+                           f"{_g(entry,'setup','entry_bricks', default='—')}")
+                out.append(f"  - rel.vol {_g(entry,'setup','rel_vol_last_bar', default='—')} · "
+                           f"ATR {_g(entry,'setup','atr', default='—')} · "
+                           f"risk/aktie {_g(entry,'setup','risk_per_share', default='—')} · "
+                           f"init-stop {_g(entry,'setup','initial_stop', default='—')}")
             if isinstance(entry.get("reversion"), dict):      # Europa-reversion
-                print(f"     [EUREV] z {_g(entry,'reversion','entry_z', default='—')}   "
-                      f"mean {_g(entry,'reversion','mean', default='—')}   "
-                      f"std {_g(entry,'reversion','std', default='—')}")
-                print(f"            bånd {_g(entry,'reversion','lower_band', default='—')}.."
-                      f"{_g(entry,'reversion','upper_band', default='—')}   "
-                      f"stop {_g(entry,'reversion','stop_price', default='—')} "
-                      f"({_g(entry,'reversion','stop_distance_pts', default='—')} pt)   "
-                      f"{_g(entry,'reversion','contracts', default='—')} kontrakt(er)")
+                out.append(f"  - [EUREV] z {_g(entry,'reversion','entry_z', default='—')} · "
+                           f"mean {_g(entry,'reversion','mean', default='—')} · "
+                           f"std {_g(entry,'reversion','std', default='—')}")
+                out.append(f"  - baand {_g(entry,'reversion','lower_band', default='—')}.."
+                           f"{_g(entry,'reversion','upper_band', default='—')} · "
+                           f"stop {_g(entry,'reversion','stop_price', default='—')} "
+                           f"({_g(entry,'reversion','stop_distance_pts', default='—')} pt) · "
+                           f"{_g(entry,'reversion','contracts', default='—')} kontrakt(er)")
             if isinstance(entry.get("buythedip"), dict):      # BuyTheDip
-                print(f"     [BTD] dip-dybde {_g(entry,'buythedip','dip_depth', default='—')}%   "
-                      f"ref-high {_g(entry,'buythedip','ref_high', default='—')}   "
-                      f"dip-low/stop {_g(entry,'buythedip','dip_low', default='—')}   "
-                      f"target {_g(entry,'buythedip','target', default='—')}")
+                out.append(f"  - [BTD] dip-dybde {_g(entry,'buythedip','dip_depth', default='—')}% · "
+                           f"ref-high {_g(entry,'buythedip','ref_high', default='—')} · "
+                           f"dip-low/stop {_g(entry,'buythedip','dip_low', default='—')} · "
+                           f"target {_g(entry,'buythedip','target', default='—')}")
             # Indikatorer (alle strategier)
-            print(f"     RSI14 {_g(entry,'indicators','rsi_14', default='—')}   "
-                  f"MACD {_g(entry,'indicators','macd', default='—')}/{_g(entry,'indicators','macd_signal', default='—')}   "
-                  f"VWAP-dist {_g(entry,'indicators','vwap_distance_pct', default='—')}%")
+            out.append(f"  - RSI14 {_g(entry,'indicators','rsi_14', default='—')} · "
+                       f"MACD {_g(entry,'indicators','macd', default='—')}/{_g(entry,'indicators','macd_signal', default='—')} · "
+                       f"VWAP-dist {_g(entry,'indicators','vwap_distance_pct', default='—')}%")
             # Tape (kun hvis faktisk opsamlet — tom for futures/BTD i paper)
-            if _g(entry,'tape','trade_count') is not None:
-                print(f"     Tape: aggressor {_g(entry,'tape','aggressor_ratio', default='—')}   "
-                      f"{_g(entry,'tape','trade_count', default='—')} trades   "
-                      f"største {_g(entry,'tape','largest_trade_size', default='—')} "
-                      f"({_g(entry,'tape','largest_trade_direction', default='—')})")
+            if _g(entry, "tape", "trade_count") is not None:
+                out.append(f"  - Tape: aggressor {_g(entry,'tape','aggressor_ratio', default='—')} · "
+                           f"{_g(entry,'tape','trade_count', default='—')} trades · "
+                           f"stoerste {_g(entry,'tape','largest_trade_size', default='—')} "
+                           f"({_g(entry,'tape','largest_trade_direction', default='—')})")
         else:
-            print("  ── Entry-snapshot: ingen (ikke bygget for denne strategi/handel) ──")
+            out.append("- _Entry-snapshot: ingen (ikke bygget for denne strategi/handel)_")
 
         # Exit-snapshot — strategi-bevidst
         if exit_:
-            print("  ── Exit-snapshot ──")
-            print(f"     MFE {_g(exit_,'trade_metrics','max_favorable_excursion', default='—')}   "
-                  f"MAE {_g(exit_,'trade_metrics','max_adverse_excursion', default='—')}   "
-                  f"bars {_g(exit_,'trade_metrics','duration_bars', default='—')}")
+            out.append("- **Exit-snapshot**")
+            out.append(f"  - MFE {_g(exit_,'trade_metrics','max_favorable_excursion', default='—')} · "
+                       f"MAE {_g(exit_,'trade_metrics','max_adverse_excursion', default='—')} · "
+                       f"bars {_g(exit_,'trade_metrics','duration_bars', default='—')}")
             if isinstance(exit_.get("reversion"), dict):      # Europa-reversion
-                print(f"     [EUREV] exit-z {_g(exit_,'reversion','exit_z', default='—')} "
-                      f"(≈0 = vendt til middel)")
+                out.append(f"  - [EUREV] exit-z {_g(exit_,'reversion','exit_z', default='—')} (≈0 = vendt til middel)")
             if isinstance(exit_.get("buythedip"), dict):      # BuyTheDip
-                print(f"     [BTD] exit-grund {_g(exit_,'buythedip','reason', default='—')}")
-            print(f"     RSI14 {_g(exit_,'indicators','rsi_14', default='—')}   "
-                  f"MACD-hist {_g(exit_,'indicators','macd_hist', default='—')}   "
-                  f"VWAP-dist {_g(exit_,'indicators','vwap_distance_pct', default='—')}%")
+                out.append(f"  - [BTD] exit-grund {_g(exit_,'buythedip','reason', default='—')}")
+            out.append(f"  - RSI14 {_g(exit_,'indicators','rsi_14', default='—')} · "
+                       f"MACD-hist {_g(exit_,'indicators','macd_hist', default='—')} · "
+                       f"VWAP-dist {_g(exit_,'indicators','vwap_distance_pct', default='—')}%")
         elif tr["exit_time_et"]:
-            print("  ── Exit-snapshot: ingen ──")
+            out.append("- _Exit-snapshot: ingen_")
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────
+# Markdown-rapport — EN kilde for baade terminal og vindue
+# ─────────────────────────────────────────────────────────────────
+def build_report_md(con, d_from, d_to, strategy_filter=None, forensics=True) -> str:
+    """Hele dagens-log-rapporten som markdown (overskrifter + punkter, ingen
+    monospace). Renderer paent i vinduet OG limes direkte ind i Claude."""
+    rows = load_events(con, d_from, d_to, strategy_filter)
+    trades = load_trades(con, d_from, d_to, strategy_filter)
+    label = d_from if d_from == d_to else f"{d_from} -> {d_to}"
+
+    if not rows and not trades:
+        return f"_Ingen handler eller events fundet for {label}._"
+
+    nu = datetime.now().strftime("%Y-%m-%d %H:%M")
+    machine = rows[0]["instance_id"] if rows else "—"
+    ctx_strat = strategy_filter or "Alle strategier"
+    out = [
+        f"# Dagens log — {label}",
+        f"{ctx_strat} · {len(trades)} handler · {len(rows)} events · maskine {machine} · genereret {nu}",
+        "",
+    ]
+    out += _overview_md(rows, trades, strategy_filter, forensics)
+    if forensics:
+        out.append("")
+        out += _forensics_md(con, trades)
+    return "\n".join(out)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -440,31 +486,25 @@ def main():
     ns = ap.parse_args()
 
     strategy_filter = None
-    date_filter = date.today().isoformat()
+    dates = []
     for a in ns.args:
         if len(a) == 10 and a.count("-") == 2:
-            date_filter = a
+            dates.append(a)
         else:
             strategy_filter = a
+    today = date.today().isoformat()
+    if not dates:
+        d_from = d_to = today
+    elif len(dates) == 1:
+        d_from = d_to = dates[0]
+    else:
+        d_from, d_to = sorted(dates[:2])
 
     con = ro_connect(DB_PATH)
-    events = load_events(con, date_filter, strategy_filter)
-    trades = load_trades(con, date_filter, strategy_filter)
-
-    if not events and not trades:
-        print(f"Ingen events eller handler fundet for {date_filter}"
-              + (f" / {strategy_filter}" if strategy_filter else ""))
-        return 0
-
-    if events:
-        print_overview(events, trades, date_filter, strategy_filter)
-    else:
-        section(f"DAGENS LOG — {date_filter}")
-        print("  (ingen events — kun trades-rækker fundet)")
-
-    if ns.forensics:
-        print_forensics(con, trades)
-
+    try:
+        print(build_report_md(con, d_from, d_to, strategy_filter, ns.forensics))
+    finally:
+        con.close()
     return 0
 
 

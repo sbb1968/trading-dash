@@ -30,8 +30,10 @@ import aiosqlite
 import secrets
 from fastapi import HTTPException, Header
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from pydantic import BaseModel
+
+import dagens_log   # modulet har __name__-guard, saa import koerer ikke main()
 
 # ── Tidsstemplet logging: alle linjer (print, logger, uvicorn) ──
 import logging, builtins
@@ -1682,6 +1684,30 @@ async def docs_file(name: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Dokumentet findes ikke")
     return FileResponse(str(target), media_type="application/pdf")
+
+
+# ── Dagens log (markdown-rapport over et dato-interval, read-only) ───────────
+@app.get("/dagenslog/report")
+async def dagenslog_report(from_: str = Query(None, alias="from"),
+                           to: str = Query(None, alias="to")):
+    """Dagens log som markdown over et dato-interval (inkl. forensik, alle strategier)."""
+    today = datetime.now().date().isoformat()
+    d_from = (from_ or today)[:10]
+    d_to = (to or today)[:10]
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+
+    def _run():
+        con = dagens_log.ro_connect(dagens_log.DB_PATH)
+        try:
+            trades = dagens_log.load_trades(con, d_from, d_to, None)
+            md = dagens_log.build_report_md(con, d_from, d_to, None, True)
+            return md, len(trades)
+        finally:
+            con.close()
+
+    md, n = await asyncio.to_thread(_run)   # sqlite er blokerende -> traad
+    return {"markdown": md, "from": d_from, "to": d_to, "n_trades": n}
 
 
 # ── Journal / Trades endpoints ────────────────────────────────
