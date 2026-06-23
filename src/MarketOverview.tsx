@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 
 // ── Typer ─────────────────────────────────────────────────────
+interface IndexData {
+  price:           number;
+  gap_pct:         number;
+  gap_status:      string;
+  intraday_pct:    number;
+  intraday_status: string;
+  vwap:            number;
+  above_vwap:      boolean | null;
+}
+
 interface MarketConditions {
   checked_at:        string;
   score:             number;
@@ -11,11 +21,8 @@ interface MarketConditions {
     value:  number;
     status: string;
   };
-  spy: {
-    price:      number;
-    gap_pct:    number;
-    gap_status: string;
-  };
+  spy: IndexData;
+  iwm: IndexData;
   scanner: {
     top_gainers:          string[];
     stocks_gap_over_10:   number;
@@ -78,6 +85,51 @@ function Row({ label, value, dot, description }: {
       </div>
     </div>
   );
+}
+
+// ── Indeks-hjælpere (delt SPY/IWM) ────────────────────────────
+type DotColor = "green" | "yellow" | "red" | "grey";
+
+function gapDot(idx?: IndexData): DotColor {
+  if (!idx || idx.price === 0) return "grey";
+  if (idx.gap_pct > 0.5) return "green";
+  if (idx.gap_pct < -1.5) return "red";
+  return "yellow";
+}
+function vwapDot(idx?: IndexData): DotColor {
+  if (!idx || idx.above_vwap == null) return "grey";
+  return idx.above_vwap ? "green" : "red";
+}
+function hasIntraday(idx?: IndexData): boolean {
+  return !!idx && !(idx.above_vwap == null && idx.intraday_pct === 0);
+}
+function IntradayValue({ idx }: { idx?: IndexData }) {
+  if (!hasIntraday(idx)) return <>Ukendt</>;
+  const v = idx!;
+  const c = v.intraday_pct >= 0 ? "var(--bull)" : "var(--bear)";
+  return (
+    <span style={{ color: c }}>
+      {v.intraday_pct >= 0 ? "+" : ""}{v.intraday_pct.toFixed(2)}% ({v.intraday_status})
+      {v.vwap > 0 ? ` · VWAP $${v.vwap.toFixed(2)}` : ""}
+    </span>
+  );
+}
+function intradayDesc(name: string, idx?: IndexData): string {
+  if (!hasIntraday(idx)) return "Ingen intradag-data lige nu (uden for handelstid).";
+  const v = idx!;
+  const dir = v.intraday_pct >= 0 ? "op" : "ned";
+  const vwapTxt = v.above_vwap == null ? "" : v.above_vwap
+    ? " og handler OVER VWAP — intradag-styrke." : " og handler UNDER VWAP — intradag-svaghed.";
+  return `${name} er ${v.intraday_pct >= 0 ? "+" : ""}${v.intraday_pct.toFixed(2)}% ${dir} fra dagens open${vwapTxt}`;
+}
+function gapDesc(name: string, idx?: IndexData): string {
+  if (!idx || idx.price === 0) return "Kunne ikke hentes.";
+  const g = idx.gap_pct;
+  if (g < -1.5) return `${name} åbner ${g.toFixed(2)}% lavere end i går — kraftigt negativt gap.`;
+  if (g < -0.5) return `${name} åbner ${g.toFixed(2)}% lavere — moderat negativt gap.`;
+  if (g < 0.3)  return `${name} åbner næsten uændret (${g.toFixed(2)}%) — neutralt.`;
+  if (g < 1.0)  return `${name} åbner ${g.toFixed(2)}% højere — positivt.`;
+  return `${name} åbner ${g.toFixed(2)}% højere — stærkt positivt gap.`;
 }
 
 // ── Hoved-komponent ───────────────────────────────────────────
@@ -315,6 +367,43 @@ export function MarketOverview() {
                 : "Ukendt"}
               dot={spyDot()}
               description={spyGapDescription()}
+            />
+
+            <Row
+              label="SPY intradag (vs open)"
+              value={<IntradayValue idx={conditions.spy} />}
+              dot={vwapDot(conditions.spy)}
+              description={intradayDesc("SPY", conditions.spy)}
+            />
+          </div>
+
+          {/* ── IWM — small-cap-regime ── */}
+          <div style={card()}>
+            <div style={{ fontSize: fsh, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+              IWM — Small Cap-regime (Russell 2000)
+            </div>
+
+            <Row
+              label="IWM (Russell 2000 ETF) kurs"
+              value={conditions.iwm?.price > 0 ? `$${conditions.iwm.price.toFixed(2)}` : "Ukendt"}
+              dot="grey"
+              description="IWM er small cap-barometeret (Russell 2000). For Ibens stil ofte vigtigere end SPY — det er HER small cap-regimet aflæses."
+            />
+
+            <Row
+              label="IWM gap fra gårsdagens luk"
+              value={conditions.iwm?.price > 0
+                ? `${conditions.iwm.gap_pct >= 0 ? "+" : ""}${conditions.iwm.gap_pct.toFixed(2)}% (${conditions.iwm.gap_status})`
+                : "Ukendt"}
+              dot={gapDot(conditions.iwm)}
+              description={gapDesc("IWM", conditions.iwm)}
+            />
+
+            <Row
+              label="IWM intradag (vs open)"
+              value={<IntradayValue idx={conditions.iwm} />}
+              dot={vwapDot(conditions.iwm)}
+              description={intradayDesc("IWM", conditions.iwm)}
             />
           </div>
 
