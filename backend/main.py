@@ -1452,6 +1452,63 @@ async def swing_top10_run():
     return {"started": True}
 
 
+# ── Intradag Top-10 Konfluens (trin 6) ──────────────────────────────────────
+# Spejler swing-top10-endpoints, MEN scanen koerer IN-PROCESS som en asyncio.Task
+# paa den DELTE ib (ikke en subprocess med egen klient, der konkurrerer om feed).
+import intradag_scanner
+
+_INTRADAG_TOP10_JSON = os.path.join(_SWING_DIR, "intradag_top10_latest.json")
+_intradag_top10 = {"task": None, "started_utc": None}
+_INTRADAG_STALE_SEC = 15 * 60   # task aeldre end dette uden at vaere done = staale
+
+
+def _intradag_running():
+    """(running: bool, started_utc: str|None). Task-tilstand med staale-backstop."""
+    t = _intradag_top10["task"]
+    if t is None or t.done():
+        return False, None
+    started = _intradag_top10["started_utc"]
+    if started:
+        age = (_datetime.datetime.now(_datetime.timezone.utc)
+               - _datetime.datetime.fromisoformat(started)).total_seconds()
+        if age > _INTRADAG_STALE_SEC:
+            return False, started
+    return True, started
+
+
+@app.get("/intradag/top10")
+async def intradag_top10_get():
+    """Seneste intradag top-10 (fra intradag_top10_latest.json) + fremdrift/running."""
+    data = {"generated_local": None, "generated_utc": None, "source": None,
+            "count": 0, "rows": [], "progress": None}
+    if os.path.exists(_INTRADAG_TOP10_JSON):
+        try:
+            with open(_INTRADAG_TOP10_JSON, encoding="utf-8") as f:
+                data = _json.load(f)
+        except Exception:
+            pass
+    running, started = _intradag_running()
+    data["running"] = running
+    data["started_utc"] = started
+    return data
+
+
+@app.post("/intradag/top10/run")
+async def intradag_top10_run():
+    """Start en frisk intradag-scan (in-process async paa delt ib). Afvis hvis en koerer."""
+    running, started = _intradag_running()
+    if running:
+        return {"started": False, "already_running": True, "started_utc": started}
+    await strategy_manager.connect_ibkr(paper_trading=True)
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        return {"started": False, "error": "IBKR ikke forbundet (er TWS/Gateway logget ind paa 7497?)"}
+    ib = conn.ib
+    _intradag_top10["started_utc"] = _datetime.datetime.now(_datetime.timezone.utc).isoformat()
+    _intradag_top10["task"] = asyncio.create_task(intradag_scanner.run_scan(ib))
+    return {"started": True, "already_running": False, "started_utc": _intradag_top10["started_utc"]}
+
+
 # ── Firma-hjemmeside (watchlist: klik paa ticker -> aaben firmaets website) ──
 # yfinance .info["website"]. Caches i hukommelsen (websites aendrer sig ikke), saa
 # kun foerste opslag pr. ticker koster et (langsomt) yfinance-kald.

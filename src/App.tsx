@@ -23,6 +23,7 @@ import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
 import { SwingReport } from "./SwingReport";
 import { IntradagReport } from "./IntradagReport";
+import { IntradagTop10 } from "./IntradagTop10";
 import { DocsWindow } from "./DocsWindow";
 import { HelpAssistant } from "./HelpAssistant";
 import { SwingTop10 } from "./SwingTop10";
@@ -1243,6 +1244,7 @@ function renderWindowContent(id: WindowId, props: {
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
     case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} />;
+    case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
     case "assistent": return <HelpAssistant />;
     case "swingtop10": return <SwingTop10 />;

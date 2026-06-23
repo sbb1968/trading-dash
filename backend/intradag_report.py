@@ -30,7 +30,10 @@ from technical_intraday import (
 )
 from supply_score import compute_supply, format_supply_report
 from catalyst_intraday import compute_catalyst_intraday, fetch_catalyst, format_catalyst_report
-from data_source_intraday import load_intraday_context, fetch_supply, fetch_spread
+from data_source_intraday import (
+    fetch_intraday_bars, fetch_benchmark_bars, fetch_daily_aggregates,
+    fetch_supply, fetch_spread,
+)
 
 
 # === Konstanter ============================================================
@@ -169,18 +172,22 @@ async def compute_intradag_report(
         daily_duration: str = "45 D", spy: str = "SPY", end: str = "",
         sr: Optional[float] = None,
         chart_pattern: Optional[float] = None,
-        candlestick: Optional[float] = None) -> dict:
+        candlestick: Optional[float] = None,
+        spy_bars=None,          # NY: hvis givet, spring SPY-fetch over (scanneren deler SPY)
+        supply_data=None) -> dict:   # NY: hvis givet, spring fetch_supply over (scan har TV-float)
 
-    # 1. Data
-    bars, spy_bars, daily = await load_intraday_context(
-        ib, symbol, timeframe=timeframe, duration=duration,
-        daily_duration=daily_duration, spy=spy, end=end)
+    # 1. Data (spy_bars/supply_data kan vaere genbrugt af scanneren -> spring fetch over)
+    bars = await fetch_intraday_bars(ib, symbol, timeframe=timeframe, duration=duration, end=end)
+    if spy_bars is None:
+        spy_bars = await fetch_benchmark_bars(ib, symbol=spy, timeframe=timeframe, duration=duration, end=end)
+    daily = await fetch_daily_aggregates(ib, symbol, duration=daily_duration, end=end)
 
     # 2. Lag
     tech_res = compute_technical_intraday(bars, spy_bars, daily)
-    # fetch_supply er et SYNC TV-screener-HTTP-kald -> to_thread saa det ikke
-    # blokerer appens event-loop (samme backend kan koere LIVE algoer).
-    supply_data = await asyncio.to_thread(fetch_supply, symbol)
+    if supply_data is None:
+        # fetch_supply er et SYNC TV-screener-HTTP-kald -> to_thread saa det ikke
+        # blokerer appens event-loop (samme backend kan koere LIVE algoer).
+        supply_data = await asyncio.to_thread(fetch_supply, symbol)
     supply_res = compute_supply(supply_data)
     cat_res = compute_catalyst_intraday(fetch_catalyst(symbol))
     layers = {"technical": tech_res, "supply": supply_res, "catalyst": cat_res}
