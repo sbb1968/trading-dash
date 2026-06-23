@@ -34,6 +34,17 @@ class MarketConditions:
     spy_gap_pct:          float = 0.0
     spy_gap_status:       str   = "ukendt"
     spy_price:            float = 0.0
+    spy_intraday_pct:     float = 0.0
+    spy_intraday_status:  str   = "ukendt"
+    spy_vwap:             float = 0.0
+    spy_above_vwap:       bool | None = None
+    iwm_price:            float = 0.0
+    iwm_gap_pct:          float = 0.0
+    iwm_gap_status:       str   = "ukendt"
+    iwm_intraday_pct:     float = 0.0
+    iwm_intraday_status:  str   = "ukendt"
+    iwm_vwap:             float = 0.0
+    iwm_above_vwap:       bool | None = None
     stocks_gap_over_10:   int   = 0
     stocks_relvol_over_5: int   = 0
     top_gainers:          list  = field(default_factory=list)
@@ -62,7 +73,17 @@ class MarketConditionChecker:
 
         # Kør alle tjek — fejler aldrig
         await self._check_vix(mc)
-        await self._check_spy(mc)
+
+        spy = await self._check_index("SPY")
+        mc.spy_price, mc.spy_gap_pct, mc.spy_gap_status = spy["price"], spy["gap_pct"], spy["gap_status"]
+        mc.spy_intraday_pct, mc.spy_intraday_status = spy["intraday_pct"], spy["intraday_status"]
+        mc.spy_vwap, mc.spy_above_vwap = spy["vwap"], spy["above_vwap"]
+
+        iwm = await self._check_index("IWM")
+        mc.iwm_price, mc.iwm_gap_pct, mc.iwm_gap_status = iwm["price"], iwm["gap_pct"], iwm["gap_status"]
+        mc.iwm_intraday_pct, mc.iwm_intraday_status = iwm["intraday_pct"], iwm["intraday_status"]
+        mc.iwm_vwap, mc.iwm_above_vwap = iwm["vwap"], iwm["above_vwap"]
+
         await self._check_scanner(mc)
         self._calculate_score(mc)
 
@@ -76,6 +97,12 @@ class MarketConditionChecker:
                     "spy_price":            mc.spy_price,
                     "spy_gap_pct":          mc.spy_gap_pct,
                     "spy_gap_status":       mc.spy_gap_status,
+                    "spy_intraday_pct":     mc.spy_intraday_pct,
+                    "spy_above_vwap":       mc.spy_above_vwap,
+                    "iwm_price":            mc.iwm_price,
+                    "iwm_gap_pct":          mc.iwm_gap_pct,
+                    "iwm_intraday_pct":     mc.iwm_intraday_pct,
+                    "iwm_above_vwap":       mc.iwm_above_vwap,
                     "stocks_gap_over_10":   mc.stocks_gap_over_10,
                     "stocks_relvol_over_5": mc.stocks_relvol_over_5,
                     "score":                mc.score,
@@ -137,67 +164,119 @@ class MarketConditionChecker:
     # SPY — via IBKR historiske bars
     # -----------------------------------------------------------------------
 
-    async def _check_spy(self, mc: MarketConditions) -> None:
-        try:
-            from ib_async import Stock
-            contract = Stock("SPY", "SMART", "USD")
-            await self.conn.ib.qualifyContractsAsync(contract)
+    async def _check_index(self, symbol: str) -> dict:
+        """Dagligt gap + live intradag-retning (vs open + VWAP) for eet indeks.
+        IBKR foerst, yfinance-fallback for BAADE dagligt og intradag. Fejler aldrig
+        kalderen — uden for RTH forbliver intradag-felter 0/ukendt/None."""
+        out = {"price": 0.0, "gap_pct": 0.0, "gap_status": "ukendt",
+               "intraday_pct": 0.0, "intraday_status": "ukendt",
+               "vwap": 0.0, "above_vwap": None}
 
+        from ib_async import Stock
+        contract = Stock(symbol, "SMART", "USD")
+
+        # 1) DAGLIGT gap (3 D / 1 day bars)
+        try:
+            await self.conn.ib.qualifyContractsAsync(contract)
             bars = await asyncio.wait_for(
                 self.conn.ib.reqHistoricalDataAsync(
-                    contract,
-                    endDateTime    = "",
-                    durationStr    = "3 D",
-                    barSizeSetting = "1 day",
-                    whatToShow     = "TRADES",
-                    useRTH         = True,
-                    formatDate     = 1,
-                ),
-                timeout=15.0
-            )
-
+                    contract, endDateTime="", durationStr="3 D",
+                    barSizeSetting="1 day", whatToShow="TRADES", useRTH=True, formatDate=1),
+                timeout=15.0)
             if bars and len(bars) >= 2:
                 prev_close     = bars[-2].close
                 today_open     = bars[-1].open or bars[-1].close
-                mc.spy_price   = round(bars[-1].close, 2)
-                mc.spy_gap_pct = round((today_open - prev_close) / prev_close * 100, 2)
+                out["price"]   = round(bars[-1].close, 2)
+                out["gap_pct"] = round((today_open - prev_close) / prev_close * 100, 2)
             elif bars:
-                mc.spy_price   = round(bars[-1].close, 2)
-                mc.spy_gap_pct = 0.0
-
+                out["price"] = round(bars[-1].close, 2)
         except Exception as e:
-            logger.warning(f"SPY IBKR fejl: {e} — prøver yfinance")
+            logger.warning(f"{symbol} IBKR dagligt fejl: {e} - proever yfinance")
             try:
                 import yfinance as yf
                 loop = asyncio.get_event_loop()
 
-                def fetch_spy():
+                def fetch_daily():
                     try:
-                        hist = yf.Ticker("SPY").history(period="3d")
+                        hist = yf.Ticker(symbol).history(period="3d")
                         if len(hist) >= 2:
-                            prev_close = float(hist["Close"].iloc[-2])
-                            today_open = float(hist["Open"].iloc[-1])
-                            today_close= float(hist["Close"].iloc[-1])
+                            prev_close  = float(hist["Close"].iloc[-2])
+                            today_open  = float(hist["Open"].iloc[-1])
+                            today_close = float(hist["Close"].iloc[-1])
                             return today_close, round((today_open - prev_close) / prev_close * 100, 2)
                         return 0.0, 0.0
                     except Exception:
                         return 0.0, 0.0
 
-                mc.spy_price, mc.spy_gap_pct = await asyncio.wait_for(
-                    loop.run_in_executor(None, fetch_spy),
-                    timeout=10.0
-                )
+                out["price"], out["gap_pct"] = await asyncio.wait_for(
+                    loop.run_in_executor(None, fetch_daily), timeout=10.0)
             except Exception as e2:
-                logger.warning(f"SPY yfinance fejl: {e2}")
+                logger.warning(f"{symbol} yfinance dagligt fejl: {e2}")
 
-        if abs(mc.spy_gap_pct) < 0.3:
-            mc.spy_gap_status = "neutral"
-        elif mc.spy_gap_pct > 0:
-            mc.spy_gap_status = "gap op"
+        out["gap_status"] = ("neutral" if abs(out["gap_pct"]) < 0.3
+                             else "gap op" if out["gap_pct"] > 0 else "gap ned")
+
+        # 2) INTRADAG (i dags 5-min RTH-bars) — vs open + VWAP
+        try:
+            bars = await asyncio.wait_for(
+                self.conn.ib.reqHistoricalDataAsync(
+                    contract, endDateTime="", durationStr="1 D",
+                    barSizeSetting="5 mins", whatToShow="TRADES", useRTH=True, formatDate=1),
+                timeout=15.0)
+            if bars:
+                today_open = bars[0].open or bars[0].close
+                current    = bars[-1].close
+                if current:
+                    out["price"] = round(current, 2)
+                if today_open:
+                    out["intraday_pct"] = round((current - today_open) / today_open * 100, 2)
+                vol = sum(b.volume for b in bars) or 0
+                if vol:
+                    tp = sum(((b.high + b.low + b.close) / 3) * b.volume for b in bars)
+                    out["vwap"]       = round(tp / vol, 2)
+                    out["above_vwap"] = current >= out["vwap"]
+        except Exception as e:
+            logger.warning(f"{symbol} intradag-bars fejl: {e} - proever yfinance")
+            try:
+                import yfinance as yf
+                loop = asyncio.get_event_loop()
+
+                def fetch_intraday():
+                    try:
+                        hist = yf.Ticker(symbol).history(period="1d", interval="5m")
+                        if hist is None or hist.empty:
+                            return 0.0, 0.0, 0.0, None
+                        today_open = float(hist["Open"].iloc[0])
+                        current    = float(hist["Close"].iloc[-1])
+                        ip   = round((current - today_open) / today_open * 100, 2) if today_open else 0.0
+                        vol  = float(hist["Volume"].sum())
+                        if vol:
+                            tp   = float(((hist["High"] + hist["Low"] + hist["Close"]) / 3 * hist["Volume"]).sum())
+                            vwap = round(tp / vol, 2)
+                            return current, ip, vwap, bool(current >= vwap)
+                        return current, ip, 0.0, None
+                    except Exception:
+                        return 0.0, 0.0, 0.0, None
+
+                cur, ip, vwap, above = await asyncio.wait_for(
+                    loop.run_in_executor(None, fetch_intraday), timeout=10.0)
+                if cur:
+                    out["price"] = round(cur, 2)
+                out["intraday_pct"], out["vwap"], out["above_vwap"] = ip, vwap, above
+            except Exception as e2:
+                logger.warning(f"{symbol} yfinance intradag fejl: {e2}")
+
+        # Ingen intradag-data (uden for RTH) -> "ukendt"; ellers retning vs open.
+        if out["above_vwap"] is None and out["intraday_pct"] == 0:
+            out["intraday_status"] = "ukendt"
+        elif abs(out["intraday_pct"]) < 0.1:
+            out["intraday_status"] = "neutral"
         else:
-            mc.spy_gap_status = "gap ned"
+            out["intraday_status"] = "op fra open" if out["intraday_pct"] > 0 else "ned fra open"
 
-        logger.info(f"SPY: ${mc.spy_price} gap {mc.spy_gap_pct:+.2f}% ({mc.spy_gap_status})")
+        logger.info(f"{symbol}: ${out['price']} gap {out['gap_pct']:+.2f}% ({out['gap_status']}) "
+                    f"intradag {out['intraday_pct']:+.2f}% ({out['intraday_status']}) vwap {out['vwap']}")
+        return out
 
     # -----------------------------------------------------------------------
     # Scanner — top gainers fra IBKR
@@ -318,6 +397,11 @@ class MarketConditionChecker:
             "skal_handle":       mc.skal_handle,
             "position_size_pct": mc.position_size_pct,
             "vix":    {"value": mc.vix, "status": mc.vix_status},
-            "spy":    {"price": mc.spy_price, "gap_pct": mc.spy_gap_pct, "gap_status": mc.spy_gap_status},
+            "spy":    {"price": mc.spy_price, "gap_pct": mc.spy_gap_pct, "gap_status": mc.spy_gap_status,
+                       "intraday_pct": mc.spy_intraday_pct, "intraday_status": mc.spy_intraday_status,
+                       "vwap": mc.spy_vwap, "above_vwap": mc.spy_above_vwap},
+            "iwm":    {"price": mc.iwm_price, "gap_pct": mc.iwm_gap_pct, "gap_status": mc.iwm_gap_status,
+                       "intraday_pct": mc.iwm_intraday_pct, "intraday_status": mc.iwm_intraday_status,
+                       "vwap": mc.iwm_vwap, "above_vwap": mc.iwm_above_vwap},
             "scanner":{"top_gainers": mc.top_gainers[:10], "stocks_gap_over_10": mc.stocks_gap_over_10, "stocks_relvol_over_5": mc.stocks_relvol_over_5},
         }
