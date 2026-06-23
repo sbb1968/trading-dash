@@ -252,10 +252,10 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
           <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--bear)", borderRadius: 4, color: "var(--bear)", fontSize: 13 }}>{error}</div>
         )}
         {!error && loading && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter intradag-bars (IBKR), SPY og float ... tager et par sekunder.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter Day trading-bars (IBKR), SPY og float ... tager et par sekunder.</div>
         )}
         {!error && !loading && !data && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast et symbol, vælg tidsramme og tryk Opdater. Rapporten scorer aktien for intradag-konfluens (teknik, forsyning, katalysator) og en handelbarheds-gate.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast et symbol, vælg tidsramme og tryk Opdater. Rapporten scorer aktien for Day trading-konfluens (teknik, forsyning, katalysator) og en handelbarheds-gate.</div>
         )}
         {!error && !loading && data && (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>

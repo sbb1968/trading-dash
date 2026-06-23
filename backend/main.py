@@ -930,7 +930,7 @@ async def intradag_analyze_json(req: IntradagAnalyzeRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Intradag-analyse fejlede: {e}")
+        raise HTTPException(status_code=500, detail=f"Day trading-analyse fejlede: {e}")
     return intradag_report.report_to_json(report)
 
 
@@ -1297,7 +1297,7 @@ def _intradag_report_html(d: dict) -> str:
     finaltxt = "—" if d.get("final") is None else sg(d["final"])
     combtxt = "—" if d.get("combined") is None else sg(d["combined"])
     return (
-        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>INTRADAG_{t}</title>'
+        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Day trading - {t}</title>'
         f'<style>{css}</style></head><body>'
         '<div class="bar">Gem som PDF: <button onclick="window.print()">Gem / Print</button>'
         '<span>(eller Ctrl+P -&gt; "Gem som PDF")</span></div><div class="wrap">'
@@ -1339,7 +1339,7 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Intradag-rapport fejlede: {e}")
+        raise HTTPException(status_code=500, detail=f"Day trading-rapport fejlede: {e}")
     return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report)))
 
 

@@ -44,8 +44,8 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   docs:            "Dokumentation",
   assistent:       "Hjælp (Claude)",
   swingtop10:      "Swing top-10",
-  intradagreport:  "Intradag-rapport",
-  intradagtop10:   "Intradag Top-10",
+  intradagreport:  "Day trading-rapport",
+  intradagtop10:   "Day trading Top-10",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────

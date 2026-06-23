@@ -143,7 +143,7 @@ export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string)
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Intradag Top-10</div>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Day trading Top-10</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
             {data?.generated_local
               ? `Genereret ${data.generated_local} · ${ageText(data.generated_utc)}`
