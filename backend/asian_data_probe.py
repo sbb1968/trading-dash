@@ -68,14 +68,14 @@ INSTRUMENTS = [
     ("Nikkei225 micro (OSE)",  "future", dict(symbol="N225MC", exchange="OSE.JPN", currency="JPY")),
     ("Nikkei225 USD (CME)",    "future", dict(symbol="NKD",    exchange="CME",     currency="USD")),
     ("Nikkei225 JPY (CME)",    "future", dict(symbol="NIY",    exchange="CME",     currency="JPY")),
-    ("Nikkei225 (SGX)",        "future", dict(symbol="N225",   exchange="SGX",     currency="USD")),
-    ("TOPIX mini (OSE)",       "future", dict(symbol="TOPXM",  exchange="OSE.JPN", currency="JPY")),
+    ("Nikkei225 stor (OSE)",   "future", dict(symbol="N225",   exchange="OSE.JPN", currency="JPY")),
+    ("TOPIX (OSE)",            "future", dict(symbol="TOPX",   exchange="OSE.JPN", currency="JPY")),
     # --- Kina/Hongkong (~03:00-09:00 dansk) ---
-    ("FTSE China A50 (SGX)",   "future", dict(symbol="CN",     exchange="SGX",     currency="USD")),
+    ("FTSE China A50 (SGX)",   "future", dict(symbol="XINA50", exchange="SGX",     currency="USD")),
     ("Hang Seng (HKFE)",       "future", dict(symbol="HSI",    exchange="HKFE",    currency="HKD")),
     ("Mini Hang Seng (HKFE)",  "future", dict(symbol="MHI",    exchange="HKFE",    currency="HKD")),
     # --- Australien (Sydney, tidligst, ~01:00-07:00 dansk) ---
-    ("ASX SPI 200 (SNFE)",     "future", dict(symbol="AP",     exchange="SNFE",    currency="AUD")),
+    ("ASX SPI 200 (SNFE)",     "future", dict(symbol="SPI",    exchange="SNFE",    currency="AUD")),
     # --- FX-baseline (24/5, data oftest inkluderet) ---
     ("USD/JPY",                "fx",     dict(pair="USDJPY")),
     ("AUD/USD",                "fx",     dict(pair="AUDUSD")),
@@ -217,8 +217,10 @@ async def hist_depth(ib, c, what_first):
 
 
 # ── Per-instrument: fire tjek ─────────────────────────────────────
-async def check_instrument(ib, label, art, kwargs, emit, errors):
-    """Koerer A-D for ét instrument. Returnerer status-dict til opsummeringen."""
+async def check_instrument(ib, label, art, kwargs, emit, errors, check_hist=True):
+    """Koerer A-D for ét instrument. Returnerer status-dict til opsummeringen.
+    check_hist=False springer tjek D over (undgaar reqHistoricalData-pacing — fx naar
+    en harvest koerer paa samme konto)."""
     emit("─" * 60)
     emit(f"  {label}")
     emit("─" * 60)
@@ -309,6 +311,9 @@ async def check_instrument(ib, label, art, kwargs, emit, errors):
             pass
 
     # ── D. 1-MIN HISTORIK-DYBDE ──
+    if not check_hist:
+        emit(f"   {YELLOW}HISTORIK: sprunget over (--no-hist)")
+        return st
     what_first = "MIDPOINT" if art == "fx" else "TRADES"
     try:
         depth = await hist_depth(ib, c, what_first)
@@ -334,7 +339,7 @@ def _fmt_ts(ts):
         return str(ts)
 
 
-async def probe(host, port, client_id, emit):
+async def probe(host, port, client_id, emit, check_hist=True):
     from ib_async import IB
     ib = IB()
     errors = []  # (reqId, code, msg)
@@ -348,7 +353,7 @@ async def probe(host, port, client_id, emit):
     results = []
     try:
         for label, art, kwargs in INSTRUMENTS:
-            st = await check_instrument(ib, label, art, kwargs, emit, errors)
+            st = await check_instrument(ib, label, art, kwargs, emit, errors, check_hist)
             results.append(st)
             emit("")
     finally:
@@ -365,6 +370,9 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7497)
     ap.add_argument("--client-id", type=int, default=45)
+    ap.add_argument("--no-hist", action="store_true",
+                    help="spring tjek D (1-min historik-dybde) over — undgaa reqHistoricalData-"
+                         "pacing-konflikt med en koerende harvest paa samme konto")
     args = ap.parse_args()
 
     out_dir = Path.cwd() / OUTPUT_DIRNAME
@@ -384,8 +392,13 @@ def main():
          "(spread/volumen er saa ikke repraesentativt).")
     emit("")
 
+    if args.no_hist:
+        emit("MODE: --no-hist — tjek D (historik-dybde) springes over (pacing-venlig).")
+        emit("")
+
     try:
-        results = asyncio.run(probe(args.host, args.port, args.client_id, emit))
+        results = asyncio.run(probe(args.host, args.port, args.client_id, emit,
+                                    check_hist=not args.no_hist))
     except Exception as e:
         emit(f"FORBINDELSESFEJL: {e}")
         emit(f"Tjek at Gateway koerer paa algoserveren og at API-port {args.port} er aaben "
@@ -394,8 +407,14 @@ def main():
         return 1
 
     # ── Opsummering: tre lister ──
-    tradebar = [r["label"] for r in results
-                if r["found"] and r["feed"].startswith(("REALTID", "ABONNERET")) and r["hist_ok"]]
+    realtid = [r for r in results if r["found"] and r["feed"].startswith(("REALTID", "ABONNERET"))]
+    # Uden historik-tjek kan vi ikke afgoere "tradebar" fuldt — vis kun realtid-fundne.
+    if args.no_hist:
+        tradebar = [r["label"] for r in realtid]
+        tradebar_label = "Realtid + fundet (historik IKKE tjekket, --no-hist)"
+    else:
+        tradebar = [r["label"] for r in realtid if r["hist_ok"]]
+        tradebar_label = "Tradebar kandidat (realtid + 1-min-historik OK)"
     mangler = [r["label"] for r in results
                if r["found"] and ("IKKE ABONNERET" in r["feed"] or "KUN DELAYED" in r["feed"])]
     ikke_fundet = [r["label"] for r in results if not r["found"]]
@@ -403,8 +422,7 @@ def main():
     emit("─" * 78)
     emit("  OPSUMMERING")
     emit("─" * 78)
-    emit(f"  Tradebar kandidat (realtid + 1-min-historik OK): "
-         f"{', '.join(tradebar) if tradebar else '(ingen)'}")
+    emit(f"  {tradebar_label}: {', '.join(tradebar) if tradebar else '(ingen)'}")
     emit(f"  Mangler dataabonnement (ikke abonneret / kun delayed): "
          f"{', '.join(mangler) if mangler else '(ingen)'}")
     emit(f"  Kontrakt ikke fundet (ret symbol i listen): "
