@@ -52,6 +52,7 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   ]},
   { label: "Analyse", icon: "🎯", items: [
     { id: "swing",          shortcut: "W" },   // Swing-rapport
+    { id: "buyhold",        shortcut: "H" },   // Buy-and-Hold-rapport
     { id: "intradagreport", shortcut: "T" },   // Intradag-rapport
   ]},
   { label: "Konto & ordrer", icon: "💼", items: [

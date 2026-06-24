@@ -1542,6 +1542,278 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
     return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report), detail=bool(detail)))
 
 
+# ── Buy-and-Hold rapport (kopi af swing-renderen; 4 lag + gate-nedbrydning + OE) ──
+def _buyhold_report_html(d: dict, detail: bool = False) -> str:
+    """Render buyhold_report.report_to_json som print-venlig HTML (lyst tema). Spejler
+    _swing_report_html: 4 lag-kort, gate-blok med 'hvorfor', Owner-Earnings-panel,
+    langsigtede tiles, header-flag. detail=True -> fuld faktor-nedbrydning (4 lag)."""
+    import html as _html
+    esc = _html.escape
+    BULL, BEAR, NEU, MUT = "#15803d", "#b91c1c", "#b45309", "#6b7280"
+    TITLES = {"quality": "Kvalitet", "growth": "Vaekst & holdbarhed",
+              "valuation": "Vaerdiansaettelse", "trend": "Langsigtet trend"}
+    ORDER = ("quality", "growth", "valuation", "trend")
+
+    def sc(v): return BULL if v >= 15 else BEAR if v <= -15 else NEU
+
+    def fb(b):
+        b = b or ""
+        if b.startswith("STAERK"): return BULL
+        if b.startswith("EGNET"): return NEU
+        if b.startswith("SVAG") or b.startswith("FRARAADES"): return BEAR
+        return MUT
+
+    def sg(v, dd=0): return ("+" if v > 0 else "") + f"{v:.{dd}f}"
+
+    def usd(v):
+        if v is None: return "—"
+        if abs(v) >= 1e9: return f"${v/1e9:.1f}B"
+        if abs(v) >= 1e6: return f"${v/1e6:.1f}M"
+        return f"${v:,.0f}"
+
+    def pct(v, dd=1, scale=1.0): return "—" if v is None else f"{v*scale:.{dd}f}%"
+
+    def layer_card(key):
+        ly = d["layers"][key]
+        rows = ""
+        for g in ly["groups"]:
+            col, p = sc(g["score"]), min(abs(g["score"]), 100)
+            side = "left:50%" if g["score"] >= 0 else f"left:{50 - p/2}%"
+            rows += (
+                '<div style="margin:6px 0"><div style="display:flex;justify-content:space-between;font-size:12px;color:#374151">'
+                f'<span>{esc(g["name"])}</span><span style="color:{col};font-weight:700">{sg(g["score"])}</span></div>'
+                '<div style="position:relative;height:6px;background:#e5e7eb;border-radius:3px;margin-top:3px">'
+                '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#9ca3af"></div>'
+                f'<div style="position:absolute;top:0;bottom:0;{side};width:{p/2}%;background:{col};border-radius:3px"></div></div></div>'
+            )
+        col = sc(ly["score"])
+        return (
+            '<div style="flex:1;min-width:210px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
+            f'<div style="display:flex;justify-content:space-between"><b style="font-size:13px">{esc(TITLES[key])}</b>'
+            f'<span style="font-size:11px;color:{MUT}">{round(ly["weight"]*100)}%</span></div>'
+            f'<div style="margin:4px 0"><span style="font-size:22px;font-weight:800;color:{col}">{sg(ly["score"])}</span> '
+            f'<span style="font-size:11px;color:{col}">{esc(ly["band"])}</span></div>{rows}</div>'
+        )
+
+    def fcol(v): return BULL if v > 5 else BEAR if v < -5 else MUT
+
+    def detail_section():
+        INTRO = {
+            "quality": "35 % af helheden. Forretningens kvalitet: afkast paa kapital, balance-soliditet, cash flow-kvalitet.",
+            "growth": "25 %. Vaekst (oms/EPS/FCF) og dens holdbarhed (konsistens, margin-trend, reinvesteringsafkast).",
+            "valuation": "25 %. Hvad koeber jeg afkast for — multipler + yields (Owner-Earnings yield er hovedfaktoren).",
+            "trend": "15 %. Langsigtet teknisk: sekulaer trend (40-uge/200-dag MA), relativ styrke, stabilitet.",
+        }
+        out = ['<div style="margin-top:10px;print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+               '<div style="font-size:16px;font-weight:800;border-bottom:2px solid #111;padding-bottom:4px">'
+               'Detaljeret faktor-nedbrydning</div>']
+        for key in ORDER:
+            ly = d["layers"][key]
+            out.append(
+                '<div style="margin-top:14px;background:#0f766e;color:#fff;border-radius:6px 6px 0 0;'
+                'padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'
+                f'<b style="font-size:14px">{esc(TITLES[key])} &middot; {round(ly["weight"]*100)}% af helheden</b>'
+                f'<span style="font-weight:800;font-size:14px">{sg(ly["score"])} '
+                f'<span style="font-weight:600;font-size:12px">{esc(ly["band"])}</span></span></div>'
+            )
+            out.append(f'<div style="font-size:12px;color:#374151;padding:8px 12px;background:#f9fafb">{esc(INTRO[key])}</div>')
+            for g in ly["groups"]:
+                facs = g["factors"]
+                gw = sum((fa.get("weight") or 0) for fa in facs) * 100
+                out.append(
+                    '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead>'
+                    '<tr style="background:#ccfbf1">'
+                    f'<th colspan="2" style="text-align:left;padding:5px 8px;color:#0f766e">{esc(g["name"])} '
+                    f'<span style="color:{MUT};font-weight:600">({gw:.1f}%)</span></th>'
+                    f'<th colspan="3" style="text-align:right;padding:5px 8px;color:{sc(g["score"])}">Gruppe {sg(g["score"])}</th></tr>'
+                    f'<tr style="border-bottom:1px solid #e5e7eb;color:{MUT}">'
+                    '<th style="text-align:left;padding:3px 8px">Parameter</th><th style="text-align:left;padding:3px 8px">Vaerdi</th>'
+                    '<th style="text-align:right;padding:3px 8px">Bidrag</th><th style="text-align:right;padding:3px 8px">Vaegt</th>'
+                    '<th style="text-align:right;padding:3px 8px">Vaegtet</th></tr></thead><tbody>'
+                )
+                for i, fa in enumerate(facs):
+                    bg = "#ffffff" if i % 2 == 0 else "#f9fafb"
+                    sig, wt, wtd = fa.get("signal") or 0, (fa.get("weight") or 0) * 100, fa.get("weighted") or 0
+                    out.append(
+                        f'<tr style="background:{bg}">'
+                        f'<td style="text-align:left;padding:3px 8px">{esc(fa["name"])}</td>'
+                        f'<td style="text-align:left;padding:3px 8px;color:#374151">{esc(str(fa.get("raw","")))}</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{fcol(sig)};font-weight:600">{sg(sig)}</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{MUT}">{wt:.1f}%</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{fcol(wtd)};font-weight:700">{sg(wtd,1)}</td></tr>'
+                    )
+                out.append('</tbody></table>')
+            if ly["excluded"]:
+                ex = "; ".join(f'{esc(e["name"])} ({esc(str(e["why"]))})' for e in ly["excluded"])
+                out.append(f'<div style="font-size:11px;color:{MUT};padding:6px 12px;background:#f9fafb">Ekskluderet: {ex}</div>')
+        out.append('</div>')
+        return "".join(out)
+
+    def drivers_html(title, col, items):
+        rows = "".join(
+            '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">'
+            f'<span style="color:#374151">{esc(it["name"])}</span>'
+            f'<span style="color:{col};font-weight:700">{sg(it["contribution"],1)}</span></div>' for it in items
+        ) or f'<div style="font-size:12px;color:{MUT}">Ingen.</div>'
+        return f'<div style="flex:1"><div style="font-weight:700;color:{col};font-size:12px;margin-bottom:4px">{esc(title)}</div>{rows}</div>'
+
+    # ── Gate-blok (med 'hvorfor' naar gate < 1) ──
+    gate = d["gate"]
+    gcol = BULL if gate >= 0.7 else (NEU if gate >= 0.3 else BEAR)
+    gate_rows = ""
+    if gate < 1.0:
+        gate_rows = ('<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">'
+                     f'<tr style="color:{MUT};border-bottom:1px solid #e5e7eb">'
+                     '<th style="text-align:left;padding:3px 6px">Risiko-signal</th>'
+                     '<th style="text-align:right;padding:3px 6px">Faktor</th>'
+                     '<th style="text-align:left;padding:3px 6px">Raa</th></tr>')
+        for gb in d["gate_breakdown"]:
+            fc = BULL if gb["factor"] >= 0.7 else (NEU if gb["factor"] >= 0.3 else BEAR)
+            gate_rows += (f'<tr><td style="padding:3px 6px">{esc(gb["signal"])}</td>'
+                          f'<td style="text-align:right;padding:3px 6px;color:{fc};font-weight:700">{gb["factor"]:.2f}</td>'
+                          f'<td style="padding:3px 6px;color:#374151">{esc(gb["raw"])}</td></tr>')
+        gate_rows += '</table>'
+    gate_block = (
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;'
+        'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+        f'<div style="display:flex;justify-content:space-between;align-items:center">'
+        f'<b style="font-size:13px">Risiko-gate</b><span style="font-size:26px;font-weight:800;color:{gcol}">{gate:.2f}</span></div>'
+        '<div style="font-size:11px;color:#6b7280">Strukturelle fatale fejl (konkurs/udvanding/FCF-distress) traekker gaten mod 0.</div>'
+        f'{gate_rows}</div>'
+    )
+
+    # ── Owner-Earnings-panel ──
+    oe = d.get("owner_earnings")
+    oe_block = ""
+    if oe:
+        oe_block = (
+            '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#f9fafb;'
+            'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+            f'<b style="font-size:13px">Owner Earnings</b> <span style="font-size:11px;color:{MUT}">'
+            f'({oe.get("norm_years")}-aars norm., est., {esc(str(oe.get("method") or ""))})</span>'
+            f'<div style="font-size:18px;font-weight:800;margin-top:2px">{usd(oe.get("value"))}</div>'
+            f'<div style="font-size:11px;color:#374151">vedligeholds-capex {usd(oe.get("maint_capex"))} · '
+            f'seneste aar: OCF {usd(oe.get("ocf_latest"))} / FCF {usd(oe.get("fcf_latest"))}</div></div>'
+        )
+
+    # ── Tiles ──
+    tl = d.get("tiles", {})
+
+    def tile(lbl, val):
+        return (f'<div style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 9px">'
+                f'<div style="font-size:9px;color:{MUT};text-transform:uppercase">{esc(lbl)}</div>'
+                f'<div style="font-size:13px;font-weight:700">{esc(val)}</div></div>')
+
+    div_txt = pct(tl.get("dividend_yield"), 1, 100.0)
+    if tl.get("payout") is not None:
+        div_txt += f" (payout {tl['payout']*100:.0f}%)"
+    tiles_html = "".join([
+        tile("Markedsvaerdi", usd(tl.get("market_cap"))),
+        tile("Sektor", tl.get("sector") or "—"),
+        tile("P/E", "—" if tl.get("pe") is None else f'{tl["pe"]:.1f}'),
+        tile("Owner-Earnings yield", pct(tl.get("oe_yield"))),
+        tile("FCF-yield", pct(tl.get("fcf_yield"), 1, 100.0)),
+        tile("Udbytte", div_txt),
+        tile("ROIC", pct(tl.get("roic"))),
+        tile("Altman Z", "—" if tl.get("altman_z") is None else f'{tl["altman_z"]:.2f}'),
+    ])
+
+    # ── Flag-striber ──
+    flags = ""
+    if d.get("fundamental_na"):
+        flags += ('<div style="background:#fef9c3;border-radius:6px;padding:8px 12px;font-size:12px">'
+                  '&#9888; Fundamentaldata utilgaengelig for denne ticker — kun trend-laget vurderet; '
+                  'scoren er IKKE en fuld vurdering.</div>')
+    if d.get("is_financial"):
+        flags += ('<div style="background:#fef9c3;border-radius:6px;padding:8px 12px;font-size:12px">'
+                  '&#9888; Begraenset model — finansiel sektor (capex/FCF/Owner-Earnings/gaeld-faktorer udeladt).</div>')
+
+    css = ("@page{margin:14mm}*{box-sizing:border-box}"
+           "body{margin:0;background:#fff;color:#111;font-family:-apple-system,Segoe UI,Roboto,sans-serif}"
+           ".bar{padding:8px 16px;background:#eee;font-size:13px;display:flex;gap:10px;align-items:center}"
+           ".bar button{font-size:13px;padding:4px 12px;cursor:pointer}"
+           ".wrap{padding:16px;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:12px}"
+           "@media print{.bar{display:none}}")
+    t = esc(d["ticker"])
+    co = esc(d.get("company") or "")
+    co_html = f' <span style="font-size:14px;font-weight:600;color:{MUT}">{co}</span>' if co else ""
+    price = f'${d["price"]:.2f}' if d.get("price") is not None else "—"
+    fbc = fb(d["final_band"])
+    detail_html = detail_section() if detail else ""
+    return (
+        f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Buy-and-Hold - {t}</title>'
+        f'<style>{css}</style></head><body>'
+        '<div class="bar">Gem som PDF: <button onclick="window.print()">Gem / Print</button>'
+        '<span>(eller Ctrl+P -&gt; "Gem som PDF")</span></div><div class="wrap">'
+        '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px">'
+        f'<div><div style="font-size:24px;font-weight:800">{t}{co_html}</div>'
+        f'<div style="color:{MUT};font-size:13px">{price} &middot; LANGSIGTET vurdering (min. 1 aar)</div></div>'
+        f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{sg(d["final"])}</div>'
+        f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(d["final_band"])}</div></div></div>'
+        f'{flags}'
+        f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{sg(d["combined"])}</b> &times; Risiko-gate <b>{d["gate"]:.2f}</b>'
+        f' &minus; (1&minus;gate)&times;40 &rarr; Samlet <b style="color:{fbc}">{sg(d["final"])}</b></div>'
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        f'{layer_card("quality")}{layer_card("growth")}{layer_card("valuation")}{layer_card("trend")}</div>'
+        f'{gate_block}{oe_block}'
+        '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
+        f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>'
+        f'{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{tiles_html}</div>'
+        f'{detail_html}</div></body></html>'
+    )
+
+
+class BuyHoldAnalyzeRequest(BaseModel):
+    ticker: str
+
+
+@app.post("/buyhold/analyze_json")
+async def buyhold_analyze_json(req: BuyHoldAnalyzeRequest):
+    """Buy-and-Hold struktureret JSON. compute_buyhold er ASYNC + kraever ib til Lag 4 ->
+    await DIREKTE paa delt ib (som /intradag, IKKE to_thread). FMP-kaldet er to_thread'et
+    inde i compute_buyhold. Er ib nede, ekskluderes Lag 4 paent."""
+    import buyhold
+    import buyhold_report
+    t = (req.ticker or "").strip().upper()
+    if not t:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    if not os.environ.get("FMP_API_KEY", ""):
+        raise HTTPException(status_code=503, detail="FMP_API_KEY ikke sat i miljoeet")
+    await strategy_manager.connect_ibkr(paper_trading=True)
+    conn = strategy_manager.get_ibkr()
+    ib = conn.ib if (conn and conn.connected) else None
+    try:
+        core = await buyhold.compute_buyhold(ib, t, os.environ.get("FMP_API_KEY", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Buy-and-Hold-rapport fejlede: {e}")
+    return buyhold_report.report_to_json(core)
+
+
+@app.get("/buyhold/report.html", response_class=HTMLResponse)
+async def buyhold_report_html(ticker: str, detail: int = 0):
+    """Pen, printbar HTML til EKSTERN browser (PDF-knappen). detail=1 -> nedbrydning."""
+    import buyhold
+    import buyhold_report
+    t = (ticker or "").strip().upper()
+    if not t:
+        raise HTTPException(status_code=400, detail="Mangler ticker")
+    if not os.environ.get("FMP_API_KEY", ""):
+        return HTMLResponse("<h2>FMP_API_KEY ikke sat i miljoeet</h2>", status_code=503)
+    await strategy_manager.connect_ibkr(paper_trading=True)
+    conn = strategy_manager.get_ibkr()
+    ib = conn.ib if (conn and conn.connected) else None
+    try:
+        core = await buyhold.compute_buyhold(ib, t, os.environ.get("FMP_API_KEY", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Buy-and-Hold-rapport fejlede: {e}")
+    return HTMLResponse(_buyhold_report_html(buyhold_report.report_to_json(core), detail=bool(detail)))
+
+
 # ── Hjaelpe-assistent endpoint ────────────────────────────────
 # Iben spoerger om hvordan Trading Dash bruges; help_assistant kalder Anthropic
 # (Haiku 4.5) med dokumentationen som kontekst. Noegle: ANTHROPIC_API_KEY i miljoeet.

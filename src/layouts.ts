@@ -10,6 +10,7 @@ export type WindowId =
   | "account"
   | "orders"
   | "swing"
+  | "buyhold"
   | "docs"
   | "assistent"
   | "swingtop10"
@@ -38,6 +39,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   account:         "Konto",
   orders:          "Ordrer",
   swing:           "Swing trading-rapport",
+  buyhold:         "Buy-and-Hold-rapport",
   docs:            "Dokumentation",
   assistent:       "Hjælp (Claude)",
   swingtop10:      "Swing trading Top-10",

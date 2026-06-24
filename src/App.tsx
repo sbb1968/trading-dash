@@ -20,6 +20,7 @@ import { MarketOverview } from "./MarketOverview";
 import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
 import { SwingReport } from "./SwingReport";
+import { BuyHoldReport } from "./BuyHoldReport";
 import { IntradagReport } from "./IntradagReport";
 import { IntradagTop10 } from "./IntradagTop10";
 import { DocsWindow } from "./DocsWindow";
@@ -932,6 +933,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
+    case "buyhold": return <BuyHoldReport />;
     case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} />;
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;

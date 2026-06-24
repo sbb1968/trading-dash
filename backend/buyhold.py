@@ -13,6 +13,7 @@ CLI kraever IBKR forbundet (Lag 4 henter bars) + FMP-noegle (Lag 1-3):
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Optional
 
 from buyhold_fundamental import (FINANCIAL_EXCLUDE, compute_growth, compute_quality,
@@ -144,7 +145,8 @@ def _band_final(final: float) -> str:
 async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
     """Hele kaeden -> core dict (layers + c + gate_inputs + meta). Bars via ib, fund via FMP."""
     ticker = ticker.upper()
-    f, meta = fetch_buyhold_fundamentals(ticker, api_key)
+    # FMP er sync/blokerende -> to_thread saa det ikke fryser ib-event-loopet.
+    f, meta = await asyncio.to_thread(fetch_buyhold_fundamentals, ticker, api_key)
     price = f.get("price")
     excl, reason = (FINANCIAL_EXCLUDE, "finansiel sektor") if meta.get("is_financial") else (set(), "")
 
@@ -152,15 +154,30 @@ async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
     g = compute_growth(f, price, excl, reason)
     v = compute_valuation(f, price, excl, reason)
 
-    weekly, daily, spy, sect = await fetch_trend_bars(ib, ticker, meta.get("sector"))
-    trend = compute_buyhold_trend(weekly, daily, spy, sect)
+    # Lag 4 kraever ib; er den nede, ekskluderes trend-laget paent (tom -> renorm uden trend).
+    try:
+        weekly, daily, spy, sect = await fetch_trend_bars(ib, ticker, meta.get("sector"))
+        trend = compute_buyhold_trend(weekly, daily, spy, sect)
+    except Exception:
+        trend = {"results": [], "excluded": [("Lag 4 (trend)", "IBKR ikke tilgaengelig")], "lag_score": 0.0}
 
     gate, gate_inputs = compute_buyhold_gate(meta.get("gate_raw", {}), meta.get("sector"))
     layers = {"quality": q, "growth": g, "valuation": v, "trend": trend}
     c = combine_buyhold(layers, gate)
     c["price"] = price
+    c["company_name"] = meta.get("company_name")
     c["final_band"] = _band_final(c["final"])
-    return {"ticker": ticker, "layers": layers, "c": c, "gate_inputs": gate_inputs, "meta": meta}
+
+    # Noegletal-tiles (buy-and-hold-relevante) + flag til serialisering/UI.
+    pe = (price / f["eps_ttm"]) if (f.get("eps_ttm") and price and f["eps_ttm"] > 0) else f.get("pe_ttm")
+    tiles = {
+        "market_cap": meta.get("market_cap"), "sector": meta.get("sector"),
+        "pe": pe, "oe_yield": f.get("oe_yield"), "dividend_yield": f.get("dividend_yield"),
+        "payout": f.get("payout"), "roic": f.get("roic"),
+        "altman_z": meta.get("gate_raw", {}).get("altman_z"), "fcf_yield": f.get("fcf_yield"),
+    }
+    return {"ticker": ticker, "layers": layers, "c": c, "gate_inputs": gate_inputs,
+            "meta": meta, "tiles": tiles, "fundamental_na": not meta.get("fundamental_available")}
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
