@@ -1302,10 +1302,13 @@ INTRADAG_CHART_JS = r"""(function(){
 })();"""
 
 
-def _intradag_report_html(d: dict) -> str:
+def _intradag_report_html(d: dict, detail: bool = False) -> str:
     """Render intradag report_to_json som en paen, print-venlig HTML-side (lyst tema),
-    aabnet i EKSTERN browser fra Print-knappen. Spejler _swing_report_html. INGEN chart
-    (5b er tekstlig; chart-i-PDF = 5c). HTML er UTF-8 -> korrekte danske tegn."""
+    aabnet i EKSTERN browser fra PDF-knappen. Spejler _swing_report_html.
+
+    detail=True tilfoejer fuld faktor-nedbrydning pr. lag (Parameter/Vaerdi/Bidrag/Vaegt/
+    Vaegtet) EFTER opsummeringen — opt-in, spejler swing-detaljen. detail=False (default)
+    = normal rapport uaendret. Haandterer pending katalysator-lag (score=None)."""
     import html as _html
     esc = _html.escape
     BULL, BEAR, NEU, MUT = "#15803d", "#b91c1c", "#b45309", "#6b7280"
@@ -1368,6 +1371,85 @@ def _intradag_report_html(d: dict) -> str:
             f'<div style="margin:4px 0">{head}</div>{body}</div>'
         )
 
+    def detail_section_html(layers) -> str:
+        """Fuld faktor-nedbrydning pr. lag — spejler swing-detaljen, men intradag-lag
+        (teknisk/forsyning/katalysator) og haandterer pending katalysator (score=None)."""
+        INTRO = {
+            "technical": ("Det tungeste lag. Faktorer i grupper der maaler intradag-momentum og "
+                          "trend-sundhed lige nu. Hver faktor scorer -100..+100; Bidrag = raa "
+                          "signal, Vaegt = hvor meget den taeller, Vaegtet = de to ganget."),
+            "supply": "Float-centreret forsynings-lag — lav float = mere eksplosiv intradag-bevaegelse.",
+            "catalyst": "Realtids-katalysatorer: friske nyheder og handels-halts.",
+        }
+        TITLES = {"technical": "Teknisk", "supply": "Forsyning", "catalyst": "Katalysator"}
+
+        def fcol(v):   # faktor-fortegnsfarve (taerskel +-5, jf. swing)
+            return BULL if v > 5 else BEAR if v < -5 else MUT
+
+        out = ['<div style="margin-top:10px;print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+               '<div style="font-size:16px;font-weight:800;border-bottom:2px solid #111;padding-bottom:4px">'
+               'Detaljeret faktor-nedbrydning</div>']
+        for key in ("technical", "supply", "catalyst"):
+            ly = layers.get(key) or {}
+            pending = ly.get("score") is None
+            wpct = "—" if ly.get("weight") is None else f'{round(ly["weight"]*100)}%'
+            score_html = ('<span style="font-weight:700;font-size:12px">Afventer</span>' if pending
+                          else f'{sg(ly.get("score",0))} <span style="font-weight:600;font-size:12px">'
+                               f'{esc(bl(ly.get("band","")))}</span>')
+            out.append(
+                '<div style="margin-top:14px;background:#0f766e;color:#fff;border-radius:6px 6px 0 0;'
+                'padding:8px 12px;display:flex;justify-content:space-between;align-items:center">'
+                f'<b style="font-size:14px">{esc(TITLES[key])} &middot; {wpct} af Kombineret</b>'
+                f'<span style="font-weight:800;font-size:14px">{score_html}</span></div>'
+            )
+            out.append(f'<div style="font-size:12px;color:#374151;padding:8px 12px;background:#f9fafb">'
+                       f'{esc(INTRO[key])}</div>')
+            groups = ly.get("groups", [])
+            if pending and not groups:
+                out.append(f'<div style="font-size:11px;color:{MUT};padding:6px 12px;background:#f9fafb">'
+                           f'Realtids-news/halts ikke aktiveret endnu.</div>')
+            for g in groups:
+                facs = g.get("factors", [])
+                gw = sum((f.get("weight") or 0) for f in facs) * 100
+                gscore = g.get("score") or 0
+                gcol = sc(gscore)
+                out.append(
+                    '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead>'
+                    '<tr style="background:#ccfbf1">'
+                    f'<th colspan="2" style="text-align:left;padding:5px 8px;color:#0f766e">{esc(g.get("name",""))} '
+                    f'<span style="color:{MUT};font-weight:600">({gw:.1f}%)</span></th>'
+                    f'<th colspan="3" style="text-align:right;padding:5px 8px;color:{gcol}">Gruppe {sg(gscore)}</th></tr>'
+                    f'<tr style="border-bottom:1px solid #e5e7eb;color:{MUT}">'
+                    '<th style="text-align:left;padding:3px 8px;font-weight:600">Parameter</th>'
+                    '<th style="text-align:left;padding:3px 8px;font-weight:600">Vaerdi</th>'
+                    '<th style="text-align:right;padding:3px 8px;font-weight:600">Bidrag</th>'
+                    '<th style="text-align:right;padding:3px 8px;font-weight:600">Vaegt</th>'
+                    '<th style="text-align:right;padding:3px 8px;font-weight:600">Vaegtet</th></tr></thead><tbody>'
+                )
+                for i, f in enumerate(facs):
+                    bg = "#ffffff" if i % 2 == 0 else "#f9fafb"
+                    sig = f.get("signal") or 0
+                    wt  = (f.get("weight") or 0) * 100
+                    wtd = f.get("weighted") or 0
+                    raw = f.get("raw")
+                    raw_s = esc(str(raw)) if raw is not None else "—"
+                    out.append(
+                        f'<tr style="background:{bg}">'
+                        f'<td style="text-align:left;padding:3px 8px">{esc(f.get("name",""))}</td>'
+                        f'<td style="text-align:left;padding:3px 8px;color:#374151">{raw_s}</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{fcol(sig)};font-weight:600">{sg(sig)}</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{MUT}">{wt:.1f}%</td>'
+                        f'<td style="text-align:right;padding:3px 8px;color:{fcol(wtd)};font-weight:700">{sg(wtd,1)}</td></tr>'
+                    )
+                out.append('</tbody></table>')
+            exc = ly.get("excluded") or []
+            if exc:
+                ex_txt = "; ".join(f'{esc(e.get("name",""))} ({esc(str(e.get("why","")))})' for e in exc)
+                out.append(f'<div style="font-size:11px;color:{MUT};padding:6px 12px;background:#f9fafb">'
+                           f'Ekskluderet: {ex_txt}</div>')
+        out.append('</div>')
+        return "".join(out)
+
     def drivers_html(title, col, items):
         rows = "".join(
             '<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">'
@@ -1410,6 +1492,7 @@ def _intradag_report_html(d: dict) -> str:
     has_chart = bool(chart and chart.get("bars"))
     chart_block = '<div id="intradag-chart" style="margin:6px 0"></div>' if has_chart else ''
     chart_script = ('<script>const CHART=' + _json.dumps(chart) + ';' + INTRADAG_CHART_JS + '</script>') if has_chart else ''
+    detail_section = detail_section_html(d["layers"]) if detail else ""
     return (
         f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Day trading - {t}</title>'
         f'<style>{css}</style></head><body>'
@@ -1425,7 +1508,7 @@ def _intradag_report_html(d: dict) -> str:
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
         f'<div style="display:flex;gap:8px;flex-wrap:wrap">{chips}</div>'
-        f'{chart_block}'
+        f'{chart_block}{detail_section}'
         f'</div>{chart_script}</body></html>'
     )
 
@@ -1434,7 +1517,8 @@ def _intradag_report_html(d: dict) -> str:
 async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
                                sr: float | None = None,        # LAERDOM Fix A: default None, ALDRIG 0
                                pattern: float | None = None,
-                               candle: float | None = None):
+                               candle: float | None = None,
+                               detail: int = 0):
     """Pen, print-venlig HTML for EET symbol (lyst tema), aabnet i EKSTERN browser fra
     Print-knappen (print sker i browserens eget vindue -> ingen overlay paa app'en, saa
     man ikke ved et uheld lukker Trading Dash via app'ens X). Samme scoring som skaermen;
@@ -1455,7 +1539,7 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Day trading-rapport fejlede: {e}")
-    return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report)))
+    return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report), detail=bool(detail)))
 
 
 # ── Hjaelpe-assistent endpoint ────────────────────────────────

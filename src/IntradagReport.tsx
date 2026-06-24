@@ -199,13 +199,14 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
     }
   }
 
-  function exportPdf() {
+  function exportPdf(detail = false) {
     const s = symbol.trim().toUpperCase();
     if (!s) return;
     const p = new URLSearchParams({ symbol: s, timeframe });
     // overlay sendes KUN naar fluebenet er TIL -> overlay-FRA defaulter None i handleren
     // -> PDF identisk med skaermen (Fix A).
     if (useOverlay) { p.set("sr", String(sr)); p.set("pattern", String(pattern)); p.set("candle", String(candle)); }
+    if (detail) p.set("detail", "1");   // detail=true -> fuld faktor-nedbrydning pr. lag
     openUrl(`${API_HTML}?${p.toString()}`);   // EKSTERN browser
   }
 
@@ -226,10 +227,15 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
             style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
             {loading ? "Henter..." : "Opdater"}
           </button>
-          <button onClick={exportPdf} disabled={!data || loading}
+          <button onClick={() => exportPdf(false)} disabled={!data || loading}
             title="Aabn den paene rapport i browseren og gem som PDF"
             style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
-            Print
+            PDF
+          </button>
+          <button onClick={() => exportPdf(true)} disabled={!data || loading}
+            title="Detaljeret PDF — alle faktor-tal pr. lag (Parameter/Vaerdi/Bidrag/Vaegt/Vaegtet)"
+            style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+            Detaljeret PDF
           </button>
         </div>
 
