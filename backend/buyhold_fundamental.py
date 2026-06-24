@@ -115,6 +115,44 @@ def owner_earnings(ocf, total_capex, ppe, revenue, prev_revenue, da):
     return ocf - total_capex, total_capex, "gulv (=FCF)"
 
 
+OE_NORM_YEARS = 3   # Owner Earnings normaliseres over N aar (Buffett: GENNEMSNITLIG capex)
+
+
+def owner_earnings_normalized(cf_rows, inc_rows, bal_rows, n=OE_NORM_YEARS):
+    """Normaliseret Owner Earnings = avg(OCF, N aar) − avg(vedligeholds-capex, N aar).
+    Et enkelt stoejende aar (engangs-capex/working-capital) forvraenger ellers
+    hovedfaktoren. Gennemsnit hver KOMPONENT (ikke slut-OE'en). Rows nyeste foerst.
+    Returnerer (oe_norm, avg_maint, step_nyeste, n_brugt, avg_revenue)."""
+    years = min(n, len(cf_rows)) if cf_rows else 0
+    if years == 0:
+        return None, None, "ingen data", 0, None
+    ocfs, maints, revs = [], [], []
+    step_latest = None
+    for i in range(years):
+        c = cf_rows[i]
+        ocf = c.get("operatingCashFlow")
+        capex = c.get("capitalExpenditure")
+        da = c.get("depreciationAndAmortization")
+        revenue = inc_rows[i].get("revenue") if i < len(inc_rows) else None
+        prev_rev = inc_rows[i + 1].get("revenue") if (i + 1) < len(inc_rows) else None
+        ppe = bal_rows[i].get("propertyPlantEquipmentNet") if i < len(bal_rows) else None
+        _oe, maint_i, step_i = owner_earnings(ocf, capex, ppe, revenue, prev_rev, da)
+        if maint_i is None or ocf is None:
+            continue
+        ocfs.append(ocf)
+        maints.append(maint_i)
+        if revenue is not None:
+            revs.append(revenue)
+        if step_latest is None:
+            step_latest = step_i           # nyeste aars estimat-trin (repraesentativt)
+    if not ocfs:
+        return None, None, "ingen data", 0, None
+    avg_ocf = sum(ocfs) / len(ocfs)
+    avg_maint = sum(maints) / len(maints)
+    avg_rev = (sum(revs) / len(revs)) if revs else None
+    return avg_ocf - avg_maint, avg_maint, step_latest, len(ocfs), avg_rev
+
+
 def _safe_div(a, b):
     if a is None or b in (None, 0):
         return None
@@ -268,7 +306,8 @@ def s_pfcf(f, price):
     if fy <= 0:
         return "P/FCF n/a (negativ FCF)", -60.0
     pfcf = 1.0 / fy
-    return f"P/FCF {pfcf:.1f}", _band_score(pfcf, [(15, 30), (25, 10), (40, -10), (60, -30)], -50)
+    # Re-centreret (interim): kvalitets-normal (~28-33x) neutralt, billigt positivt.
+    return f"P/FCF {pfcf:.1f}", _band_score(pfcf, [(15, 30), (25, 10), (35, 0), (50, -20)], -40)
 
 
 def s_ev_ebitda(f, price):
@@ -277,7 +316,8 @@ def s_ev_ebitda(f, price):
         return None
     if v <= 0:
         return "EV/EBITDA n/a (negativ EBITDA)", -50.0
-    return f"EV/EBITDA {v:.1f}", _band_score(v, [(8, 30), (12, 10), (18, -10), (25, -30)], -50)
+    # Re-centreret (interim): kvalitets-large-cap (18-22x) neutralt; aegte dyrt (>30) negativt.
+    return f"EV/EBITDA {v:.1f}", _band_score(v, [(10, 30), (15, 10), (22, 0), (30, -20), (45, -40)], -60)
 
 
 def s_oe_yield(f, price):
@@ -286,8 +326,9 @@ def s_oe_yield(f, price):
         return None
     if v < 0:
         return f"Owner-Earnings yield {v:.1f}% - ROEDT (negativ OE)", -70.0
-    return (f"Owner-Earnings yield {v:.1f}% (est.)",
-            _band_score(v, [(2, -20), (4, 10), (6, 30), (8, 60)], 75))
+    # Re-centreret (interim): kvalitets-normal yield ~3.5% lander neutralt, billigt positivt.
+    return (f"Owner-Earnings yield {v:.1f}% (norm., est.)",
+            _band_score(v, [(1, -40), (2, -10), (3.5, 0), (5, 20), (7, 40)], 60))
 
 
 def s_fcf_yield(f, price):
@@ -571,19 +612,20 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
     f["fcf_margin"] = (_safe_div(fcf, revenue) or 0) * 100 if (fcf is not None and revenue) else None
     f["fcf_conversion"] = _safe_div(fcf, ni)
 
-    # --- Owner Earnings (est.) ---
-    prev_rev = rev_series[1] if len(rev_series) > 1 else None
-    ppe = bal0.get("propertyPlantEquipmentNet") or bal0.get("propertyPlantEquipmentNetTTM")
-    oe, maint_capex, oe_step = owner_earnings(ocf, total_capex, ppe, revenue, prev_rev, da)
-    meta["owner_earnings"] = oe
-    meta["ocf"] = ocf
-    meta["fcf"] = fcf
-    meta["maint_capex"] = maint_capex
+    # --- Owner Earnings (3-aars normaliseret, est.) ---
+    # Et enkelt stoejende aar (engangs-capex/skat/working-capital) forvraenger ellers
+    # hovedfaktoren (KO 2024: FCF kunstigt lav). Normalisér over N aar.
+    oe_norm, avg_maint, oe_step, oe_n, avg_rev = owner_earnings_normalized(cf_l, inc_l, bal_l)
+    meta["owner_earnings"] = oe_norm
+    meta["ocf"] = ocf                 # seneste aars OCF (til spaend-kontekst)
+    meta["fcf"] = fcf                 # seneste aars FCF (til spaend-kontekst)
+    meta["maint_capex"] = avg_maint   # gns. vedligeholds-capex over N aar
     meta["oe_step"] = oe_step
-    if oe is not None and revenue:
-        f["oe_margin"] = oe / revenue * 100
-    if oe is not None and mktcap:
-        f["oe_yield"] = oe / mktcap * 100
+    meta["oe_n_years"] = oe_n
+    if oe_norm is not None and avg_rev:
+        f["oe_margin"] = oe_norm / avg_rev * 100      # mod gns. revenue (konsistent basis)
+    if oe_norm is not None and mktcap:
+        f["oe_yield"] = oe_norm / mktcap * 100        # mod NUVAERENDE marketCap = korrekt yield
 
     # --- gate-raafelter (Fase 2 samler gaten) ---
     wc = (_safe_div(bal0.get("totalCurrentAssets"), 1) or 0) - (bal0.get("totalCurrentLiabilities") or 0) \
@@ -654,8 +696,8 @@ def main() -> int:
 
     oe, ocf, fcf = meta.get("owner_earnings"), meta.get("ocf"), meta.get("fcf")
     if oe is not None:
-        print(f"  Owner Earnings (est., {meta['oe_step']}): {oe:,.0f}  "
-              f"[OCF {ocf:,.0f} · FCF {fcf:,.0f} · maint-capex {meta.get('maint_capex'):,.0f}]")
+        print(f"  Owner Earnings ({meta.get('oe_n_years')}-aars norm., est., {meta['oe_step']}): {oe:,.0f}  "
+              f"[seneste aar: OCF {ocf:,.0f} · FCF {fcf:,.0f} · gns. maint-capex {meta.get('maint_capex'):,.0f}]")
     print()
     print(_fmt_layer("KVALITET (Lag 1)", compute_quality(f, f.get("price"), excl, reason)))
     print(_fmt_layer("VAEKST & HOLDBARHED (Lag 2)", compute_growth(f, f.get("price"), excl, reason)))
