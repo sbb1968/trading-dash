@@ -156,6 +156,8 @@ async def execute(db, sources, force):
         print("  ❌ Kunne ikke forbinde til IBKR (er TWS/Gateway oppe paa rette port?).")
         return 1
     journal = Journal(db)
+    await journal.init()        # AABNER aiosqlite-forbindelsen (_db) — ellers ser reconcile
+                                # ingen aabne rows og behandler positionerne som fremmede.
 
     rc = 0
     try:
@@ -180,6 +182,10 @@ async def execute(db, sources, force):
                 rc = 1
     finally:
         conn.disconnect()
+        try:
+            await journal.close()
+        except Exception:
+            pass
     return rc
 
 
