@@ -209,11 +209,13 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
     }
   }
 
-  function exportPdf() {
+  function exportPdf(detail = false) {
     if (!data) return;
     // Aaben den paene rapport i ekstern browser; brugeren gemmer som PDF derfra.
+    // detail=true -> fuld faktor-nedbrydning pr. lag (til teknisk gennemgang).
     const p = new URLSearchParams({ ticker: data.ticker });
     if (useOverlay) { p.set("sr", String(sr)); p.set("pattern", String(pattern)); p.set("candle", String(candle)); }
+    if (detail) p.set("detail", "1");
     openUrl(`${API_HTML}?${p.toString()}`);
   }
 
@@ -230,10 +232,15 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
             {loading ? "Analyserer..." : "Analyser"}
           </button>
-          <button onClick={exportPdf} disabled={!data || loading}
+          <button onClick={() => exportPdf(false)} disabled={!data || loading}
             title="Aabn den paene rapport i browseren og gem som PDF"
             style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
             PDF
+          </button>
+          <button onClick={() => exportPdf(true)} disabled={!data || loading}
+            title="Detaljeret PDF — alle faktor-tal pr. lag (Parameter/Vaerdi/Bidrag/Vaegt/Vaegtet)"
+            style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+            Detaljeret PDF
           </button>
         </div>
 
