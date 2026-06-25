@@ -1586,13 +1586,16 @@ def _buyhold_report_html(d: dict, detail: bool = False) -> str:
                 '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:#9ca3af"></div>'
                 f'<div style="position:absolute;top:0;bottom:0;{side};width:{p/2}%;background:{col};border-radius:3px"></div></div></div>'
             )
-        col = sc(ly["score"])
+        empty = not ly.get("groups")            # ingen faktor-grupper = intet scoret
+        head_val = "—" if empty else sg(ly["score"])
+        head_col = MUT if empty else sc(ly["score"])
+        head_band = "ingen data" if empty else esc(ly["band"])
         return (
             '<div style="flex:1;min-width:210px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
             f'<div style="display:flex;justify-content:space-between"><b style="font-size:13px">{esc(TITLES[key])}</b>'
             f'<span style="font-size:11px;color:{MUT}">{round(ly["weight"]*100)}%</span></div>'
-            f'<div style="margin:4px 0"><span style="font-size:22px;font-weight:800;color:{col}">{sg(ly["score"])}</span> '
-            f'<span style="font-size:11px;color:{col}">{esc(ly["band"])}</span></div>{rows}</div>'
+            f'<div style="margin:4px 0"><span style="font-size:22px;font-weight:800;color:{head_col}">{head_val}</span> '
+            f'<span style="font-size:11px;color:{head_col}">{head_band}</span></div>{rows}</div>'
         )
 
     def fcol(v): return BULL if v > 5 else BEAR if v < -5 else MUT

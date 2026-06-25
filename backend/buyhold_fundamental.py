@@ -674,7 +674,16 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
     statement_locked = all(("LAAST" in e) for e in meta["errors"] if e.split(":")[0] in
                            ("income", "balance", "cash-flow", "ratios")) and any(
         e.split(":")[0] in ("income", "balance", "cash-flow") for e in meta["errors"])
-    meta["fundamental_available"] = bool(rev_series or rt or km)
+    # Til-stede-men-tomt skrog (FMP returnerer fx [None,...] eller {"symbol": ...} for
+    # ukendte/ikke-US tickere) maa IKKE taelle som "tilgaengelig". Kraev en aegte vaerdi.
+    meta["fundamental_available"] = bool(
+        any(v is not None for v in rev_series)
+        or f.get("net_margin") is not None
+        or f.get("roe") is not None
+        or f.get("roic") is not None
+        or f.get("eps_ttm") is not None
+        or f.get("gross_margin") is not None
+    )
     meta["statement_locked"] = statement_locked
     return f, meta
 

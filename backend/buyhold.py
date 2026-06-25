@@ -163,6 +163,21 @@ async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
 
     gate, gate_inputs = compute_buyhold_gate(meta.get("gate_raw", {}), meta.get("sector"))
     layers = {"quality": q, "growth": g, "valuation": v, "trend": trend}
+
+    # Hul-rapport-vagt: hverken fundamental data ELLER et trend-lag med faktorer -> intet
+    # at vurdere -> rejs klar fejl (endpoint -> 422, UI viser forklaring i stedet for nul-kort).
+    if not meta.get("fundamental_available") and not layers["trend"].get("results"):
+        if any("429" in e for e in meta.get("errors", [])):
+            raise ValueError(
+                f"{ticker}: FMP's daglige kvota ser ud til at vaere opbrugt (429), og der "
+                f"er ingen kursdata. Proev igen efter FMP-reset.")
+        raise ValueError(
+            f"Ingen brugbar data for {ticker}. Hverken fundamentale noegletal (FMP) eller "
+            f"kursdata (IBKR) kunne hentes. Tickeren findes muligvis ikke i datakilderne "
+            f"eller er ikke US-noteret — Buy-and-Hold-modellen daekker primaert US-noterede "
+            f"selskaber, og for ikke-US-noterede findes data typisk ikke under det bare "
+            f"ticker. (Proev evt. en ADR-ticker hvis selskabet har en.)")
+
     c = combine_buyhold(layers, gate)
     c["price"] = price
     c["company_name"] = meta.get("company_name")
@@ -219,6 +234,9 @@ def main() -> int:
             return 1
         try:
             core = await compute_buyhold(conn.ib, a.ticker.upper(), a.api_key)
+        except ValueError as e:
+            print(f"\n  {e}\n")
+            return 0
         finally:
             conn.disconnect()
         c, meta = core["c"], core["meta"]

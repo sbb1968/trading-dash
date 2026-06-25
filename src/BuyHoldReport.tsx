@@ -79,6 +79,7 @@ function ScoreBar({ value }: { value: number }) {
 }
 
 function LayerCard({ title, layer }: { title: string; layer: Layer }) {
+  const empty = !layer.groups || layer.groups.length === 0;   // ingen faktorer = intet scoret
   return (
     <div style={{ flex: 1, minWidth: 0, background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -86,8 +87,17 @@ function LayerCard({ title, layer }: { title: string; layer: Layer }) {
         <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{Math.round(layer.weight * 100)}%</span>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-        <span style={{ fontSize: 22, fontWeight: 800, color: scoreColor(layer.score) }}>{signed(layer.score)}</span>
-        <Badge text={bandLabel(layer.band)} color={scoreColor(layer.score)} />
+        {empty ? (
+          <>
+            <span style={{ fontSize: 22, fontWeight: 800, color: "var(--text-muted)" }}>—</span>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>ingen data</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: 22, fontWeight: 800, color: scoreColor(layer.score) }}>{signed(layer.score)}</span>
+            <Badge text={bandLabel(layer.band)} color={scoreColor(layer.score)} />
+          </>
+        )}
       </div>
       <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
         {layer.groups.map((g, i) => (
