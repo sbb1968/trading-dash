@@ -3,6 +3,17 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 const LOG_KEY = "td_livealgo_log";   // localStorage-nøgle
 const LOG_MAX = 500;                 // maks. antal linjer i hukommelse/persistens
 
+// Strategi-prefix til LIVE LOG — ÉN kilde for alle strategier (tidligere hardkodet
+// ternær der kun dækkede KONF2/REV, så fx BuyTheDip stod umærket). Ny strategi =
+// tilføj én linje her.
+const STRAT_TAG: Record<string, string> = {
+  "Konfluens 2":      "[KONF2] ",
+  "Europa-reversion": "[REV] ",
+  "BuyTheDip":        "[DIP] ",
+  "Momentum ORB":     "[ORB] ",
+};
+const stratPrefix = (name?: string): string => (name ? STRAT_TAG[name] ?? "" : "");
+
 // ── Algo Status (flyttet fra LiveAlgo) ────────────────────────
 export type AlgoStatus =
   | "idle" | "started" | "scanning" | "universe_ready"
@@ -194,17 +205,12 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
       setStatus(msg.status);
       setMessage(msg.message);
       setTotalPnl(msg.total_pnl);
-      const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Europa-reversion" ? "[REV] " : "";
-      addLog(`${stratPrefix}${msg.message}`);   // tidsstempel tilføjes nu i addLog (lokal tid)
+      addLog(`${stratPrefix(msg.strategy)}${msg.message}`);   // tidsstempel tilføjes nu i addLog (lokal tid)
       if (msg.status === "universe_ready" && msg.message.includes(":")) {
         const part = msg.message.split(":")[1]?.trim();
         if (part) setUniverse(part.split(", ").filter(Boolean));
       }
     } else if (msg.type === "algo_trade") {
-      // Strategi-prefix til log (KONF eller ORB) hvis strategy er sat
-      const stratPrefix = msg.strategy === "Konfluens 2" ? "[KONF2] " :
-                          msg.strategy === "Europa-reversion" ? "[REV] " : "";
       // Konfluens-specifikt: vis bricks/score hvis tilgængelige
       const bricksTag = msg.bricks ? `  [${msg.bricks}]` : "";
 
@@ -216,7 +222,7 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
           entry_time: msg.time!,
         }]);
         const verb = msg.action === "buy" ? "KØB " : "SHRT";
-        addLog(`📈 ${stratPrefix}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.price!)}${bricksTag}`);
+        addLog(`📈 ${stratPrefix(msg.strategy)}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.price!)}${bricksTag}`);
       } else {
         setPositions(prev => prev.filter(p => p.ticker !== msg.ticker));
         setTrades(prev => [...prev, {
@@ -226,7 +232,7 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
         }]);
         const emoji = (msg.pnl || 0) >= 0 ? "✅" : "❌";
         const verb = msg.action === "buy_cover" ? "COVR" : "SÆLG";
-        addLog(`📉 ${stratPrefix}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.exit_price!)}  ${emoji} ${usd(msg.pnl!)} (${msg.reason})`);
+        addLog(`📉 ${stratPrefix(msg.strategy)}${verb} ${msg.shares} ${msg.ticker} @ ${usd(msg.exit_price!)}  ${emoji} ${usd(msg.pnl!)} (${msg.reason})`);
       }
     } else if (msg.type === "positions_snapshot") {
       // Genopbyg "Åbne positioner"-panelet fra backendens snapshot (sendt ved hver

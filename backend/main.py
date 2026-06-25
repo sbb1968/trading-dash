@@ -664,37 +664,35 @@ async def websocket_algo(websocket: WebSocket):
     algo_clients.append(websocket)
     print(f"[Algo] Klient forbundet — {len(algo_clients)} aktive")
 
-    # Send initial-status for hver registreret algo-strategi.
-    # LiveAlgo.tsx vil modtage flere algo_status-beskeder; hver med 'strategy'-felt
-    # så frontenden kan adskille dem. Bagudkompatibilitet: hvis ingen ekstra
-    # strategier er registreret, sender vi som før (uden strategy-felt).
-    for strat_name in ("Konfluens 2", "Europa-reversion"):
-        strat = strategy_manager._strategies.get(strat_name)
-        if strat and strat.status == StrategyStatus.RUNNING:
-            status  = "trading"
-            message = f"{strat_name} kører"
-            pnl     = strat.stats.pnl_today
-            pos     = strat.stats.open_positions
-            trades  = strat.stats.trades_today
-        elif strat:
-            status  = "idle"
-            message = f"{strat_name} er ikke startet"
-            pnl     = 0
-            pos     = 0
-            trades  = 0
-        else:
-            # Strategi ikke registreret — spring over
-            continue
-
+    # Send initial-status ved (re)connect. Vi daekker ALLE registrerede strategier
+    # (via registeret, ikke en hardkodet liste) saa ingen — fx BuyTheDip — mangler i
+    # reconnect-rapporten. For at undgaa "ikke startet"-stoej i LIVE LOG sender vi KUN
+    # en linje for de KOERENDE strategier; det per-strategi-panel drives separat af
+    # manager_status, saa hvilende strategier mangler ikke noget. Er ingen koerende,
+    # sendes EEN opsummerende linje.
+    _ts = datetime.now().strftime("%H:%M:%S")
+    running_names = []
+    for strat_name, strat in strategy_manager._strategies.items():
+        if strat.status == StrategyStatus.RUNNING:
+            running_names.append(strat_name)
+            await websocket.send_text(json.dumps({
+                "type":      "algo_status",
+                "strategy":  strat_name,
+                "status":    "trading",
+                "message":   f"{strat_name} kører",
+                "total_pnl": strat.stats.pnl_today,
+                "positions": strat.stats.open_positions,
+                "trades":    strat.stats.trades_today,
+                "time":      _ts,
+            }))
+    if not running_names:
         await websocket.send_text(json.dumps({
             "type":      "algo_status",
-            "strategy":  strat_name,
-            "status":    status,
-            "message":   message,
-            "total_pnl": pnl,
-            "positions": pos,
-            "trades":    trades,
-            "time":      datetime.now().strftime("%H:%M:%S"),
+            "strategy":  None,
+            "status":    "idle",
+            "message":   "Forbundet til backend — ingen aktive strategier",
+            "total_pnl": 0, "positions": 0, "trades": 0,
+            "time":      _ts,
         }))
 
     # Open-positions snapshot, så UI'et kan genopbygge "Åbne positioner"-panelet efter
