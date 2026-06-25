@@ -4157,13 +4157,27 @@
             const algoRunning = algo.running === true;
 
             // Jobs-tabel
-            const jobsRows = (sched.jobs || []).map(j => `
-                <tr>
-                    <td>${j.name}</td>
-                    <td class="num">${j.et_time} ET</td>
-                    <td class="num">${j.last_run_on || "—"}</td>
-                </tr>
-            `).join("");
+            // Status (i dag): samme logik som koerer_nu.py. last_run_on er in-memory pr.
+            // backend-proces og saettes foerst naar vinduet rammer -> "—" foer vinduet er
+            // IKKE "kører aldrig". Kørte i dag (grøn) / Afventer i dag (vindue ikke naaet) /
+            // IKKE kørt i dag! (vindue passeret uden kørsel = problem).
+            const etDate = (sched.now_et || "").slice(0, 10);
+            const nowHm  = (sched.now_et || "").slice(11, 16);
+            const jobsRows = (sched.jobs || []).map(j => {
+                const last = j.last_run_on;
+                const windowPassed = j.et_time && nowHm && nowHm >= j.et_time;
+                let state, color;
+                if (last === etDate)       { state = "Kørte i dag";      color = "#4ade80"; }
+                else if (!windowPassed)    { state = "Afventer i dag";   color = "#888"; }
+                else                       { state = "IKKE kørt i dag!"; color = "#ffb84a"; }
+                const lastTxt = (last && last !== etDate) ? ` <span style="color:#777; font-size:11px;">· sidst ${last}</span>` : "";
+                return `
+                    <tr>
+                        <td>${j.name}</td>
+                        <td class="num">${j.et_time} ET</td>
+                        <td style="color:${color}; font-weight:600;">${state}${lastTxt}</td>
+                    </tr>`;
+            }).join("");
 
             const stats = algo.stats || {};
 
@@ -4239,7 +4253,7 @@
                 <div class="section-title">Planlagte jobs (${(sched.jobs || []).length})</div>
                 <div class="card" style="padding:0;">
                     <table>
-                        <thead><tr><th>Job</th><th style="text-align:right;">Tidspunkt</th><th style="text-align:right;">Sidst kørt</th></tr></thead>
+                        <thead><tr><th>Job</th><th style="text-align:right;">Tidspunkt</th><th>Status (i dag)</th></tr></thead>
                         <tbody>${jobsRows || `<tr><td colspan="3" class="empty">Ingen jobs</td></tr>`}</tbody>
                     </table>
                 </div>
