@@ -244,6 +244,20 @@ class BuyTheDipLive(BaseStrategy):
         entry = row.get("entry_price") or 0.0
         snap  = await self.conn.get_snapshot(sym)
         exit_price = (snap.get("last") if snap else None) or entry or 0.0
+        # Undgaa DUPLIKAT-lukordre: hviler der allerede en aktiv {close_action}-ordre paa
+        # symbolet (fx en GTC force-close fra en tidligere session der ikke fyldte), saa lad
+        # DEN lukke positionen — laeg ikke endnu en (ellers dobbelt-salg ved aabningen). Row
+        # forbliver aaben; naeste reconcile bekraefter naar den eksisterende er fyldt.
+        _dups = [o for o in await self.conn.get_open_orders()
+                 if o["symbol"] == sym.upper() and o["action"] == close_action]
+        if _dups:
+            await self._log(
+                f"⏸ {sym}: en {close_action}-ordre hviler allerede "
+                f"({_dups[0]['status']}, rest {_dups[0]['remaining']:.0f}) — laegger IKKE en "
+                f"duplikat. Lader den eksisterende lukke; reconcile bekraefter naar fyldt.",
+                level="warning")
+            return
+
         result = await self.conn.place_paper_order(
             sym, close_action, shares, source=self.name,
             await_fill_sec=CLOSE_FILL_WAIT_SEC,
@@ -260,7 +274,8 @@ class BuyTheDipLive(BaseStrategy):
             await self._log(
                 f"⚠ {sym}: reconcile-lukning IKKE bekræftet fyldt "
                 f"(status={result.get('status')}, filled={filled}/{shares}) "
-                f"— journal-row forbliver åben, luk evt. manuelt i TWS", level="warning")
+                f"— journal-row forbliver åben (markedet kan være lukket: en MKT-ordre "
+                f"fylder først ved åbning). Luk evt. manuelt i TWS.", level="warning")
             return
         fill = result.get("avg_fill")
         if fill and fill > 0:

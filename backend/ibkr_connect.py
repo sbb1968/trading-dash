@@ -242,6 +242,37 @@ class IBKRConnection:
             "avg_cost": p.avgCost,
         } for p in self.ib.positions()]
 
+    async def get_open_orders(self) -> list:
+        """Aktive (ikke-fyldte/ikke-annullerede) ordrer paa tvaers af ALLE klienter.
+        Bruges af reconcile til at undgaa at laegge en DUPLIKAT luk-ordre oven paa en der
+        allerede hviler (fx en GTC force-close fra en tidligere session der ikke fyldte).
+        Best-effort: timeout/fejl -> falder tilbage paa lokalt kendte openTrades()."""
+        ACTIVE = {"PendingSubmit", "ApiPending", "PreSubmitted", "Submitted"}
+        try:
+            trades = await asyncio.wait_for(self.ib.reqAllOpenOrdersAsync(), timeout=5)
+        except Exception:
+            try:
+                trades = self.ib.openTrades()
+            except Exception:
+                trades = []
+        out = []
+        for t in trades or []:
+            try:
+                st = getattr(t.orderStatus, "status", "")
+                if st not in ACTIVE:
+                    continue
+                rem = getattr(t.orderStatus, "remaining", None)
+                out.append({
+                    "symbol":    (t.contract.symbol or "").upper(),
+                    "action":    (t.order.action or "").upper(),     # BUY/SELL
+                    "remaining": float(rem) if rem is not None else 0.0,
+                    "status":    st,
+                    "orderRef":  getattr(t.order, "orderRef", "") or "",
+                })
+            except Exception:
+                continue
+        return out
+
     # ── Historiske bars ───────────────────────────────────────
     async def get_historical_bars(
         self,

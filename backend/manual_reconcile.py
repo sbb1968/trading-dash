@@ -182,6 +182,12 @@ async def execute(db, sources, force):
                 rc = 1
     finally:
         conn.disconnect()
+        # Lad evt. afkoblings-trigget journal-skrivning (sen ordre-status-callback) lande
+        # MENS journalen stadig er aaben -> undgaa "Cannot operate on a closed database".
+        try:
+            await asyncio.sleep(0.4)
+        except Exception:
+            pass
         try:
             await journal.close()
         except Exception:
