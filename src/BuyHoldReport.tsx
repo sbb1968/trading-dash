@@ -189,6 +189,8 @@ export function BuyHoldReport() {
   }
 
   const oe = data?.owner_earnings;
+  // Ingen rapport (fejl/ingen data) -> PDF giver ingen mening: inaktivér begge knapper.
+  const pdfDisabled = !data || loading || !!error;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--border-subtle)", display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
@@ -200,20 +202,20 @@ export function BuyHoldReport() {
           style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
           {loading ? "Analyserer..." : "Analyser"}
         </button>
-        <button onClick={() => exportPdf(false)} disabled={!data || loading}
+        <button onClick={() => exportPdf(false)} disabled={pdfDisabled}
           title="Aabn den paene rapport i browseren og gem som PDF"
-          style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+          style={{ background: "var(--bg-elevated)", color: pdfDisabled ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: pdfDisabled ? "default" : "pointer" }}>
           PDF
         </button>
-        <button onClick={() => exportPdf(true)} disabled={!data || loading}
+        <button onClick={() => exportPdf(true)} disabled={pdfDisabled}
           title="Detaljeret PDF — alle faktor-tal pr. lag"
-          style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
+          style={{ background: "var(--bg-elevated)", color: pdfDisabled ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: pdfDisabled ? "default" : "pointer" }}>
           Detaljeret PDF
         </button>
       </div>
 
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-        {error && <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--bear)", borderRadius: 4, color: "var(--bear)", fontSize: 13 }}>{error}</div>}
+        {error && <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>{error}</div>}
         {!error && loading && <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter fundamentaler (FMP) + uge-bars (IBKR) ... tager et par sekunder.</div>}
         {!error && !loading && !data && <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. LANGSIGTET koeb-og-hold-vurdering: kvalitet, vaekst, vaerdiansaettelse, trend — gated paa strukturel risiko.</div>}
         {!error && !loading && data && (
