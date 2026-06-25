@@ -12,7 +12,16 @@ tradebart. FIRE tjek pr. instrument:
   A. KVALIFICERING + OEKONOMI  (reqContractDetails: localSymbol/expiry/mult/minTick)
   B. SESSIONSTIDER             (liquidHours -> dansk tid FOERST, lokal i parentes)
   C. LIVE-FEED + spread/volumen (reqMktData: realtid/forsinket + mikrostruktur)
-  D. 1-MIN HISTORIK-DYBDE      (reqHistoricalData: virker 1-min + hvor dybt)
+  D. 1-MIN HISTORIK-DYBDE + AARSAG (reqHeadTimeStamp + reqHistoricalData)
+
+AENDRING (denne version): tjek D rapporterer nu den PRAECISE AARSAG, naar historik
+fejler — i stedet for at sluge fejlen og bare sige "ingen bars". To tilfoejelser:
+  * reqHeadTimeStamp: eet billigt kald der giver TIDLIGST tilgaengelige bar (hvor langt
+    tilbage data raekker) OG renest afsloerer permission/availability (bruger HMDS,
+    samme rettigheder som bars). Findes en head-timestamp -> data FINDES.
+  * Fejl-destillering: 162-beskeden adskiller permission ("No market data permissions
+    for OSE.JPN") vs pacing ("pacing violation") vs no-data. Timeout vs IBKR-fejl vs
+     aegte-tom holdes nu adskilt. Lette pacing-pauser mellem historik-kald.
 
 Koeber INTET. reqMktData/reqHistoricalData paa et uabonneret instrument giver bare en
 fejl/delayed — ingen maanedsgebyrer udloeses. Koer mod Gateway paa algoserveren (ingen
@@ -23,6 +32,9 @@ Python 3.14: event-loop-fix oeverst. ib_async, alle *Async-kald. Laes-only.
 TIMING: A/B/D virker NAAR SOM HELST; C (realtid-vs-frosset + spread/volumen) er kun
 repraesentativ naar det asiatiske marked er AABENT. Koer i et asiatisk vindue, fx
 ~03:00-07:00 dansk (rammer Japan/Hongkong/ASX samtidigt).
+
+VIGTIGT efter et nyt abonnement: rettigheder opdateres foerst ved en NY Gateway-
+forbindelse. Re-login Gateway FOER genkoersel, ellers ser proben de gamle rettigheder.
 
 Brug:
     python asian_data_probe.py
@@ -50,6 +62,10 @@ OUTPUT_DIRNAME = "asian_data_probe_output"
 GREEN, YELLOW, RED = "✅", "⚠️ ", "❌"
 
 DK = ZoneInfo("Europe/Copenhagen")
+
+# Pacing: lille pause foer hvert historik-kald (reqHeadTimeStamp/reqHistoricalData), saa
+# en raekke kald ikke udloeser en 162 pacing-violation der forurener diagnosen.
+PACE = 1.0
 
 # IBKR timeZoneId -> IANA. Udvid efter behov fra hvad proben faktisk ser i kolonnen.
 TZMAP = {
@@ -181,39 +197,84 @@ def next_liquid_session(liquid_hours: str, tz_id: str):
     return None
 
 
-# ── Tjek D: 1-min historik-dybde ──────────────────────────────────
-async def hist_depth(ib, c, what_first):
-    """Returner (newest_ts, oldest_ts, n, used_duration, used_what) eller None.
-    Futures -> TRADES (retry MIDPOINT hvis tom = TRADES-uden-for-RTH-faelden);
-    FX -> MIDPOINT. formatDate=2, useRTH=False (futures handler ~23t)."""
+# ── Tjek D: 1-min historik-dybde + AARSAG ─────────────────────────
+def _hist_error_reason(errors):
+    """Destillér den mest relevante IBKR-fejlbesked fra historik-kaldet (ikke-benigne
+    koder). 162-beskeden adskiller permission vs pacing vs no-data."""
+    out = []
+    for _, cc, m in errors:
+        if cc in BENIGN:
+            continue
+        msg = m.split("message:", 1)[-1].strip() if "message:" in m else (m or "").strip()
+        tag = f"{cc}: {msg[:90]}"
+        if tag not in out:
+            out.append(tag)
+    return " | ".join(out) if out else None
+
+
+async def hist_diag(ib, c, what_first, errors):
+    """Diagnosér 1-min historik. Returnerer dict:
+      ok        : bool (kunne hente 1-min bars)
+      newest    : nyeste bar-ts (eller None)
+      oldest    : aeldste i 2-dages sample (eller None)
+      n         : antal bars i sample
+      used_what : TRADES/MIDPOINT der virkede
+      earliest  : reqHeadTimeStamp (tidligst tilgaengelige bar) eller None
+      reason    : aarsags-streng hvis ok=False (permission/pacing/no-data/timeout/...)
+    """
+    res = {"ok": False, "newest": None, "oldest": None, "n": 0,
+           "used_what": what_first, "earliest": None, "reason": None}
+    errors.clear()
+
+    # 1) headTimestamp: eet billigt kald -> tidligst tilgaengelige bar + ren
+    #    permission/availability-probe (HMDS, samme rettigheder som bars).
+    await asyncio.sleep(PACE)
+    try:
+        head = await asyncio.wait_for(
+            ib.reqHeadTimeStampAsync(c, whatToShow=what_first, useRTH=False, formatDate=2),
+            timeout=20)
+        if head:
+            res["earliest"] = head
+    except asyncio.TimeoutError:
+        res["reason"] = "timeout paa reqHeadTimeStamp (data-farm langsom?)"
+    except Exception as e:
+        res["reason"] = f"{type(e).__name__}: {str(e)[:80]}"
+
+    # 2) sample-pull (2 D) -> bekraeft 1-min granularitet + nyeste bar.
     async def fetch(dur, what):
+        await asyncio.sleep(PACE)
         try:
             return await asyncio.wait_for(ib.reqHistoricalDataAsync(
                 c, endDateTime="", durationStr=dur, barSizeSetting="1 min",
                 whatToShow=what, useRTH=False, formatDate=2), timeout=30)
-        except Exception:
+        except asyncio.TimeoutError:
+            if not res["reason"]:
+                res["reason"] = "timeout paa reqHistoricalData (data-farm langsom / pacing?)"
+            return []
+        except Exception as e:
+            if not res["reason"]:
+                res["reason"] = f"{type(e).__name__}: {str(e)[:80]}"
             return []
 
-    # 1) bekraeft 1-min virker (kort kald)
-    short = await fetch("2 D", what_first)
-    used_what = what_first
-    if not short and what_first == "TRADES":
-        short = await fetch("2 D", "MIDPOINT")
-        if short:
-            used_what = "MIDPOINT"
-    if not short:
-        return None
+    bars = await fetch("2 D", what_first)
+    used = what_first
+    if not bars and what_first == "TRADES":
+        bars = await fetch("2 D", "MIDPOINT")
+        if bars:
+            used = "MIDPOINT"
+    if bars:
+        res["ok"] = True
+        res["used_what"] = used
+        res["newest"] = bars[-1].date
+        res["oldest"] = bars[0].date
+        res["n"] = len(bars)
+        res["reason"] = None
+        return res
 
-    # 2) dybde-sondering: laengste duration der lykkes
-    for dur in ("2 M", "1 M", "10 D"):
-        deep = await fetch(dur, used_what)
-        if not deep and used_what == "TRADES":
-            alt = await fetch(dur, "MIDPOINT")
-            if alt:
-                deep, used_what = alt, "MIDPOINT"
-        if deep:
-            return (short[-1].date, deep[0].date, len(deep), dur, used_what)
-    return (short[-1].date, short[0].date, len(short), "2 D", used_what)
+    # 3) ingen bars -> destillér den faktiske aarsag fra IBKR-fejlene (162-besked osv.).
+    res["reason"] = (_hist_error_reason(errors) or res["reason"]
+                     or "ingen bars og ingen fejl (UAFKLARET)")
+    return res
 
 
 # ── Per-instrument: fire tjek ─────────────────────────────────────
@@ -224,7 +285,8 @@ async def check_instrument(ib, label, art, kwargs, emit, errors, check_hist=True
     emit("─" * 60)
     emit(f"  {label}")
     emit("─" * 60)
-    st = {"label": label, "found": False, "feed": "", "hist_ok": False, "spread": ""}
+    st = {"label": label, "found": False, "feed": "", "hist_ok": False,
+          "spread": "", "hist_reason": ""}
 
     # ── A. KVALIFICERING + OEKONOMI ──
     cd = await resolve_details(ib, art, kwargs)
@@ -310,24 +372,34 @@ async def check_instrument(ib, label, art, kwargs, emit, errors, check_hist=True
         except Exception:
             pass
 
-    # ── D. 1-MIN HISTORIK-DYBDE ──
+    # ── D. 1-MIN HISTORIK-DYBDE + AARSAG ──
     if not check_hist:
         emit(f"   {YELLOW}HISTORIK: sprunget over (--no-hist)")
         return st
     what_first = "MIDPOINT" if art == "fx" else "TRADES"
     try:
-        depth = await hist_depth(ib, c, what_first)
+        diag = await hist_diag(ib, c, what_first, errors)
     except Exception as e:
-        depth = None
-        emit(f"   {RED} HISTORIK: reqHistoricalData fejl: {e}")
-    if depth:
-        newest, oldest, n, dur, used_what = depth
+        emit(f"   {RED} HISTORIK: probe-fejl: {e}")
+        st["hist_reason"] = f"probe-fejl: {e}"
+        return st
+
+    if diag["ok"]:
         st["hist_ok"] = True
-        what_note = f" [{used_what}]" if used_what != what_first else ""
-        emit(f"   {GREEN} HISTORIK: 1-min OK · raekker mindst til {_fmt_ts(oldest)} ({dur})"
-             f"{what_note} · nyeste {_fmt_ts(newest)} · {n} bars")
-    elif depth is None and "HISTORIK" not in (st.get("feed") or ""):
-        emit(f"   {RED} HISTORIK: ingen 1-min bars (hverken TRADES eller MIDPOINT)")
+        what_note = f" [{diag['used_what']}]" if diag["used_what"] != what_first else ""
+        earliest_s = (f" · raekker tilbage til {_fmt_ts(diag['earliest'])}"
+                      if diag["earliest"] else " · dybde ukendt (ingen headTimeStamp)")
+        emit(f"   {GREEN} HISTORIK: 1-min OK{what_note} · nyeste {_fmt_ts(diag['newest'])} · "
+             f"{diag['n']} bars i 2-dages sample{earliest_s}")
+    elif diag["earliest"]:
+        # headTimeStamp gav en dato -> data FINDES; sample-pull fejlede (pacing/timeout),
+        # IKKE manglende rettighed. Vigtig skelnen: koeb ikke abonnement for dette.
+        st["hist_reason"] = f"data FINDES (tidligst {_fmt_ts(diag['earliest'])}), pull fejlede: {diag['reason']}"
+        emit(f"   {YELLOW}HISTORIK: data FINDES (tidligst {_fmt_ts(diag['earliest'])}), "
+             f"men sample-pull fejlede — {diag['reason']}")
+    else:
+        st["hist_reason"] = diag["reason"]
+        emit(f"   {RED} HISTORIK: ingen 1-min bars — {diag['reason']}")
     return st
 
 
@@ -390,6 +462,8 @@ def main():
          f"client-id {args.client_id}")
     emit("Bemaerk: marked lukket = 'frosset' men stadig REALTID HVIS abonneret "
          "(spread/volumen er saa ikke repraesentativt).")
+    emit("Historik fejler? Linjen viser nu AARSAGEN: 162-permission (mangler abonnement) "
+         "vs pacing/timeout (forbigaaende) vs 'data FINDES' (rettighed OK).")
     emit("")
 
     if args.no_hist:
@@ -406,7 +480,7 @@ def main():
         (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
         return 1
 
-    # ── Opsummering: tre lister ──
+    # ── Opsummering: lister ──
     realtid = [r for r in results if r["found"] and r["feed"].startswith(("REALTID", "ABONNERET"))]
     # Uden historik-tjek kan vi ikke afgoere "tradebar" fuldt — vis kun realtid-fundne.
     if args.no_hist:
@@ -418,6 +492,8 @@ def main():
     mangler = [r["label"] for r in results
                if r["found"] and ("IKKE ABONNERET" in r["feed"] or "KUN DELAYED" in r["feed"])]
     ikke_fundet = [r["label"] for r in results if not r["found"]]
+    hist_fail = [(r["label"], r.get("hist_reason", "")) for r in results
+                 if r["found"] and not r["hist_ok"] and r.get("hist_reason")]
 
     emit("─" * 78)
     emit("  OPSUMMERING")
@@ -427,6 +503,10 @@ def main():
          f"{', '.join(mangler) if mangler else '(ingen)'}")
     emit(f"  Kontrakt ikke fundet (ret symbol i listen): "
          f"{', '.join(ikke_fundet) if ikke_fundet else '(ingen)'}")
+    if hist_fail and not args.no_hist:
+        emit("  Historik utilgaengelig — AARSAG pr. instrument (skel permission fra pacing):")
+        for lab, why in hist_fail:
+            emit(f"      - {lab}: {why}")
     emit("  → Spread/volumen er kun repraesentativt naar det asiatiske marked er aabent "
          "(~03:00-07:00 dansk).")
     emit("")
