@@ -4095,17 +4095,30 @@
                 const res = await fetch("/status");
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
-                renderStatus(data);
+                // Per-strategi-status (samme kilde som Strategier-fanen). Valgfri: fejler den
+                // (auth/ikke-algoserver), falder Status-fanen tilbage til /status' globale bool.
+                let algoList = null;
+                try {
+                    const ar = await authFetch("/algo/list");
+                    if (ar.ok) algoList = await ar.json();
+                } catch (e) { /* valgfri — vis /status alene */ }
+                renderStatus(data, algoList);
             } catch (e) {
                 document.getElementById("content").innerHTML = `
                     <div class="card"><div class="error"><strong>Fejl:</strong> ${e.message}</div></div>`;
             }
         }
 
-        function renderStatus(d) {
+        function renderStatus(d, algoList) {
             // Helper: grøn/rød indikator-prik med tekst
             const dot = (ok, okText, badText) =>
                 `<span class="status-dot ${ok ? "online" : "offline"}"></span>${ok ? okText : badText}`;
+
+            // Per-strategi (fra /algo/list). Null -> fald tilbage til /status' globale algo.running.
+            const stratList = (algoList && algoList.strategies)
+                ? algoList.strategies.filter(s => !SKRINLAGTE_STRATEGIER.has(s.name))
+                : null;
+            const runningCount = stratList ? stratList.filter(s => s.running).length : null;
 
             const id = d.identity || {};
             const sched = d.scheduler || {};
@@ -4156,14 +4169,35 @@
                             <div class="muted-text" style="margin-top:4px;">Næste ORB-start: ${sched.next_start ? `${sched.next_start}${sched.next_start_dk ? ` / ${sched.next_start_dk.split(" ").slice(-1)[0]} DK` : ""}` : "—"}</div>
                         </div>
                         <div>
-                            <div class="stat-label">Algoritme</div>
+                            <div class="stat-label">Strategier</div>
                             <div style="font-size:18px; font-weight:600; margin-top:6px;">
-                                ${dot(algoRunning, "Kører", "Ikke aktiv (" + (stats.status || "idle") + ")")}
+                                ${stratList
+                                    ? `<span class="status-dot ${runningCount > 0 ? "online" : "offline"}"></span>${runningCount} af ${stratList.length} kører`
+                                    : dot(algoRunning, "Kører", "Ikke aktiv (" + (stats.status || "idle") + ")")}
                             </div>
-                            <div class="muted-text" style="margin-top:4px;">Handler i dag: ${stats.trades_today ?? 0}</div>
+                            <div class="muted-text" style="margin-top:4px;">${stratList ? "se Strategier — kører nu" : "Handler i dag: " + (stats.trades_today ?? 0)}</div>
                         </div>
                     </div>
                 </div>
+
+                ${stratList ? `
+                <!-- STRATEGIER — KOERER NU (per-strategi, fra /algo/list) -->
+                <div class="section-title">Strategier — kører nu</div>
+                <div class="card" style="padding:0;">
+                    <table>
+                        <thead><tr><th>Strategi</th><th>Status</th><th style="text-align:right;">Handler</th><th style="text-align:right;">Dagens P&L</th><th style="text-align:right;">Åbne</th></tr></thead>
+                        <tbody>${stratList.map(s => {
+                            const run = s.running; const st = s.stats || {};
+                            return `<tr>
+                                <td><span class="status-dot ${run ? "online" : "offline"}"></span>${s.name}</td>
+                                <td>${run ? "Kører" : (s.status || "stoppet")}</td>
+                                <td class="num">${run ? (st.trades_today ?? 0) : "—"}</td>
+                                <td class="num ${run ? cls(st.pnl_today) : ""}">${run ? fmtMoneySigned(st.pnl_today) : "—"}</td>
+                                <td class="num">${run ? (st.open_positions ?? 0) : "—"}</td>
+                            </tr>`;
+                        }).join("")}</tbody>
+                    </table>
+                </div>` : ""}
 
                 <!-- IDENTITET -->
                 <div class="section-title">Identitet</div>
