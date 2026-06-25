@@ -28,6 +28,7 @@ import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
 import { HelpAssistant } from "./HelpAssistant";
 import { SwingTop10 } from "./SwingTop10";
+import { BuyHoldTop10 } from "./BuyHoldTop10";
 import { useTickerName } from "./useTickerName";
 
 
@@ -941,6 +942,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
     case "assistent": return <HelpAssistant />;
     case "swingtop10": return <SwingTop10 />;
+    case "buyholdtop10": return <BuyHoldTop10 />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }

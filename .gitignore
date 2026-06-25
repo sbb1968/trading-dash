@@ -145,3 +145,10 @@ backend/swing_scores_*.csv
 backend/swing_top10_*.csv
 backend/swing_top10_latest.json
 backend/swing_top10_running.lock
+
+# Buy-and-Hold top-10 runtime-output (persistent cache + latest/lock/log; ikke kildekode)
+backend/buyhold_scores_cache.csv
+backend/buyhold_top10_latest.json
+backend/buyhold_top10_running.lock
+backend/buyhold_top10_run.log
+backend/buyhold_fmp_cache/

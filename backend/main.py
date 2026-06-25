@@ -2032,6 +2032,74 @@ async def swing_top10_run():
     return {"started": True}
 
 
+# ── Buy-and-Hold Top-10 (vindue) ─────────────────────────────────────
+# Spejler swing-top10: subprocess (egen ib, koeres uden for handelstid), laasefil
+# med staale-backstop, latest.json. buyhold_top10.py er kvote-budgetteret + resumerbar.
+_BH_TOP10_LATEST = os.path.join(_SWING_DIR, "buyhold_top10_latest.json")
+_BH_TOP10_LOCK   = os.path.join(_SWING_DIR, "buyhold_top10_running.lock")
+_BH_TOP10_RUNLOG = os.path.join(_SWING_DIR, "buyhold_top10_run.log")
+_BH_TOP10_STALE_SEC = 2 * 3600   # koersel er kvote-kappet (~MAX_PER_RUN navne) -> ~minutter; 2t backstop
+
+
+def _bh_top10_running():
+    """(running, started_utc, progress). Laasefilen er kilden, med staale-backstop."""
+    if not os.path.exists(_BH_TOP10_LOCK):
+        return False, None, None
+    try:
+        with open(_BH_TOP10_LOCK, encoding="utf-8") as f:
+            lock = _json.load(f)
+        started = lock.get("started_utc")
+        age = (_datetime.datetime.now(_datetime.timezone.utc)
+               - _datetime.datetime.fromisoformat(started)).total_seconds()
+        prog = {"done": lock.get("done"), "total": lock.get("total")}
+        return (age <= _BH_TOP10_STALE_SEC), started, prog
+    except Exception:
+        return False, None, None
+
+
+@app.get("/buyhold/top10")
+async def buyhold_top10_get():
+    """Seneste buy-and-hold top-10 (fra buyhold_top10_latest.json) + running/progress."""
+    data = {"generated_local": None, "generated_utc": None, "source": None,
+            "universe_size": 0, "scored_cached": 0, "count": 0, "rows": []}
+    if os.path.exists(_BH_TOP10_LATEST):
+        try:
+            with open(_BH_TOP10_LATEST, encoding="utf-8") as f:
+                data = _json.load(f)
+        except Exception:
+            pass
+    running, started, prog = _bh_top10_running()
+    data["running"] = running
+    data["started_utc"] = started
+    data["progress"] = prog
+    return data
+
+
+@app.post("/buyhold/top10/run")
+async def buyhold_top10_run():
+    """Start en frisk buy-and-hold top-10-koersel (subprocess). Afvis hvis en koerer.
+    Kraever FMP_API_KEY i backendens miljoe + (helst) IBKR oppe paa 7497."""
+    if not os.environ.get("FMP_API_KEY", ""):
+        return {"started": False, "error": "FMP_API_KEY ikke sat i backendens miljoe"}
+    running, started, _ = _bh_top10_running()
+    if running:
+        return {"started": False, "already_running": True, "started_utc": started}
+    if os.path.exists(_BH_TOP10_LOCK):
+        try:
+            os.remove(_BH_TOP10_LOCK)
+        except OSError:
+            pass
+    try:
+        logf = open(_BH_TOP10_RUNLOG, "a", encoding="utf-8")
+        _subprocess.Popen(
+            [sys.executable, "buyhold_top10.py"],
+            cwd=_SWING_DIR, stdout=logf, stderr=_subprocess.STDOUT,
+        )
+    except Exception as e:
+        return {"started": False, "error": f"{type(e).__name__}: {e}"}
+    return {"started": True}
+
+
 # ── Intradag Top-10 Konfluens (trin 6) ──────────────────────────────────────
 # Spejler swing-top10-endpoints, MEN scanen koerer IN-PROCESS som en asyncio.Task
 # paa den DELTE ib (ikke en subprocess med egen klient, der konkurrerer om feed).
