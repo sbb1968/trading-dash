@@ -136,13 +136,22 @@ def main() -> int:
         print("   (ingen strategier registreret)")
 
     # ── Scheduler: auto-starts + kørte de i dag? ──
-    print("\n  AUTO-START (scheduler) — sidst kørt:")
+    print("\n  AUTO-START (scheduler):")
+    now_hm = now_et_str[11:16]                    # ET 'HH:MM' til vindue-sammenligning
     for j in sched.get("jobs", []):
         nm, et, last = j.get("name"), j.get("et_time"), j.get("last_run_on")
-        dk = _hhmm_et_to_dk(et, et_date)         # job-tid i DK
-        mark = GREEN if last == et_date else GREY  # kørte i dag? (ET-dato)
-        print(f"   {mark} {nm:<24} @ {dk} DK — sidst {last or 'aldrig'}")
+        dk = _hhmm_et_to_dk(et, et_date)
+        window_passed = bool(et and now_hm and now_hm >= et)
+        if last == et_date:
+            mark, state = GREEN, "kørte i dag"
+        elif not window_passed:
+            mark, state = GREY, "afventer i dag"       # vinduet er ikke naaet endnu
+        else:
+            mark, state = YEL, "IKKE kørt i dag!"      # vinduet passeret uden kørsel = problem
+        tail = f" · sidst {last}" if (last and last != et_date) else ""
+        print(f"   {mark} {nm:<24} @ {dk} DK — {state}{tail}")
     print(f"   Naeste auto-start: {sched.get('next_start_dk', '?')} DK")
+    print("   (sidst-kørt nulstilles ved backend-genstart — viser kun denne proces)")
 
     # ── Risiko ──
     risk = status.get("risk", {}) or {}
