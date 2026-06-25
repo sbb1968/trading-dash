@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """
-cogt_fix_dupe_orders.py - annuller DUPLIKAT GTC-SELL paa COGT, behold praecis EEN.
+cogt_fix_dupe_orders.py - ryd DUPLIKAT GTC-SELL paa COGT via global cancel.
 ═══════════════════════════════════════════════════════════════════════════════
 Der ligger flere identiske hvilende SELL-ordrer paa COGT (orphan-duplikater fra foer
-dup-fixet). Tre x SELL 14 mod en position paa 14 = oversaelg -> short ved aabningen.
-Dette script annullerer alle paa naer EEN, saa positionen lukkes praecis een gang
-naar US-markedet aabner.
+dup-fixet), lagt af FORSKELLIGE klienter (clientId 79 + 88). En API-klient kan KUN
+annullere ordrer den selv lagde (cancelOrder pr. orderId -> Error 10147 paa tvaers af
+klienter). Derfor bruger vi reqGlobalCancel, der annullerer paa tvaers af klienter.
+
+reqGlobalCancel rammer ALLE aabne ordrer paa kontoen -> for ikke at ramme en anden
+strategis hvilende ordre AFBRYDER scriptet, hvis der findes aktive ordrer der IKKE er
+COGT. (Diag bekraeftede at der lige nu KUN er COGT-ordrer.) Bagefter laegger
+manual_reconcile praecis EEN ren SELL (dup-vagten ser ingen hvilende -> lige en).
 
 SIKKERHED:
   - DEFAULT = PREVIEW: viser hvad der ville ske, annullerer INTET.
-  - --execute = annuller alle aktive COGT SELL paa naer den foerste (behold qty=position).
-  - Egen random client-id (IBKRConnection) -> kicker IKKE backendens forbindelse,
-    kraever INGEN backend-genstart (sikkert midt i eksperimentet).
-  - Roerer KUN COGT SELL-ordrer. Placerer ALDRIG noget.
+  - --execute = reqGlobalCancel (KUN hvis alle aktive ordrer er COGT).
+  - Egen random client-id -> kicker IKKE backenden, kraever INGEN genstart.
+  - Placerer ALDRIG noget (det goer manual_reconcile bagefter).
 
 Koer paa ALGOSERVEREN fra backend/:
     python cogt_fix_dupe_orders.py              # preview
-    python cogt_fix_dupe_orders.py --execute    # annuller duplikater
-Send outputtet retur.
+    python cogt_fix_dupe_orders.py --execute    # global cancel (kun hvis kun COGT aktivt)
+Derefter:
+    python manual_reconcile.py --source K2 --execute   # laegger EEN ren SELL
 """
 from __future__ import annotations
 
@@ -46,13 +51,17 @@ def _fmt(t):
             f"orderId={o.orderId} permId={o.permId} clientId={o.clientId}")
 
 
+def _active(ib):
+    return [t for t in (ib.openTrades() or []) if t.orderStatus.status in ACTIVE]
+
+
 async def main(execute: bool) -> int:
     from accounts import load_identity
     from ibkr_connect import IBKRConnection
 
     identity = load_identity()
     print("=" * 72)
-    print(f"  COGT DUPLIKAT-ORDRE-FIX — {'EXECUTE (annullerer)' if execute else 'PREVIEW (roerer intet)'}")
+    print(f"  COGT DUPLIKAT-ORDRE-FIX (global cancel) — {'EXECUTE' if execute else 'PREVIEW (roerer intet)'}")
     print("=" * 72)
     print(f"  Konto: {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
 
@@ -67,70 +76,61 @@ async def main(execute: bool) -> int:
         except Exception as e:
             print(f"  (reqAllOpenOrders fejlede: {type(e).__name__}: {e} — bruger openTrades)")
 
-        # Position (sanity: behold en SELL der matcher antallet vi ejer).
         pos = {p["ticker"].upper(): p["position"] for p in conn.get_positions() if p.get("position")}
-        held = pos.get(SYMBOL, 0)
-        print(f"\n  Position {SYMBOL}: {held:+g}")
+        print(f"\n  Position {SYMBOL}: {pos.get(SYMBOL, 0):+g}")
 
-        active = [t for t in (ib.openTrades() or [])
-                  if t.contract.symbol.upper() == SYMBOL
-                  and t.order.action.upper() == "SELL"
-                  and t.orderStatus.status in ACTIVE]
-        print(f"\n  Aktive {SYMBOL} SELL-ordrer: {len(active)}")
+        active = _active(ib)
+        cogt = [t for t in active if t.contract.symbol.upper() == SYMBOL and t.order.action.upper() == "SELL"]
+        other = [t for t in active if t not in cogt]
+
+        print(f"\n  Aktive ordrer i alt: {len(active)}  (COGT SELL: {len(cogt)}, andet: {len(other)})")
         for t in active:
             print(f"    {_fmt(t)}")
 
-        if len(active) <= 1:
-            print("\n  -> 0 eller 1 ordre — intet at rydde op. Faerdig.")
+        if len(cogt) <= 1 and not other:
+            print(f"\n  -> {len(cogt)} COGT SELL — intet at rydde op. Faerdig.")
             return 0
 
-        keep = active[0]
-        drop = active[1:]
-        print(f"\n  PLAN: behold 1 (permId={keep.order.permId}, qty={keep.order.totalQuantity:g}), "
-              f"annuller {len(drop)}:")
-        for t in drop:
-            print(f"    ANNULLER permId={t.order.permId} orderId={t.order.orderId} clientId={t.order.clientId}")
+        if other:
+            print("\n  ⛔ AFBRYDER: der er aktive ordrer der IKKE er COGT SELL (se 'andet' ovenfor).")
+            print("     reqGlobalCancel ville ramme dem. Annuller COGT-duplikaterne manuelt i TWS,")
+            print("     eller stop de andre strategier foerst. Scriptet roerer INTET.")
+            return 1
 
-        if held and abs(keep.order.totalQuantity) != abs(held):
-            print(f"\n  ⚠ ADVARSEL: beholdt ordre (qty={keep.order.totalQuantity:g}) matcher IKKE "
-                  f"positionen ({held:+g}) — tjek manuelt i TWS foer --execute.")
+        # Her: alle aktive ordrer er COGT SELL -> sikkert at global-cancele.
+        print(f"\n  PLAN: reqGlobalCancel -> annullerer alle {len(cogt)} COGT SELL (intet andet aktivt).")
+        print("        Bagefter laegger 'manual_reconcile --source K2 --execute' EEN ren SELL.")
 
         if not execute:
             print("\n  (PREVIEW) Annullerede INTET. Koer igen med --execute for at udfoere.")
             return 0
 
-        for t in drop:
-            try:
-                ib.cancelOrder(t.order)
-                print(f"    -> cancelOrder sendt: permId={t.order.permId}")
-            except Exception as e:
-                print(f"    -> FEJL ved annullering permId={t.order.permId}: {type(e).__name__}: {e}")
-        await asyncio.sleep(3)   # lad annulleringer lande
+        ib.reqGlobalCancel()
+        print("\n  -> reqGlobalCancel sendt. Venter paa at annulleringer lander...")
+        await asyncio.sleep(4)
 
-        # Bekraeft sluttilstand.
         try:
             await asyncio.wait_for(ib.reqAllOpenOrdersAsync(), timeout=8)
         except Exception:
             pass
-        still = [t for t in (ib.openTrades() or [])
-                 if t.contract.symbol.upper() == SYMBOL
-                 and t.order.action.upper() == "SELL"
-                 and t.orderStatus.status in ACTIVE]
-        print(f"\n  EFTER: {len(still)} aktiv {SYMBOL} SELL tilbage:")
+        still = _active(ib)
+        print(f"\n  EFTER: {len(still)} aktiv(e) ordre(r) tilbage:")
         for t in still:
             print(f"    {_fmt(t)}")
-        if len(still) == 1:
-            print("\n  ✅ Praecis EEN SELL tilbage — fylder ved US-aabning (15:30 DK) og lukker de 14.")
-            print("     Koer derefter: python manual_reconcile.py --source K2 --execute  (lukker journal-row)")
+        if not still:
+            print("\n  ✅ Alle hvilende ordrer annulleret. Position COGT staar stadig aaben (14).")
+            print("     NAESTE: python manual_reconcile.py --source K2 --execute")
+            print("       -> dup-vagten ser ingen hvilende ordre og laegger PRAECIS EEN ren SELL,")
+            print("          der fylder ved US-aabning (15:30 DK) og lukker de 14.")
         else:
-            print(f"\n  ⚠ {len(still)} tilbage (forventede 1) — tjek i TWS.")
+            print("\n  ⚠ Der er stadig aktive ordrer — tjek i TWS.")
     finally:
         conn.disconnect()
     return 0
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Annuller duplikat COGT SELL-ordrer (behold een)")
-    ap.add_argument("--execute", action="store_true", help="udfoer annulleringen (uden = preview)")
+    ap = argparse.ArgumentParser(description="Global-cancel COGT duplikat-SELL (kun hvis kun COGT aktivt)")
+    ap.add_argument("--execute", action="store_true", help="udfoer reqGlobalCancel (uden = preview)")
     a = ap.parse_args()
     raise SystemExit(asyncio.run(main(a.execute)))
