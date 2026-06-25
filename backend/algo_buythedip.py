@@ -404,7 +404,8 @@ class BuyTheDipLive(BaseStrategy):
                     self._status("done",
                                  f"✅ Handelsdagen afsluttet | P&L: ${self.total_pnl:+,.2f} | "
                                  f"{len(self.trades)} handler ({wins}W/{losses}L)")
-                    self.status = StrategyStatus.STOPPED
+                    await self._log_self_stop("Sessions-slut: force-close",
+                                              StrategyStatus.STOPPED, "done")
                     break
 
                 if not self.universe:
@@ -449,16 +450,18 @@ class BuyTheDipLive(BaseStrategy):
                             consecutive_errors = 0
                             self._status("trading", "✅ Genforbundet — fortsætter")
                         else:
-                            self._status("error", "❌ Kunne ikke genforbinde — stopper")
-                            self.status = StrategyStatus.ERROR
+                            await self._log_self_stop("IBKR-forbindelse tabt",
+                                                      StrategyStatus.ERROR, "error")
                             break
 
                 await asyncio.sleep(LOOP_SLEEP_SECONDS)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as e:
             logger.exception("[BuyTheDip] _trading_loop crashede")
-            raise
+            await self._log_self_stop(
+                f"Fejl i strategi-loop: {type(e).__name__}: {str(e)[:80]}",
+                StrategyStatus.ERROR, "error")
 
     async def _check_ticker(self, ticker: str, allow_entries: bool):
         """Hent seneste færdige bar; håndtér exit på åben position; ellers detektér

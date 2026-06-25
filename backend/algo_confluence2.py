@@ -715,7 +715,8 @@ class Confluence2Live(BaseStrategy):
 
                     await self._write_daily_diagnostics(reason="normal_close")
 
-                    self.status = StrategyStatus.STOPPED
+                    await self._log_self_stop("Sessions-slut: force-close",
+                                              StrategyStatus.STOPPED, "done")
                     break
 
                 self._status("trading",
@@ -758,8 +759,8 @@ class Confluence2Live(BaseStrategy):
                             consecutive_errors = 0
                             self._status("trading", "✅ Genforbundet — fortsætter handel")
                         else:
-                            self._status("error", "❌ Kunne ikke genforbinde — stopper")
-                            self.status = StrategyStatus.ERROR
+                            await self._log_self_stop("IBKR-forbindelse tabt",
+                                                      StrategyStatus.ERROR, "error")
                             break
 
                 await asyncio.sleep(LOOP_SLEEP_SECONDS)
@@ -770,7 +771,9 @@ class Confluence2Live(BaseStrategy):
         except Exception as e:
             _shutdown_reason = f"crash: {type(e).__name__}: {e}"
             logger.exception("_trading_loop crashede")
-            raise
+            await self._log_self_stop(
+                f"Fejl i strategi-loop: {type(e).__name__}: {str(e)[:80]}",
+                StrategyStatus.ERROR, "error")
         finally:
             await self._write_daily_diagnostics(reason=_shutdown_reason)
 

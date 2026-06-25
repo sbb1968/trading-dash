@@ -422,6 +422,28 @@ class BaseStrategy(ABC):
             )
         await self.on_stop()
 
+    async def _log_self_stop(self, reason: str, status_enum,
+                             status_str: str = "stopped") -> None:
+        """Gør et SELV-stop (loop-fejl / IBKR-forbindelse tabt / sessions-slut) SYNLIGT +
+        forensisk: en maerket algo_status-linje i LIVE LOG ('Strategi stoppet: <reason>',
+        som frontendens STRAT_TAG praefikser med [TAG]) + et strategy_stopped-event
+        (reason/trades/pnl) — samme synlige+forensiske maskineri som et bruger-stop.
+        Kaldes fra _trading_loop, hvor stop() ikke kan bruges (dens on_stop ville cancel'e
+        selve loop-tasken); loopet break'er/returnerer selv bagefter."""
+        self.status = status_enum
+        self._status(status_str, f"Strategi stoppet: {reason}")
+        if self._journal:
+            try:
+                await self._journal.log_event(
+                    source     = self.name,
+                    event_type = "strategy_stopped",
+                    payload    = {"reason":       reason,
+                                  "trades_today": self.stats.trades_today,
+                                  "pnl_today":    round(self.stats.pnl_today, 2)},
+                )
+            except Exception as e:
+                logger.error(f"[{self.name}] strategy_stopped-skriv fejlede: {e}")
+
     async def emergency_stop(self) -> None:
         await self._log("⚠ NØDSTOP AKTIVERET", level="warning")
 

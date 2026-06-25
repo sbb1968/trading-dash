@@ -527,7 +527,8 @@ class EuropaReversionLive(BaseStrategy):
                                  f"✅ EU-session afsluttet | "
                                  f"P&L: ${self.total_pnl:+,.2f} | "
                                  f"{len(self.trades)} handler ({wins}W/{losses}L)")
-                    self.status = StrategyStatus.STOPPED
+                    await self._log_self_stop("Sessions-slut: force-close",
+                                              StrategyStatus.STOPPED, "done")
                     break
 
                 self._status("trading",
@@ -561,8 +562,8 @@ class EuropaReversionLive(BaseStrategy):
                             consecutive_errors = 0
                             self._status("trading", "✅ Genforbundet — fortsætter handel")
                         else:
-                            self._status("error", "❌ Kunne ikke genforbinde — stopper")
-                            self.status = StrategyStatus.ERROR
+                            await self._log_self_stop("IBKR-forbindelse tabt",
+                                                      StrategyStatus.ERROR, "error")
                             break
 
                 await asyncio.sleep(LOOP_SLEEP_SECONDS)
@@ -571,7 +572,9 @@ class EuropaReversionLive(BaseStrategy):
             raise
         except Exception as e:
             logger.exception(f"[Europa-reversion] _trading_loop crashede: {e}")
-            raise
+            await self._log_self_stop(
+                f"Fejl i strategi-loop: {type(e).__name__}: {str(e)[:80]}",
+                StrategyStatus.ERROR, "error")
 
     # _reconnect() er løftet til BaseStrategy (Trin 1).
 
