@@ -167,15 +167,33 @@ def main() -> int:
     emit("")
 
     scored, skipped = [], []
-    for tk, bucket in universe:
+    consec_throttled, bailed = 0, False
+    for i, (tk, bucket) in enumerate(universe):
         f, meta, status = cached_fetch(tk, a.api_key, a.cache_ttl_days, a.throttle_sec,
                                        use_cache=not a.no_cache)
-        if status == "throttled" or not meta.get("fundamental_available"):
-            skipped.append((tk, bucket, "throttled (429)" if status == "throttled" else "data n/a"))
+        if status == "throttled":
+            skipped.append((tk, bucket, "throttled (429)"))
+            consec_throttled += 1
+            if consec_throttled >= 3:        # quota ser udtoemt ud -> stop, braend ikke flere kald
+                bailed = True
+                for tk2, b2 in universe[i + 1:]:
+                    skipped.append((tk2, b2, "ikke forsoegt (afbrudt)"))
+                break
+            continue
+        consec_throttled = 0
+        if not meta.get("fundamental_available"):
+            skipped.append((tk, bucket, "data n/a"))
             continue
         sc = score_fundamental(f, meta)
         sc.update(ticker=tk, bucket=bucket, status=status)
         scored.append(sc)
+
+    if bailed:
+        emit("  ⚠ FMP throttlede 3 tickers i traek — dagligt quota ser udtoemt/haardt-limiteret ud.")
+        emit("    Stoppede for ikke at braende flere kald. FMP's daglige quota nulstilles typisk")
+        emit("    00:00 UTC (02:00 DK). Vent og koer igen — cachede tickers loader oejeblikkeligt,")
+        emit("    saa cachen bygges op lidt ad gangen over flere koersler.")
+        emit("")
 
     if not scored:
         emit("  Ingen scorede tickers (alt throttlet/n.a.). Koer igen — cachede loader oejeblikkeligt.")
