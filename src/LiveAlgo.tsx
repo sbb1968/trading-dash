@@ -573,11 +573,13 @@ export function LiveAlgo() {
             ) : (
               log.map((line, i) => (
                 <div key={i} style={{
-                  color: line.includes("KØB")  ? "var(--bull)"  :
+                  color: line.includes("ADVARSEL") ? "var(--bear)" :
+                         line.includes("KØB")  ? "var(--bull)"  :
                          line.includes("SÆLG") ? "var(--bear)"  :
                          line.includes("⚠")    ? "var(--neutral, #f59e0b)" :
                          line.includes("✅")   ? "var(--bull)"  :
                                                  "var(--text-secondary)",
+                  fontWeight: line.includes("ADVARSEL") ? 700 : undefined,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}>{line}</div>

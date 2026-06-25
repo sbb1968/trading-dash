@@ -177,6 +177,13 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
   const strategyWsRef = useRef<WebSocket | null>(null);
   const didInit       = useRef(false);   // StrictMode-guard mod dobbelt-connect
 
+  // 3c: husk hvilke strategier der var KOERENDE, saa et reconnect (fx en backend-genstart)
+  // hvor en tidligere-koerende strategi nu er vaek kan give EEN tydelig advarsel. En
+  // bruger-stop sker over en LIVE forbindelse (intet reconnect) -> udloeser IKKE dette.
+  const runningRef        = useRef<Set<string>>(new Set());
+  const reconnectCheckRef = useRef(false);
+  const lostSnapshotRef   = useRef<string[]>([]);
+
   function addLog(line: string) {
     // Stempl HVER log-linje med lokal (dansk) tid, konsistent på tværs af alle
     // strategier og beskedtyper. Tidligere brugte kun algo_status-linjer msg.time
@@ -196,8 +203,23 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
   }
 
   function handleManagerStatus(msg: ManagerStatusMsg) {
-    setStrategies(msg.strategies.filter(s => !SKRINLAGTE_STRATEGIER.has(s.name)));
+    const visible = msg.strategies.filter(s => !SKRINLAGTE_STRATEGIER.has(s.name));
+    setStrategies(visible);
     setRisk(msg.risk);
+
+    // 3c: efter en afbrydelse — advar om KOERENDE strategier der nu er vaek (backend
+    // kan vaere genstartet). EEN linje pr. tabt strategi; rendereren farver "ADVARSEL" roed.
+    const nowRunning = new Set(visible.filter(s => s.status === "running").map(s => s.name));
+    if (reconnectCheckRef.current) {
+      reconnectCheckRef.current = false;
+      for (const name of lostSnapshotRef.current) {
+        if (!nowRunning.has(name)) {
+          addLog(`🚨 ADVARSEL: ${name} var aktiv før forbindelsen blev afbrudt og kører `
+               + `IKKE længere (backenden kan være genstartet).`);
+        }
+      }
+    }
+    runningRef.current = nowRunning;
   }
 
   function handleAlgoMessage(msg: AlgoMsg) {
@@ -278,7 +300,13 @@ export function LiveLogProvider({ children }: { children: React.ReactNode }) {
           }
         } catch {}
       };
-      ws.onclose = () => setTimeout(connectStrategy, 3000);
+      ws.onclose = () => {
+        // 3c: snapshot hvad der koerte FOER afbrydelsen + bed naeste manager_status
+        // sammenligne, saa en tabt koerende strategi efter reconnect giver en advarsel.
+        lostSnapshotRef.current = Array.from(runningRef.current);
+        reconnectCheckRef.current = true;
+        setTimeout(connectStrategy, 3000);
+      };
     }
 
     connectAlgo();
