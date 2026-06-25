@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-nikkei_harvest_1min.py — host OSE-Nikkei (stor, N225) 1-min bars -> data_harvest/NIKKEI_1min.csv
+nikkei_harvest_1min.py — host OSE-Nikkei 1-min bars -> data_harvest/NIKKEI_1min.csv
 ═══════════════════════════════════════════════════════════════════════════════════════════════
 Forudsaetning for nikkei_precondition.py (discovery-scan af den asiatiske session).
 Skriver standard 1-min OHLCV CSV (samme format som nkd_harvest):
   timestamp,open,high,low,close,volume   (ISO ET-tidsstempler, tz-aware)
 useRTH=False (baade Tokyo day- og night-session med; scanen session-gater selv).
 
-OSE-Nikkei "stor" (N225, OSE.JPN, JPY) — dybest ren 1-min historik (probe: tilbage til
-2025-03-14). Kvalificering loeftet fra asian_data_probe (symbol=N225/OSE.JPN/JPY, front-maaned).
+Kontrakt via --contract {stor,mini,micro} (default MICRO = mest likvid; tynde bars laver
+falsk mean-reversion, saa micro er det rigtige til en 1-min-scan). Alle OSE.JPN/JPY,
+front-maaned, kvalificering loeftet fra asian_data_probe. Kontrakt-skift overskriver CSV'en
+(blander aldrig to kontrakters bars — en .contract-markoer vogter det).
 
 RESUME (1-min over ~15 mdr er langt + krydser TWS' 23.45-force-close):
   - CSV skrives efter HVER chunk -> en afbrudt koersel taber intet.
@@ -22,7 +24,8 @@ koerende backend/strategi paa samme TWS). Kun historik -> kraever Japan/OSE-data
 Python 3.14: event-loop-fix. ib_async. Kun stdlib derudover.
 
 Brug (paa Soerens workstation, fra backend/):
-    python nikkei_harvest_1min.py            # default ~500 dage (bunder naturligt ved kontrakt-start)
+    python nikkei_harvest_1min.py                 # micro (default), ~500 dage (bunder naturligt)
+    python nikkei_harvest_1min.py --contract stor # eksplicit anden kontrakt
     python nikkei_harvest_1min.py --days 180
 
 Placering: C:\\Projects\\trading_dash\\backend\\nikkei_harvest_1min.py
@@ -59,6 +62,10 @@ SLEEP_BETWEEN = 0.8
 PACING_WAIT   = 60
 DEFAULT_DAYS  = 500
 OUT_CSV       = Path("data_harvest") / "NIKKEI_1min.csv"
+# OSE-Nikkei-kontrakter: samme indeks, VIDT forskellig likviditet -> mikrostruktur.
+# micro er mest likvid (default) — tynde bars laver falsk mean-reversion. Alle OSE.JPN/JPY.
+CONTRACTS = {"stor": "N225", "mini": "N225M", "micro": "N225MC"}
+DEFAULT_CONTRACT = "micro"
 
 
 def _et(dt) -> datetime:
@@ -105,9 +112,9 @@ def write_csv(path: Path, by_ts: dict):
     tmp.replace(out)
 
 
-async def qualify_front(ib, emit):
-    """Naermeste ikke-udloebne OSE-Nikkei stor (N225, OSE.JPN, JPY). 10339-sikkert."""
-    base = Future(symbol="N225", exchange="OSE.JPN", currency="JPY")
+async def qualify_front(ib, symbol, emit):
+    """Naermeste ikke-udloebne OSE-Nikkei front (symbol via --contract). 10339-sikkert."""
+    base = Future(symbol=symbol, exchange="OSE.JPN", currency="JPY")
     details = await asyncio.wait_for(ib.reqContractDetailsAsync(base), timeout=15)
     if not details:
         emit("   FEJL: ingen kontrakt-detaljer for N225@OSE.JPN (JPY).")
@@ -203,21 +210,36 @@ async def main_async(args):
     def emit(s=""):
         print(s, flush=True)
 
+    symbol = CONTRACTS[args.contract]
     emit("=" * 78)
-    emit("  OSE-NIKKEI (stor) 1-min HARVEST -> data_harvest/NIKKEI_1min.csv  (read-only, resumerbar)")
+    emit(f"  OSE-NIKKEI ({args.contract}, {symbol}) 1-min HARVEST -> data_harvest/NIKKEI_1min.csv  (read-only, resumerbar)")
     emit("=" * 78)
     emit(f"  Tid: {datetime.now():%Y-%m-%d %H:%M}   Gateway: {args.host}:{args.port}   "
          f"client-id {args.client_id}   bar={BAR_SIZE}")
 
     out = OUT_CSV if OUT_CSV.is_absolute() else (Path.cwd() / OUT_CSV)
-    by_ts = load_existing(out)
-    if by_ts:
-        emit(f"  Fandt {len(by_ts)} eksisterende bars -> resume-tilstand.\n")
+    meta = out.with_suffix(out.suffix + ".contract")   # husker hvilken kontrakt CSV'en er
+    prev = meta.read_text(encoding="utf-8").strip() if meta.exists() else None
+    if prev == args.contract:   # resume KUN naar markoeren matcher praecis (ingen markoer = ukendt = frisk)
+        by_ts = load_existing(out)
+        if by_ts:
+            emit(f"  Fandt {len(by_ts)} eksisterende '{args.contract}'-bars -> resume-tilstand.\n")
+        else:
+            emit("  Ingen brugbar eksisterende CSV -> frisk hoest.\n")
     else:
-        emit("  Ingen eksisterende CSV -> frisk hoest.\n")
+        by_ts = {}
+        if out.exists():
+            emit(f"  Eksisterende CSV matcher ikke '{args.contract}' (markoer={prev}) "
+                 f"-> starter FORFRA (overskriver; blander aldrig to kontrakter).\n")
+        else:
+            emit("  Ingen eksisterende CSV -> frisk hoest.\n")
 
     def write_cb(d):
         write_csv(OUT_CSV, d)
+        try:
+            meta.write_text(args.contract, encoding="utf-8")
+        except OSError:
+            pass
 
     ib = IB()
     try:
@@ -228,7 +250,7 @@ async def main_async(args):
     emit("  Forbundet.\n")
 
     try:
-        contract = await qualify_front(ib, emit)
+        contract = await qualify_front(ib, symbol, emit)
         if contract is None:
             return 1
         emit(f"\n  Henter 1-min OHLCV (useRTH=False) op til {args.days} dage bagud...")
@@ -259,6 +281,9 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--client-id", type=int, default=CLIENT_ID)
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS)
+    ap.add_argument("--contract", choices=list(CONTRACTS), default=DEFAULT_CONTRACT,
+                    help=f"OSE-Nikkei-kontrakt (default {DEFAULT_CONTRACT} = mest likvid; "
+                         f"skift overskriver CSV'en, blander ikke kontrakter)")
     args = ap.parse_args()
     try:
         return asyncio.run(main_async(args))
