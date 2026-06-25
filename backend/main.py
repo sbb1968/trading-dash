@@ -3067,6 +3067,30 @@ async def health():
                 "et_time":  start_job["et_time"],
                 "dk_time":  dk_time,            # fx "15:20" — så UI kan vise "09:20 ET / 15:20 DK"
             }
+
+    # ── Flåde-board: ALLE auto-start-strategier (ikke kun K2) + per-strategi kør-status ──
+    # auto_starts = hvad maskinen auto-starter (kun algoserveren); strategies = hvad der
+    # faktisk KØRER netop nu (samme form som /algo/list) — saa Status-fanens flaade-board
+    # kan vise "kører nu" pr. maskine uden en ekstra auth'et round-trip.
+    JOBMAP = {"start_konfluens2": "Konfluens 2", "start_europa_reversion": "Europa-reversion"}
+    auto_starts = []
+    if sched and identity.instance_role == "algoserver":
+        for j in sched["jobs"]:
+            nm = JOBMAP.get(j["name"])
+            if nm:
+                auto_starts.append({"strategy": nm, "et_time": j["et_time"]})
+    strategies_health = [
+        {
+            "name":    name,
+            "running": (s.status == StrategyStatus.RUNNING),
+            "status":  s.status.value if hasattr(s.status, "value") else str(s.status),
+            "stats":   ({"trades_today":   s.stats.trades_today,
+                         "pnl_today":      s.stats.pnl_today,
+                         "open_positions": s.stats.open_positions}
+                        if s.status == StrategyStatus.RUNNING else {}),
+        }
+        for name, s in strategy_manager._strategies.items()
+    ]
     return {
         "status":           "ok",
         "clients":          len(connected_clients),
@@ -3081,7 +3105,9 @@ async def health():
         # ── Analyse-fanen: drifts-forudsætninger ──
         "role":             identity.instance_role,
         "paper_trading":    identity.paper_trading,
-        "scheduled":        scheduled,                         # None = manuel (workstation)
+        "scheduled":        scheduled,                         # None = manuel (workstation) [bagudkompat]
+        "auto_starts":      auto_starts,                        # ALLE auto-start-strategier (K2 + Europa)
+        "strategies":       strategies_health,                 # per-strategi kør-status NETOP NU
         "next_start":       sched["next_start"]     if sched else None,
         "next_start_dk":    sched.get("next_start_dk") if sched else None,
         "is_trading_day":   sched["is_trading_day"] if sched else None,

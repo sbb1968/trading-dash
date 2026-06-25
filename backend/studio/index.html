@@ -3567,7 +3567,7 @@
                             <td>${statusCell}</td>
                             <td>${tsCell}</td>
                             <td>${backendCell}</td>
-                            <td colspan="5" class="muted">—</td>
+                            <td colspan="6" class="muted">—</td>
                         </tr>
                     `;
                 }
@@ -3576,11 +3576,32 @@
                 const ibkr = h.ibkr_connected
                     ? `<span style="color:#4ade80;">✓ Forbundet</span>`
                     : `<span class="status-dot warn"></span> Afbrudt`;
-                // Scheduleret auto-strategi — kun algoserveren auto-starter (fx ORB 09:44 ET);
-                // workstation kører manuelt.
-                const scheduled = h.scheduled
-                    ? `${h.scheduled.strategy} · ${h.scheduled.et_time} ET${h.scheduled.dk_time ? ` <span class="muted">/ ${h.scheduled.dk_time} DK</span>` : ""}`
-                    : `<span class="muted">Manuel</span>`;
+                // Scheduleret auto-strategi/-er — kun algoserveren auto-starter; workstation
+                // kører manuelt. auto_starts (liste) viser ALLE (K2 + Europa); falder tilbage
+                // til den gamle enkelt-scheduled hvis peeren kører aeldre kode.
+                const scheduled = (Array.isArray(h.auto_starts) && h.auto_starts.length)
+                    ? h.auto_starts.map(a => `${a.strategy} <span class="muted">${a.et_time} ET</span>`).join("<br>")
+                    : (h.scheduled
+                        ? `${h.scheduled.strategy} · ${h.scheduled.et_time} ET${h.scheduled.dk_time ? ` <span class="muted">/ ${h.scheduled.dk_time} DK</span>` : ""}`
+                        : `<span class="muted">Manuel</span>`);
+
+                // Kører nu — per-strategi (fra h.strategies, samme form som /algo/list).
+                // Peer paa aeldre kode (intet strategies-felt) -> "—". Skrinlagte filtreres.
+                let koerernu;
+                if (Array.isArray(h.strategies)) {
+                    const running = h.strategies.filter(s => s.running && !SKRINLAGTE_STRATEGIER.has(s.name));
+                    if (running.length === 0) {
+                        koerernu = `<span class="muted">ingen</span>`;
+                    } else {
+                        koerernu = running.map(s => {
+                            const st = s.stats || {};
+                            const tip = `${st.trades_today ?? 0} handler · P&L ${fmtMoneySigned(st.pnl_today)} · ${st.open_positions ?? 0} aabne`;
+                            return `<span style="color:#4ade80;" title="${tip}">● ${s.name}</span>`;
+                        }).join("<br>");
+                    }
+                } else {
+                    koerernu = `<span class="muted">—</span>`;
+                }
                 const nextRun   = (h.scheduled && h.next_start)
                     ? `${h.next_start}${h.next_start_dk ? ` <span class="muted">/ ${h.next_start_dk.split(" ").slice(-1)[0]} DK</span>` : ""}`
                     : "—";
@@ -3597,6 +3618,7 @@
                         <td>${backendCell}</td>
                         <td>${ibkr}</td>
                         <td>${scheduled}</td>
+                        <td style="font-size:12px;">${koerernu}</td>
                         <td style="font-size:12px; color:#cfcfcf;">${nextRun}</td>
                         <td>${tradingDay}</td>
                         <td>${konto}</td>
@@ -3614,6 +3636,7 @@
                             <th style="padding:10px 8px;">Backend</th>
                             <th style="padding:10px 8px;">IBKR</th>
                             <th style="padding:10px 8px;">Scheduleret</th>
+                            <th style="padding:10px 8px;">Kører nu</th>
                             <th style="padding:10px 8px;">Næste kørsel</th>
                             <th style="padding:10px 8px;">Handelsdag</th>
                             <th style="padding:10px 8px;">Konto</th>
