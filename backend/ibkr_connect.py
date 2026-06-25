@@ -248,13 +248,18 @@ class IBKRConnection:
         allerede hviler (fx en GTC force-close fra en tidligere session der ikke fyldte).
         Best-effort: timeout/fejl -> falder tilbage paa lokalt kendte openTrades()."""
         ACTIVE = {"PendingSubmit", "ApiPending", "PreSubmitted", "Submitted"}
+        # VIGTIGT: reqAllOpenOrdersAsync's RETURVAERDI er upaalidelig for ordrer fra ANDRE
+        # klienter (kan vaere tom selv om de findes). Vent paa kaldet saa open-order-events
+        # lander, og laes derefter ib.openTrades() (akkumuleret state) — den ER paalidelig
+        # paa tvaers af klienter (bevist i diag_cogt_orders).
         try:
-            trades = await asyncio.wait_for(self.ib.reqAllOpenOrdersAsync(), timeout=5)
+            await asyncio.wait_for(self.ib.reqAllOpenOrdersAsync(), timeout=5)
         except Exception:
-            try:
-                trades = self.ib.openTrades()
-            except Exception:
-                trades = []
+            pass
+        try:
+            trades = self.ib.openTrades()
+        except Exception:
+            trades = []
         out = []
         for t in trades or []:
             try:
