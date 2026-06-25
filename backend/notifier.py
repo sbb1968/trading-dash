@@ -19,6 +19,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -28,6 +29,19 @@ logger = logging.getLogger(__name__)
 NTFY_SERVER = "https://ntfy.sh"
 NTFY_TOPIC  = "fasteriben"     # ← skift dette til noget privat
 NTFY_URL    = f"{NTFY_SERVER}/{NTFY_TOPIC}"
+
+# ── Stilletid: send KUN push i tidsrummet [07:00, 23:00) dansk tid ──
+# Uden for vinduet droppes beskeder (fx algoserverens TWS-offline-alert naar TWS
+# auto-logger-af ~23.45 hver aften — ellers spammer den telefonen om natten).
+_DK_TZ = ZoneInfo("Europe/Copenhagen")
+NOTIFY_HOUR_START = 7
+NOTIFY_HOUR_END   = 23
+
+
+def _outside_send_window() -> bool:
+    """True hvis NU er uden for sende-vinduet (07-23 dansk tid)."""
+    h = datetime.now(_DK_TZ).hour
+    return not (NOTIFY_HOUR_START <= h < NOTIFY_HOUR_END)
 
 # Throttle — undgå spam hvis samme fejl gentager sig
 _last_sent: dict[str, datetime] = {}
@@ -40,6 +54,7 @@ async def send(
     priority: int = 3,      # 1=min, 3=default, 4=high, 5=urgent (vækker telefon)
     tags: str    = "robot",
     dedup_key: Optional[str] = None,
+    ignore_quiet_hours: bool = False,
 ) -> bool:
     """
     Send push-besked.
@@ -51,7 +66,12 @@ async def send(
       5 = urgent (lyder selv i Do Not Disturb — brug kun til kritiske ting)
 
     dedup_key: hvis sat, sendes samme key max én gang per DEDUP_WINDOW_SEC.
+    ignore_quiet_hours: overstyr 07-23-vinduet (kun til ægte kritiske beskeder).
     """
+    if not ignore_quiet_hours and _outside_send_window():
+        logger.info(f"[Notifier] Uden for sende-vindue (07-23 dansk tid) — dropper: {title}")
+        return False
+
     if dedup_key:
         last = _last_sent.get(dedup_key)
         if last and (datetime.now() - last).total_seconds() < DEDUP_WINDOW_SEC:
