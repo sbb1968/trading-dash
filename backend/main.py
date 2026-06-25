@@ -1542,6 +1542,64 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
     return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report), detail=bool(detail)))
 
 
+# Vanilla-JS uge-trend-chart til buyhold-PDF'en — candlesticks + 10/30/40-uge MA + ATH
+# (spejler BuyHoldChart.tsx + Pine 'Trend-kontekst'-tvillingen). Ingen pills/S/R. CHART
+# injiceres som JSON foran scriptet i _buyhold_report_html.
+BUYHOLD_CHART_JS = r"""(function(){
+  if(!CHART || !CHART.bars || !CHART.bars.length) return;
+  var W=900, H=380, TOP=24, BOTM=44, XL=14, GUTTER=62;
+  var BULL="#15803d", BEAR="#b91c1c", MUT="#6b7280", GRID="#e5e7eb", TAGBG="#374151";
+  var MA10="#34c759", MA30="#ff9500", MA40="#0a84ff", ATHC="#8e8e93";
+  var bars=CHART.bars, n=bars.length, BOT=H-BOTM, xr=W-GUTTER;
+  var lo=Infinity, hi=-Infinity, i, b;
+  for(i=0;i<n;i++){b=bars[i]; if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h;}
+  if(CHART.ath>hi)hi=CHART.ath;
+  var pad=(hi-lo)*0.06||1, pmin=lo-pad, pmax=hi+pad;
+  var slot=(xr-XL)/Math.max(n,1);
+  function x(idx){return XL+(idx+0.5)*slot;}
+  function y(p){return BOT-(p-pmin)/(pmax-pmin)*(BOT-TOP);}
+  var s='<svg viewBox="0 0 '+W+' '+H+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">';
+  var span=pmax-pmin, step=span>400?100:span>200?50:span>80?25:span>30?10:5, p;
+  for(p=Math.ceil(pmin/step)*step;p<pmax;p+=step){
+    s+='<line x1="'+XL+'" y1="'+y(p)+'" x2="'+xr+'" y2="'+y(p)+'" stroke="'+GRID+'" stroke-width="0.5"/>';
+    s+='<text x="'+(xr+4)+'" y="'+(y(p)+4)+'" font-size="13" fill="'+MUT+'">'+p+'</text>';
+  }
+  var prevY="";
+  bars.forEach(function(bb,ii){
+    var yr=bb.t.slice(0,4);
+    if(yr!==prevY){
+      s+='<line x1="'+x(ii)+'" y1="'+TOP+'" x2="'+x(ii)+'" y2="'+(BOT+4)+'" stroke="'+MUT+'" stroke-width="0.5"/>';
+      s+='<text x="'+x(ii)+'" y="'+(BOT+20)+'" text-anchor="middle" font-size="14" fill="'+MUT+'">'+yr+'</text>';
+      prevY=yr;
+    }
+  });
+  s+='<line x1="'+XL+'" y1="'+y(CHART.ath)+'" x2="'+xr+'" y2="'+y(CHART.ath)+'" stroke="'+ATHC+'" stroke-width="1.2" stroke-dasharray="5 4"/>';
+  s+='<text x="'+(XL+4)+'" y="'+(y(CHART.ath)-4)+'" font-size="12" fill="'+ATHC+'">ATH '+CHART.ath.toFixed(2)+'</text>';
+  var bw=Math.min(6, slot*0.6);
+  bars.forEach(function(bb,ii){
+    var up=bb.c>=bb.o, col=up?BULL:BEAR, cx=x(ii);
+    var yb=y(Math.max(bb.o,bb.c)), hb=Math.max(Math.abs(y(bb.o)-y(bb.c)),1);
+    s+='<line x1="'+cx+'" y1="'+y(bb.h)+'" x2="'+cx+'" y2="'+y(bb.l)+'" stroke="'+col+'" stroke-width="0.8"/>';
+    s+='<rect x="'+(cx-bw/2)+'" y="'+yb+'" width="'+bw+'" height="'+hb+'" fill="'+col+'"/>';
+  });
+  function poly(arr,color){
+    if(!arr)return; var d="", started=false, ii;
+    for(ii=0;ii<arr.length;ii++){ if(arr[ii]==null)continue; d+=(started?"L":"M")+x(ii)+" "+y(arr[ii])+" "; started=true; }
+    if(d) s+='<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.5"/>';
+  }
+  poly(CHART.ma40, MA40); poly(CHART.ma30, MA30); poly(CHART.ma10, MA10);
+  var yc=y(CHART.current_price);
+  s+='<line x1="'+XL+'" y1="'+yc+'" x2="'+xr+'" y2="'+yc+'" stroke="'+MUT+'" stroke-width="0.5" stroke-dasharray="2 3"/>';
+  s+='<rect x="'+(xr+2)+'" y="'+(yc-11)+'" width="'+(GUTTER-6)+'" height="22" rx="4" fill="'+TAGBG+'"/>';
+  s+='<text x="'+(xr+2+(GUTTER-6)/2)+'" y="'+(yc+5)+'" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">'+CHART.current_price.toFixed(2)+'</text>';
+  var lx=XL+4, ly=TOP+12;
+  function leg(col,txt){ s+='<line x1="'+lx+'" y1="'+ly+'" x2="'+(lx+16)+'" y2="'+ly+'" stroke="'+col+'" stroke-width="2"/>'; s+='<text x="'+(lx+20)+'" y="'+(ly+4)+'" font-size="12" fill="'+MUT+'">'+txt+'</text>'; lx+=70; }
+  leg(MA10,"10u"); leg(MA30,"30u"); leg(MA40,"40u");
+  s+='</svg>';
+  document.getElementById("buyhold-chart").innerHTML=s;
+})();"""
+
+
 # ── Buy-and-Hold rapport (kopi af swing-renderen; 4 lag + gate-nedbrydning + OE) ──
 def _buyhold_report_html(d: dict, detail: bool = False) -> str:
     """Render buyhold_report.report_to_json som print-venlig HTML (lyst tema). Spejler
@@ -1774,6 +1832,16 @@ def _buyhold_report_html(d: dict, detail: bool = False) -> str:
     price = f'${d["price"]:.2f}' if d.get("price") is not None else "—"
     fbc = fb(d["final_band"])
     detail_html = detail_section() if detail else ""
+    import json as _json
+    chart = d.get("chart")
+    has_chart = bool(chart and chart.get("bars"))
+    chart_block = (
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">'
+        '<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px">'
+        'Langsigtet trend &middot; uge-chart (10/30/40-uge MA + ATH) &mdash; kontekst, ikke dommen</div>'
+        '<div id="buyhold-chart"></div></div>'
+    ) if has_chart else ""
+    chart_script = ('<script>const CHART=' + _json.dumps(chart) + ';' + BUYHOLD_CHART_JS + '</script>') if has_chart else ""
     return (
         f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Buy-and-Hold - {t}</title>'
         f'<style>{css}</style></head><body>'
@@ -1795,12 +1863,13 @@ def _buyhold_report_html(d: dict, detail: bool = False) -> str:
         'selskabets <b>stoerrelse</b> &mdash; ikke vaerdien pr. investeret krone.</div>'
         '<div style="display:flex;gap:10px;flex-wrap:wrap">'
         f'{layer_card("quality")}{layer_card("growth")}{layer_card("valuation")}{layer_card("trend")}</div>'
+        f'{chart_block}'
         f'{gate_block}{oe_block}'
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>'
         f'{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
         f'{tiles_html}'
-        f'{detail_html}</div></body></html>'
+        f'{detail_html}</div>{chart_script}</body></html>'
     )
 
 

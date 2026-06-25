@@ -18,7 +18,7 @@ from typing import Optional
 
 from buyhold_fundamental import (FINANCIAL_EXCLUDE, compute_growth, compute_quality,
                                  compute_valuation, fetch_buyhold_fundamentals, is_financial)
-from buyhold_trend import compute_buyhold_trend, fetch_trend_bars
+from buyhold_trend import buyhold_chart_data, compute_buyhold_trend, fetch_trend_bars
 
 try:
     from swing_report import GATE_STRAF          # genbrug swingens gate-straf
@@ -155,6 +155,7 @@ async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
     v = compute_valuation(f, price, excl, reason)
 
     # Lag 4 kraever ib; er den nede, ekskluderes trend-laget paent (tom -> renorm uden trend).
+    weekly = None
     try:
         weekly, daily, spy, sect = await fetch_trend_bars(ib, ticker, meta.get("sector"))
         trend = compute_buyhold_trend(weekly, daily, spy, sect)
@@ -192,7 +193,8 @@ async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
         "altman_z": meta.get("gate_raw", {}).get("altman_z"), "fcf_yield": f.get("fcf_yield"),
     }
     return {"ticker": ticker, "layers": layers, "c": c, "gate_inputs": gate_inputs,
-            "meta": meta, "tiles": tiles, "fundamental_na": not meta.get("fundamental_available")}
+            "meta": meta, "tiles": tiles, "fundamental_na": not meta.get("fundamental_available"),
+            "chart": buyhold_chart_data(weekly)}   # None hvis ingen uge-bars (ib nede)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────

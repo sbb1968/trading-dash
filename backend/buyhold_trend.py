@@ -210,6 +210,40 @@ def compute_buyhold_trend(weekly, daily, spy_weekly, sector_weekly) -> dict:
 
 
 # ── Bar-hentning (live ib) ───────────────────────────────────────────────────
+def buyhold_chart_data(weekly_df, window: int = 260) -> Optional[dict]:
+    """Uge-bars + 10/30/40-uge MA-serier + ATH-linje til buy-and-hold-rapportens
+    trend-chart. Spejler Pine 'Trend-kontekst'-tvillingen (samme MA'er + ATH).
+    window = max antal uge-staenger (260 ~ 5 aar). None hvis for lidt data.
+    (200-dag MA UDELADT af chartet — ~40 uger, ville klistre paa 40-uge-linjen.)"""
+    if weekly_df is None or len(weekly_df) < 2:
+        return None
+    df = weekly_df.tail(window)
+    close = df["close"]
+
+    def _ma(n):
+        # Roll paa HELE serien, klip saa til vinduet -> MA korrekt ved vinduets venstrekant.
+        m = weekly_df["close"].rolling(n).mean().tail(len(df))
+        return [None if pd.isna(v) else round(float(v), 2) for v in m]
+
+    def _t(idx):
+        try:
+            return pd.Timestamp(idx).strftime("%Y-%m-%d")
+        except Exception:
+            return str(idx)
+
+    bars = [{"t": _t(idx),
+             "o": round(float(r["open"]), 2), "h": round(float(r["high"]), 2),
+             "l": round(float(r["low"]), 2), "c": round(float(r["close"]), 2)}
+            for idx, r in df.iterrows()]
+    ath = round(float(weekly_df["close"].tail(window).max()), 2)   # ATH (close-basis, matcher faktoren)
+    return {
+        "bars": bars,
+        "ma10": _ma(10), "ma30": _ma(30), "ma40": _ma(40),
+        "ath": ath,
+        "current_price": round(float(close.iloc[-1]), 2),
+    }
+
+
 async def fetch_trend_bars(ib, symbol: str, sector: Optional[str]):
     """(weekly_5y, daily_1y, spy_weekly_5y, sector_weekly_5y) via de generiske helpers.
     Mangler sektor-ETF-mapping -> sector_weekly None (sektor-RS ekskluderes)."""

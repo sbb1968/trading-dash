@@ -115,7 +115,7 @@ def report_to_json(core: dict) -> dict:
         "gate_breakdown": _gate_breakdown(core["gate_inputs"]),
         "owner_earnings": owner_earnings,
         "tiles": core.get("tiles", {}),
-        "chart": None,   # valgfri uge-chart (degraderet i Fase 3)
+        "chart": core.get("chart"),   # uge-trend-chart (None hvis ingen uge-bars)
     }
 
 

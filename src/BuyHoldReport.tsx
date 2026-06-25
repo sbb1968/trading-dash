@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { BuyHoldChart, type BuyHoldChartData } from "./BuyHoldChart";
 
 const API_JSON = "http://127.0.0.1:8000/buyhold/analyze_json";
 const API_HTML = "http://127.0.0.1:8000/buyhold/report.html";
@@ -28,6 +29,7 @@ interface BuyHoldData {
   gate_breakdown: GateSignal[];
   owner_earnings: OwnerEarnings | null;
   tiles: Tiles;
+  chart: BuyHoldChartData | null;
 }
 
 // ---- Hjaelpere --------------------------------------------------------------
@@ -255,6 +257,14 @@ export function BuyHoldReport() {
               <LayerCard title="Værdiansættelse" layer={data.layers.valuation} />
               <LayerCard title="Langsigtet trend" layer={data.layers.trend} />
             </div>
+
+            {/* Uge-trend-chart (kontekst, ikke dommen) — kun naar uge-bars findes */}
+            {data.chart && data.chart.bars.length > 0 && (
+              <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px" }}>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.3px", marginBottom: 6 }}>Langsigtet trend · uge-chart (10/30/40-uge MA + ATH) — kontekst, ikke dommen</div>
+                <BuyHoldChart chart={data.chart} />
+              </div>
+            )}
 
             {/* Gate-blok m. nedbrydning */}
             <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 12 }}>
