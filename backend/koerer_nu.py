@@ -23,6 +23,8 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -30,6 +32,26 @@ except (AttributeError, ValueError):
     pass
 
 GREEN, GREY, RED, YEL = "✅", "⚪", "❌", "⚠️"
+ET = ZoneInfo("America/New_York")
+DK = ZoneInfo("Europe/Copenhagen")
+
+
+def _et_to_dk(et_str):
+    """'2026-06-25 03:21:07' (ET) -> DK-datetime (korrekt DST). None ved fejl."""
+    try:
+        return datetime.strptime(et_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ET).astimezone(DK)
+    except (ValueError, TypeError):
+        return None
+
+
+def _hhmm_et_to_dk(hhmm, et_date_str):
+    """ET-klokkeslaet 'HH:MM' paa dagens ET-dato -> DK 'HH:MM' (DST-korrekt)."""
+    try:
+        y, mo, d = (int(x) for x in et_date_str.split("-"))
+        h, mi = (int(x) for x in hhmm.split(":"))
+        return datetime(y, mo, d, h, mi, tzinfo=ET).astimezone(DK).strftime("%H:%M")
+    except (ValueError, TypeError, AttributeError):
+        return f"{hhmm} ET"
 
 
 def _get(url: str, key: str | None = None):
@@ -83,7 +105,11 @@ def main() -> int:
           f"TWS-watchdog online: {GREEN if tws.get('tws_online') else RED}"
           f"{'  ' + RED + ' DATABLIND' if tws.get('data_blind_since') else ''}")
     sched = status.get("scheduler", {}) or {}
-    print(f"  Tid (ET): {sched.get('now_et', '?')} · handelsdag: {'ja' if sched.get('is_trading_day') else 'nej'}")
+    now_et_str = sched.get("now_et", "") or ""
+    et_date = now_et_str[:10]                    # ET-dato (last_run_on er ET-baseret)
+    now_dk = _et_to_dk(now_et_str)
+    now_disp = now_dk.strftime("%Y-%m-%d %H:%M:%S") if now_dk else (now_et_str or "?")
+    print(f"  Tid: {now_disp} DK · handelsdag: {'ja' if sched.get('is_trading_day') else 'nej'}")
 
     # ── Per-strategi ──
     print("\n  STRATEGIER:")
@@ -113,9 +139,10 @@ def main() -> int:
     print("\n  AUTO-START (scheduler) — sidst kørt:")
     for j in sched.get("jobs", []):
         nm, et, last = j.get("name"), j.get("et_time"), j.get("last_run_on")
-        mark = GREEN if last == (sched.get("now_et", "") or "")[:10] else GREY
-        print(f"   {mark} {nm:<24} @ {et} ET — sidst {last or 'aldrig'}")
-    print(f"   Naeste auto-start: {sched.get('next_start_dk', '?')} DK ({sched.get('next_start', '?')})")
+        dk = _hhmm_et_to_dk(et, et_date)         # job-tid i DK
+        mark = GREEN if last == et_date else GREY  # kørte i dag? (ET-dato)
+        print(f"   {mark} {nm:<24} @ {dk} DK — sidst {last or 'aldrig'}")
+    print(f"   Naeste auto-start: {sched.get('next_start_dk', '?')} DK")
 
     # ── Risiko ──
     risk = status.get("risk", {}) or {}
