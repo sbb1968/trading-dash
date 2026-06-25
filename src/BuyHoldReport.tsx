@@ -217,6 +217,7 @@ export function BuyHoldReport() {
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1, color: finalBandColor(data.final_band) }}>{signed(data.final)}</div>
                 <div style={{ marginTop: 6 }}><Badge text={bandLabel(data.final_band)} color={finalBandColor(data.final_band)} /></div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)", marginTop: 4 }}>↕ Sammenlign kandidater på dette tal</div>
               </div>
             </div>
 
@@ -228,6 +229,11 @@ export function BuyHoldReport() {
               <span>Kombineret <b style={{ color: "var(--text-secondary)" }}>{signed(data.combined)}</b></span><span>×</span>
               <span>Risiko-gate <b style={{ color: gateFactorColor(data.gate) }}>{data.gate.toFixed(2)}</b></span><span>→</span>
               <span>Samlet <b style={{ color: finalBandColor(data.final_band) }}>{signed(data.final)}</b></span>
+            </div>
+
+            {/* Ramme: hvad kan sammenlignes paa tvaers */}
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", border: "1px solid var(--accent)", borderRadius: 6, padding: "8px 12px", background: "var(--bg-elevated)" }}>
+              <b style={{ color: "var(--accent)" }}>Sammenlign på tværs af aktier:</b> SAMLET-scoren, de fire lag-scorer og de <b>sammenlignelige nøgletal</b> nederst. De absolutte beløb (Owner Earnings, markedsværdi) viser selskabets <b>størrelse</b> — ikke værdien pr. investeret krone.
             </div>
 
             {/* Fire lag */}
@@ -262,11 +268,22 @@ export function BuyHoldReport() {
 
             {/* Owner Earnings-panel */}
             {oe && (
-              <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 12 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>Owner Earnings</span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}> ({oe.norm_years}-års norm., est., {oe.method})</span>
-                <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>{fmtUSD(oe.value)}</div>
-                <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>vedligeholds-capex {fmtUSD(oe.maint_capex)} · seneste år: OCF {fmtUSD(oe.ocf_latest)} / FCF {fmtUSD(oe.fcf_latest)}</div>
+              <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: 8, padding: 12, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>Owner Earnings</span>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)" }}> ({oe.norm_years}-års norm., est., {oe.method})</span>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: "var(--neutral)", border: "1px solid var(--neutral)", borderRadius: 4, padding: "1px 6px", marginLeft: 6, textTransform: "uppercase", letterSpacing: "0.3px" }}>Absolut · størrelse · ej sammenligneligt</span>
+                  <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>{fmtUSD(oe.value)}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>vedligeholds-capex {fmtUSD(oe.maint_capex)} · seneste år: OCF {fmtUSD(oe.ocf_latest)} / FCF {fmtUSD(oe.fcf_latest)}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>Hele virksomhedens årlige ejer-indtjening. Størrelses-tal — siger intet om aktien er dyr eller billig.</div>
+                </div>
+                <div style={{ width: 1, background: "var(--border-subtle)" }} />
+                <div style={{ minWidth: 210, border: "1px solid var(--accent)", borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.3px" }}>↕ Sammenlign aktier her</div>
+                  <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>Owner-Earnings yield</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "var(--accent)" }}>{fmtPct(data.tiles.oe_yield)}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)" }}>= {fmtUSD(oe.value)} / markedsværdi {fmtUSD(data.tiles.market_cap)}</div>
+                </div>
               </div>
             )}
 
@@ -277,16 +294,24 @@ export function BuyHoldReport() {
               <DriverList title="Modvind" color="var(--bear)" items={data.drivers.negative} />
             </div>
 
-            {/* Tiles */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Chip label="Markedsværdi" value={fmtUSD(data.tiles.market_cap)} />
-              <Chip label="Sektor" value={data.tiles.sector ?? "—"} />
-              <Chip label="P/E" value={data.tiles.pe == null ? "—" : data.tiles.pe.toFixed(1)} />
-              <Chip label="OE-yield" value={fmtPct(data.tiles.oe_yield)} />
-              <Chip label="FCF-yield" value={fmtPct(data.tiles.fcf_yield, 1, 100)} />
-              <Chip label="Udbytte" value={data.tiles.dividend_yield == null ? "—" : `${(data.tiles.dividend_yield * 100).toFixed(1)}%${data.tiles.payout != null ? ` (${(data.tiles.payout * 100).toFixed(0)}%)` : ""}`} />
-              <Chip label="ROIC" value={fmtPct(data.tiles.roic)} />
-              <Chip label="Altman Z" value={data.tiles.altman_z == null ? "—" : data.tiles.altman_z.toFixed(2)} />
+            {/* Tiles — to maerkede grupper */}
+            <div style={{ border: "1px solid var(--accent)", borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 7 }}>↕ Sammenlignelige nøgletal · på tværs af aktier</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Chip label="P/E" value={data.tiles.pe == null ? "—" : data.tiles.pe.toFixed(1)} />
+                <Chip label="OE-yield" value={fmtPct(data.tiles.oe_yield)} />
+                <Chip label="FCF-yield" value={fmtPct(data.tiles.fcf_yield, 1, 100)} />
+                <Chip label="ROIC" value={fmtPct(data.tiles.roic)} />
+                <Chip label="Udbytte" value={data.tiles.dividend_yield == null ? "—" : `${(data.tiles.dividend_yield * 100).toFixed(1)}%${data.tiles.payout != null ? ` (${(data.tiles.payout * 100).toFixed(0)}%)` : ""}`} />
+                <Chip label="Altman Z" value={data.tiles.altman_z == null ? "—" : data.tiles.altman_z.toFixed(2)} />
+              </div>
+            </div>
+            <div style={{ border: "1px solid var(--border-subtle)", borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 7 }}>Kontekst · denne akties størrelse (ej sammenligneligt)</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Chip label="Markedsværdi" value={fmtUSD(data.tiles.market_cap)} />
+                <Chip label="Sektor" value={data.tiles.sector ?? "—"} />
+              </div>
             </div>
           </div>
         )}

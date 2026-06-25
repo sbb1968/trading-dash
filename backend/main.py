@@ -1684,39 +1684,70 @@ def _buyhold_report_html(d: dict, detail: bool = False) -> str:
 
     # ── Owner-Earnings-panel ──
     oe = d.get("owner_earnings")
+    tl = d.get("tiles", {})            # bruges baade af OE-yield-ankeret og tiles nedenfor
     oe_block = ""
     if oe:
+        oey = pct(tl.get("oe_yield"))
+        mcap = usd(tl.get("market_cap"))
         oe_block = (
             '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#f9fafb;'
-            'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+            'display:flex;gap:16px;flex-wrap:wrap;print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+            '<div style="flex:1;min-width:240px">'
             f'<b style="font-size:13px">Owner Earnings</b> <span style="font-size:11px;color:{MUT}">'
             f'({oe.get("norm_years")}-aars norm., est., {esc(str(oe.get("method") or ""))})</span>'
-            f'<div style="font-size:18px;font-weight:800;margin-top:2px">{usd(oe.get("value"))}</div>'
-            f'<div style="font-size:11px;color:#374151">vedligeholds-capex {usd(oe.get("maint_capex"))} · '
-            f'seneste aar: OCF {usd(oe.get("ocf_latest"))} / FCF {usd(oe.get("fcf_latest"))}</div></div>'
+            '<div style="display:inline-block;font-size:9px;font-weight:700;color:#92400e;background:#fef3c7;'
+            'border-radius:4px;padding:2px 6px;margin-left:6px;text-transform:uppercase;letter-spacing:.3px">'
+            'Absolut &middot; stoerrelse &middot; ej sammenligneligt</div>'
+            f'<div style="font-size:24px;font-weight:800;margin-top:3px">{usd(oe.get("value"))}</div>'
+            f'<div style="font-size:11px;color:#374151">vedligeholds-capex {usd(oe.get("maint_capex"))} &middot; '
+            f'seneste aar: OCF {usd(oe.get("ocf_latest"))} / FCF {usd(oe.get("fcf_latest"))}</div>'
+            f'<div style="font-size:11px;color:{MUT};margin-top:4px">Hele virksomhedens aarlige ejer-indtjening. '
+            'Stoerrelses-tal &mdash; siger intet om aktien er dyr eller billig.</div></div>'
+            '<div style="width:1px;background:#e5e7eb"></div>'
+            '<div style="min-width:210px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;'
+            'padding:10px 12px;display:flex;flex-direction:column;justify-content:center;'
+            'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+            '<div style="font-size:9px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:.3px">'
+            '&#8597; Sammenlign aktier her</div>'
+            '<div style="font-size:13px;color:#374151;margin-top:2px">Owner-Earnings yield</div>'
+            f'<div style="font-size:26px;font-weight:800;color:#0369a1">{oey}</div>'
+            f'<div style="font-size:11px;color:{MUT}">= {usd(oe.get("value"))} / markedsvaerdi {mcap}</div></div></div>'
         )
 
     # ── Tiles ──
-    tl = d.get("tiles", {})
 
-    def tile(lbl, val):
-        return (f'<div style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 9px">'
+    def tile(lbl, val, accent=False):
+        bc = "#bae6fd" if accent else "#e5e7eb"
+        return (f'<div style="border:1px solid {bc};border-radius:6px;padding:5px 9px">'
                 f'<div style="font-size:9px;color:{MUT};text-transform:uppercase">{esc(lbl)}</div>'
                 f'<div style="font-size:13px;font-weight:700">{esc(val)}</div></div>')
 
     div_txt = pct(tl.get("dividend_yield"), 1, 100.0)
     if tl.get("payout") is not None:
         div_txt += f" (payout {tl['payout']*100:.0f}%)"
-    tiles_html = "".join([
+    cmp_tiles = "".join([           # sammenlignelige paa tvaers (ratios/yields) — accent
+        tile("P/E", "—" if tl.get("pe") is None else f'{tl["pe"]:.1f}', True),
+        tile("Owner-Earnings yield", pct(tl.get("oe_yield")), True),
+        tile("FCF-yield", pct(tl.get("fcf_yield"), 1, 100.0), True),
+        tile("ROIC", pct(tl.get("roic")), True),
+        tile("Udbytte", div_txt, True),
+        tile("Altman Z", "—" if tl.get("altman_z") is None else f'{tl["altman_z"]:.2f}', True),
+    ])
+    ctx_tiles = "".join([           # kontekst — denne akties stoerrelse (ej sammenligneligt)
         tile("Markedsvaerdi", usd(tl.get("market_cap"))),
         tile("Sektor", tl.get("sector") or "—"),
-        tile("P/E", "—" if tl.get("pe") is None else f'{tl["pe"]:.1f}'),
-        tile("Owner-Earnings yield", pct(tl.get("oe_yield"))),
-        tile("FCF-yield", pct(tl.get("fcf_yield"), 1, 100.0)),
-        tile("Udbytte", div_txt),
-        tile("ROIC", pct(tl.get("roic"))),
-        tile("Altman Z", "—" if tl.get("altman_z") is None else f'{tl["altman_z"]:.2f}'),
     ])
+    tiles_html = (
+        '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;'
+        'print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+        '<div style="font-size:10px;font-weight:700;color:#0369a1;text-transform:uppercase;letter-spacing:.4px;'
+        'margin-bottom:7px">&#8597; Sammenlignelige noegletal &middot; paa tvaers af aktier</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{cmp_tiles}</div></div>'
+        '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">'
+        '<div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;'
+        'margin-bottom:7px">Kontekst &middot; denne akties stoerrelse (ej sammenligneligt)</div>'
+        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{ctx_tiles}</div></div>'
+    )
 
     # ── Flag-striber ──
     flags = ""
@@ -1749,17 +1780,23 @@ def _buyhold_report_html(d: dict, detail: bool = False) -> str:
         f'<div><div style="font-size:24px;font-weight:800">{t}{co_html}</div>'
         f'<div style="color:{MUT};font-size:13px">{price} &middot; LANGSIGTET vurdering (min. 1 aar)</div></div>'
         f'<div style="text-align:right"><div style="font-size:34px;font-weight:800;color:{fbc}">{sg(d["final"])}</div>'
-        f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(d["final_band"])}</div></div></div>'
+        f'<div style="font-size:12px;font-weight:700;color:{fbc}">{esc(d["final_band"])}</div>'
+        '<div style="font-size:10px;color:#0369a1;font-weight:700;margin-top:3px">&#8597; SAMMENLIGN KANDIDATER PAA DETTE TAL</div></div></div>'
         f'{flags}'
         f'<div style="font-size:12px;color:{MUT}">Kombineret <b>{sg(d["combined"])}</b> &times; Risiko-gate <b>{d["gate"]:.2f}</b>'
         f' &minus; (1&minus;gate)&times;40 &rarr; Samlet <b style="color:{fbc}">{sg(d["final"])}</b></div>'
+        '<div style="font-size:12px;color:#374151;background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;'
+        'padding:8px 12px;print-color-adjust:exact;-webkit-print-color-adjust:exact">'
+        '<b style="color:#0369a1">Sammenlign paa tvaers af aktier:</b> SAMLET-scoren, de fire lag-scorer og de '
+        '<b>sammenlignelige noegletal</b> nederst. De absolutte beloeb (Owner Earnings, markedsvaerdi) viser '
+        'selskabets <b>stoerrelse</b> &mdash; ikke vaerdien pr. investeret krone.</div>'
         '<div style="display:flex;gap:10px;flex-wrap:wrap">'
         f'{layer_card("quality")}{layer_card("growth")}{layer_card("valuation")}{layer_card("trend")}</div>'
         f'{gate_block}{oe_block}'
         '<div style="display:flex;gap:16px;border:1px solid #e5e7eb;border-radius:8px;padding:12px">'
         f'{drivers_html("Medvind", BULL, d["drivers"]["positive"])}<div style="width:1px;background:#e5e7eb"></div>'
         f'{drivers_html("Modvind", BEAR, d["drivers"]["negative"])}</div>'
-        f'<div style="display:flex;gap:8px;flex-wrap:wrap">{tiles_html}</div>'
+        f'{tiles_html}'
         f'{detail_html}</div></body></html>'
     )
 
