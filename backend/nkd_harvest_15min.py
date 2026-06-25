@@ -2,28 +2,27 @@
 """
 nkd_harvest_15min.py — host NKD (CME Nikkei) 15-min bars til data_harvest/NKD_15min.csv
 ═══════════════════════════════════════════════════════════════════════════════════════
-Skriver i PRAECIS det format eureversion_backtest.py laeser:
+Skriver standard 15-min OHLCV CSV (NKD-strategiens eget data-grundlag):
   timestamp,open,high,low,close,volume   (ISO ET-tidsstempler, tz-aware -04:00)
-useRTH=False (hele Globex-doegnet; backtesten session-gater selv til europaeisk).
+useRTH=False (hele Globex-doegnet; backtesten session-gater selv).
 
 Front-kontrakten (NKDU6) raekker ~3 maaneder (densitets-tjekket: tilbage til 2026-03-23)
 - det er hvad EEN kontrakt giver. Dybere historik = stitching af flere front-maaneder;
 byg det kun hvis den preliminaere backtest lover.
 
-Skriver KUN data_harvest/NKD_15min.csv - roerer ikke de eksisterende MES/M2K-filer.
+Skriver KUN data_harvest/NKD_15min.csv - roerer ikke andre instrumenters filer.
 Genbruger densitets-tjekkets verificerede qualify + pull (4009 bars hentet rent).
 
 Read-only: handler ikke, sender ingen ordrer. Egen client-id 46 (ingen kollision med
-backend/K2/EUREVERSION paa samme TWS). Kun historik -> kraever intet realtids-abonnement.
+en koerende backend/strategi paa samme TWS). Kun historik -> kraever intet realtids-abonnement.
 
 Python 3.14: event-loop-fix. ib_async. Kun stdlib derudover.
 
 Brug (paa samme maskine som densitets-tjekket, fra backend/):
     python nkd_harvest_15min.py
 
-Bagefter (den validerede regel, pinnet til live-config LOOKBACK=30):
-    python eureversion_backtest.py --only NKD --session europaeisk --lookback 30 ^
-        --entry-z 2.0 --exit-z 0.5 --stop-z 3.5 --cost-read-bp 10
+Bagefter koeres NKD-strategiens egen backtest paa data_harvest/NKD_15min.csv (selvstaendig
+mean-reversion-regel paa EU-morgen-vinduet; bygges separat).
 
 Placering: C:\\Projects\\trading_dash\\backend\\nkd_harvest_15min.py
 """
@@ -200,9 +199,7 @@ async def main_async(args):
     emit(f"  {len(bars)} bars  ·  {oldest:%Y-%m-%d %H:%M} -> {newest:%Y-%m-%d %H:%M} ET  "
          f"({(newest - oldest).days} kalenderdage)")
     emit("")
-    emit("  Naeste (den validerede regel, pinnet til live-config LOOKBACK=30):")
-    emit("    python eureversion_backtest.py --only NKD --session europaeisk --lookback 30 \\")
-    emit("        --entry-z 2.0 --exit-z 0.5 --stop-z 3.5 --cost-read-bp 10")
+    emit("  Naeste: NKD-strategiens egen backtest paa NKD_15min.csv (selvstaendig regel, bygges separat).")
     return 0
 
 

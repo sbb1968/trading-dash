@@ -2,12 +2,12 @@
 """
 nkd_density_check.py — pre-backtest densitets- og struktur-tjek for NKD (CME Nikkei)
 =====================================================================================
-PORTEN foer vi genbruger EUREVERSION-harnessen paa NKD. Svarer paa to ting empirisk,
+PORTEN foer vi bygger NKD-strategiens backtest. Svarer paa to ting empirisk,
 saa vi ikke backtester paa data der ikke findes — eller i en session hvor NKD ikke
 mean-reverter:
 
   1) DENSITET: hvor taet ligger 15-min bars hen over doegnet? Specielt:
-       - EUREVERSIONs NATIVE vindue (EU-morgen 02:00-08:00 ET = 08:00-14:00 dansk),
+       - EU-morgen-vinduet (02:00-08:00 ET = 08:00-14:00 dansk),
          hvor NKD er i tynd natte-Globex (Japan lukket, US ikke aabnet).
        - NKD's egen LIKVIDE US-session (09:30-17:00 ET = 15:30-23:00 dansk).
      Histogrammet viser begge paa een gang -> billedet afgoer hvilken session der
@@ -23,10 +23,10 @@ mean-reverter:
 
 Henter NKD FRONT-kontrakt (CME, USD) paa samme maade som futures_preflight_check.py
 (reqContractDetails + naermeste udloeb, 10339-sikkert — IKKE ContFuture), saa det
-matcher den rigtige harvest/harness-pipeline. useRTH=False som strategien.
+matcher harvest-pipelinen. useRTH=False som strategien.
 
 Read-only: handler ikke, sender ingen ordrer, aendrer intet. Egen client-id (default
-46), saa den IKKE kolliderer med en koerende backend/K2/EUREVERSION paa samme TWS.
+46), saa den IKKE kolliderer med en koerende backend/strategi paa samme TWS.
 Kun HISTORIK -> kraever intet realtids-abonnement og kan koeres naar som helst.
 Undgaa dog at koere praecis i det minut en strategi fyrer entries (pacing).
 
@@ -68,13 +68,13 @@ from ib_async import IB, Future
 HOST            = "127.0.0.1"
 PORT            = 7497
 CLIENT_ID       = 46
-BAR_SIZE        = "15 mins"     # matcher EUREVERSIONs 15-min timeframe
+BAR_SIZE        = "15 mins"     # 15-min timeframe
 CHUNK_DAYS      = 30
 SLEEP_BETWEEN   = 0.6
 PACING_WAIT     = 60
 DEFAULT_DAYS    = 400           # nok til at ramme front-kontraktens naturlige bund
 
-# Vinduer i ET (time, minut). EU = EUREVERSIONs native; US = NKD's likvide CME-session.
+# Vinduer i ET (time, minut). EU = EU-morgen-vindue; US = NKD's likvide CME-session.
 EU_START_ET = (2, 0);  EU_END_ET = (8, 0)     # 08:00-14:00 dansk
 US_START_ET = (9, 30); US_END_ET = (17, 0)    # 15:30-23:00 dansk
 
@@ -248,7 +248,7 @@ def analyze(bars, lines):
         by_hour[b["et"].hour] += 1
     maxc = max(by_hour.values()) if by_hour else 1
     emit("")
-    emit("  Bars pr. ET-time  ([EU]=EUREVERSIONs vindue  [US]=NKD likvid):")
+    emit("  Bars pr. ET-time  ([EU]=EU-morgen-vindue  [US]=NKD likvid):")
     for h in range(24):
         c = by_hour.get(h, 0)
         bar = "#" * int(round(40 * c / maxc)) if maxc else ""
@@ -315,7 +315,7 @@ def analyze(bars, lines):
     emit("=" * 78)
     eu_dense = eu_avg >= 18.0
     us_dense = us_avg >= 22.0
-    emit(f"  EU-vindue (harnessens native):  "
+    emit(f"  EU-vindue (EU-morgen):          "
          f"{'TAET NOK' if eu_dense else 'FOR TYNDT'} ({eu_avg:.1f} bars/dag) "
          f"+ {fmt_ac(eu_ac, eu_n).split('[')[1].rstrip(']') if eu_ac is not None else 'n/a'}".rstrip())
     emit(f"  US-session (NKD likvid):        "
@@ -323,10 +323,10 @@ def analyze(bars, lines):
          f"+ {fmt_ac(us_ac, us_n).split('[')[1].rstrip(']') if us_ac is not None else 'n/a'}".rstrip())
     emit("")
     if eu_dense and (eu_ac is not None and eu_ac < -0.02):
-        emit("  -> EU-vinduet baerer: genbrug harnessen SOM DEN ER (session=european). Host + backtest.")
+        emit("  -> EU-vinduet baerer: byg NKD-strategiens backtest paa EU-morgen-vinduet. Host + backtest.")
     elif us_dense and (us_ac is not None and us_ac < -0.02):
         emit("  -> EU-vinduet baerer ikke, men US-sessionen er taet OG reversion-agtig:")
-        emit("     retarget session til US (09:30-17:00 ET) i backtesten. Anden tese end EUREVERSION,")
+        emit("     retarget session til US (09:30-17:00 ET) i backtesten. Anden tese,")
         emit("     men datamaessigt farbar. Host US-session-bars + backtest med US-vindue.")
     elif us_dense:
         emit("  -> Kun US-sessionen er taet, men den ser TRENDENDE/stoej ud — mean-reversion a priori")
@@ -382,7 +382,7 @@ def main() -> int:
     ap.add_argument("--host", default=HOST)
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--client-id", type=int, default=CLIENT_ID,
-                    help="eget id — undgaa kollision med backend/K2/EUREVERSION")
+                    help="eget id — undgaa kollision med backend/strategi")
     ap.add_argument("--days", type=int, default=DEFAULT_DAYS,
                     help="hvor langt bagud der proeves hentet (default 400)")
     args = ap.parse_args()
