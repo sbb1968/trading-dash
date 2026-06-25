@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { StrategyDocsModal } from "./StrategyDocsModal";
+import { ConfirmDialog } from "./ConfirmDialog";
 import {
   useLiveLog, usd,
   AlgoStatus, StrategyStatusEnum, StrategyInfo, RiskStatus, Trade,
@@ -302,6 +303,11 @@ export function LiveAlgo() {
   // View-state (lokal — nulstilling er harmløs)
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
 
+  // Bekraeftelses-dialog ved start/stop — forhindrer utilsigtet klik (fejl-stop).
+  // Gater KUN frontend-handlingen; startStrategy/stopStrategy kaldes uaendret ved bekraeft.
+  const [pendingAction, setPendingAction] =
+    useState<{ action: "start" | "stop"; name: string; positions: number } | null>(null);
+
   // Docs modal — viser markdown-dokumentation i popup
   const [docsModal, setDocsModal] = useState<{strategy: string; version: "iben" | "teknisk"} | null>(null);
 
@@ -358,6 +364,7 @@ export function LiveAlgo() {
 
   return (
     <div style={{
+      position: "relative",   // begraenser bekraeftelses-dialogens overlay til dette vindue
       display: "flex",
       flexDirection: "column",
       height: "100%",
@@ -454,8 +461,8 @@ export function LiveAlgo() {
                 strategy={s}
                 isSelected={s.name === selectedStrategy}
                 onSelect={() => setSelectedStrategy(s.name)}
-                onStart={startStrategy}
-                onStop={stopStrategy}
+                onStart={(name) => setPendingAction({ action: "start", name, positions: s.stats.open_positions })}
+                onStop={(name) => setPendingAction({ action: "stop", name, positions: s.stats.open_positions })}
               />
             ))}
           </div>
@@ -609,6 +616,29 @@ export function LiveAlgo() {
           strategy={docsModal.strategy}
           version={docsModal.version}
           onClose={() => setDocsModal(null)}
+        />
+      )}
+
+      {pendingAction && (
+        <ConfirmDialog
+          title={pendingAction.action === "start"
+            ? `Start ${pendingAction.name}?`
+            : `Stop ${pendingAction.name}?`}
+          body={pendingAction.action === "start"
+            ? "Algoritmen starter og begynder at overvåge markedet."
+            : "Strategien stopper med at overvåge og handle."
+              + (pendingAction.positions > 0
+                ? ` ${pendingAction.name} har ${pendingAction.positions} åbne position${pendingAction.positions > 1 ? "er" : ""}.`
+                : "")}
+          confirmLabel={pendingAction.action === "start" ? "Start" : "Stop"}
+          variant={pendingAction.action === "stop" ? "danger" : "normal"}
+          onConfirm={() => {
+            const { action, name } = pendingAction;
+            setPendingAction(null);
+            if (action === "start") startStrategy(name);
+            else stopStrategy(name);
+          }}
+          onCancel={() => setPendingAction(null)}
         />
       )}
     </div>
