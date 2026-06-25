@@ -106,6 +106,27 @@ def write_csv(path, by_ts):
     tmp.replace(path)
 
 
+async def reconnect(ib, host, port, client_id, emit, attempts=3, delay=8):
+    """Genforbind ved transient drop. False hvis TWS varigt nede (fx 23.45 auto-logoff)."""
+    for a in range(1, attempts + 1):
+        if ib.isConnected():
+            return True
+        try:
+            ib.disconnect()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(
+                ib.connectAsync(host, port, clientId=client_id, timeout=15), timeout=20)
+            if ib.isConnected():
+                emit(f"   genforbundet (forsoeg {a}/{attempts})")
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(delay)
+    return False
+
+
 async def qualify(ib, inst, emit):
     """futures: front-maaned af Future(symbol,exchange,currency); fx: Forex(pair). 10339-sikkert."""
     if inst["kind"] == "fx":
@@ -144,8 +165,9 @@ async def qualify(ib, inst, emit):
     return c
 
 
-async def pull(ib, contract, what, max_days, by_ts, emit, write_cb):
-    """1-min OHLCV, walk bagud i 5 D-chunks. Resume fra aeldste eksisterende. Skriv pr. chunk."""
+async def pull(ib, contract, what, max_days, by_ts, emit, write_cb, reconnect_cb):
+    """1-min OHLCV, walk bagud i 5 D-chunks. Resume fra aeldste eksisterende. Skriv pr. chunk.
+    Genforbinder ved transient drop; rejser ConnectionError ved varigt tab (23.45-logoff)."""
     target = datetime.now(timezone.utc) - timedelta(days=max_days)
     oldest = min(by_ts) if by_ts else None
     if oldest is not None and oldest <= target:
@@ -163,8 +185,14 @@ async def pull(ib, contract, what, max_days, by_ts, emit, write_cb):
                     barSizeSetting=BAR_SIZE, whatToShow=what, useRTH=False, formatDate=1), timeout=90)
                 break
             except Exception as e:
-                if "pacing" in str(e).lower():
+                msg = str(e).lower()
+                if "pacing" in msg:
                     emit(f"   (pacing - venter {PACING_WAIT}s)"); await asyncio.sleep(PACING_WAIT); continue
+                if "not connected" in msg or "peer closed" in msg or not ib.isConnected():
+                    emit("   forbindelse tabt — proever at genforbinde...")
+                    if await reconnect_cb():
+                        continue
+                    raise ConnectionError("TWS-forbindelse tabt (varig)")
                 if attempt == 0:
                     await asyncio.sleep(3); continue
                 emit(f"   reqHistoricalData fejl: {e}"); bars = None
@@ -191,7 +219,7 @@ async def pull(ib, contract, what, max_days, by_ts, emit, write_cb):
     return [by_ts[k] for k in sorted(by_ts)]
 
 
-async def harvest_one(ib, inst, days, emit):
+async def harvest_one(ib, inst, days, reconnect_cb, emit):
     label = inst["label"]
     emit("─" * 70)
     emit(f"  {label}  ({inst['kind']}, what={inst['what']})")
@@ -217,7 +245,7 @@ async def harvest_one(ib, inst, days, emit):
     contract = await qualify(ib, inst, emit)
     if contract is None:
         return
-    bars = await pull(ib, contract, inst["what"], days, by_ts, emit, write_cb)
+    bars = await pull(ib, contract, inst["what"], days, by_ts, emit, write_cb, reconnect_cb)
     if len(bars) < 50:
         emit(f"   FOR FAA BARS ({len(bars)}).")
         return
@@ -248,10 +276,23 @@ async def main_async(args):
         emit(f"  FEJL: kunne ikke forbinde til TWS: {e}")
         return 1
     emit("  Forbundet.\n")
+
+    async def do_reconnect():
+        return await reconnect(ib, args.host, args.port, args.client_id, emit)
+
     try:
         for inst in insts:
+            if not ib.isConnected():
+                emit("  Forbindelse nede — proever at genforbinde foer naeste instrument...")
+                if not await do_reconnect():
+                    emit("  ⛔ TWS varigt nede (sandsynligvis 23.45 auto-logoff). Stopper rent.")
+                    break
             try:
-                await harvest_one(ib, inst, args.days, emit)
+                await harvest_one(ib, inst, args.days, do_reconnect, emit)
+            except ConnectionError:
+                emit("  ⛔ TWS-forbindelse tabt under hoest (sandsynligvis 23.45 auto-logoff).")
+                emit("     Alt hentet indtil nu er gemt (resumerbar pr. fil). Koer igen naar TWS er oppe.")
+                break
             except Exception as e:
                 emit(f"   FEJL ved {inst['label']}: {type(e).__name__}: {e}")
             emit("")
