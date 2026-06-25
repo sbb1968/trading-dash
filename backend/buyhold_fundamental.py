@@ -153,6 +153,12 @@ def owner_earnings_normalized(cf_rows, inc_rows, bal_rows, n=OE_NORM_YEARS):
     return avg_ocf - avg_maint, avg_maint, step_latest, len(ocfs), avg_rev
 
 
+def _avg_window(values, n):
+    """Gns. af de foerste n ikke-None vaerdier (rows er nyeste foerst). None hvis ingen."""
+    vals = [v for v in values[:n] if v is not None]
+    return (sum(vals) / len(vals)) if vals else None
+
+
 def _safe_div(a, b):
     if a is None or b in (None, 0):
         return None
@@ -204,14 +210,18 @@ def s_debt_equity(f, price):
 
 
 def s_fcf_margin(f, price):
-    return _band_score(f.get("fcf_margin"), [(0, -60), (5, 10), (10, 40), (20, 60)], 75)
+    v = f.get("fcf_margin")
+    if v is None:
+        return None
+    return (f"FCF-margin {v:.1f}% (norm.)",
+            _band_score(v, [(0, -60), (5, 10), (10, 40), (20, 60)], 75))
 
 
 def s_fcf_conversion(f, price):
     v = f.get("fcf_conversion")
     if v is None:
         return None
-    return (f"FCF/nettoresultat {v:.2f}",
+    return (f"FCF/nettoresultat {v:.2f} (norm.)",
             _band_score(v, [(0, -70), (0.6, -20), (0.8, 10), (1.0, 40)], 60))
 
 
@@ -409,7 +419,7 @@ LAYERS = {
 # Sektor-undtagelse: capex/FCF/Owner-Earnings/gaeld-faktorer er meningsloese for
 # finans/bank -> ekskludér dem (Altman Z haandteres i gaten, Fase 2).
 FINANCIAL_EXCLUDE = {"oe_margin", "fcf_margin", "fcf_conversion", "netdebt_ebitda",
-                     "oe_yield", "pfcf", "fcf_yield"}
+                     "oe_yield", "pfcf", "fcf_yield", "gross_margin"}
 
 
 def is_financial(sector: Optional[str]) -> bool:
@@ -609,8 +619,7 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
     total_capex = cf0.get("capitalExpenditure")
     da = cf0.get("depreciationAndAmortization")
     ni = cf0.get("netIncome") if cf0.get("netIncome") is not None else inc0.get("netIncome")
-    f["fcf_margin"] = (_safe_div(fcf, revenue) or 0) * 100 if (fcf is not None and revenue) else None
-    f["fcf_conversion"] = _safe_div(fcf, ni)
+    # fcf_margin/fcf_conversion saettes NORMALISERET efter OE-kaldet (samme 3-aars basis)
 
     # --- Owner Earnings (3-aars normaliseret, est.) ---
     # Et enkelt stoejende aar (engangs-capex/skat/working-capital) forvraenger ellers
@@ -626,6 +635,27 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
         f["oe_margin"] = oe_norm / avg_rev * 100      # mod gns. revenue (konsistent basis)
     if oe_norm is not None and mktcap:
         f["oe_yield"] = oe_norm / mktcap * 100        # mod NUVAERENDE marketCap = korrekt yield
+
+    # --- normaliserede cash flow-metrikker (samme N-aars vindue som OE) ---
+    # Et enkelt stoejende aar (KO 2024) forvraenger ellers fcf_margin/-conversion/-yield.
+    avg_fcf = _avg_window(col(cf_l, "freeCashFlow"), OE_NORM_YEARS)
+    _ni_vals = col(cf_l, "netIncome")
+    if not any(v is not None for v in _ni_vals[:OE_NORM_YEARS]):
+        _ni_vals = col(inc_l, "netIncome")          # fallback: netIncome fra income-statement
+    avg_ni = _avg_window(_ni_vals, OE_NORM_YEARS)
+
+    if avg_fcf is not None and avg_rev:
+        f["fcf_margin"] = avg_fcf / avg_rev * 100   # PROCENT
+    elif fcf is not None and revenue:
+        f["fcf_margin"] = (_safe_div(fcf, revenue) or 0) * 100   # fallback: enkeltaar (faa aars data)
+
+    if avg_fcf is not None and avg_ni:
+        f["fcf_conversion"] = avg_fcf / avg_ni      # RATIO
+    elif fcf is not None and ni:
+        f["fcf_conversion"] = _safe_div(fcf, ni)    # fallback: enkeltaar
+
+    if avg_fcf is not None and mktcap:
+        f["fcf_yield"] = avg_fcf / mktcap           # FRAKTION (ikke x100) — overskriver FMP-TTM
 
     # --- gate-raafelter (Fase 2 samler gaten) ---
     wc = (_safe_div(bal0.get("totalCurrentAssets"), 1) or 0) - (bal0.get("totalCurrentLiabilities") or 0) \
