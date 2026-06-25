@@ -20,8 +20,11 @@ afhaengige faktor ekskluderes, resten staar.
 """
 from __future__ import annotations
 
+import json
 import statistics as _st
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -685,6 +688,36 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
         or f.get("gross_margin") is not None
     )
     meta["statement_locked"] = statement_locked
+    return f, meta
+
+
+# ── Disk-cache af (f, meta) pr. ticker — sparer FMP-kald (Free-tier 250/dag) ──
+FMP_CACHE_DIR = Path(__file__).resolve().parent / "buyhold_fmp_cache"
+FMP_CACHE_TTL_DAYS = 1.0
+
+
+def fetch_buyhold_fundamentals_cached(symbol: str, api_key: str,
+                                      ttl_days: float = FMP_CACHE_TTL_DAYS,
+                                      use_cache: bool = True):
+    """Som fetch_buyhold_fundamentals, men disk-cachet pr. ticker (scorer-inputtet (f,meta)).
+    Et gentaget opslag paa samme ticker koster 0 FMP-kald inden for ttl_days. Cacher ALDRIG
+    en 429-throttlet pull (saa den retry'er naar FMP-kvotaen er frisk igen); genuin data +
+    'ikke fundet'/402 caches (persistente). Spejler buyhold_calibrate's cache-moenster."""
+    p = FMP_CACHE_DIR / f"{symbol.upper()}.json"
+    if use_cache and p.exists():
+        if ttl_days is None or (time.time() - p.stat().st_mtime) <= ttl_days * 86400:
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))   # laeser Infinity (interest_coverage)
+                return d["f"], d["meta"]
+            except Exception:
+                pass
+    f, meta = fetch_buyhold_fundamentals(symbol, api_key)
+    if not any("429" in e for e in meta.get("errors", [])):     # cache alt UNDTAGEN 429
+        try:
+            FMP_CACHE_DIR.mkdir(exist_ok=True)
+            p.write_text(json.dumps({"f": f, "meta": meta}), encoding="utf-8")
+        except Exception:
+            pass
     return f, meta
 
 

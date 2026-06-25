@@ -17,7 +17,7 @@ import asyncio
 from typing import Optional
 
 from buyhold_fundamental import (FINANCIAL_EXCLUDE, compute_growth, compute_quality,
-                                 compute_valuation, fetch_buyhold_fundamentals, is_financial)
+                                 compute_valuation, fetch_buyhold_fundamentals_cached, is_financial)
 from buyhold_trend import buyhold_chart_data, compute_buyhold_trend, fetch_trend_bars
 
 try:
@@ -146,7 +146,9 @@ async def compute_buyhold(ib, ticker: str, api_key: str) -> dict:
     """Hele kaeden -> core dict (layers + c + gate_inputs + meta). Bars via ib, fund via FMP."""
     ticker = ticker.upper()
     # FMP er sync/blokerende -> to_thread saa det ikke fryser ib-event-loopet.
-    f, meta = await asyncio.to_thread(fetch_buyhold_fundamentals, ticker, api_key)
+    # Disk-cachet pr. ticker (1-dags TTL): gentaget opslag = 0 FMP-kald (Free-tier-venligt;
+    # capped ticker du allerede har set i dag renderer fortsat fra cache).
+    f, meta = await asyncio.to_thread(fetch_buyhold_fundamentals_cached, ticker, api_key)
     price = f.get("price")
     excl, reason = (FINANCIAL_EXCLUDE, "finansiel sektor") if meta.get("is_financial") else (set(), "")
 
