@@ -2149,7 +2149,7 @@ DOCS_DIR = Path(__file__).parent / "docs"
 # Kategori-praefiks i filnavnet styrer sektionen i docs-vinduet. Filnavn-moenster:
 #   <kategori>_<NN>_<titel>.pdf   fx  swing_02_konfluens_v1_referenceguide.pdf
 # Kategorien stripper ud af titlen (sektions-overskriften baerer den i stedet).
-_DOC_CATEGORIES = [("swing", "Swing Trading"), ("day", "Day Trading"), ("buyhold", "Buy-and-Hold")]
+_DOC_CATEGORIES = [("swing", "Swing Trading"), ("day", "Day Trading"), ("buyhold", "Buy and Hold")]
 _DOC_CAT_LABEL = dict(_DOC_CATEGORIES)
 _DOC_CAT_ORDER = {key: i for i, (key, _) in enumerate(_DOC_CATEGORIES)}
 
