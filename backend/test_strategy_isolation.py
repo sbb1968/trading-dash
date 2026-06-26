@@ -39,6 +39,7 @@ STRATEGIES = {
     "algo_confluence2.py":      ("Konfluens 2",      "strategies.confluence2"),
     "algo_buythedip.py":        ("BuyTheDip",        None),   # selvstændig, ingen egen pakke
     "algo_europa_reversion.py": ("Europa-reversion", "strategies.europa_reversion"),
+    "algo_trendjoin.py":        ("Trend Join Long",  None),   # selvstændig, ingen egen pakke
 }
 ALL_SOURCES = [src for src, _ in STRATEGIES.values()]
 

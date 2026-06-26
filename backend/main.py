@@ -361,6 +361,21 @@ async def startup():
         buythedip._broadcast_fn = broadcast_algo_sync
         print(f"[Server] BuyTheDip registreret — buy-the-dip, forbruger K2-univers")
 
+        # ── Registrér Trend Join Long (gap-and-go m. nyhedskatalysator, paper) ──
+        # MANUEL start kun — IKKE i scheduleren (auto-starter aldrig). Long-only.
+        from algo_trendjoin import TrendJoinLive
+
+        trendjoin_config = StrategyConfig(
+            max_loss_per_trade  = 200.0,
+            max_daily_loss      = 300.0,
+            max_open_positions  = 5,        # rules.json: max_concurrent_positions
+            max_position_size   = 1600.0,   # ~10% notional-loft (sizer 1% risiko-baseret)
+        )
+        trendjoin = TrendJoinLive(strategy_manager.get_ibkr(), config=trendjoin_config)
+        strategy_manager.register(trendjoin)
+        trendjoin._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] Trend Join Long registreret — gap-and-go m. nyhedsfilter, MANUEL start")
+
     asyncio.create_task(start_ibkr_feed())
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
