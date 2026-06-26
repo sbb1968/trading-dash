@@ -181,6 +181,7 @@ async def pull(ib, contract, max_days, by_ts, emit, write_cb, reconnect_cb):
             if chunk_oldest is None or u < chunk_oldest:
                 chunk_oldest = u
         write_cb(by_ts)
+        emit(f"      chunk {ci + 1}: +{len(bars)} (til {chunk_oldest.astimezone(ET):%Y-%m-%d}) · total {len(by_ts)}")
         if oldest is not None and chunk_oldest >= oldest:
             break
         oldest = chunk_oldest
@@ -202,6 +203,11 @@ async def main_async(args):
     emit(f"  TREND-JOIN 5-min HARVEST (useRTH=False -> premarket+RTH) -> {DATA_DIR}/  (resumerbar)")
     emit("=" * 78)
     emit(f"  Tid: {datetime.now():%Y-%m-%d %H:%M} · {len(tickers)} tickers · client-id {args.client_id} · ~{args.days} dage")
+    if len(tickers) > 20:
+        emit(f"  ⚠ STORT univers: ~{len(tickers)} tickers x {args.days} dage 5-min = mange tusinde historik-")
+        emit("     kald (IBKR pacing-begraenset -> kan tage TIMER) paa SAMME TWS som evt. live strategier")
+        emit("     -> risiko for at pacing-sulte dem (datablind). Anbefaling: test foerst smaat med")
+        emit("     --tickers AAPL,NVDA,TSLA,AMD,META  og koer fuldt univers UDEN FOR handelstid. Ctrl+C = sikkert.")
 
     ib = IB()
     try:
@@ -223,6 +229,7 @@ async def main_async(args):
             path = out_path(t)
             by_ts = load_existing(path)
             tag = f"(resume {len(by_ts)})" if by_ts else ""
+            emit(f"  [{i}/{len(tickers)}] {t} henter... {tag}")
             c = await qualify_stock(ib, t, emit)
             if c is None:
                 emit(f"  [{i}/{len(tickers)}] {t:<6} sprunget over (ukvalificeret)")
