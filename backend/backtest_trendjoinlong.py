@@ -7,9 +7,10 @@ Gap-and-go momentum-long. Laeser reglerne fra rules.json og 5-min CSV'er (m. pre
 intet telegram/dashboard/scheduling.
 
 Regel (fra rules.json), alt pr. handelsdag pr. ticker:
-  DAGLIGE filtre:   D2 forrige luk > SMA200(daglig) · D3 gap fra forrige luk >= 3%
-  INTRADAG (entry-bar, 10:05-15:30 ET): D1 pris > forrige dags high · I1 pris > premarket-high ·
-                    I2 ny HOD · I3 RVOL >= 2 (kumulativ RTH-vol vs 14-dages snit ved samme klokke)
+  DAGLIGT filter:   D2 forrige luk > SMA200(daglig)
+  INTRADAG (entry-bar, 10:05-15:30 ET): D3 pris >= 3% over forrige luk (intradag-mover — matcher
+                    HumbledTraders 30-min-re-scan, ikke kun open-gap) · D1 pris > forrige dags high ·
+                    I1 pris > premarket-high · I2 ny HOD · I3 RVOL >= 2 (kum. RTH-vol vs 14-dages snit)
   ENTRY:  foerste bar i vinduet hvor ALLE rammer -> koeb paa bar-LUK.
   STOP:   LOD(RTH ved entry) x 0.99.  R = entry - stop.
   EXIT:   partial 1/3 ved +0.75R · breakeven ved +1.0R · derefter trail til 5m swing-low(2,2) ·
@@ -105,7 +106,7 @@ def swing_low_2_2(lows, i):
     return best
 
 
-def simulate_day(day_bars, prior_high, R_rules, premarket_high, lod_entry_pct):
+def simulate_day(day_bars, prior_high, R_rules, premarket_high, prior_close):
     """day_bars: liste af dicts (tmin,o,h,l,c) for RTH-dagen, sorteret. Returnerer trade-dict eller None."""
     rk = R_rules
     n = len(day_bars)
@@ -119,7 +120,8 @@ def simulate_day(day_bars, prior_high, R_rules, premarket_high, lod_entry_pct):
         new_hod = b["h"] > hod
         if rk["entry_lo"] <= t <= rk["entry_hi"]:
             cond = (b["c"] > prior_high and b["c"] > premarket_high and new_hod
-                    and b["rvol"] >= rk["rvol_min"])
+                    and b["rvol"] >= rk["rvol_min"]
+                    and (b["c"] - prior_close) / prior_close * 100 >= rk["gap_min"])
             if cond:
                 entry_idx = i
                 break
@@ -203,11 +205,9 @@ def analyze_ticker(path, rules, emit):
             continue
         if row["open"] < rules["min_price"]:
             continue
-        # D2: forrige luk > SMA200 ; D3: gap >= min
+        # D2 (dagligt): forrige luk > SMA200. D3 (>=3% over forrige luk) er flyttet til
+        # entry-baren -> intradag-mover, matcher 30-min-re-scanen (ikke kun open-gap).
         if not (row["prior_close"] > row["prior_sma"]):
-            continue
-        gap = (row["open"] - row["prior_close"]) / row["prior_close"] * 100
-        if gap < rules["gap_min"]:
             continue
         ph = pm_high.get(d, -1.0)            # premarket-high (mangler -> -1 = altid over)
         day = rth[rth["date"] == d]
@@ -225,7 +225,7 @@ def analyze_ticker(path, rules, emit):
                                                          and not np.isnan(ctoday)) else 0.0
             bars.append({"tmin": t, "o": b["open"], "h": b["high"], "l": b["low"],
                          "c": b["close"], "rvol": rvol})
-        tr = simulate_day(bars, row["prior_high"], rules, ph, rules["stop_pct"])
+        tr = simulate_day(bars, row["prior_high"], rules, ph, row["prior_close"])
         if tr:
             tr["date"] = d
             trades.append(tr)
@@ -284,8 +284,8 @@ def main():
         (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
         return 1
     emit(f"  Univers: {len(files)} tickers fra {ddir.name}/  ·  regel-defaults (ikke tunet)")
-    emit(f"  D3 gap>={rules['gap_min']}% · I3 RVOL>={rules['rvol_min']} · entry "
-         f"{a.cost_bp and ''}{rules['entry_lo']//60:02d}:{rules['entry_lo']%60:02d}-"
+    emit(f"  D3 >={rules['gap_min']}% over forrige luk (intradag) · I3 RVOL>={rules['rvol_min']} · entry "
+         f"{rules['entry_lo']//60:02d}:{rules['entry_lo']%60:02d}-"
          f"{rules['entry_hi']//60:02d}:{rules['entry_hi']%60:02d} ET · stop LOD-1% · "
          f"partial {int(rules['partial_frac']*100)}%@{rules['partial_R']}R · BE@{rules['be_R']}R")
 
