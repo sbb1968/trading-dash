@@ -152,7 +152,7 @@ export function MarketOverview() {
           const msg = JSON.parse(e.data);
           if (msg.type === "market_conditions") {
             setConditions(msg);
-            setLastUpdate(new Date().toLocaleTimeString("da-DK"));
+            setLastUpdate(new Date().toLocaleString("da-DK"));
             setLoading(false);
             setError("");
           }
@@ -172,7 +172,7 @@ export function MarketOverview() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       setConditions(data);
-      setLastUpdate(new Date().toLocaleTimeString("da-DK"));
+      setLastUpdate(new Date().toLocaleString("da-DK"));
     } catch {
       setError("Kunne ikke hente data — er backend kørende?");
     } finally {
@@ -310,6 +310,10 @@ export function MarketOverview() {
               <span style={{ fontSize: 20, fontWeight: 900, color: scoreColor }}>
                 {scoreEmoji} {conditions.score}/100
               </span>
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text-muted, var(--text-secondary))", marginBottom: 4 }}>
+              ⟳ Beregnet af backend: <strong>{conditions.checked_at || "—"}</strong>
+              {" "}— klik ↺ Opdater; rykker tiden, reberegnes scoren
             </div>
             <ScoreBar score={conditions.score} />
             <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -455,9 +459,12 @@ export function MarketOverview() {
           </div>
 
           {/* ── Tidsstempel ── */}
-          <div style={{ fontSize: 10, color: "var(--text-secondary)", textAlign: "center" }}>
-            Sidst opdateret: {lastUpdate || conditions.checked_at}
-            {" · "}Opdater manuelt — data ændres ikke i realtid
+          <div style={{ fontSize: 10, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>
+            Beregnet af backend: <strong style={{ color: "var(--text-primary)" }}>{conditions.checked_at || "—"}</strong>
+            {" · "}Hentet i vinduet: {lastUpdate || "—"}
+            <br />
+            Reberegnes ved hvert kald — rykker "Beregnet"-tiden når du klikker ↺ Opdater, kører den.
+            Ændres scoren ikke, er markedsinputtene uændrede (fx lukket marked).
           </div>
 
         </>
