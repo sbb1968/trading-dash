@@ -6,6 +6,8 @@ import { useEffect, useState, useCallback } from "react";
 
 const API = "http://127.0.0.1:8000/sectors/overview";
 const REFRESH_MS = 60_000;
+const NAME_W = 340;   // fast bredde paa navne-kolonnen, saa tallene staar LIGE efter teksten
+                      // (ikke skubbet ud til hoejre kant) og kolonnerne flugter paa tvaers af raekker
 
 interface Niche {
   ticker: string; tickers: string[]; label: string;
@@ -113,7 +115,7 @@ export function SectorNiche({ onSelectTicker }: { onSelectTicker?: (t: string) =
           <div style={{ display: "flex", alignItems: "center", padding: "2px 12px",
             color: "var(--text-muted)", fontSize: "0.78em", textTransform: "uppercase",
             letterSpacing: "0.5px" }}>
-            <span style={{ flex: 1 }}>Sektor</span>
+            <span style={{ width: NAME_W }}>Sektor</span>
             <span style={{ width: 56, textAlign: "right" }}>Andel</span>
             <span style={{ width: 64, textAlign: "right" }}>Nu</span>
             <span style={{ width: 64, textAlign: "right" }}>1U</span>
@@ -130,8 +132,8 @@ export function SectorNiche({ onSelectTicker }: { onSelectTicker?: (t: string) =
                   style={{ display: "flex", alignItems: "center", padding: "6px 12px",
                     cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
                     background: open ? "var(--bg-elevated)" : "transparent" }}>
-                  <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 8,
-                    minWidth: 0 }}>
+                  <span style={{ width: NAME_W, display: "flex", alignItems: "center", gap: 8,
+                    minWidth: 0, boxSizing: "border-box" }}>
                     <span style={{ width: 12, color: "var(--text-muted)" }}>{open ? "▾" : "▸"}</span>
                     <span>{s.emoji}</span>
                     <span style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden",
@@ -153,11 +155,11 @@ export function SectorNiche({ onSelectTicker }: { onSelectTicker?: (t: string) =
                 {/* Niche-underinddeling */}
                 {open && s.niches.map(n => (
                   <div key={s.key + n.ticker + n.label}
-                    style={{ display: "flex", alignItems: "center", padding: "4px 12px 4px 30px",
+                    style={{ display: "flex", alignItems: "center", padding: "4px 12px",
                       borderBottom: "1px solid var(--border-subtle)",
                       background: "var(--bg-base)", fontSize: "0.95em" }}>
-                    <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 6,
-                      minWidth: 0 }}>
+                    <span style={{ width: NAME_W, paddingLeft: 18, display: "flex",
+                      alignItems: "center", gap: 6, minWidth: 0, boxSizing: "border-box" }}>
                       <span style={{ minWidth: 78 }}>
                         {n.tickers.map((t, i) => (
                           <span key={t}>{i > 0 && <span style={{ color: "var(--text-muted)" }}>/</span>}{tickerBtn(t)}</span>
@@ -187,7 +189,8 @@ export function SectorNiche({ onSelectTicker }: { onSelectTicker?: (t: string) =
                 <div key={"cc" + n.ticker}
                   style={{ display: "flex", alignItems: "center", padding: "4px 12px",
                     borderBottom: "1px solid var(--border-subtle)" }}>
-                  <span style={{ flex: 1, display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ width: NAME_W, display: "flex", gap: 6, alignItems: "center",
+                    minWidth: 0, boxSizing: "border-box" }}>
                     <span style={{ minWidth: 78 }}>
                       {n.tickers.map((t, i) => (
                         <span key={t}>{i > 0 && <span style={{ color: "var(--text-muted)" }}>/</span>}{tickerBtn(t)}</span>
