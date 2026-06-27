@@ -190,7 +190,7 @@ class TrendJoinLive(BaseStrategy):
 
     @property
     def description(self) -> str:
-        return ("Gap-and-go long: top-gappers (re-scan/30min) MED positiv nyheds"
+        return ("Gap-and-go long: top % gainers (re-scan/30min) MED positiv nyheds"
                 "katalysator, join momentum (ny HOD>premarket-high). Flertrins-exit. Paper.")
 
     @property
@@ -384,7 +384,7 @@ class TrendJoinLive(BaseStrategy):
         Emitterer ALTID et 'trendjoin_scan'-forensik-event (alle gappers + verdikt +
         max-change), så trendjoin_forensik.py kan vise hvad hver 30-min-runde fandt."""
         self._last_scan = datetime.now(ET)
-        self._status("scanning", "Pull af top-gappers + nyhedstjek...")
+        self._status("scanning", "Pull af top % gainers + nyhedstjek...")
 
         gappers = await self._scan_top_gappers()
         records: list[dict] = []   # forensik: én pr. gapper denne runde (m. verdikt)
@@ -468,7 +468,7 @@ class TrendJoinLive(BaseStrategy):
         trendjoin_forensik.py. Best-effort — må aldrig nedbryde scannet."""
         scan_et = self._last_scan or datetime.now(ET)
         mc = (f"{max_change:+.1f}% ({top_sym})" if max_change is not None else "—")
-        await self._log(f"🔁 30-min scan: {len(records)} gappers · max-change {mc} · "
+        await self._log(f"🔁 30-min scan: {len(records)} gainers · max-change {mc} · "
                         f"{len(added)} ny optaget · pulje {len(self.universe)}")
         if not self._journal:
             return
@@ -585,7 +585,7 @@ class TrendJoinLive(BaseStrategy):
                         logger.exception(f"[TrendJoin] rescan-fejl: {e}")
 
                 self._status("trading",
-                             f"Overvåger {len(self.universe)} gappers — "
+                             f"Overvåger {len(self.universe)} top % gainers — "
                              f"{now_et.strftime('%H:%M:%S')} ET | "
                              f"Pos: {self.stats.open_positions}/{self.config.max_open_positions}",
                              persist=False)

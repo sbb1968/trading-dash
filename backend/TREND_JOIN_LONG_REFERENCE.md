@@ -1,7 +1,7 @@
 # Trend Join Long — sådan virker den (HumbledTrader vs. vores implementering)
 
 > Reference til `algo_trendjoin.py` (live, paper) + `rules.json` (parametre) + `trendjoin_forensik.py` (indsigt).
-> Skrevet for at afklare *præcis* hvordan top-gapper-universet dannes og opdateres.
+> Skrevet for at afklare *præcis* hvordan listen ("top % gainers") dannes og opdateres.
 
 ---
 
@@ -11,9 +11,15 @@
 
 **Næsten — men to ting er anderledes:**
 
-1. **Der måles fra sidste luk til AKTUEL pris (live), ikke til åbningskursen.** En aktie der står +X% over gårsdagens luk *lige nu* er en gapper — uanset om bevægelsen skete ved åbning eller intradag kl. 13:00. Så intradag-movere fanges også.
+1. **Der måles fra sidste luk til AKTUEL pris (live), ikke til åbningskursen.** En aktie der står +X% over gårsdagens luk *lige nu* er en top-gainer — uanset om bevægelsen skete ved åbning eller intradag kl. 13:00. Så intradag-movere fanges også.
 2. **Universet er IKKE låst ved åbning.** Hver 30. min laves et **friskt scan af markedet**, og universet **vokser** efterhånden som nye aktier krydser tærsklen. Det er ikke "lås ved åbning → filtrér en fast liste".
 3. ✅ Rigtigt: 3%-tærsklen anvendes hver runde — men på de **friske** scan-resultater (nye kandidater), og 3% tjekkes **igen live** lige før entry.
+
+### Terminologi: "top % gainers", ikke "gappers"
+
+Listen vi laver er strengt taget en **top % gainers**-liste (TradingViews egen betegnelse: "US Top Gainers") — aktier sorteret efter **% ændring fra forrige luk, målt live hele dagen**. Et **"gap"** er per definition et *åbnings*-fænomen (springet fra forrige luk til dagens åbning, målt én gang kl. 09:30). Tidligt på dagen er de to næsten identiske (top-gainerne *er* morgen-gapperne), men senere på dagen indeholder listen også **intradag-runnere** der ikke gappede ved åbningen.
+
+I dette dokument bruger vi derfor **"top % gainers"** om listen, og reserverer **"gapper"** til den delmængde der faktisk gappede ved åbningen. (`rules.json` bruger ordet "gap" løst i `D3_min_gap_pct_from_prior_close` — det betyder "% over forrige luk", ikke nødvendigvis et åbnings-gap. Strategien hedder **Trend Join Long**, fordi den *joiner* en igangværende optrend, ikke specifikt et gap.)
 
 Resten af dokumentet forklarer det i detaljer.
 
@@ -67,7 +73,7 @@ Mellem rescans overvåges **alle** aktier i puljen (`_check_ticker`). For hver h
 
 → rammer alle: **køb på bar-luk**. Største gap først, op til 5 samtidige positioner.
 
-**Bemærk: 3% tjekkes TO steder** — (a) ved scan-vetting (er den overhovedet en gapper?) og (b) live ved hver entry-evaluering (er den ≥3% over forrige luk i selve entry-øjeblikket?). En aktie kan altså være optaget i puljen, men vente på at entry-betingelserne falder på plads — eller falde ud af ≥3% igen og dermed ikke trigge.
+**Bemærk: 3% tjekkes TO steder** — (a) ved scan-vetting (er den overhovedet en top-gainer?) og (b) live ved hver entry-evaluering (er den ≥3% over forrige luk i selve entry-øjeblikket?). En aktie kan altså være optaget i puljen, men vente på at entry-betingelserne falder på plads — eller falde ud af ≥3% igen og dermed ikke trigge.
 
 ### 2c. Exit (rules.json)
 Stop = dagens RTH-low × 0.99 ved entry. R = entry − stop.
@@ -92,7 +98,7 @@ Stop = dagens RTH-low × 0.99 ved entry. R = entry − stop.
 | Gap-reference | fra forrige luk | fra forrige luk (D3) | Matcher `rules.json` (`D3_min_gap_pct_from_prior_close`) |
 | Nyhedskilde | (hendes opsætning) | Finnhub company-news + keyword-sentiment | Det I allerede har i platformen |
 
-**Ingen af afvigelserne ændrer tesen:** top-gappere med positiv nyhedskatalysator, join momentum, flertrins-exit. De er pragmatiske valg givet hvilke data vi har.
+**Ingen af afvigelserne ændrer tesen:** top % gainers med positiv nyhedskatalysator, join momentum, flertrins-exit. De er pragmatiske valg givet hvilke data vi har.
 
 ---
 
@@ -106,9 +112,9 @@ Stop = dagens RTH-low × 0.99 ved entry. R = entry − stop.
   cd C:\Projects\trading_dash\backend
   python trendjoin_forensik.py            # i dag
   python trendjoin_forensik.py --day 2026-06-27
-  python trendjoin_forensik.py --full     # ALLE gappers pr. scan
+  python trendjoin_forensik.py --full     # ALLE gainers pr. scan
   ```
-  Viser pr. 30-min-runde: alle fundne top-gappers, **max-change + top-gapper**, og verdikt pr. aktie (optaget / ingen_katalysator / d2_fejl / under_gap / ...), plus max-change-kurven over dagen, gapper-frekvens, og dagens handler.
+  Viser pr. 30-min-runde: alle fundne top % gainers, **max-change + top-gainer**, og verdikt pr. aktie (optaget / ingen_katalysator / d2_fejl / under_gap / ...), plus max-change-kurven over dagen, gainer-frekvens, og dagens handler.
 
 ---
 
@@ -116,8 +122,8 @@ Stop = dagens RTH-low × 0.99 ved entry. R = entry − stop.
 
 | Parameter | Værdi | Betydning |
 |---|---|---|
-| `RESCAN_INTERVAL_SEC` | 1800 | nyt top-gapper-scan hvert 30. min |
-| `MIN_GAP_PCT` | 3.0 | gapper-tærskel (% over forrige luk) |
+| `RESCAN_INTERVAL_SEC` | 1800 | nyt top-% gainer-scan hvert 30. min |
+| `MIN_GAP_PCT` | 3.0 | gainer-tærskel (% over forrige luk) |
 | `MIN_PRICE_USD` | 3.0 | min aktiekurs |
 | entry-vindue | 10:05–15:30 ET | ingen nye entries udenfor |
 | `FORCE_CLOSE_ET` | 15:51 | tvangsluk (ingen overnight) |

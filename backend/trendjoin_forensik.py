@@ -2,9 +2,9 @@
 """
 trendjoin_forensik.py — hvad fandt Trend Join Long's 30-min-scan i dag? (READ-ONLY)
 ====================================================================================
-Genskaber dagens top-gapper-scanninger fra trading_dash.db. Strategien skriver ét
-'trendjoin_scan'-event pr. 30-min-runde med ALLE fundne top-gappers, deres change%,
-max-change/top-gapper, og verdikt pr. gapper (optaget / ingen_katalysator / under_gap /
+Genskaber dagens top-% gainer-scanninger fra trading_dash.db. Strategien skriver ét
+'trendjoin_scan'-event pr. 30-min-runde med ALLE fundne top % gainers, deres change%,
+max-change/top-gainer, og verdikt pr. aktie (optaget / ingen_katalysator / under_gap /
 d2_fejl / ...). Scriptet viser dem pænt, så du kan se præcis hvad pipelinen så hver runde
 — inkl. max-change hver 30. min — plus hvem der blev optaget og dagens handler.
 
@@ -14,7 +14,7 @@ Skema: events(ts_utc, ts_local, source, event_type, symbol, payload_json),
 
     python trendjoin_forensik.py
     python trendjoin_forensik.py --day 2026-06-27
-    python trendjoin_forensik.py --full        # vis ALLE gappers pr. scan (ikke kun top 15)
+    python trendjoin_forensik.py --full        # vis ALLE gainers pr. scan (ikke kun top 15)
 
 Placering: C:\\Projects\\trading_dash\\backend\\trendjoin_forensik.py
 """
@@ -72,8 +72,8 @@ def main():
     ap.add_argument("--db", default="trading_dash.db")
     ap.add_argument("--source", default=SOURCE)
     ap.add_argument("--day", default=None, help="YYYY-MM-DD (default i dag)")
-    ap.add_argument("--full", action="store_true", help="vis ALLE gappers pr. scan (ikke kun top 15)")
-    ap.add_argument("--top", type=int, default=15, help="antal gappers vist pr. scan (default 15)")
+    ap.add_argument("--full", action="store_true", help="vis ALLE gainers pr. scan (ikke kun top 15)")
+    ap.add_argument("--top", type=int, default=15, help="antal gainers vist pr. scan (default 15)")
     ap.add_argument("--limit", type=int, default=40000)
     a = ap.parse_args()
     day = date.fromisoformat(a.day) if a.day else date.today()
@@ -119,7 +119,7 @@ def main():
         added = pl.get("added") or []
         mc_s = f"{mc:+.1f}% ({top})" if mc is not None else "—"
         print("\n" + "─" * 84)
-        print(f"  🔁 {hm(t)} ET · {pl.get('num_gappers', len(gappers))} gappers · "
+        print(f"  🔁 {hm(t)} ET · {pl.get('num_gappers', len(gappers))} gainers · "
               f"MAX-CHANGE {mc_s} · {len(added)} optaget · pulje {pl.get('universe_size','?')}")
         print("─" * 84)
         # sortér efter change faldende (som scanneren)
@@ -152,16 +152,16 @@ def main():
     for t, pl in scans:
         mc = pl.get("max_change")
         mc_s = f"{mc:>+6.1f}% ({pl.get('top_gapper','—')})" if mc is not None else "    — "
-        print(f"   {hm(t)}   max {mc_s:<22} gappers {pl.get('num_gappers','?'):>3}   "
+        print(f"   {hm(t)}   max {mc_s:<22} gainers {pl.get('num_gappers','?'):>3}   "
               f"optaget {len(pl.get('added') or [])}")
 
-    # ── Gapper-frekvens (hvilke navne dukkede oftest op + blev de optaget) ──
+    # ── Top-gainer-frekvens (hvilke navne dukkede oftest op + blev de optaget) ──
     print("\n" + "=" * 84)
-    print("  GAPPER-FREKVENS I DAG  (unikke navne set på tværs af scans)")
+    print("  TOP-GAINER-FREKVENS I DAG  (unikke navne set på tværs af scans)")
     print("=" * 84)
     ordered = sorted(freq.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["max_change"]))
     optaget_n = sum(1 for _, f in ordered if f["optaget"])
-    print(f"   {len(ordered)} unikke gappers · {optaget_n} blev OPTAGET\n")
+    print(f"   {len(ordered)} unikke gainers · {optaget_n} blev OPTAGET\n")
     for sym, f in ordered[:40]:
         flag = "✅" if f["optaget"] else "  "
         print(f"   {flag} {sym:<6} set {f['count']:>2}x · max {f['max_change']:>+6.1f}% · "
