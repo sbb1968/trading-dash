@@ -380,45 +380,59 @@ class TrendJoinLive(BaseStrategy):
     # -------------------------------------------------------------
     async def _rescan_watchlist(self) -> None:
         """HumbledTrader-pipeline: pull top-gappers, og for HVER ny kandidat tjek
-        nyhedskatalysator + daglige filtre (D2 SMA200). Bestås → optag i puljen."""
+        nyhedskatalysator + daglige filtre (D2 SMA200). Bestås → optag i puljen.
+        Emitterer ALTID et 'trendjoin_scan'-forensik-event (alle gappers + verdikt +
+        max-change), så trendjoin_forensik.py kan vise hvad hver 30-min-runde fandt."""
         self._last_scan = datetime.now(ET)
         self._status("scanning", "Pull af top-gappers + nyhedstjek...")
 
         gappers = await self._scan_top_gappers()
-        if not gappers:
-            self._status("scanning", "Scanner gav 0 gappers denne runde", persist=False)
-            return
+        records: list[dict] = []   # forensik: én pr. gapper denne runde (m. verdikt)
+        added: list[str] = []
+        max_change = max((c for _, _, c, _ in gappers), default=None)
+        top_sym = gappers[0][0].upper() if gappers else None
 
-        added = []
         async with aiohttp.ClientSession() as session:
             for sym, price, change, vol in gappers:
                 sym = sym.upper()
-                if sym in self.universe or sym in self._done_today:
-                    continue
-                if change < MIN_GAP_PCT or price < MIN_PRICE_USD:
-                    continue
+                rec = {"sym": sym, "change": round(change, 2), "price": round(price, 2),
+                       "vol": int(vol), "verdict": "", "detail": ""}
+
+                if sym in self._positions or sym in self.universe:
+                    rec["verdict"] = "i_pulje"; records.append(rec); continue
+                if sym in self._done_today:
+                    rec["verdict"] = "handlet_i_dag"; records.append(rec); continue
+                if change < MIN_GAP_PCT:
+                    rec["verdict"] = "under_gap"; records.append(rec); continue
+                if price < MIN_PRICE_USD:
+                    rec["verdict"] = "under_pris"; records.append(rec); continue
                 if self._vetted.get(sym) is False:
-                    continue   # allerede afvist i dag
+                    rec["verdict"] = "tidl_afvist"; records.append(rec); continue
 
                 # ── KERNE: positiv nyhedskatalysator? ──
                 has_cat, detail = await check_positive_catalyst(session, sym)
                 await asyncio.sleep(1.1)   # Finnhub rate-limit
+                rec["detail"] = detail[:120]
                 if not has_cat:
                     self._vetted[sym] = False
+                    rec["verdict"] = "ingen_katalysator"
                     await self.log_rejection_change(sym, f"ingen positiv katalysator ({detail})")
-                    continue
+                    records.append(rec); continue
 
                 # ── Daglige filtre: D2 (forrige luk > SMA200) + prior_high + prior_close ──
                 ctx = await self._build_daily_context(sym)
                 if ctx is None:
                     self._vetted[sym] = False
+                    rec["verdict"] = "mangler_daglig_data"
                     await self.log_rejection_change(sym, "manglende daglige data (SMA200/prior)")
-                    continue
+                    records.append(rec); continue
                 if not (ctx["prior_close"] > ctx["sma200"]):
                     self._vetted[sym] = False
+                    rec["verdict"] = "d2_fejl_under_sma200"
+                    rec["detail"] = f"luk {ctx['prior_close']:.2f} < SMA200 {ctx['sma200']:.2f}"
                     await self.log_rejection_change(
                         sym, f"D2 fejl: forrige luk {ctx['prior_close']:.2f} < SMA200 {ctx['sma200']:.2f}")
-                    continue
+                    records.append(rec); continue
 
                 # ── Premarket-high (I1-reference) ──
                 ctx["premarket_high"] = await self._premarket_high(sym)
@@ -431,9 +445,14 @@ class TrendJoinLive(BaseStrategy):
                 self.universe.append(sym)
                 added.append(sym)
                 self._diag_vetted += 1
+                rec["verdict"] = "OPTAGET"
+                records.append(rec)
                 await self._log(
                     f"📰➕ {sym} optaget: gap {change:+.1f}%, katalysator «{detail[:70]}» "
                     f"(prior_high ${ctx['prior_high']:.2f}, pm_high ${ctx['premarket_high']:.2f})")
+
+        # ── Forensik: skriv hele scannet (top-gappers + verdikt + max-change) ──
+        await self._log_scan(records, max_change, top_sym, added)
 
         if added:
             self._status("universe_ready",
@@ -441,6 +460,32 @@ class TrendJoinLive(BaseStrategy):
                          f"(i alt {len(self.universe)})")
             await self.log_universe(self.universe, meta={
                 "added": added, "min_gap_pct": MIN_GAP_PCT, "source": "tv_top_gainers+finnhub"})
+
+    async def _log_scan(self, records: list[dict], max_change: Optional[float],
+                        top_sym: Optional[str], added: list[str]) -> None:
+        """Skriv ét 'trendjoin_scan'-event pr. 30-min-runde (forensik): alle top-gappers
+        med verdikt + max-change + top-gapper + hvem der blev optaget. Læses af
+        trendjoin_forensik.py. Best-effort — må aldrig nedbryde scannet."""
+        scan_et = self._last_scan or datetime.now(ET)
+        mc = (f"{max_change:+.1f}% ({top_sym})" if max_change is not None else "—")
+        await self._log(f"🔁 30-min scan: {len(records)} gappers · max-change {mc} · "
+                        f"{len(added)} ny optaget · pulje {len(self.universe)}")
+        if not self._journal:
+            return
+        try:
+            await self._journal.log_event(
+                source=self.name, event_type="trendjoin_scan",
+                payload={
+                    "scan_et": scan_et.strftime("%Y-%m-%d %H:%M:%S"),
+                    "num_gappers": len(records),
+                    "max_change": round(max_change, 2) if max_change is not None else None,
+                    "top_gapper": top_sym,
+                    "added": added,
+                    "universe_size": len(self.universe),
+                    "gappers": records,
+                })
+        except Exception as e:
+            logger.error(f"[TrendJoin] scan-event-skriv fejlede: {e}")
 
     async def _scan_top_gappers(self) -> list[tuple]:
         """Top-gainers (= gappers, sorteret efter dagsændring) via TV-screeneren,
