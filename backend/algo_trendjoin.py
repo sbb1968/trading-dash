@@ -70,6 +70,9 @@ UNIVERSE_TOP_N      = 25
 UNIVERSE_PRICE_MIN  = 3.0
 UNIVERSE_PRICE_MAX  = 500.0  # large caps gapper sjældent — lad prisloftet være vidt
 UNIVERSE_MIN_VOLUME = 500_000
+REQUIRE_ALL_GREEN   = True   # TV: kun aktier hvor 1D + 1W + 1M ændring ALLE er positive
+                            # (optrend-bekræftelse; matcher join-tesen). Færre, men renere
+                            # kandidater (scanner-koden: win rate ~23% -> ~48% i deres test).
 SCAN_TIMEOUT_SEC    = 15
 
 # ── Operationelt (spejler BuyTheDip) ────────────────────────────
@@ -497,7 +500,7 @@ class TrendJoinLive(BaseStrategy):
                 loop.run_in_executor(None, lambda: fetch_tv_top_gainers(
                     top_n=UNIVERSE_TOP_N, price_min=UNIVERSE_PRICE_MIN,
                     price_max=UNIVERSE_PRICE_MAX, min_volume=UNIVERSE_MIN_VOLUME,
-                    require_all_green=False)),    # rå gappere; vi gater selv på gap/SMA/katalysator
+                    require_all_green=REQUIRE_ALL_GREEN)),   # 1D+1W+1M grønne (optrend) + egne gates
                 timeout=SCAN_TIMEOUT_SEC)
         except asyncio.TimeoutError:
             logger.error("[TrendJoin] TV top-gainer scan timeout")
