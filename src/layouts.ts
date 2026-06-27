@@ -18,7 +18,8 @@ export type WindowId =
   | "intradagreport"
   | "intradagtop10"
   | "dagenslog"
-  | "haltscanner";
+  | "haltscanner"
+  | "sektorniche";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   watchlist:    "Watchlist",
@@ -49,6 +50,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   intradagtop10:   "Day trading Top-10",
   dagenslog:       "Dagens log",
   haltscanner:     "Halt-scanner",
+  sektorniche:     "Sektorer",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────

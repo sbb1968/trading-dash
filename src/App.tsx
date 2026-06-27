@@ -23,6 +23,7 @@ import { SwingReport } from "./SwingReport";
 import { BuyHoldReport } from "./BuyHoldReport";
 import { IntradagReport } from "./IntradagReport";
 import { IntradagTop10 } from "./IntradagTop10";
+import { SectorNiche } from "./SectorNiche";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -937,6 +938,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "buyhold": return <BuyHoldReport />;
     case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} />;
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
+    case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
