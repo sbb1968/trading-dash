@@ -92,15 +92,17 @@ BAR_SIZE                 = "5 mins"
 # ═══════════════════════════════════════════════════════════════
 async def check_positive_catalyst(
     session: aiohttp.ClientSession, ticker: str
-) -> tuple[bool, str]:
+) -> tuple[bool, str, float]:
     """Har `ticker` en FRISK, POSITIV nyhedskatalysator i dag?
 
     Henter Finnhub company-news (i dag + i går), kører keyword-sentiment på hver
     overskrift (samme heuristik som News Room). Positiv katalysator = mindst én
     'bullish' overskrift nyere end NEWS_MAX_AGE_HOURS OG netto bullish (flere
-    bullish end bearish blandt friske). Returnerer (har_katalysator, overskrift).
+    bullish end bearish blandt friske). Returnerer (har_katalysator, overskrift,
+    best_ts) — best_ts = epoch (UTC) for den valgte bullish overskrift, 0.0 hvis ingen.
 
-    Best-effort: enhver fejl/timeout → (False, "<årsag>"). Det er KERNEN i
+    Best-effort: enhver fejl/timeout → (False, "<årsag>", 0.0). De FØRSTE TO
+    returværdier er UÆNDREDE; kun best_ts (forensik) er tilføjet. Det er KERNEN i
     strategien — ingen katalysator, ingen handel.
     """
     to_date = datetime.now().date()
@@ -112,14 +114,14 @@ async def check_positive_catalyst(
         async with session.get(url, params=params,
                                timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
-                return False, f"finnhub HTTP {resp.status}"
+                return False, f"finnhub HTTP {resp.status}", 0.0
             items = await resp.json()
     except asyncio.TimeoutError:
-        return False, "finnhub timeout"
+        return False, "finnhub timeout", 0.0
     except Exception as e:
-        return False, f"finnhub fejl: {type(e).__name__}"
+        return False, f"finnhub fejl: {type(e).__name__}", 0.0
     if not isinstance(items, list) or not items:
-        return False, "ingen nyheder"
+        return False, "ingen nyheder", 0.0
 
     cutoff = datetime.now().timestamp() - NEWS_MAX_AGE_HOURS * 3600
     bull, bear, best = 0, 0, ""
@@ -139,10 +141,10 @@ async def check_positive_catalyst(
         elif sent == "bearish":
             bear += 1
     if bull > 0 and bull > bear:
-        return True, best
+        return True, best, best_ts
     if bull > 0 and bull <= bear:
-        return False, f"blandet/negativ (bull={bull} bear={bear})"
-    return False, "ingen frisk positiv nyhed"
+        return False, f"blandet/negativ (bull={bull} bear={bear})", 0.0
+    return False, "ingen frisk positiv nyhed", 0.0
 
 
 def _swing_low_2_2(bars: list[Bar]) -> Optional[float]:
@@ -413,13 +415,17 @@ class TrendJoinLive(BaseStrategy):
                     rec["verdict"] = "tidl_afvist"; records.append(rec); continue
 
                 # ── KERNE: positiv nyhedskatalysator? ──
-                has_cat, detail = await check_positive_catalyst(session, sym)
+                has_cat, detail, catalyst_ts = await check_positive_catalyst(session, sym)
                 await asyncio.sleep(1.1)   # Finnhub rate-limit
                 rec["detail"] = detail[:120]
                 if not has_cat:
                     self._vetted[sym] = False
                     rec["verdict"] = "ingen_katalysator"
                     await self.log_rejection_change(sym, f"ingen positiv katalysator ({detail})")
+                    # A2 (observe-only): registrér den nyheds-afviste gapper som MATCHET
+                    # kontrol ('shadow candidate'). Den bestod change>=3% + pris>=$3 og
+                    # fejlede KUN nyheds-gaten. Ændrer INTET ved afvisningen ovenfor.
+                    await self._log_shadow_candidate(sym, change, price, detail)
                     records.append(rec); continue
 
                 # ── Daglige filtre: D2 (forrige luk > SMA200) + prior_high + prior_close ──
@@ -441,6 +447,7 @@ class TrendJoinLive(BaseStrategy):
                 ctx["premarket_high"] = await self._premarket_high(sym)
                 ctx["gap_pct"] = change
                 ctx["catalyst"] = detail
+                ctx["catalyst_ts"] = catalyst_ts   # A1: til catalyst_age ved entry-forensik
                 ctx["hod"] = 0.0
                 ctx["lod"] = float("inf")
                 self._ctx[sym] = ctx
@@ -489,6 +496,29 @@ class TrendJoinLive(BaseStrategy):
                 })
         except Exception as e:
             logger.error(f"[TrendJoin] scan-event-skriv fejlede: {e}")
+
+    async def _log_shadow_candidate(self, sym: str, change: float, price: float,
+                                    detail: str) -> None:
+        """A2 (observe-only): registrér en nyheds-afvist gapper som matchet kontrol-
+        kandidat ('trendjoin_shadow_candidate') til offline A/B (trendjoin_shadow_eval.py).
+        Ændrer INGEN handelsbeslutning — append-only event. Best-effort."""
+        now_et = datetime.now(ET)
+        await self._log(f"👻 shadow-kandidat {sym}: change {change:+.1f}%, {detail[:50]}")
+        if not self._journal:
+            return
+        try:
+            await self._journal.log_event(
+                source=self.name, event_type="trendjoin_shadow_candidate", symbol=sym,
+                payload={
+                    "symbol": sym,
+                    "scan_ts_utc": now_et.timestamp(),   # UTC-epoch (tz-aware -> korrekt)
+                    "scan_et": now_et.strftime("%H:%M:%S"),
+                    "change_pct": round(change, 2),
+                    "price": round(price, 2),
+                    "news_detail": detail[:120],
+                })
+        except Exception as e:
+            logger.error(f"[TrendJoin] shadow-candidate-skriv fejlede: {e}")
 
     async def _scan_top_gappers(self) -> list[tuple]:
         """Top-gainers (= gappers, sorteret efter dagsændring) via TV-screeneren,
@@ -762,6 +792,11 @@ class TrendJoinLive(BaseStrategy):
                 risk_per_share = entry * STOP_PCT  # degenerate-vagt
         entry_time = datetime.now(ET)
         R = risk_per_share
+        # A1: katalysator-alder ved entry (frisk = lille). UTC-epoch på begge sider
+        # (entry_time er tz-aware -> .timestamp() = UTC; Finnhub-ts er UTC) -> ingen tz-fælde.
+        _cat_ts = ctx.get("catalyst_ts", 0.0) or 0.0
+        catalyst_age_min = (round((entry_time.timestamp() - _cat_ts) / 60.0, 1)
+                            if _cat_ts > 0 else None)
 
         try:
             from orders_tracker import get_tracker
@@ -804,7 +839,9 @@ class TrendJoinLive(BaseStrategy):
                 variant_name=self.name)
             snap["trendjoin"] = {"gap_pct": round(ctx.get("gap_pct", 0), 4),
                                  "stop": round(stop, 4), "R": round(R, 4),
-                                 "catalyst": str(ctx.get("catalyst", ""))[:200]}
+                                 "catalyst": str(ctx.get("catalyst", ""))[:200],
+                                 "catalyst_ts": round(_cat_ts, 0),
+                                 "catalyst_age_min": catalyst_age_min}
             if self._journal:
                 await self._journal.log_event(source=self.name, event_type="trade_forensics",
                                               symbol=ticker, payload=snap)
@@ -816,8 +853,10 @@ class TrendJoinLive(BaseStrategy):
                 "type": "algo_trade", "strategy": self.name, "action": "buy",
                 "ticker": ticker, "price": entry, "shares": shares,
                 "time": entry_time.strftime("%H:%M:%S")})
+        _age_txt = f"{catalyst_age_min:.0f} min" if catalyst_age_min is not None else "?"
         await self._log(f"🚀 {ticker}: BUY {shares} @ ${entry:.2f} (stop ${stop:.2f}, R ${R:.2f}, "
-                        f"gap {ctx.get('gap_pct',0):+.1f}%, target1 ${entry + PARTIAL_R*R:.2f})")
+                        f"gap {ctx.get('gap_pct',0):+.1f}%, target1 ${entry + PARTIAL_R*R:.2f}, "
+                        f"katalysator-alder {_age_txt})")
 
     # -------------------------------------------------------------
     # Exit — stop-first · partial 1/3 @0.75R · BE @1.0R · 5m swing-low-trail
