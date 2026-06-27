@@ -2970,6 +2970,34 @@ async def list_strategy_docs(strategy_name: str):
         "versions": versions_available,
     }
 
+
+# ── Sektor- & niche-overblik (TradingView ETF-data) ───────────
+_sector_cache: dict = {"ts": 0.0, "data": None}
+SECTOR_CACHE_TTL = 60   # sek — TV-data er alligevel ~15 min forsinket
+
+@app.get("/sectors/overview")
+async def sectors_overview(force: bool = False):
+    """De 11 SPDR-sektorer + niche-underinddeling med ydeevne (nu/1U/1M) og AUM-andel
+    (de 11 summerer til 100; niche-%'er summerer til 100 pr. sektor). Cachet ~60s; det
+    blokerende TV-request køres i executor så det ikke fryser event-loopet."""
+    import time as _time
+    now = _time.time()
+    if (not force and _sector_cache["data"] is not None
+            and (now - _sector_cache["ts"]) < SECTOR_CACHE_TTL):
+        return {**_sector_cache["data"], "cached": True}
+    from sector_niche import build_overview
+    loop = asyncio.get_event_loop()
+    try:
+        data = await loop.run_in_executor(None, build_overview)
+    except Exception as e:
+        if _sector_cache["data"] is not None:
+            return {**_sector_cache["data"], "cached": True, "stale": True}
+        raise HTTPException(status_code=502, detail=f"Kunne ikke hente sektor-data: {e}")
+    if data.get("ok"):
+        _sector_cache["ts"] = now
+        _sector_cache["data"] = data
+    return {**data, "cached": False}
+
 # ── /ws/strategy ──────────────────────────────────────────────
 @app.websocket("/ws/strategy")
 async def websocket_strategy(websocket: WebSocket):
