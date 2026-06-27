@@ -418,9 +418,11 @@ export function LiveAlgo() {
           }}>
             📋 Strategier ({strategies.length})
           </div>
-          {selectedStrategy && (() => {
-            // Map display name → docs filename key
-            const docsKey = STRATEGY_DOCS_KEYS[selectedStrategy] || "confluence2";
+          {selectedStrategy && STRATEGY_DOCS_KEYS[selectedStrategy] && (() => {
+            // Map display name → docs filename key. Vis KUN docs-knapper for
+            // strategier MED egne docs — ellers (BuyTheDip/Europa/Trend Join)
+            // intet, så vi ikke fejlagtigt viser en anden strategis docs.
+            const docsKey = STRATEGY_DOCS_KEYS[selectedStrategy] as string;
             return (
               <div style={{ display: "flex", gap: 6 }}>
                 <button
