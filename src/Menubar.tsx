@@ -70,6 +70,11 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
 // Flad liste af alle shortcut-entries til brug i keydown-listener
 const ALL_WIN_SHORTCUTS: WinEntry[] = NON_CHART_GROUPS.flatMap(g => g.items);
 
+// Studio åbnes på ALGOSERVEREN (iben-algo) — den er datasamleren: alle maskiner pusher
+// deres journal dertil, så KUN dens Studio viser HELE flåden i maskine-dropdownen.
+// 127.0.0.1 ville på en workstation kun vise den lokale maskine (intet replikeret arkiv).
+const STUDIO_URL = "http://iben-algo:8000/studio";
+
 // ── Temaer ────────────────────────────────────────────────────
 const THEMES: { id: string; label: string; dot: string; group: string }[] = [
   { id: "original",   label: "Original",       dot: "#555555", group: "Original" },
@@ -463,8 +468,8 @@ export function Menubar({
       <div className="menubar-right">
         <span className="menubar-sep" />
         <button className="menu-btn menu-btn-door menu-btn-door-primary"
-                onClick={() => openUrl("http://127.0.0.1:8000/studio")}
-                title="Åbn Studio (admin og analyse i browser)">
+                onClick={() => openUrl(STUDIO_URL)}
+                title="Åbn Studio på algoserveren (hele flåden) i browser">
           🎛 Studio
         </button>
         <button className="menu-btn menu-btn-door"
