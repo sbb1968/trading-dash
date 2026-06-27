@@ -18,6 +18,7 @@ Stilen spejler test_reconcile_observation.py (PASS/FAIL, SystemExit(1) ved fejl)
 """
 
 import asyncio
+import sys
 import types
 from datetime import datetime
 
@@ -39,6 +40,13 @@ def check(name, cond, detail=""):
         raise SystemExit(1)
 
 
+def report(name, cond, detail=""):
+    """Soft-check: printer PASS/FAIL men KASTER IKKE — til Del C, hvis resultat er DATA
+    (afgør næste skridt), ikke en forventet hård lås."""
+    print(f"  {'PASS' if cond else 'FAIL'}  {name}" + ("" if cond else f"  {detail}"))
+    return bool(cond)
+
+
 # Retry-/poll-løkker må ikke bruge rigtig tid i testen.
 async def _noop_sleep(*a, **k):
     return None
@@ -52,15 +60,21 @@ k2mod.LATE_CLOSE_MAX_MIN = 0
 # ── Mocks ──────────────────────────────────────────────────────
 class MockConn:
     """Registrerer ALLE place_paper_order-kald i order_calls."""
-    def __init__(self, order_ret=None, positions=None, last=10.0):
+    def __init__(self, order_ret=None, positions=None, last=10.0, open_orders=None):
         self.connected = True
         self.order_calls = []
         self._order_ret = order_ret            # dict | callable(call_idx)->dict | None
         self._positions = positions or []
         self._last = last
+        self._open_orders = open_orders or []  # dup-vagt (get_open_orders) — default tom
 
     def get_positions(self):
         return self._positions
+
+    async def get_open_orders(self):
+        # Dup-vagten i _reconcile_close læser denne. Default tom -> samme adfærd som før
+        # dup-vagten fandtes (de eksisterende A/C/D-scenarier placerer ordrer uændret).
+        return list(self._open_orders)
 
     async def get_snapshot(self, ticker):
         return {"last": self._last}
@@ -419,11 +433,157 @@ def section_E():
         k2mod.LATE_CLOSE_MAX_MIN, k2mod.FORCE_CLOSE_RETRY_DELAY, k2mod.SESSION_END = _save
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# REGRESSIONS-LÅS MOD RECONCILE OVER-SELL (SPEC_reconcile_oversell)
+# Tester den DELTE get_open_orders + det fælles _reconcile_close-mønster, så
+# COGT-over-sell-mekanismen er låst for ALLE fire algoer (K2 som repræsentant).
+# ════════════════════════════════════════════════════════════════════════════
+
+class PersistentConn:
+    """Persistent ordrebog + position der overlever 'genstarter' (friske algo-instanser
+    deler SAMME conn = TWS-state overlever). Markedet lukket: place_paper_order fylder
+    IKKE og lader ordren ligge resting (get_open_orders ser den næste pas). Markedet
+    åbent: fylder + opdaterer positionen. stale_positions overstyrer get_positions
+    (simulerer et forsinket positions-feed)."""
+    def __init__(self, position=0, market_open=False, stale_positions=None, last=9.0):
+        self.connected = True
+        self.position = position             # reel net IBKR-position i COGT
+        self.market_open = market_open
+        self._stale = stale_positions        # hvis sat: get_positions returnerer denne
+        self.orderbook = []                  # resting orders (dup-vagtens kilde)
+        self.order_calls = []                # ALLE place_paper_order-kald
+        self._last = last
+
+    def get_positions(self):
+        if self._stale is not None:
+            return self._stale
+        return [{"ticker": "COGT", "position": self.position}] if self.position else []
+
+    async def get_snapshot(self, ticker):
+        return {"last": self._last}
+
+    async def get_open_orders(self):
+        return list(self.orderbook)
+
+    async def place_paper_order(self, ticker, action, quantity, source="",
+                                await_fill_sec=0, **kw):
+        self.order_calls.append((ticker, action, quantity))
+        if self.market_open:                 # fylder straks
+            self.position += (-quantity if action.upper() == "SELL" else quantity)
+            return {"filled": quantity, "avg_fill": self._last, "status": "Filled",
+                    "order_id": len(self.order_calls)}
+        # markedet lukket -> ordren ligger resting (ufyldt), som en GTC fra en tidl. session
+        self.orderbook.append({"symbol": ticker.upper(), "action": action.upper(),
+                               "remaining": float(quantity), "status": "PreSubmitted",
+                               "orderRef": source})
+        return {"filled": 0, "avg_fill": 0, "status": "PreSubmitted",
+                "order_id": len(self.order_calls)}
+
+    def fill_resting(self):
+        """Simulér at markedet åbner og de hvilende ordrer fylder: anvend dem på
+        positionen og ryd ordrebogen (de forsvinder så fra openTrades)."""
+        for o in self.orderbook:
+            self.position += (-int(o["remaining"]) if o["action"] == "SELL"
+                              else int(o["remaining"]))
+        self.orderbook = []
+
+
+# ── SEKTION F (Del A) — get_open_orders læser openTrades (lås commit 5fc4aba) ──
+def section_F():
+    print("\nSektion F (Del A) — get_open_orders læser openTrades (ikke den tomme returværdi)")
+    conn = ibkr_connect.IBKRConnection.__new__(ibkr_connect.IBKRConnection)
+    conn._connect_attempted = True
+    conn.paper = True
+    resting = types.SimpleNamespace(
+        order=types.SimpleNamespace(action="SELL", totalQuantity=14, orderRef="Konfluens 2"),
+        orderStatus=types.SimpleNamespace(status="PreSubmitted", remaining=14),
+        contract=types.SimpleNamespace(symbol="COGT"))
+
+    class MockIB:
+        async def reqAllOpenOrdersAsync(self):
+            return []                        # upålidelig returværdi (tom for cross-client)
+        def openTrades(self):
+            return [resting]                 # akkumuleret state = cross-client sandhed
+
+    conn.ib = MockIB()
+    out = asyncio.run(conn.get_open_orders())
+    cogt = [o for o in out if o["symbol"] == "COGT" and o["action"] == "SELL"]
+    check("F1 get_open_orders fandt COGT-SELL via openTrades (ikke tom returværdi)",
+          len(cogt) == 1 and cogt[0]["remaining"] == 14.0, out)
+    # Hvis nogen reverterer til 'return await reqAllOpenOrdersAsync()' fejler F1 — pointen.
+
+
+# ── SEKTION G (Del B) — cross-restart: ingen over-sell (alle algoer) ───────────
+def section_G():
+    print("\nSektion G (Del B) — cross-restart: dup-vagt forhindrer over-sell over 5 genstarter")
+    conn = PersistentConn(position=14, market_open=False)   # COGT long +14, marked lukket
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14)])
+
+    for _ in range(5):                       # 5 'genstarter', frisk algo, SAMME conn
+        algo = make_algo(conn, journal)
+        asyncio.run(algo._reconcile_orphans())
+
+    sells = [c for c in conn.order_calls if c[1] == "SELL"]
+    check("G1 pas 1 placerede SELL COGT 14", ("COGT", "SELL", 14) in conn.order_calls, conn.order_calls)
+    check("G2 dup-vagt: KUN én SELL over 5 genstarter (ingen over-sell)", len(sells) == 1, conn.order_calls)
+    check("G3 total SELL-mængde == 14 (aldrig 28+)", sum(c[2] for c in sells) == 14, sells)
+    check("G4 ufyldt → INGEN reconcile_flatten (row forbliver åben)", journal.closes == [], journal.closes)
+
+    conn.fill_resting()                      # den hvilende SELL fylder -> position 0
+    algo = make_algo(conn, journal)
+    asyncio.run(algo._reconcile_orphans())   # 6. pas
+    sells2 = [c for c in conn.order_calls if c[1] == "SELL"]
+    check("G5 efter fyldning: 6. pas placerer INGEN ny ordre", len(sells2) == 1, conn.order_calls)
+    check("G6 net==0 → bogført lukket præcis ÉN gang (reconcile_phantom)",
+          journal.closes == ["reconcile_phantom"], journal.closes)
+
+
+# ── SEKTION H (Del C) — residual: stale position + fyldt-og-forsvundet ordre ───
+#    DATA, ikke en hård lås: resultatet afgør om handelsstien skal røres.
+def section_H():
+    print("\nSektion H (Del C) — residual-kant: STALE +14 + tom ordrebog  [DATA, ikke hård lås]")
+    # Reel position = 0 (en tidl. reconcile-close fyldte ALLEREDE), MEN feedet er bagud:
+    conn = PersistentConn(position=0, market_open=False,
+                          stale_positions=[{"ticker": "COGT", "position": 14}])  # stale +14
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14)])           # journal-row endnu ikke lukket
+    algo = make_algo(conn, journal)
+    asyncio.run(algo._reconcile_orphans())
+
+    extra_sell = [c for c in conn.order_calls if c[1] == "SELL"]
+    safe = (len(extra_sell) == 0)
+    return report("H1 stale +14 + tom ordrebog → INGEN ny SELL (reel position er flad)",
+                  safe, f"placerede {extra_sell}")
+
+
 if __name__ == "__main__":
-    print("Samlet test: K2 reconcile-oprydning + robust force-close")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+    print("Samlet test: K2 reconcile-oprydning + robust force-close + over-sell-regressionslås")
     section_A()
     section_B()
     section_C()
     section_D()
     section_E()
-    print("\nALLE TESTS BESTÅET ✓")
+    section_F()
+    section_G()
+    print("\nHÅRDE LÅSE BESTÅET (Sektion A–E + Del A + Del B) ✓")
+
+    delc_ok = section_H()
+    print("\n" + "=" * 72)
+    if delc_ok:
+        print("  DEL C: PASS — stale+tom-residualen er IKKE exploitbar på nuværende kode.")
+        print("  → Sløjfen er lukket; ingen ændring i handelsstien nødvendig.")
+    else:
+        print("  DEL C: FAIL (DATA, ikke en regression) — reconcile placerer en SELL på en")
+        print("  STALE +14 mens den reelle position er flad. Residualen er ægte under et")
+        print("  forsinket positions-feed (reconcile læser positionen som sandhed; _dups er")
+        print("  eneste anden vagt, og ordrebogen er tom fordi closen allerede fyldte).")
+        print("  → Næste skridt: SPEC_reconcile_idempotens.md (stabil reconcile-close-nøgle")
+        print("    pr. trade_id, så der afgives højst ÉN reconcile-close pr. position —")
+        print("    uafhængigt af feed-timing). Del C (H1) er accept-kriteriet: skal vende")
+        print("    fra FAIL til PASS når fixet er på plads.")
+    print("=" * 72)
