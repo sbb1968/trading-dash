@@ -10,6 +10,7 @@ const STRAT_TAG: Record<string, string> = {
   "Konfluens 2":      "[KONF2] ",
   "Europa-reversion": "[REV] ",
   "BuyTheDip":        "[DIP] ",
+  "Trend Join Long":  "[TJL] ",
   "Momentum ORB":     "[ORB] ",
 };
 const stratPrefix = (name?: string): string => (name ? STRAT_TAG[name] ?? "" : "");
