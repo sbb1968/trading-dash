@@ -278,6 +278,53 @@ class IBKRConnection:
                 continue
         return out
 
+    async def get_order_outcome(self, order_ref: str) -> str:
+        """Slaa udfaldet af en tidligere afgivet ordre op via dens DETERMINISTISKE orderRef.
+        Til idempotent reconcile-close. Returnerer EN af:
+          'active'            — ordren hviler stadig (openTrades, cross-client)
+          'filled'            — en execution m. ref'en findes (account+dag-scoped, overlever genstart)
+          'terminal_unfilled' — completed order m. ref'en er Cancelled/Expired/Rejected (ufyldt)
+          'not_findable'      — kan ikke fastslaas (KONSERVATIVT default -> kalderen placerer ALDRIG
+                                paa dette; den falder tilbage paa positions-korroboration)
+        Best-effort: enhver fejl -> 'not_findable'. KRITISK: returnér KUN 'terminal_unfilled' ved
+        POSITIV annullerings-bekraeftelse — ellers 'not_findable', saa vi aldrig gen-placerer paa tvivl."""
+        if not order_ref or not self.connected:
+            return "not_findable"
+        # 1) aktiv?
+        try:
+            for o in await self.get_open_orders():
+                if (o.get("orderRef") or "") == order_ref:
+                    return "active"
+        except Exception:
+            pass
+        # 2) fyldt? executions baerer orderRef og er account+dag-scoped (overlever genstart)
+        try:
+            from ib_async import ExecutionFilter
+            await asyncio.wait_for(self.ib.reqExecutionsAsync(ExecutionFilter()), timeout=5)
+        except Exception:
+            pass
+        try:
+            for f in self.ib.fills():
+                if (getattr(f.execution, "orderRef", "") or "") == order_ref:
+                    return "filled"
+        except Exception:
+            pass
+        # 3) terminal-ufyldt? completed orders (best-effort; KUN positiv annullering)
+        try:
+            await asyncio.wait_for(self.ib.reqCompletedOrdersAsync(apiOnly=False), timeout=5)
+            TERMINAL = {"Cancelled", "ApiCancelled", "Inactive", "Expired", "Rejected"}
+            for t in self.ib.trades():
+                if (getattr(t.order, "orderRef", "") or "") != order_ref:
+                    continue
+                st = getattr(t.orderStatus, "status", "")
+                if st == "Filled" or (getattr(t.orderStatus, "filled", 0) or 0) > 0:
+                    return "filled"
+                if st in TERMINAL:
+                    return "terminal_unfilled"
+        except Exception:
+            pass
+        return "not_findable"
+
     # ── Historiske bars ───────────────────────────────────────
     async def get_historical_bars(
         self,
@@ -423,12 +470,17 @@ class IBKRConnection:
         limit_price:    float = 0,
         source:         str   = "",
         await_fill_sec: float = 0,
+        order_ref:      Optional[str] = None,
     ) -> Optional[dict]:
         """Sender en ordre til paper trading kontoen.
 
         source: strateginavn (fx "Momentum ORB"). Saettes som orderRef paa
         ordren, saa fills og ordrehistorik kan spores tilbage til den strategi
         der sendte ordren — afgoerende naar flere strategier deler samme konto.
+
+        order_ref: eksplicit, DETERMINISTISK orderRef (fx reconcile_close_{trade_id}).
+        Overstyrer `source` paa ordren, saa en reconcile-close kan slaas entydigt op
+        bagefter (idempotens). Falder tilbage paa `source` naar None.
         """
         if not self.connected:
             return None
@@ -442,8 +494,9 @@ class IBKRConnection:
             contract = await self._resolve_contract(ticker)
             order = MarketOrder(action, quantity) if order_type == "MKT" \
                     else LimitOrder(action, quantity, limit_price)
-            if source:
-                order.orderRef = source
+            _ref = order_ref or source
+            if _ref:
+                order.orderRef = _ref
             trade = self.ib.placeOrder(contract, order)
 
             # await_fill_sec=0 (default): bevarer hidtidig adfærd — vent 1 sek

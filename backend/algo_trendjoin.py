@@ -32,6 +32,8 @@ import pytz
 
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
+from reconcile_idempotency import (
+    RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 from strategies.base import Bar
 from trade_forensics import build_entry_snapshot, build_exit_snapshot
 from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE, _guess_sentiment
@@ -310,6 +312,13 @@ class TrendJoinLive(BaseStrategy):
             if shares <= 0:
                 continue
             net = ibkr_by_ticker.get(sym, 0)
+
+            # Idempotens-gate (lukker Del C): allerede en reconcile-close afgivet for row'en?
+            if (row.get("current_stage") or "") == RECONCILE_CLOSING:
+                if await self._reconcile_confirm(sym, row, shares, sign, net):
+                    cleaned += 1
+                continue
+
             if net == 0:
                 await self._reconcile_mark_closed(sym, row)
                 cleaned += 1
@@ -344,8 +353,17 @@ class TrendJoinLive(BaseStrategy):
                 f"({_dups[0]['status']}, rest {_dups[0]['remaining']:.0f}) — lægger IKKE duplikat.",
                 level="warning")
             return
+        # Idempotens: durabel markoer + deterministisk orderRef FOER vi venter paa fyldning.
+        _tid = row.get("trade_id")
+        _ref = reconcile_close_ref(_tid)
+        if _tid and self._journal:
+            try:
+                await self._journal.update_trade_state(_tid, current_stage=RECONCILE_CLOSING)
+            except Exception as e:
+                logger.error(f"[TrendJoin] kunne ikke saette reconcile_closing-markoer ({sym}): {e}")
         result = await self.conn.place_paper_order(
-            sym, close_action, shares, source=self.name, await_fill_sec=CLOSE_FILL_WAIT_SEC)
+            sym, close_action, shares, source=self.name, await_fill_sec=CLOSE_FILL_WAIT_SEC,
+            order_ref=_ref)
         if not result:
             await self._log(f"⚠ Kunne ikke lukke gammel position {sym} — luk manuelt i TWS",
                             level="warning")
@@ -379,6 +397,47 @@ class TrendJoinLive(BaseStrategy):
                 payload={"reconcile": True, "phantom": True})
         await self._log(f"🧹 {sym}: TrendJoin-journal stod åben men IBKR er flad — bogført "
                         f"lukket (fantom, nul-P&L), ingen ordre sendt", level="warning")
+
+    async def _reconcile_confirm(self, sym: str, row: dict, shares: int, sign: int,
+                                 net) -> bool:
+        """Bekraeftelses-sti for en row i reconcile_closing (delt, ren beslutning via
+        decide_confirmation). Placerer ALDRIG paa UKENDT udfald (Del C-laasen)."""
+        ref = reconcile_close_ref(row.get("trade_id"))
+        net_sign = 1 if net > 0 else (-1 if net < 0 else 0)
+        position_open = (net != 0 and net_sign == sign and abs(net) >= shares)
+        try:
+            outcome = await self.conn.get_order_outcome(ref)
+        except Exception:
+            outcome = "not_findable"
+        decision = decide_confirmation(outcome, position_open)
+        if decision == WAIT:
+            await self._log(f"⏸ {sym}: reconcile-close ({ref}) hviler stadig (udfald={outcome}) — afventer",
+                            level="warning")
+            return False
+        if decision == FLATTEN:
+            await self._reconcile_mark_filled(sym, row, outcome)
+            return True
+        if decision == RETRY:
+            await self._log(f"↻ {sym}: reconcile-close bekraeftet doed-ufyldt (udfald={outcome}), "
+                            f"position stadig aaben — genafgiver", level="warning")
+            await self._reconcile_close(sym, row, shares, sign)
+            return False
+        await self._log(f"🔎 {sym}: reconcile-close ({ref}) ubekraeftet og ikke synlig; position ser "
+                        f"stadig aaben ud (net {net:+.0f}) — observe-only, afventer", level="warning")
+        return False
+
+    async def _reconcile_mark_filled(self, sym: str, row: dict, outcome: str) -> None:
+        """Tidligere reconcile-close bekraeftet fyldt (eller position flad) → bogfoer row'en
+        lukket (reconcile_flatten, nul-P&L est.). INGEN ny ordre."""
+        trade_id = row.get("trade_id")
+        entry = row.get("entry_price") or 0.0
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id=trade_id, exit_price=entry, exit_time=datetime.now(ET),
+                exit_reason="reconcile_flatten", pnl=0.0,
+                payload={"reconcile": True, "confirmed_outcome": outcome})
+        await self._log(f"♻ {sym}: tidligere reconcile-close bekraeftet ({outcome}) — row bogfoert "
+                        f"lukket (reconcile_flatten, nul-P&L est.)", level="warning")
 
     # -------------------------------------------------------------
     # 30-min top-gapper RESCAN + nyhedskatalysator-gate + daglige filtre

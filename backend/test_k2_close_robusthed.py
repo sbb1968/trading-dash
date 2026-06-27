@@ -25,6 +25,8 @@ from datetime import datetime
 import ibkr_connect
 import algo_confluence2 as k2mod
 import trade_queries
+from reconcile_idempotency import (
+    decide_confirmation, RECONCILE_CLOSING, WAIT, FLATTEN, RETRY, OBSERVE)
 
 # Neutralisér exit-forensik på den fyldte sti (testen fokuserer på pop + bogføring;
 # forensik er allerede dækket andetsteds og kræver fuld bar-historik).
@@ -85,12 +87,16 @@ class MockConn:
         r = self._order_ret
         return r(len(self.order_calls)) if callable(r) else r
 
+    async def get_order_outcome(self, order_ref):
+        return getattr(self, "_order_outcome", "not_findable")
+
 
 class MockJournal:
     def __init__(self):
         self._db = object()          # truthy sentinel
         self.db_path = ":memory:"
         self.closes = []             # liste af exit_reason
+        self.stage_updates = []      # liste af (trade_id, current_stage)
 
     async def log_trade_close(self, **kw):
         self.closes.append(kw.get("exit_reason"))
@@ -100,6 +106,10 @@ class MockJournal:
 
     async def log_trade_open(self, **kw):
         pass
+
+    async def update_trade_state(self, trade_id, current_stage=None, **kw):
+        self.stage_updates.append((trade_id, current_stage))
+        return True
 
 
 def install_list_trades(rows, raise_exc=False):
@@ -146,9 +156,9 @@ def mk_position(shares=100, entry=5.0):
         metadata={"trade_id": "t1"})
 
 
-def row(symbol, side, shares, entry=5.0):
+def row(symbol, side, shares, entry=5.0, stage=None):
     return {"symbol": symbol, "side": side, "shares": shares,
-            "entry_price": entry, "trade_id": f"{symbol}-1"}
+            "entry_price": entry, "trade_id": f"{symbol}-1", "current_stage": stage}
 
 
 FILLED = {"filled": 100, "avg_fill": 5.10, "status": "Filled", "order_id": None}
@@ -453,6 +463,7 @@ class PersistentConn:
         self.orderbook = []                  # resting orders (dup-vagtens kilde)
         self.order_calls = []                # ALLE place_paper_order-kald
         self._last = last
+        self.order_outcome = "not_findable"  # konfigurerbart udfald til get_order_outcome
 
     def get_positions(self):
         if self._stale is not None:
@@ -464,6 +475,9 @@ class PersistentConn:
 
     async def get_open_orders(self):
         return list(self.orderbook)
+
+    async def get_order_outcome(self, order_ref):
+        return self.order_outcome
 
     async def place_paper_order(self, ticker, action, quantity, source="",
                                 await_fill_sec=0, **kw):
@@ -539,22 +553,62 @@ def section_G():
           journal.closes == ["reconcile_phantom"], journal.closes)
 
 
-# ── SEKTION H (Del C) — residual: stale position + fyldt-og-forsvundet ordre ───
-#    DATA, ikke en hård lås: resultatet afgør om handelsstien skal røres.
+# ── SEKTION H (Del C-fix) — idempotent reconcile-close (durabel reconcile_closing) ──
+#    H1 = Del C-residualen, nu LUKKET. H2/H3/H4 = vagter mod at fixet er for konservativt.
 def section_H():
-    print("\nSektion H (Del C) — residual-kant: STALE +14 + tom ordrebog  [DATA, ikke hård lås]")
-    # Reel position = 0 (en tidl. reconcile-close fyldte ALLEREDE), MEN feedet er bagud:
-    conn = PersistentConn(position=0, market_open=False,
-                          stale_positions=[{"ticker": "COGT", "position": 14}])  # stale +14
-    journal = MockJournal()
-    install_list_trades([row("COGT", "long", 14)])           # journal-row endnu ikke lukket
-    algo = make_algo(conn, journal)
-    asyncio.run(algo._reconcile_orphans())
+    print("\nSektion H (Del C-fix) — idempotent reconcile-close")
 
-    extra_sell = [c for c in conn.order_calls if c[1] == "SELL"]
-    safe = (len(extra_sell) == 0)
-    return report("H1 stale +14 + tom ordrebog → INGEN ny SELL (reel position er flad)",
-                  safe, f"placerede {extra_sell}")
+    # H1 (Del C): row i reconcile_closing + stale +14 + udfald UKENDT (not_findable, fordi
+    # closen fyldte+aldede ud) → OBSERVE, ALDRIG en ny SELL. (Var FAIL før fixet.)
+    conn = PersistentConn(position=0, market_open=False,
+                          stale_positions=[{"ticker": "COGT", "position": 14}])
+    conn.order_outcome = "not_findable"
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14, stage=RECONCILE_CLOSING)])
+    asyncio.run(make_algo(conn, journal)._reconcile_orphans())
+    check("H1 (Del C) stale +14 + reconcile_closing + udfald ukendt → INGEN ny SELL",
+          [c for c in conn.order_calls if c[1] == "SELL"] == [], conn.order_calls)
+
+    # H2: første-gangs gammel åben position (ingen markør) → afgiver ÉN close + sætter markøren.
+    conn = PersistentConn(position=14, market_open=False)
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14)])
+    asyncio.run(make_algo(conn, journal)._reconcile_orphans())
+    check("H2 første-gangs åben position → afgiver ÉN close",
+          [c for c in conn.order_calls if c[1] == "SELL"] == [("COGT", "SELL", 14)], conn.order_calls)
+    check("H2 satte reconcile_closing-markør FØR fyldning",
+          ("COGT-1", RECONCILE_CLOSING) in journal.stage_updates, journal.stage_updates)
+
+    # H3: row i reconcile_closing, den gemte close er BEKRÆFTET død-ufyldt + position stadig
+    #     åben → LEGITIM retry (frisk close). Vagt mod at fixet aldrig lukker.
+    conn = PersistentConn(position=14, market_open=False)
+    conn.order_outcome = "terminal_unfilled"
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14, stage=RECONCILE_CLOSING)])
+    asyncio.run(make_algo(conn, journal)._reconcile_orphans())
+    check("H3 bekræftet-død-ufyldt + position åben → afgiver frisk close",
+          [c for c in conn.order_calls if c[1] == "SELL"] == [("COGT", "SELL", 14)], conn.order_calls)
+
+    # H4: fantom uændret — IBKR flad, ingen markør, ingen prior close → mark_closed, ingen ordre.
+    conn = PersistentConn(position=0, market_open=False)
+    journal = MockJournal()
+    install_list_trades([row("COGT", "long", 14)])
+    asyncio.run(make_algo(conn, journal)._reconcile_orphans())
+    check("H4 fantom (IBKR flad) → INGEN ordre", conn.order_calls == [], conn.order_calls)
+    check("H4 fantom → bogført reconcile_phantom", journal.closes == ["reconcile_phantom"], journal.closes)
+
+
+# ── SEKTION I — decide_confirmation (delt, ren beslutningslogik) ───────────────
+def section_I():
+    print("\nSektion I — decide_confirmation (ren beslutningslogik, delt af alle fire algoer)")
+    check("I active → WAIT", decide_confirmation("active", True) == WAIT)
+    check("I filled → FLATTEN", decide_confirmation("filled", True) == FLATTEN)
+    check("I terminal_unfilled + åben → RETRY", decide_confirmation("terminal_unfilled", True) == RETRY)
+    check("I terminal_unfilled + flad → FLATTEN", decide_confirmation("terminal_unfilled", False) == FLATTEN)
+    check("I not_findable + flad → FLATTEN (position korroborerer)",
+          decide_confirmation("not_findable", False) == FLATTEN)
+    check("I not_findable + åben → OBSERVE (Del C: aldrig gen-placér)",
+          decide_confirmation("not_findable", True) == OBSERVE)
 
 
 if __name__ == "__main__":
@@ -562,7 +616,7 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):
         pass
-    print("Samlet test: K2 reconcile-oprydning + robust force-close + over-sell-regressionslås")
+    print("Samlet test: K2 reconcile-oprydning + robust force-close + idempotent over-sell-lås")
     section_A()
     section_B()
     section_C()
@@ -570,20 +624,6 @@ if __name__ == "__main__":
     section_E()
     section_F()
     section_G()
-    print("\nHÅRDE LÅSE BESTÅET (Sektion A–E + Del A + Del B) ✓")
-
-    delc_ok = section_H()
-    print("\n" + "=" * 72)
-    if delc_ok:
-        print("  DEL C: PASS — stale+tom-residualen er IKKE exploitbar på nuværende kode.")
-        print("  → Sløjfen er lukket; ingen ændring i handelsstien nødvendig.")
-    else:
-        print("  DEL C: FAIL (DATA, ikke en regression) — reconcile placerer en SELL på en")
-        print("  STALE +14 mens den reelle position er flad. Residualen er ægte under et")
-        print("  forsinket positions-feed (reconcile læser positionen som sandhed; _dups er")
-        print("  eneste anden vagt, og ordrebogen er tom fordi closen allerede fyldte).")
-        print("  → Næste skridt: SPEC_reconcile_idempotens.md (stabil reconcile-close-nøgle")
-        print("    pr. trade_id, så der afgives højst ÉN reconcile-close pr. position —")
-        print("    uafhængigt af feed-timing). Del C (H1) er accept-kriteriet: skal vende")
-        print("    fra FAIL til PASS når fixet er på plads.")
-    print("=" * 72)
+    section_H()
+    section_I()
+    print("\nALLE LÅSE BESTÅET ✓  (incl. Del C: stale-feed over-sell-residual lukket)")

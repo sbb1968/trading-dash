@@ -37,6 +37,8 @@ import pytz
 
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
+from reconcile_idempotency import (
+    RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 # Delt forensik-opsamling — samme modul K2 bruger. De generiske builders beregner
 # indikatorerne (RSI/MACD/BB/VWAP/EMA) via compute_all og samler tape/depth,
 # strategi-agnostisk. EUREVERSION lægger sin egen bånd/z-blok oveni.
@@ -271,8 +273,14 @@ class EuropaReversionLive(BaseStrategy):
                 open_rows = []
 
             if open_rows:
-                # Ægte vores (lukke-ordre fyldte aldrig) → luk + bogfør.
-                await self._reconcile_close(sym, qty, open_rows[0])
+                _r = open_rows[0]
+                # Idempotens-gate (lukker Del C): allerede en reconcile-close afgivet for
+                # row'en? → bekraeftelses-sti, ALDRIG blind gen-placering paa stale feed.
+                if (_r.get("current_stage") or "") == RECONCILE_CLOSING:
+                    await self._reconcile_confirm(sym, qty, _r)
+                else:
+                    # Ægte vores (lukke-ordre fyldte aldrig) → luk + bogfør.
+                    await self._reconcile_close(sym, qty, _r)
             else:
                 # Observe-only: aldrig blind-flatte.
                 await self._log(
@@ -313,9 +321,18 @@ class EuropaReversionLive(BaseStrategy):
                 level="warning")
             return
 
+        # Idempotens: durabel markoer + deterministisk orderRef FOER vi venter paa fyldning.
+        _tid = row.get("trade_id")
+        _ref = reconcile_close_ref(_tid)
+        if _tid and self._journal:
+            try:
+                await self._journal.update_trade_state(_tid, current_stage=RECONCILE_CLOSING)
+            except Exception as e:
+                logger.error(f"[Europa-reversion] kunne ikke saette reconcile_closing-markoer ({sym}): {e}")
+
         result = await self.conn.place_paper_order(
             sym, close_action, contracts, source=self.name,
-            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC, order_ref=_ref,
         )
         if not result:
             await self._log(
@@ -360,6 +377,43 @@ class EuropaReversionLive(BaseStrategy):
             f"♻ Gammel åben position {sym} ({qty:+.0f}) er lukket @ ${exit_price:.2f} "
             f"(reconcile) | P&L: ${pnl:+.2f}")
         self._status("started", f"Gammel åben position {sym} er lukket (reconcile)")
+
+    async def _reconcile_confirm(self, sym: str, qty: float, row: dict) -> None:
+        """Bekraeftelses-sti for en row der ALLEREDE er i reconcile_closing (delt, ren
+        beslutning via decide_confirmation). Placerer ALDRIG paa UKENDT udfald (Del C).
+        Kaldes kun fra 'ours'-loopet, dvs. IBKR viser en position (qty != 0)."""
+        ref = reconcile_close_ref(row.get("trade_id"))
+        position_open = (qty != 0)
+        try:
+            outcome = await self.conn.get_order_outcome(ref)
+        except Exception:
+            outcome = "not_findable"
+        decision = decide_confirmation(outcome, position_open)
+        if decision == WAIT:
+            await self._log(f"⏸ {sym}: reconcile-close ({ref}) hviler stadig (udfald={outcome}) — afventer",
+                            level="warning")
+        elif decision == FLATTEN:
+            await self._reconcile_mark_filled(sym, row, outcome)
+        elif decision == RETRY:
+            await self._log(f"↻ {sym}: reconcile-close bekraeftet doed-ufyldt (udfald={outcome}), "
+                            f"position stadig aaben — genafgiver", level="warning")
+            await self._reconcile_close(sym, qty, row)
+        else:
+            await self._log(f"🔎 {sym}: reconcile-close ({ref}) ubekraeftet og ikke synlig; position "
+                            f"ser stadig aaben ud ({qty:+.0f}) — observe-only, afventer", level="warning")
+
+    async def _reconcile_mark_filled(self, sym: str, row: dict, outcome: str) -> None:
+        """Tidligere reconcile-close bekraeftet fyldt (eller position flad) → bogfoer row'en
+        lukket (reconcile_flatten, nul-P&L est.). INGEN ny ordre."""
+        trade_id = row.get("trade_id")
+        entry = row.get("entry_price") or 0.0
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id=trade_id, exit_price=entry, exit_time=datetime.now(ET),
+                exit_reason="reconcile_flatten", pnl=0.0,
+                payload={"reconcile": True, "confirmed_outcome": outcome})
+        await self._log(f"♻ {sym}: tidligere reconcile-close bekraeftet ({outcome}) — row bogfoert "
+                        f"lukket (reconcile_flatten, nul-P&L est.)", level="warning")
 
     async def _reconcile_close_stale_journal_rows(self, ibkr_positions: list) -> None:
         """Luk åbne journal-rows (source=self.name, MES/M2K) der IKKE har nogen

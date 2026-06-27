@@ -32,6 +32,8 @@ import pytz
 
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
+from reconcile_idempotency import (
+    RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 
 # Konfluens 2 strategi-arkitektur
 from strategies.confluence2 import (
@@ -354,6 +356,14 @@ class Confluence2Live(BaseStrategy):
 
             net = ibkr_by_ticker.get(sym, 0)
 
+            # Idempotens-gate: er der ALLEREDE afgivet en reconcile-close for denne row
+            # (durabel markoer i journalen, overlever genstart)? → bekraeftelses-sti,
+            # ALDRIG blind gen-placering. Lukker Del C (over-sell paa stale feed).
+            if (row.get("current_stage") or "") == RECONCILE_CLOSING:
+                if await self._reconcile_confirm(sym, row, shares, sign, net):
+                    cleaned += 1
+                continue
+
             if net == 0:
                 # Fantom: journalen åben, IBKR flad → ordren fyldte nok aldrig.
                 await self._reconcile_mark_closed(sym, row)
@@ -409,9 +419,19 @@ class Confluence2Live(BaseStrategy):
                 level="warning")
             return
 
+        # Idempotens: saet durabel markoer + deterministisk orderRef FOER vi venter paa
+        # fyldning, saa en allerede afgivet close kan slaas entydigt op naeste pas (Del C).
+        _tid = row.get("trade_id")
+        _ref = reconcile_close_ref(_tid)
+        if _tid and self._journal:
+            try:
+                await self._journal.update_trade_state(_tid, current_stage=RECONCILE_CLOSING)
+            except Exception as e:
+                logger.error(f"[Konfluens 2] kunne ikke saette reconcile_closing-markoer ({sym}): {e}")
+
         result = await self.conn.place_paper_order(
             sym, close_action, shares, source=self.name,
-            await_fill_sec=CLOSE_FILL_WAIT_SEC,
+            await_fill_sec=CLOSE_FILL_WAIT_SEC, order_ref=_ref,
         )
         if not result:
             await self._log(
@@ -472,6 +492,53 @@ class Confluence2Live(BaseStrategy):
         await self._log(
             f"🧹 {sym}: K2-journal stod åben men IBKR er flad — bogført lukket "
             f"(fantom, nul-P&L), ingen ordre sendt", level="warning")
+
+    async def _reconcile_confirm(self, sym: str, row: dict, shares: int, sign: int,
+                                 net) -> bool:
+        """Bekraeftelses-sti for en row der ALLEREDE er i reconcile_closing. Slaar den
+        deterministiske close-ref op og beslutter via decide_confirmation (delt, ren).
+        Placerer ALDRIG en ny close paa UKENDT udfald (Del C-laasen). Returnerer True
+        hvis row'en blev bogfoert lukket."""
+        ref = reconcile_close_ref(row.get("trade_id"))
+        net_sign = 1 if net > 0 else (-1 if net < 0 else 0)
+        position_open = (net != 0 and net_sign == sign and abs(net) >= shares)
+        try:
+            outcome = await self.conn.get_order_outcome(ref)
+        except Exception:
+            outcome = "not_findable"
+        decision = decide_confirmation(outcome, position_open)
+        if decision == WAIT:
+            await self._log(f"⏸ {sym}: reconcile-close ({ref}) hviler stadig "
+                            f"(udfald={outcome}) — afventer", level="warning")
+            return False
+        if decision == FLATTEN:
+            await self._reconcile_mark_filled(sym, row, outcome)
+            return True
+        if decision == RETRY:
+            await self._log(f"↻ {sym}: reconcile-close bekraeftet doed-ufyldt "
+                            f"(udfald={outcome}), position stadig aaben — genafgiver",
+                            level="warning")
+            await self._reconcile_close(sym, row, shares, sign)
+            return False
+        # OBSERVE — Del C: udfald UKENDT + position ser stadig aaben ud → ALDRIG gen-placér.
+        await self._log(f"🔎 {sym}: reconcile-close ({ref}) ubekraeftet og ikke synlig; "
+                        f"position ser stadig aaben ud (net {net:+.0f}) — observe-only, "
+                        f"afventer (kraever evt. manuelt tjek)", level="warning")
+        return False
+
+    async def _reconcile_mark_filled(self, sym: str, row: dict, outcome: str) -> None:
+        """En tidligere reconcile-close er bekraeftet fyldt (eller positionen er flad) →
+        bogfoer row'en lukket (reconcile_flatten). INGEN ny ordre. Den faktiske fyld-pris
+        kendes ikke (ordren er aldet ud) → nul-P&L est., samme aerlige default som fantom."""
+        trade_id = row.get("trade_id")
+        entry = row.get("entry_price") or 0.0
+        if trade_id and self._journal:
+            await self._journal.log_trade_close(
+                trade_id=trade_id, exit_price=entry, exit_time=datetime.now(ET),
+                exit_reason="reconcile_flatten", pnl=0.0,
+                payload={"reconcile": True, "confirmed_outcome": outcome})
+        await self._log(f"♻ {sym}: tidligere reconcile-close bekraeftet ({outcome}) — "
+                        f"row bogfoert lukket (reconcile_flatten, nul-P&L est.)", level="warning")
 
     # -------------------------------------------------------------
     # Status broadcast
