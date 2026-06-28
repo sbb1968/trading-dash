@@ -29,6 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
+SCHEMA = 2   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -77,22 +78,75 @@ def _wiki_summary(name: str) -> dict:
     return {}
 
 
-def _yf_extra(sym: str) -> dict:
+def _num(v):
+    """float eller None (filtrerer NaN/uendelig fra)."""
+    try:
+        f = float(v)
+        return f if f == f and abs(f) != float("inf") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _yf_bundle(sym: str) -> dict:
+    """Ét yfinance-opslag: profil-felter + nøgletal + 4-års omsætning/overskud. Best-effort."""
+    out = {"employees": None, "ceo": "", "summary": "", "sector": "", "industry": "",
+           "website": "", "country": "", "stats": {}, "financials": []}
     try:
         import yfinance as yf
-        info = yf.Ticker(sym).info or {}
+        t = yf.Ticker(sym)
+        info = t.info or {}
     except Exception:
-        return {}
+        return out
+
     ceo = ""
     for o in (info.get("companyOfficers") or []):
-        t = (o.get("title") or "").lower()
-        if "chief executive" in t or t == "ceo":
+        title = (o.get("title") or "").lower()
+        if "chief executive" in title or title == "ceo":
             ceo = o.get("name", "")
             break
-    return {"employees": info.get("fullTimeEmployees"), "ceo": ceo,
-            "summary": info.get("longBusinessSummary", "") or "",
-            "sector": info.get("sector", "") or "", "industry": info.get("industry", "") or "",
-            "website": info.get("website", "") or "", "country": info.get("country", "") or ""}
+    out.update(employees=info.get("fullTimeEmployees"), ceo=ceo,
+               summary=info.get("longBusinessSummary", "") or "",
+               sector=info.get("sector", "") or "", industry=info.get("industry", "") or "",
+               website=info.get("website", "") or "", country=info.get("country", "") or "")
+    out["stats"] = {
+        "price":         _num(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "pe":            _num(info.get("trailingPE")),
+        "fwd_pe":        _num(info.get("forwardPE")),
+        "pb":            _num(info.get("priceToBook")),
+        "eps":           _num(info.get("trailingEps")),
+        "div_yield":     _num(info.get("dividendYield")),      # kan være 0.6 (%) eller 0.006 (frac)
+        "beta":          _num(info.get("beta")),
+        "profit_margin": _num(info.get("profitMargins")),      # fraktion
+        "roe":           _num(info.get("returnOnEquity")),     # fraktion
+        "rev_growth":    _num(info.get("revenueGrowth")),      # fraktion
+        "hi52":          _num(info.get("fiftyTwoWeekHigh")),
+        "lo52":          _num(info.get("fiftyTwoWeekLow")),
+    }
+
+    # 4-års omsætning + overskud (årlig resultatopgørelse)
+    try:
+        fin = t.income_stmt
+        if fin is None or getattr(fin, "empty", True):
+            fin = t.financials
+        if fin is not None and not fin.empty:
+            def _row(*names):
+                for n in names:
+                    if n in fin.index:
+                        return fin.loc[n]
+                return None
+            rev = _row("Total Revenue", "TotalRevenue", "Revenue", "Operating Revenue")
+            ni = _row("Net Income", "Net Income Common Stockholders", "NetIncome")
+            cols = list(fin.columns)[:4][::-1]   # ældste af de 4 først
+            for c in cols:
+                yr = getattr(c, "year", None) or str(c)[:4]
+                out["financials"].append({
+                    "year": int(yr) if str(yr).isdigit() else str(yr),
+                    "revenue": _num(rev[c]) if rev is not None else None,
+                    "net_income": _num(ni[c]) if ni is not None else None,
+                })
+    except Exception:
+        pass
+    return out
 
 
 def get_company_info(ticker: str, force: bool = False) -> dict:
@@ -106,7 +160,7 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
     if not force and cache.exists():
         try:
             d = json.loads(cache.read_text(encoding="utf-8"))
-            if d.get("_cached_date") == today:
+            if d.get("_cached_date") == today and d.get("_schema") == SCHEMA:
                 return d
         except Exception:
             pass
@@ -114,7 +168,7 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
     prof = _finnhub_profile(sym)
     name = prof.get("name") or sym
     wiki = _wiki_summary(name)
-    yf = _yf_extra(sym)
+    yf = _yf_bundle(sym)
 
     out = {
         "ticker":          sym,
@@ -135,8 +189,11 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
         "desc_source":     "Wikipedia" if wiki.get("extract") else ("yfinance" if yf.get("summary") else ""),
         "wiki_url":        wiki.get("url", ""),
         "thumbnail":       wiki.get("thumbnail", ""),
+        "stats":           yf.get("stats", {}),          # nøgletal (P/E, P/B, udbytte, beta, marginer…)
+        "financials":      yf.get("financials", []),     # [{year, revenue, net_income}] seneste 4 år
         "ok":              bool(prof or wiki.get("extract") or yf.get("summary")),
         "_cached_date":    today,
+        "_schema":         SCHEMA,
     }
     try:
         cache.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
