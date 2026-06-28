@@ -29,7 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
-SCHEMA = 2   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
+SCHEMA = 3   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -90,7 +90,8 @@ def _num(v):
 def _yf_bundle(sym: str) -> dict:
     """Ét yfinance-opslag: profil-felter + nøgletal + 4-års omsætning/overskud. Best-effort."""
     out = {"employees": None, "ceo": "", "summary": "", "sector": "", "industry": "",
-           "website": "", "country": "", "stats": {}, "financials": []}
+           "website": "", "country": "", "earnings_date": "", "earnings_date_end": "",
+           "stats": {}, "financials": []}
     try:
         import yfinance as yf
         t = yf.Ticker(sym)
@@ -146,6 +147,20 @@ def _yf_bundle(sym: str) -> dict:
                 })
     except Exception:
         pass
+
+    # Næste earnings-dato (yfinance calendar; 2 datoer = estimeret vindue)
+    try:
+        cal = t.calendar
+        eds = cal.get("Earnings Date") if isinstance(cal, dict) else None
+        seq = eds if isinstance(eds, (list, tuple)) else ([eds] if eds else [])
+        dates = sorted({(d.isoformat()[:10] if hasattr(d, "isoformat") else str(d)[:10])
+                        for d in seq if d})
+        if dates:
+            out["earnings_date"] = dates[0]
+            if len(dates) > 1:
+                out["earnings_date_end"] = dates[-1]
+    except Exception:
+        pass
     return out
 
 
@@ -183,6 +198,8 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
         "shares_out_m":    prof.get("shareOutstanding"),       # mio. aktier
         "employees":       yf.get("employees"),
         "ceo":             yf.get("ceo", ""),
+        "earnings_date":   yf.get("earnings_date", ""),
+        "earnings_date_end": yf.get("earnings_date_end", ""),
         "logo":            prof.get("logo", ""),
         "website":         prof.get("weburl") or yf.get("website", ""),
         "description":     wiki.get("extract") or yf.get("summary") or "",

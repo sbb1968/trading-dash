@@ -19,7 +19,18 @@ interface Company {
   market_cap_musd: number | null; shares_out_m: number | null;
   employees: number | null; ceo: string; logo: string; website: string;
   description: string; desc_source: string; wiki_url: string; ok: boolean;
+  earnings_date?: string; earnings_date_end?: string;
   stats?: Stats; financials?: Fin[];
+}
+
+function earningsLabel(d?: string, end?: string): string {
+  if (!d) return "—";
+  const dt = new Date(d + "T00:00:00");
+  if (isNaN(dt.getTime())) return d;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((dt.getTime() - today.getTime()) / 86400000);
+  const rel = days === 0 ? "i dag" : days > 0 ? `om ${days} dage` : `for ${-days} dage siden`;
+  return `${d}${end && end !== d ? ` – ${end}` : ""} (${rel})`;
 }
 
 const n2 = (v: number | null | undefined) => (v == null || !isFinite(v)) ? "—" : v.toFixed(2);
@@ -92,6 +103,7 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
     ["Land", data.country || "—"],
     ["Børs", data.exchange || "—"],
     ["IPO", data.ipo || "—"],
+    ["Næste earnings", earningsLabel(data.earnings_date, data.earnings_date_end)],
     ["Market cap", fmtCap(data.market_cap_musd)],
     ["Aktier udestående", fmtShares(data.shares_out_m)],
     ["Medarbejdere", fmtNum(data.employees)],
