@@ -29,7 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
-SCHEMA = 5   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
+SCHEMA = 6   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -52,10 +52,17 @@ def _wiki_intro(name: str, lang: str) -> dict:
     med/uden selskabs-suffiks; springer disambiguation over. Tom dict hvis intet rent hit."""
     if not name:
         return {}
-    cands = [name]
+    base = name
     for suf in _SUFFIXES:
         if name.endswith(suf):
-            cands.append(name[: -len(suf)].strip())
+            base = name[: -len(suf)].strip()
+            break
+    # Firma-KVALIFICEREDE titler først (undgår navnefæller som 'Tesla'=SI-enhed, 'Apple'=frugt).
+    cands = [name, f"{base}, Inc.", f"{base} Inc.", f"{base} (company)"]
+    if lang == "da":
+        cands.append(f"{base} (virksomhed)")
+    if " " in base:        # flerords-navne (fx 'Micron Technology') er sikre som bar titel; enkeltord IKKE
+        cands.append(base)
     seen = set()
     for cand in cands:
         if not cand or cand in seen:
@@ -108,19 +115,27 @@ def _strip_wiki_noise(text: str) -> str:
     return " ".join(keep).strip() or (text or "")
 
 
-def _danish(text: str, name: str) -> str:
-    """Omformulér kildeteksten til en koncis DANSK firmabeskrivelse (3-5 sætninger) via
-    Claude Haiku (samme nøgle som hjælpe-assistenten). Best-effort: tom/fejl/ingen nøgle -> ''."""
-    if not text:
+def _describe_da(name: str, ticker: str, wiki_text: str, yf_text: str) -> str:
+    """Skriv en koncis DANSK firmabeskrivelse (3-5 sætninger) via Claude Haiku ud fra BEGGE
+    kilder. Haiku bedes ignorere kildetekst om en navnefælle (fx SI-enheden 'tesla') og bruge
+    det forretningsresumé (yfinance) der altid handler om netop tickeren. Best-effort -> ''."""
+    if not (wiki_text or yf_text):
         return ""
     try:
         from anthropic import Anthropic
         resp = Anthropic().messages.create(
             model="claude-haiku-4-5", max_tokens=500,
             system=("Du skriver en kort, faktuel firmabeskrivelse paa DANSK: 3-5 saetninger der "
-                    "klart forklarer hvad firmaet laver og staar for. Kun selve beskrivelsen — "
-                    "ingen indledning, ingen kilde-henvisning, ingen markdown."),
-            messages=[{"role": "user", "content": f"Firma: {name}\n\nKildetekst:\n{text}"}])
+                    "klart forklarer hvad det BOERSNOTEREDE firma laver og staar for. Brug KUN "
+                    "materiale der faktisk handler om netop dette firma; IGNORÉR kildetekst om "
+                    "noget andet (fx en fysisk enhed, et begreb eller en navnefaelle). "
+                    "Forretningsresuméet (Kilde B) handler altid om det rigtige firma — stol paa "
+                    "det hvis Kilde A er om noget andet. Kun selve beskrivelsen — ingen "
+                    "indledning, ingen kilde-henvisning, ingen markdown."),
+            messages=[{"role": "user", "content":
+                       f"Firma: {name} (ticker {ticker}).\n\n"
+                       f"Kilde A (Wikipedia):\n{wiki_text or '—'}\n\n"
+                       f"Kilde B (forretningsresumé):\n{yf_text or '—'}"}])
         return "".join(b.text for b in resp.content
                        if getattr(b, "type", None) == "text").strip()
     except Exception:
@@ -235,19 +250,17 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
     wiki_da = _wiki_intro(name, "da")                               # dansk hvis artiklen findes
     wiki_en = {} if wiki_da.get("extract") else _wiki_intro(name, "en")
 
-    _src = "Wikipedia" if (wiki_da.get("extract") or wiki_en.get("extract")) else \
-           ("yfinance" if yf.get("summary") else "")
-    _lang = "dansk" if wiki_da.get("extract") else "engelsk"
-    raw = _trim(_strip_wiki_noise(wiki_da.get("extract") or wiki_en.get("extract")
-                                  or yf.get("summary") or ""))
-    if not raw:
-        description, desc_source = "", ""
+    wiki_text = _trim(_strip_wiki_noise(wiki_da.get("extract") or wiki_en.get("extract") or ""))
+    yf_sum = _trim(yf.get("summary") or "", max_sentences=8, max_chars=1200)   # rig kontekst til AI
+    srcs = (["Wikipedia"] if wiki_text else []) + (["forretningsresumé"] if yf_sum else [])
+    src_label = " + ".join(srcs)
+    da = _describe_da(name, sym, wiki_text, yf_sum)   # AI reconciler kilderne -> ren dansk
+    if da:
+        description, desc_source = da, (f"{src_label} → dansk" if src_label else "dansk")
+    elif wiki_text or yf_sum:
+        description, desc_source = (yf_sum or wiki_text), src_label   # fallback uden AI
     else:
-        da = _danish(raw, name)   # ALTID via Haiku: ensartet ren dansk i rette længde (3-5 sætn.)
-        if da:
-            description, desc_source = da, f"{_src} → dansk"
-        else:
-            description, desc_source = raw, f"{_src} ({_lang})"      # fallback uden oversættelse
+        description, desc_source = "", ""
     wiki_url = wiki_da.get("url") or wiki_en.get("url") or ""
 
     out = {
