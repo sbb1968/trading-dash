@@ -39,9 +39,17 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
     let cancelled = false;
     setLoading(true); setErr(""); setNoLogo(false);
     fetch(API + encodeURIComponent(ticker))
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then((j: Company) => { if (!cancelled) setData(j); })
-      .catch((e: any) => { if (!cancelled) setErr(e?.message || "Kunne ikke hente firma-info"); })
+      .catch((e: any) => {
+        if (cancelled) return;
+        const code = e?.message;
+        if (code === "404")
+          setErr("Backenden er forbundet, men kører gammel kode uden /company-endpointet — "
+            + "genstart backenden (git pull + restart) for at få Firma-info.");
+        else
+          setErr(`Kunne ikke hente firma-info (${code || "netværksfejl"}).`);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [ticker]);
@@ -65,7 +73,7 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
       background: "var(--bg-base)", color: "var(--text-primary)" }}>
       {!ticker && <div style={{ color: "var(--text-muted)" }}>Vælg en ticker for at se firma-info.</div>}
       {ticker && loading && !data && <div style={{ color: "var(--text-muted)" }}>Henter firma-info for {ticker}…</div>}
-      {err && <div style={{ color: "var(--bear)" }}>⚠ {err} — er backenden startet?</div>}
+      {err && <div style={{ color: "var(--bear)" }}>⚠ {err}</div>}
 
       {data && (
         <>
