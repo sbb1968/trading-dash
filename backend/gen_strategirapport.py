@@ -435,6 +435,29 @@ def build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, com
                       topMargin=14*mm, bottomMargin=14*mm, title="Strategirapport").build(story)
 
 
+def generate_report(db, start, end, out_pdf, account="—", notional=10_000.0) -> dict:
+    """Byg PDF'en for [start, end] fra journalen i `db`. Returnerer et summary-dict.
+    Kaldes både fra CLI (main) og fra /strategirapport-endpointet."""
+    out_pdf = Path(out_pdf)
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    days = business_days(start, end)
+    trades = load_trades(db, start, end)
+    dailies, cums, mets = {}, {}, {}
+    for s in STRATS:
+        daily, cum = daily_curve(trades[s], days)
+        dailies[s], cums[s] = daily, cum
+        mets[s] = metrics(trades[s], daily, cum, notional)
+    all_trades = pd.concat([t for t in trades.values() if len(t)], ignore_index=True) \
+        if any(len(t) for t in trades.values()) \
+        else pd.DataFrame(columns=["day", "pnl", "hold", "win", "reason"])
+    comb_daily = sum(dailies[s] for s in STRATS)
+    comb_cum = comb_daily.cumsum()
+    comb_met = metrics(all_trades, comb_daily, comb_cum, notional * len(STRATS))
+    p_eq, p_bar = build_figures(days, cums, comb_cum, mets, comb_met, out_pdf.parent)
+    build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, comb_met, notional)
+    return {"out_pdf": str(out_pdf), "days": len(days), "mets": mets, "comb": comb_met}
+
+
 def _account_label(explicit):
     if explicit:
         return explicit
@@ -473,25 +496,11 @@ def main():
     out_pdf = Path(a.out) if a.out else (out_dir / f"strategirapport_{start}_{end}.pdf")
     account = _account_label(a.account)
 
-    days = business_days(start, end)
-    trades = load_trades(a.db, start, end)
-    dailies, cums, mets = {}, {}, {}
-    for s in STRATS:
-        daily, cum = daily_curve(trades[s], days)
-        dailies[s], cums[s] = daily, cum
-        mets[s] = metrics(trades[s], daily, cum, a.notional)
-
-    all_trades = pd.concat([t for t in trades.values() if len(t)], ignore_index=True) \
-        if any(len(t) for t in trades.values()) else pd.DataFrame(columns=["day","pnl","hold","win","reason"])
-    comb_daily = sum(dailies[s] for s in STRATS)
-    comb_cum = comb_daily.cumsum()
-    comb_met = metrics(all_trades, comb_daily, comb_cum, a.notional * len(STRATS))
-
-    p_eq, p_bar = build_figures(days, cums, comb_cum, mets, comb_met, out_dir)
-    build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, comb_met, a.notional)
+    r = generate_report(a.db, start, end, out_pdf, account, a.notional)
+    mets, comb_met = r["mets"], r["comb"]
 
     print(f"OK -> {out_pdf}")
-    print(f"Periode {start}..{end}  ({len(days)} handelsdage) · konto {account}")
+    print(f"Periode {start}..{end}  ({r['days']} handelsdage) · konto {account}")
     for s in STRATS:
         m = mets[s]
         print(f"  {s:<16} {m['trades']:>3} handler  WR {m['wr']:>4.0f}%  "

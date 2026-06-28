@@ -2998,6 +2998,33 @@ async def sectors_overview(force: bool = False):
         _sector_cache["data"] = data
     return {**data, "cached": False}
 
+
+# ── Strategi-sammenligningsrapport (PDF, faktiske journal-data) ──
+@app.get("/strategirapport/pdf")
+async def strategirapport_pdf(start: str = None, end: str = None):
+    """Generér + servér strategirapporten (PDF) for [start,end] fra journalen. Det
+    blokerende matplotlib/reportlab-byg køres i executor; PDF serveres inline."""
+    from datetime import date as _date, timedelta as _td
+    try:
+        e = _date.fromisoformat(end) if end else _date.today()
+        s = _date.fromisoformat(start) if start else (e - _td(days=120))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ugyldig dato (brug YYYY-MM-DD)")
+    if s > e:
+        raise HTTPException(status_code=400, detail="start er efter end")
+    base = Path(__file__).parent
+    out_pdf = base / "strategirapport_output" / f"strategirapport_{s}_{e}.pdf"
+    account = f"{identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})"
+    db = str(base / "trading_dash.db")
+    try:
+        import gen_strategirapport as gsr
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: gsr.generate_report(db, s, e, out_pdf, account))
+    except Exception as ex:
+        raise HTTPException(status_code=500, detail=f"Kunne ikke bygge rapport: {ex}")
+    return FileResponse(str(out_pdf), media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{out_pdf.name}"'})
+
 # ── /ws/strategy ──────────────────────────────────────────────
 @app.websocket("/ws/strategy")
 async def websocket_strategy(websocket: WebSocket):
