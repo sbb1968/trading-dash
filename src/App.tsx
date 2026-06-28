@@ -25,6 +25,7 @@ import { IntradagReport } from "./IntradagReport";
 import { IntradagTop10 } from "./IntradagTop10";
 import { SectorNiche } from "./SectorNiche";
 import { StrategyReport } from "./StrategyReport";
+import { CompanyInfo } from "./CompanyInfo";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -941,6 +942,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
     case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
     case "strategirapport": return <StrategyReport />;
+    case "firmainfo": return <CompanyInfo ticker={props.selectedTicker} />;
     case "docs":    return <DocsWindow />;
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
@@ -968,6 +970,7 @@ export function getWindowTitle(id: WindowId, selectedTicker: string, stocks?: an
     chartweekly: `${withName} — Weekly`,
     level2:      `Level 2 — ${withName}`,
     timesales:   `Time & Sales — ${withName}`,
+    firmainfo:   `Firma-info — ${selectedTicker}`,
   };
   return t[id] ?? WINDOW_LABELS[id];
 }

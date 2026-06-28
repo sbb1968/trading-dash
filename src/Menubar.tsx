@@ -50,6 +50,7 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
     { id: "timesales",      shortcut: "M" },
     { id: "marketoverview", shortcut: "R" },
     { id: "sektorniche",    shortcut: "K" },   // Sektorer & nicher
+    { id: "firmainfo",      shortcut: "F" },   // Firma-info for valgt ticker
   ]},
   { label: "Analyse", icon: "🎯", items: [
     { id: "swing",          shortcut: "W" },   // Swing-rapport

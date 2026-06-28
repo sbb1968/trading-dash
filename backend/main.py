@@ -3025,6 +3025,19 @@ async def strategirapport_pdf(start: str = None, end: str = None):
     return FileResponse(str(out_pdf), media_type="application/pdf",
                         headers={"Content-Disposition": f'inline; filename="{out_pdf.name}"'})
 
+
+# ── Firma-info pr. ticker (Finnhub-profil + Wikipedia + yfinance, dagligt cachet) ──
+@app.get("/company/{ticker}")
+async def company_endpoint(ticker: str, force: bool = False):
+    """Kompakt firmaprofil til Firma-info-vinduet. De blokerende HTTP-/yfinance-kald
+    køres i executor; resultatet er dagligt cachet i company_info."""
+    import company_info
+    loop = asyncio.get_event_loop()
+    try:
+        return await loop.run_in_executor(None, lambda: company_info.get_company_info(ticker, force))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Kunne ikke hente firma-info: {e}")
+
 # ── /ws/strategy ──────────────────────────────────────────────
 @app.websocket("/ws/strategy")
 async def websocket_strategy(websocket: WebSocket):
