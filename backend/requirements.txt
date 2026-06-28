@@ -56,3 +56,4 @@ yfinance==1.3.0
 # tradingview-screener pinner pandas<3 men kører fint på vores pandas 3.
 # Installeres med --no-deps så pandas IKKE nedgraderes:
 #   pip install --no-deps tradingview-screener==3.2.0
+reportlab
