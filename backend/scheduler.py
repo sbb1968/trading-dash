@@ -43,6 +43,15 @@ K2_RETRY_UNTIL_ET = dtime(9, 40)   # giv op efter dette (for sent inde i session
 EUREV_START_ET       = dtime(1, 50)   # 07:50 dansk
 EUREV_RETRY_UNTIL_ET = dtime(7, 30)   # giv op efter dette (for sent — session lukker 08:00 ET)
 
+# Auto-start af BuyTheDip + Trend Join Long (KUN algoserveren — instance-guard som K2/EUREV).
+# Forskudt 2-5 min EFTER K2's 09:20 — armede laenge foer entry-vinduerne (US-aaben 09:30), og
+# forskudt saa de tre US-strategiers pre-flight/scan ikke rammer TWS samtidig (pacing). Samme
+# genforsoegs-moenster som K2 (genforsoeg hvert loop-tick indtil *_RETRY_UNTIL_ET). Justerbare.
+BTD_START_ET       = dtime(9, 22)   # 15:22 dansk
+BTD_RETRY_UNTIL_ET = dtime(9, 42)
+TJL_START_ET       = dtime(9, 25)   # 15:25 dansk
+TJL_RETRY_UNTIL_ET = dtime(9, 45)
+
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
 # 2026 NYSE-lukkede dage:
@@ -188,6 +197,10 @@ class AlgoScheduler:
                          window_end_et=EUREV_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("start_konfluens2", K2_START_ET, self._job_start_konfluens2,
                          window_end_et=K2_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("start_buythedip", BTD_START_ET, self._job_start_buythedip,
+                         window_end_et=BTD_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("start_trendjoin", TJL_START_ET, self._job_start_trendjoin,
+                         window_end_et=TJL_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
         ]
 
@@ -201,10 +214,10 @@ class AlgoScheduler:
         self._running = True
         self._task    = asyncio.create_task(self._loop())
 
-        auto = (f"Europa-reversion @ {EUREV_START_ET.strftime('%H:%M')} ET (genforsøg til "
-                f"{EUREV_RETRY_UNTIL_ET.strftime('%H:%M')}), "
-                f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')} ET (genforsøg til "
-                f"{K2_RETRY_UNTIL_ET.strftime('%H:%M')})"
+        auto = (f"Europa-reversion @ {EUREV_START_ET.strftime('%H:%M')}, "
+                f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')}, "
+                f"BuyTheDip @ {BTD_START_ET.strftime('%H:%M')}, "
+                f"Trend Join Long @ {TJL_START_ET.strftime('%H:%M')} ET (alle m. genforsøg)"
                 if self._instance_role == "algoserver" else "ingen (manuel start)")
         logger.info(
             f"[Scheduler] Startet ({self._instance_role}) — reset_daily aktiv, "
@@ -235,7 +248,7 @@ class AlgoScheduler:
         + Konfluens 2 09:20 ET). I dag hvis et af tidspunkterne endnu ikke er passeret og det er
         en handelsdag; ellers første tidspunkt på næste handelsdag."""
         now = now_et()
-        start_times = sorted([EUREV_START_ET, K2_START_ET])   # 01:50, 09:20 ET
+        start_times = sorted([EUREV_START_ET, K2_START_ET, BTD_START_ET, TJL_START_ET])
 
         if is_trading_day(now.date()):
             for st in start_times:
@@ -296,6 +309,43 @@ class AlgoScheduler:
             return False  # genforsøg inden for vinduet
         logger.info("[Scheduler] Auto-starter Europa-reversion")
         await self._start_algo("Europa-reversion")
+        return True
+
+    async def _job_start_buythedip(self) -> bool:
+        """Auto-start BuyTheDip omkring US-aabning. KUN paa algoserveren (instance-guard som K2).
+        Workstation springer over — ellers ville BAADE algoserver og workstation koere strategien
+        paa den DELTE konto (DUO509856) -> dobbelte ordrer. start_strategy er idempotent (no-op
+        hvis RUNNING), saa et genforsoegs-kald eller en manuelt startet strategi ikke dobbelt-startes."""
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_buythedip sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); startes manuelt paa workstation")
+            return True   # bevidst skip — markér færdig, ingen genforsøg/spam
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte BuyTheDip — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {BTD_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info("[Scheduler] Auto-starter BuyTheDip")
+        await self._start_algo("BuyTheDip")
+        return True
+
+    async def _job_start_trendjoin(self) -> bool:
+        """Auto-start Trend Join Long omkring US-aabning. KUN paa algoserveren (instance-guard som
+        K2). Spejler _job_start_buythedip: workstation springer over (manuel start dér), TWS-offline
+        -> genforsøg i vinduet, start_strategy idempotent."""
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_trendjoin sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); startes manuelt paa workstation")
+            return True
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte Trend Join Long — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {TJL_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False
+        logger.info("[Scheduler] Auto-starter Trend Join Long")
+        await self._start_algo("Trend Join Long")
         return True
 
     async def _job_reset_daily(self):
