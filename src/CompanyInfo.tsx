@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-// Firma-info (Google-knowledge-panel-stil) for den valgte ticker. Henter /company/<ticker>
-// (Finnhub-profil + Wikipedia-beskrivelse + yfinance), dagligt cachet i backenden.
+// Firma-info (Google-knowledge-panel-stil). Følger den globale valgte ticker, men har
+// også et lokalt inputfelt så man kan slå en hvilken som helst ticker op direkte.
+// Henter /company/<ticker> (Finnhub-profil + Wikipedia + yfinance), dagligt cachet.
 const API = "http://127.0.0.1:8000/company/";
 
 interface Company {
@@ -29,16 +30,22 @@ function fmtNum(n: number | null): string {
 }
 
 export function CompanyInfo({ ticker }: { ticker: string }) {
+  const [query, setQuery] = useState(ticker || "");
+  const [active, setActive] = useState(ticker || "");
   const [data, setData] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [noLogo, setNoLogo] = useState(false);
 
+  // Synk med den globale valgte ticker (charts/Level 2 osv.)
+  useEffect(() => { setQuery(ticker || ""); setActive(ticker || ""); }, [ticker]);
+
+  // Hent når den aktive ticker skifter
   useEffect(() => {
-    if (!ticker) { setData(null); return; }
+    if (!active) { setData(null); return; }
     let cancelled = false;
     setLoading(true); setErr(""); setNoLogo(false);
-    fetch(API + encodeURIComponent(ticker))
+    fetch(API + encodeURIComponent(active))
       .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then((j: Company) => { if (!cancelled) setData(j); })
       .catch((e: any) => {
@@ -52,7 +59,12 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [ticker]);
+  }, [active]);
+
+  const submit = () => {
+    const t = query.trim().toUpperCase();
+    if (t) { setQuery(t); setActive(t); }
+  };
 
   const facts: [string, string][] = data ? [
     ["Branche", data.industry || "—"],
@@ -69,15 +81,32 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
   const linkStyle: React.CSSProperties = { color: "var(--accent, #3b82f6)", cursor: "pointer" };
 
   return (
-    <div style={{ height: "100%", overflow: "auto", padding: "16px 18px",
+    <div style={{ height: "100%", overflow: "auto", padding: "14px 18px",
       background: "var(--bg-base)", color: "var(--text-primary)" }}>
-      {!ticker && <div style={{ color: "var(--text-muted)" }}>Vælg en ticker for at se firma-info.</div>}
-      {ticker && loading && !data && <div style={{ color: "var(--text-muted)" }}>Henter firma-info for {ticker}…</div>}
+      {/* Ticker-input */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); }}
+          placeholder="Ticker (fx NOW)"
+          style={{ flex: 1, background: "var(--bg-base)", color: "var(--text-primary)",
+            border: "1px solid var(--border-default)", borderRadius: 5, padding: "6px 10px",
+            fontSize: 13, textTransform: "uppercase" }} />
+        <button onClick={submit} disabled={loading}
+          style={{ cursor: "pointer", padding: "6px 16px", borderRadius: 5,
+            border: "1px solid var(--border-default)", background: "var(--accent, #3b82f6)",
+            color: "#fff", fontWeight: 700, fontSize: 13 }}>
+          {loading ? "…" : "Vis"}
+        </button>
+      </div>
+
+      {!active && <div style={{ color: "var(--text-muted)" }}>Indtast en ticker og tryk Enter.</div>}
+      {active && loading && !data && <div style={{ color: "var(--text-muted)" }}>Henter firma-info for {active}…</div>}
       {err && <div style={{ color: "var(--bear)" }}>⚠ {err}</div>}
 
       {data && (
         <>
-          {/* Header */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
             {data.logo && !noLogo && (
               <img src={data.logo} alt="" onError={() => setNoLogo(true)}
@@ -92,7 +121,6 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
             </div>
           </div>
 
-          {/* Beskrivelse */}
           {data.description ? (
             <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--text-primary)" }}>
               {data.description}
@@ -109,7 +137,6 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
             </div>
           )}
 
-          {/* Fakta-tabel */}
           <div style={{ marginTop: 14, border: "1px solid var(--border-subtle)", borderRadius: 8,
             overflow: "hidden" }}>
             {facts.map(([k, v], i) => (
@@ -122,7 +149,6 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
             ))}
           </div>
 
-          {/* Links */}
           <div style={{ marginTop: 12, display: "flex", gap: 16, fontSize: 12.5 }}>
             {data.website && <span style={linkStyle} onClick={() => openUrl(data.website)}>🌐 Hjemmeside</span>}
             {data.wiki_url && <span style={linkStyle} onClick={() => openUrl(data.wiki_url)}>📖 Wikipedia</span>}
