@@ -29,7 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
-SCHEMA = 3   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
+SCHEMA = 5   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -47,35 +47,84 @@ def _finnhub_profile(sym: str) -> dict:
         return {}
 
 
-def _wiki_summary(name: str) -> dict:
-    """Wikipedia REST-summary for firmanavnet. Prøver fuldt navn + uden selskabs-suffiks.
-    Springer disambiguation over. Tom dict hvis intet rent hit."""
+def _wiki_intro(name: str, lang: str) -> dict:
+    """Fuld intro-sektion (længere end REST-summary) via w/api.php extracts. Prøver navn
+    med/uden selskabs-suffiks; springer disambiguation over. Tom dict hvis intet rent hit."""
     if not name:
         return {}
-    candidates = [name]
+    cands = [name]
     for suf in _SUFFIXES:
         if name.endswith(suf):
-            candidates.append(name[: -len(suf)].strip())
+            cands.append(name[: -len(suf)].strip())
     seen = set()
-    for cand in candidates:
+    for cand in cands:
         if not cand or cand in seen:
             continue
         seen.add(cand)
-        title = urllib.parse.quote(cand.replace(" ", "_"))
         try:
-            r = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}",
-                             timeout=HTTP_TIMEOUT, headers=UA)
+            r = requests.get(f"https://{lang}.wikipedia.org/w/api.php",
+                             params={"action": "query", "prop": "extracts", "exintro": 1,
+                                     "explaintext": 1, "redirects": 1, "format": "json",
+                                     "titles": cand}, timeout=HTTP_TIMEOUT, headers=UA)
             if r.status_code != 200:
                 continue
-            d = r.json()
-            if d.get("type") == "disambiguation" or not d.get("extract"):
-                continue
-            return {"extract": d.get("extract", ""),
-                    "url": (((d.get("content_urls") or {}).get("desktop") or {}).get("page", "")),
-                    "thumbnail": ((d.get("thumbnail") or {}).get("source", ""))}
+            pages = ((r.json() or {}).get("query") or {}).get("pages") or {}
+            for page in pages.values():
+                if page.get("missing") is not None:
+                    continue
+                extract = (page.get("extract") or "").strip()
+                low = extract.lower()
+                if not extract or "may refer to" in low or "kan henvise til" in low:
+                    continue
+                title = page.get("title", cand)
+                return {"extract": extract, "lang": lang,
+                        "url": f"https://{lang}.wikipedia.org/wiki/"
+                               f"{urllib.parse.quote(title.replace(' ', '_'))}"}
         except Exception:
             continue
     return {}
+
+
+def _trim(text: str, max_sentences: int = 6, max_chars: int = 950) -> str:
+    """Normalisér whitespace + kap til ~6 sætninger / max_chars (2-3x længere end en summary)."""
+    import re
+    text = " ".join((text or "").split())
+    if not text:
+        return ""
+    out = " ".join(re.split(r"(?<=[.!?])\s+", text)[:max_sentences]).strip()
+    if len(out) > max_chars:
+        out = out[:max_chars].rsplit(" ", 1)[0].rstrip(",;: ") + "…"
+    return out
+
+
+def _strip_wiki_noise(text: str) -> str:
+    """Fjern Wikipedia-vedligeholdelsesbannere/hatnotes (fx 'for faa kildehenvisninger',
+    'this article needs additional citations') saa de ikke ender i beskrivelsen."""
+    import re
+    bad = ("kildehenvisning", "troværdige kilder", "du kan hjælpe", "denne artikel",
+           "this article", "additional citations", "may refer to", "kan henvise til")
+    sents = re.split(r"(?<=[.!?])\s+", " ".join((text or "").split()))
+    keep = [s for s in sents if not any(b in s.lower() for b in bad)]
+    return " ".join(keep).strip() or (text or "")
+
+
+def _danish(text: str, name: str) -> str:
+    """Omformulér kildeteksten til en koncis DANSK firmabeskrivelse (3-5 sætninger) via
+    Claude Haiku (samme nøgle som hjælpe-assistenten). Best-effort: tom/fejl/ingen nøgle -> ''."""
+    if not text:
+        return ""
+    try:
+        from anthropic import Anthropic
+        resp = Anthropic().messages.create(
+            model="claude-haiku-4-5", max_tokens=500,
+            system=("Du skriver en kort, faktuel firmabeskrivelse paa DANSK: 3-5 saetninger der "
+                    "klart forklarer hvad firmaet laver og staar for. Kun selve beskrivelsen — "
+                    "ingen indledning, ingen kilde-henvisning, ingen markdown."),
+            messages=[{"role": "user", "content": f"Firma: {name}\n\nKildetekst:\n{text}"}])
+        return "".join(b.text for b in resp.content
+                       if getattr(b, "type", None) == "text").strip()
+    except Exception:
+        return ""
 
 
 def _num(v):
@@ -182,8 +231,24 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
 
     prof = _finnhub_profile(sym)
     name = prof.get("name") or sym
-    wiki = _wiki_summary(name)
     yf = _yf_bundle(sym)
+    wiki_da = _wiki_intro(name, "da")                               # dansk hvis artiklen findes
+    wiki_en = {} if wiki_da.get("extract") else _wiki_intro(name, "en")
+
+    _src = "Wikipedia" if (wiki_da.get("extract") or wiki_en.get("extract")) else \
+           ("yfinance" if yf.get("summary") else "")
+    _lang = "dansk" if wiki_da.get("extract") else "engelsk"
+    raw = _trim(_strip_wiki_noise(wiki_da.get("extract") or wiki_en.get("extract")
+                                  or yf.get("summary") or ""))
+    if not raw:
+        description, desc_source = "", ""
+    else:
+        da = _danish(raw, name)   # ALTID via Haiku: ensartet ren dansk i rette længde (3-5 sætn.)
+        if da:
+            description, desc_source = da, f"{_src} → dansk"
+        else:
+            description, desc_source = raw, f"{_src} ({_lang})"      # fallback uden oversættelse
+    wiki_url = wiki_da.get("url") or wiki_en.get("url") or ""
 
     out = {
         "ticker":          sym,
@@ -202,13 +267,12 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
         "earnings_date_end": yf.get("earnings_date_end", ""),
         "logo":            prof.get("logo", ""),
         "website":         prof.get("weburl") or yf.get("website", ""),
-        "description":     wiki.get("extract") or yf.get("summary") or "",
-        "desc_source":     "Wikipedia" if wiki.get("extract") else ("yfinance" if yf.get("summary") else ""),
-        "wiki_url":        wiki.get("url", ""),
-        "thumbnail":       wiki.get("thumbnail", ""),
+        "description":     description,
+        "desc_source":     desc_source,
+        "wiki_url":        wiki_url,
         "stats":           yf.get("stats", {}),          # nøgletal (P/E, P/B, udbytte, beta, marginer…)
         "financials":      yf.get("financials", []),     # [{year, revenue, net_income}] seneste 4 år
-        "ok":              bool(prof or wiki.get("extract") or yf.get("summary")),
+        "ok":              bool(prof or description or yf.get("summary")),
         "_cached_date":    today,
         "_schema":         SCHEMA,
     }
