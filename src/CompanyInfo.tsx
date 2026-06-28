@@ -140,11 +140,11 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
           placeholder="Ticker (fx NOW)"
           style={{ flex: 1, background: "var(--bg-base)", color: "var(--text-primary)",
             border: "1px solid var(--border-default)", borderRadius: 5, padding: "6px 10px",
-            fontSize: 13, textTransform: "uppercase" }} />
+            fontSize: 15, textTransform: "uppercase" }} />
         <button onClick={submit} disabled={loading}
           style={{ cursor: "pointer", padding: "6px 16px", borderRadius: 5,
             border: "1px solid var(--border-default)", background: "var(--accent, #3b82f6)",
-            color: "#fff", fontWeight: 700, fontSize: 13 }}>
+            color: "#fff", fontWeight: 700, fontSize: 15 }}>
           {loading ? "…" : "Vis"}
         </button>
       </div>
@@ -162,25 +162,25 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
                   background: "#fff", padding: 3, flexShrink: 0 }} />
             )}
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 17, fontWeight: 800 }}>{data.name}</div>
-              <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              <div style={{ fontSize: 21, fontWeight: 800 }}>{data.name}</div>
+              <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
                 {data.ticker}{data.exchange ? ` · ${data.exchange}` : ""}
               </div>
             </div>
           </div>
 
           {data.description ? (
-            <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--text-primary)" }}>
+            <div style={{ fontSize: 16, lineHeight: 1.6, color: "var(--text-primary)" }}>
               {data.description}
               {data.desc_source && (
-                <span style={{ color: "var(--text-muted)", fontSize: 11 }}>
+                <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
                   {" "}— {data.desc_source}
                   {data.wiki_url && <> · <span style={linkStyle} onClick={() => openUrl(data.wiki_url)}>Wikipedia</span></>}
                 </span>
               )}
             </div>
           ) : (
-            <div style={{ color: "var(--text-muted)", fontSize: 12 }}>
+            <div style={{ color: "var(--text-muted)", fontSize: 14 }}>
               Ingen beskrivelse fundet for {data.ticker}.
             </div>
           )}
@@ -188,7 +188,7 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
           <div style={{ marginTop: 14, border: "1px solid var(--border-subtle)", borderRadius: 8,
             overflow: "hidden" }}>
             {facts.map(([k, v], i) => (
-              <div key={k} style={{ display: "flex", fontSize: 12.5,
+              <div key={k} style={{ display: "flex", fontSize: 15,
                 background: i % 2 ? "var(--bg-base)" : "var(--bg-elevated)",
                 borderBottom: i < facts.length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
                 <div style={{ width: 150, padding: "7px 10px", color: "var(--text-secondary)" }}>{k}</div>
@@ -200,15 +200,15 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
           {/* Nøgletal */}
           {keyStats.length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)",
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-secondary)",
                 textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 7 }}>Nøgletal</div>
               <div style={{ display: "grid", gap: 8,
                 gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
                 {keyStats.map(([k, v]) => (
                   <div key={k} style={{ background: "var(--bg-elevated)",
                     border: "1px solid var(--border-subtle)", borderRadius: 6, padding: "6px 10px" }}>
-                    <div style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{k}</div>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{v}</div>
+                    <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{k}</div>
+                    <div style={{ fontSize: 17, fontWeight: 700 }}>{v}</div>
                   </div>
                 ))}
               </div>
@@ -218,11 +218,11 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
           {/* Omsætning & overskud */}
           {data.financials && data.financials.length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)",
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-secondary)",
                 textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 7 }}>
                 Omsætning &amp; overskud (seneste {data.financials.length} år)
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 15 }}>
                 <thead>
                   <tr style={{ color: "var(--text-secondary)" }}>
                     <th style={{ textAlign: "left", padding: "5px 8px" }} />
@@ -254,12 +254,12 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
             </div>
           )}
 
-          <div style={{ marginTop: 16, display: "flex", gap: 16, fontSize: 12.5 }}>
+          <div style={{ marginTop: 16, display: "flex", gap: 16, fontSize: 15 }}>
             {data.website && <span style={linkStyle} onClick={() => openUrl(data.website)}>🌐 Hjemmeside</span>}
             {data.wiki_url && <span style={linkStyle} onClick={() => openUrl(data.wiki_url)}>📖 Wikipedia</span>}
           </div>
 
-          <div style={{ marginTop: 14, color: "var(--text-muted)", fontSize: 10.5 }}>
+          <div style={{ marginTop: 14, color: "var(--text-muted)", fontSize: 12.5 }}>
             Kilder: Finnhub (profil/logo), Wikipedia (beskrivelse), yfinance (medarbejdere/CEO).
             Cachet dagligt. {loading && "· opdaterer…"}
           </div>
