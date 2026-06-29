@@ -152,3 +152,10 @@ backend/buyhold_top10_latest.json
 backend/buyhold_top10_running.lock
 backend/buyhold_top10_run.log
 backend/buyhold_fmp_cache/
+
+# news_source_bench: hold mappen (via .gitkeep), men ignorer selve rapporterne.
+# Undtager netop denne mappe fra backend/*_output/-reglen ovenfor (linje-raekkefoelge
+# afgoer: senere regler vinder). En fil kan kun re-inkluderes hvis mappen selv er det.
+!backend/news_bench_output/
+backend/news_bench_output/*
+!backend/news_bench_output/.gitkeep
