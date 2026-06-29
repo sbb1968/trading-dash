@@ -231,7 +231,7 @@ class TrendJoinLive(BaseStrategy):
         # Test nyheds-API (kernen). Best-effort — advarer men blokerer ikke start.
         try:
             async with aiohttp.ClientSession() as s:
-                has, detail = await check_positive_catalyst(s, "NVDA")
+                has, detail, _ = await check_positive_catalyst(s, "NVDA")
             checks.append(f"Finnhub-news svarer ({'katalysator' if has else 'ingen'} på NVDA)")
         except Exception as e:
             checks.append(f"⚠ Finnhub-news ikke verificeret: {type(e).__name__}")
