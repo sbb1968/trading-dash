@@ -19,7 +19,7 @@ from orders_tracker   import get_tracker
 
 from accounts import identity
 
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -2280,6 +2280,52 @@ async def docs_file(name: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Dokumentet findes ikke")
     return FileResponse(str(target), media_type="application/pdf")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Handels-chart — bar-kontekst med entry/exit pr. lukket handel (Stage B + A)
+# Genskaber chartet algoen handlede paa (algoens egne bar-parametre). Read-only,
+# off trading path. Koeres paa WORKSTATION med TWS (bar-genhentning er et IBKR-kald).
+# ═══════════════════════════════════════════════════════════════════
+import trade_chart
+
+
+@app.get("/handels-chart/trades", dependencies=[Depends(require_studio_auth)])
+async def handelschart_trades(start: str | None = None, end: str | None = None,
+                              sources: str | None = None):
+    """Lukkede handler (alle 4 algoer) til trade-listen. sources = komma-liste filter
+    (fx 'BuyTheDip,Trend Join Long'). Auth som /buyhold (workstation slipper igennem)."""
+    src_list = [s.strip() for s in sources.split(",") if s.strip()] if sources else None
+    trades = await trade_chart.load_closed_trades(journal.db, start=start, end=end, sources=src_list)
+    return {"trades": trades, "count": len(trades)}
+
+
+@app.get("/handels-chart/trade/{trade_id}.png")
+async def handelschart_trade_png(trade_id: str, bars_before: int = 40, bars_after: int = 40):
+    """Server-genereret PNG for handlen — inline (ingen Content-Disposition, som /docs/file),
+    saa <img src> kan vise den direkte. Genhenter bars med algoens egne parametre."""
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not getattr(conn, "connected", False):
+        raise HTTPException(status_code=503,
+                            detail="IBKR ikke forbundet (TWS/Gateway paa 7497?) — kan ikke genhente bars")
+    png = await trade_chart.build_trade_png(journal.db, conn, trade_id,
+                                            bars_before=bars_before, bars_after=bars_after)
+    if png is None:
+        raise HTTPException(status_code=404, detail="Handel ikke fundet eller ingen bars i vinduet")
+    return Response(content=png, media_type="image/png")
+
+
+@app.get("/handels-chart/trade/{trade_id}/bars", dependencies=[Depends(require_studio_auth)])
+async def handelschart_trade_bars(trade_id: str, bars_before: int = 40, bars_after: int = 40):
+    """Stage A: bars + entry/exit-markoerer + stop/target-niveauer som JSON (Lightweight Charts)."""
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not getattr(conn, "connected", False):
+        raise HTTPException(status_code=503, detail="IBKR ikke forbundet (TWS/Gateway paa 7497?)")
+    data = await trade_chart.build_trade_bars_json(journal.db, conn, trade_id,
+                                                   bars_before=bars_before, bars_after=bars_after)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Handel ikke fundet eller ingen bars i vinduet")
+    return data
 
 
 # ── Dagens log (markdown-rapport over et dato-interval, read-only) ───────────
