@@ -1889,6 +1889,28 @@
         function multForSymbol(sym) {
             return FUTURES_MULT[(sym || "").toUpperCase()] || 1;
         }
+        // Margin (kapital STILLET TIL RAADIGHED) pr. futures-kontrakt ($). Estimat —
+        // IBKR's init-margin varierer over tid/broker; juster her hvis TWS viser andet.
+        // Bruges KUN naar den faktiske margin (payload.init_margin) ikke er fanget.
+        const MARGIN_PER_CONTRACT = { MES: 2200, M2K: 1600 };
+        // Margin for en handel: {margin, est}. Faktisk fra payload.init_margin hvis fanget
+        // (futures); ellers estimat = kontrakter × MARGIN_PER_CONTRACT. Aktier: kontant
+        // indskud = pris × antal (1:1, ingen gearing). Margin er den rigtige naevner for
+        // forrentning (P&L/margin), fordi futures kun kraever en broekdel af notional.
+        function marginForTrade(t) {
+            const sym  = (t.symbol || "").toUpperCase();
+            const mult = multForSymbol(sym);
+            if (t.payload && t.payload.init_margin != null)
+                return { margin: t.payload.init_margin, est: false };
+            if (mult !== 1) {   // futures
+                const m = MARGIN_PER_CONTRACT[sym];
+                return (m != null && t.shares != null)
+                    ? { margin: m * t.shares, est: true } : { margin: null, est: false };
+            }
+            // aktie: kontant indskud (notional = margin, ingen gearing)
+            return (t.entry_price != null && t.shares != null)
+                ? { margin: t.entry_price * t.shares, est: false } : { margin: null, est: false };
+        }
         // Exit-årsag → begreb vi kender (vist i ÅRSAG-kolonnen). Ukendte koder vises råt.
         const REASON_LABELS = {
             revert:        "take-profit",   // mean-reversion: prisen vendte til target
@@ -2658,6 +2680,16 @@
                     const mPctCell = _marginPct != null
                         ? `<span class="${cls(_marginPct)}" style="font-weight:700;">${_marginPct >= 0 ? "+" : ""}${_marginPct.toFixed(2)}%</span>`
                         : `<span class="muted">—</span>`;
+                    // Margin (stillet til raadighed) + forrentning paa margin (P&L/margin)
+                    const _mg = marginForTrade(t);
+                    const _marginRetPct = (_mg.margin != null && _mg.margin > 0 && t.pnl != null)
+                        ? (t.pnl / _mg.margin) * 100 : null;
+                    const marginCell = _mg.margin != null
+                        ? `${fmtMoney(_mg.margin)}${_mg.est ? '<span class="muted" style="font-size:11px;" title="estimat — IBKR-margin ikke fanget for denne handel">&nbsp;~</span>' : ''}`
+                        : `<span class="muted">—</span>`;
+                    const marginRetCell = _marginRetPct != null
+                        ? `<span class="${cls(_marginRetPct)}" style="font-weight:700;">${_marginRetPct >= 0 ? "+" : ""}${_marginRetPct.toFixed(2)}%</span>`
+                        : `<span class="muted">—</span>`;
                     const rowClass = t.pnl == null ? "row-open"
                                    : t.pnl > 0    ? "row-positive"
                                    : t.pnl < 0    ? "row-negative" : "";
@@ -2671,10 +2703,12 @@
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
                             <td class="num">${_notional != null ? fmtMoney(_notional) : "—"}</td>
+                            <td class="num">${marginCell}</td>
                             <td class="num">${exitCell}</td>
                             <td class="num">${_risikoBrugt != null ? fmtMoney(_risikoBrugt) : "—"}</td>
                             <td class="num">${mPnlCell}</td>
                             <td class="num">${mPctCell}</td>
+                            <td class="num">${marginRetCell}</td>
                             <td>${reasonPill(t.exit_reason)}</td>
                         </tr>
                     `;
@@ -2727,11 +2761,13 @@
                                 <th>Side</th>
                                 <th style="text-align:right;">Stk</th>
                                 <th style="text-align:right;">Entry<br>pris</th>
-                                <th style="text-align:right;">Eksponering</th>
+                                <th style="text-align:right;" title="Notionel eksponering = pris × antal × multiplikator (hele kontraktværdien)">Eksponering</th>
+                                <th style="text-align:right;" title="Margin = kapital stillet til rådighed for handlen. Faktisk fra IBKR hvis fanget, ellers estimat (~). Aktier: kontant indskud.">Margin</th>
                                 <th style="text-align:right;">Exit<br>pris</th>
                                 <th style="text-align:right;">Risiko<br>($)</th>
                                 <th style="text-align:right;">P&L</th>
-                                <th style="text-align:right;">P&L %</th>
+                                <th style="text-align:right;" title="P&L i % af display-budgettet ($1.000) — sammenligneligt på tværs af handler">P&L %</th>
+                                <th style="text-align:right;" title="Forrentning = P&L i % af den margin du stillede til rådighed (P&L / margin)">Afkast %<br>(margin)</th>
                                 <th style="padding-left:24px;">Årsag</th>
                             </tr>
                         </thead>
