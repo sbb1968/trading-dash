@@ -212,17 +212,22 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 {imgLoading && <span>⏳ genhenter bars fra IBKR…</span>}
               </div>
 
-              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
-                <img
-                  key={`${sel.trade_id}-${before}-${after}`}
-                  src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
-                  alt={`Chart for ${sel.symbol}`}
-                  onLoad={() => setImgLoading(false)}
-                  onError={() => setImgLoading(false)}
-                  style={{ width: "100%", height: "100%", objectFit: "contain",
-                    borderRadius: 6, border: "1px solid var(--border-subtle)",
-                    opacity: imgLoading ? 0.4 : 1, transition: "opacity .2s" }}
-                />
+              {/* Fyld højden, bevar konstant candle-bredde: korte charts centreres,
+                  lange scroller vandret (width:fit-content + margin:auto undgår flex-
+                  centrerings-clip så man kan scrolle fra venstre). */}
+              <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+                <div style={{ height: "100%", width: "fit-content", margin: "0 auto" }}>
+                  <img
+                    key={`${sel.trade_id}-${before}-${after}`}
+                    src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
+                    alt={`Chart for ${sel.symbol}`}
+                    onLoad={() => setImgLoading(false)}
+                    onError={() => setImgLoading(false)}
+                    style={{ height: "100%", width: "auto", display: "block",
+                      borderRadius: 6, border: "1px solid var(--border-subtle)",
+                      opacity: imgLoading ? 0.4 : 1, transition: "opacity .2s" }}
+                  />
+                </div>
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 }}>
                 Hvis chartet ikke vises: tjek at TWS/Gateway er forbundet (bars genhentes live fra IBKR).

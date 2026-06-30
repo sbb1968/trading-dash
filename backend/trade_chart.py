@@ -235,10 +235,13 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
     entry_pos = _nearest_pos(df.index, entry_et)
     exit_pos = _nearest_pos(df.index, exit_et)
 
-    # Stor, hoej-oploesnings-figur saa chartet fylder vinduet og forbliver skarpt
-    # naar frontend skalerer det op (objectFit: contain).
+    # Bredden skaleres efter antal bars -> KONSTANT candle-bredde uanset handelsvarighed.
+    # (En 5-timers hold blev "gnidret" naar ~400 1-min bars blev presset ind paa samme
+    # bredde som en 18-min handel.) Frontend fylder hoejden og scroller vandret for lange
+    # handler; korte centreres. ~0.11 in/bar @130dpi ≈ 14 px/bar.
+    width_in = max(14.0, min(60.0, n * 0.11))
     fig, (ax, axv) = plt.subplots(
-        2, 1, figsize=(18, 10), sharex=True,
+        2, 1, figsize=(width_in, 9), sharex=True,
         gridspec_kw={"height_ratios": [4, 1], "hspace": 0.06})
 
     # ── Candlesticks (ren matplotlib — ingen ekstra dep) ──
@@ -281,7 +284,8 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
                    edgecolors="black", linewidths=0.6, zorder=7, label=f"exit {exit_price:.2f}")
 
     # ── Akser / labels (dansk tid) ──
-    tick_step = max(1, n // 12)
+    n_ticks = max(8, int(width_in * 1.2))   # flere ticks paa brede (scrollende) charts
+    tick_step = max(1, n // n_ticks)
     ticks = list(range(0, n, tick_step))
     axv.set_xticks(ticks)
     axv.set_xticklabels([idx_dk[i].strftime("%H:%M") for i in ticks], rotation=0, fontsize=11)
@@ -307,7 +311,7 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
         fontsize=12, color="#555", pad=10)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
