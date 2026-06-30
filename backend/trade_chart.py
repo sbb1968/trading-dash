@@ -235,8 +235,10 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
     entry_pos = _nearest_pos(df.index, entry_et)
     exit_pos = _nearest_pos(df.index, exit_et)
 
+    # Stor, hoej-oploesnings-figur saa chartet fylder vinduet og forbliver skarpt
+    # naar frontend skalerer det op (objectFit: contain).
     fig, (ax, axv) = plt.subplots(
-        2, 1, figsize=(13, 7.5), sharex=True,
+        2, 1, figsize=(18, 10), sharex=True,
         gridspec_kw={"height_ratios": [4, 1], "hspace": 0.06})
 
     # ── Candlesticks (ren matplotlib — ingen ekstra dep) ──
@@ -256,13 +258,13 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
 
     # ── Stop / target-linjer hvor de findes ──
     if isinstance(stop, (int, float)) and stop:
-        ax.axhline(stop, color="#d32f2f", linestyle="--", linewidth=1.0, alpha=0.8, zorder=4)
+        ax.axhline(stop, color="#d32f2f", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
         ax.text(n - 0.5, stop, f" stop {stop:.2f}", color="#d32f2f", va="center",
-                ha="left", fontsize=9)
+                ha="left", fontsize=12)
     if isinstance(target, (int, float)) and target:
-        ax.axhline(target, color="#2e7d32", linestyle="--", linewidth=1.0, alpha=0.8, zorder=4)
+        ax.axhline(target, color="#2e7d32", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
         ax.text(n - 0.5, target, f" target {target:.2f}", color="#2e7d32", va="center",
-                ha="left", fontsize=9)
+                ha="left", fontsize=12)
 
     # ── PRAECIS groen entry-pil + roed exit-pil (paa eksakt fill-pris) ──
     if isinstance(entry_price, (int, float)):
@@ -279,31 +281,33 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
                    edgecolors="black", linewidths=0.6, zorder=7, label=f"exit {exit_price:.2f}")
 
     # ── Akser / labels (dansk tid) ──
-    tick_step = max(1, n // 10)
+    tick_step = max(1, n // 12)
     ticks = list(range(0, n, tick_step))
     axv.set_xticks(ticks)
-    axv.set_xticklabels([idx_dk[i].strftime("%H:%M") for i in ticks], rotation=0, fontsize=8)
-    ax.set_ylabel("Pris ($)", fontsize=9)
-    axv.set_ylabel("Volumen", fontsize=8)
+    axv.set_xticklabels([idx_dk[i].strftime("%H:%M") for i in ticks], rotation=0, fontsize=11)
+    ax.tick_params(axis="y", labelsize=11)
+    axv.tick_params(axis="y", labelsize=10)
+    ax.set_ylabel("Pris ($)", fontsize=12)
+    axv.set_ylabel("Volumen", fontsize=11)
     ax.grid(True, alpha=0.15, zorder=0)
     axv.grid(True, alpha=0.15, zorder=0)
-    ax.legend(loc="best", fontsize=8, framealpha=0.85)
+    ax.legend(loc="best", fontsize=12, framealpha=0.85)
 
     pnl_s = f"${pnl:+,.2f}" if isinstance(pnl, (int, float)) else "?"
     dato = entry_et.strftime("%Y-%m-%d")
     p = params_for(source)
     fig.suptitle(
         f"{symbol} · {source} · {side} · P&L {pnl_s} · {exit_reason} · {dato}",
-        fontsize=13, fontweight="bold", y=0.97)
+        fontsize=17, fontweight="bold", y=0.98)
     ax.set_title(
         f"{p['bar_size']} {p['what_to_show']} useRTH={p['use_rth']}  ·  "
         f"entry {entry_et.strftime('%H:%M')} ET / {entry_et.astimezone(DK).strftime('%H:%M')} DK  →  "
         f"exit {exit_et.strftime('%H:%M')} ET / {exit_et.astimezone(DK).strftime('%H:%M')} DK  ·  "
         f"x-akse i dansk tid",
-        fontsize=9, color="#555", pad=8)
+        fontsize=12, color="#555", pad=10)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()

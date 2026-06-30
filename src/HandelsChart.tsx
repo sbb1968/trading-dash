@@ -127,32 +127,32 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
       {/* Indhold: trade-liste (venstre) + chart (højre) */}
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* Trade-liste */}
-        <div style={{ width: 360, borderRight: "1px solid var(--border-subtle)", overflow: "auto" }}>
-          {loading && <div style={{ padding: 14, color: "var(--text-secondary)" }}>Henter handler…</div>}
-          {err && <div style={{ padding: 14, color: "var(--bear)" }}>⚠ {err} — er backenden startet?</div>}
+        <div style={{ width: 460, borderRight: "1px solid var(--border-subtle)", overflow: "auto", flexShrink: 0 }}>
+          {loading && <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 15 }}>Henter handler…</div>}
+          {err && <div style={{ padding: 16, color: "var(--bear)", fontSize: 15 }}>⚠ {err} — er backenden startet?</div>}
           {!loading && !err && trades.length === 0 &&
-            <div style={{ padding: 14, color: "var(--text-secondary)", fontSize: 12.5, lineHeight: 1.5 }}>
+            <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.5 }}>
               Ingen lukkede handler i intervallet for de valgte algoer.
             </div>}
           {trades.map(t => {
             const isSel = sel?.trade_id === t.trade_id;
             return (
               <div key={t.trade_id} onClick={() => setSel(t)}
-                style={{ padding: "8px 11px", cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
+                style={{ padding: "11px 14px", cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
                   background: isSel ? "var(--bg-elevated)" : "transparent",
-                  borderLeft: `3px solid ${isSel ? (COLOR_OF[t.source] || "var(--accent)") : "transparent"}` }}>
+                  borderLeft: `4px solid ${isSel ? (COLOR_OF[t.source] || "var(--accent)") : "transparent"}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span style={{ fontWeight: 800, fontSize: 13 }}>{t.symbol}</span>
-                  <span style={{ fontWeight: 800, fontSize: 12.5, color: pnlColor(t.pnl) }}>
+                  <span style={{ fontWeight: 800, fontSize: 18 }}>{t.symbol}</span>
+                  <span style={{ fontWeight: 800, fontSize: 16.5, color: pnlColor(t.pnl) }}>
                     {typeof t.pnl === "number" ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "—"}
                   </span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11,
-                  color: "var(--text-secondary)", marginTop: 2 }}>
-                  <span style={{ color: COLOR_OF[t.source] || "var(--text-secondary)" }}>{t.source}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14,
+                  color: "var(--text-secondary)", marginTop: 4 }}>
+                  <span style={{ color: COLOR_OF[t.source] || "var(--text-secondary)", fontWeight: 600 }}>{t.source}</span>
                   <span>{(t.side || "").toUpperCase()} · {t.exit_reason || "?"}</span>
                 </div>
-                <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 2 }}>
+                <div style={{ fontSize: 13.5, color: "var(--text-secondary)", marginTop: 4 }}>
                   {fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}
                 </div>
               </div>
@@ -161,12 +161,13 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
         </div>
 
         {/* Chart + metadata */}
-        <div style={{ flex: 1, overflow: "auto", padding: 14, minWidth: 0 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 12,
+          minWidth: 0, minHeight: 0 }}>
           {!sel && (
-            <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.6, paddingTop: 30,
+            <div style={{ color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.6, paddingTop: 40,
               textAlign: "center" }}>
               Vælg en handel i listen for at se chartet.<br />
-              <span style={{ fontSize: 11.5 }}>
+              <span style={{ fontSize: 13 }}>
                 Chartet genskabes fra IBKR med algoens egne bar-parametre — {before} bars før entry,
                 selve handlen, {after} bars efter exit. Grøn pil = entry, rød pil = exit.
               </span>
@@ -175,18 +176,18 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
           {sel && (
             <>
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
-                marginBottom: 10 }}>
-                <span style={{ fontSize: 17, fontWeight: 800, cursor: onSelectTicker ? "pointer" : "default" }}
+                marginBottom: 8 }}>
+                <span style={{ fontSize: 20, fontWeight: 800, cursor: onSelectTicker ? "pointer" : "default" }}
                   onClick={() => onSelectTicker?.(sel.symbol)} title={onSelectTicker ? "Vælg ticker" : ""}>
                   {sel.symbol}
                 </span>
-                <span style={{ color: COLOR_OF[sel.source] || "var(--text-secondary)", fontWeight: 700 }}>
+                <span style={{ fontSize: 15, color: COLOR_OF[sel.source] || "var(--text-secondary)", fontWeight: 700 }}>
                   {sel.source}
                 </span>
-                <span style={{ color: pnlColor(sel.pnl), fontWeight: 800 }}>
+                <span style={{ fontSize: 15, color: pnlColor(sel.pnl), fontWeight: 800 }}>
                   P&amp;L {typeof sel.pnl === "number" ? `${sel.pnl >= 0 ? "+" : ""}$${sel.pnl.toFixed(2)}` : "—"}
                 </span>
-                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>
                   {(sel.side || "").toUpperCase()} · entry ${sel.entry_price?.toFixed(2) ?? "—"} → exit
                   ${sel.exit_price?.toFixed(2) ?? "—"} · {sel.exit_reason || "?"}
                   {typeof sel.current_stop === "number" && ` · stop $${sel.current_stop.toFixed(2)}`}
@@ -194,7 +195,7 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 </span>
               </div>
 
-              <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10, fontSize: 11.5,
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8, fontSize: 13,
                 color: "var(--text-secondary)" }}>
                 <label style={{ display: "flex", gap: 5, alignItems: "center" }}>
                   Bars før
@@ -211,16 +212,19 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 {imgLoading && <span>⏳ genhenter bars fra IBKR…</span>}
               </div>
 
-              <img
-                key={`${sel.trade_id}-${before}-${after}`}
-                src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
-                alt={`Chart for ${sel.symbol}`}
-                onLoad={() => setImgLoading(false)}
-                onError={() => setImgLoading(false)}
-                style={{ maxWidth: "100%", borderRadius: 6, border: "1px solid var(--border-subtle)",
-                  opacity: imgLoading ? 0.4 : 1, transition: "opacity .2s" }}
-              />
-              <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+              <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+                <img
+                  key={`${sel.trade_id}-${before}-${after}`}
+                  src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
+                  alt={`Chart for ${sel.symbol}`}
+                  onLoad={() => setImgLoading(false)}
+                  onError={() => setImgLoading(false)}
+                  style={{ width: "100%", height: "100%", objectFit: "contain",
+                    borderRadius: 6, border: "1px solid var(--border-subtle)",
+                    opacity: imgLoading ? 0.4 : 1, transition: "opacity .2s" }}
+                />
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 }}>
                 Hvis chartet ikke vises: tjek at TWS/Gateway er forbundet (bars genhentes live fra IBKR).
                 Micro-caps ~6 mdr. tilbage i 1-min historik.
               </div>
