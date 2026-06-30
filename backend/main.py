@@ -2461,9 +2461,15 @@ class UpdateNotesRequest(BaseModel):
 #   archive sat       → arkivet i archives/<archive>/trading_dash.db (read-only)
 # Den arkiverede DB åbnes read-only pr. request og lukkes bagefter.
 # Læser fra et statisk snapshot — ingen WAL-skrivning i gang, så mode=ro er sikkert.
+# Sentinel: "alle maskiner samlet" (lokal db + alle arkiver) — se _fleet_dbs.
+FLEET_ARCHIVE = "__fleet__"
+
+
 @asynccontextmanager
 async def _resolve_db(archive):
-    if not archive:
+    # __fleet__ er ikke ét arkiv — endpoints der ikke har en fleet-gren falder
+    # gracefully tilbage til den lokale db (i stedet for 404 på et "arkiv" der ikke findes).
+    if not archive or archive == FLEET_ARCHIVE:
         yield journal.db
         return
     import replication_store
@@ -2475,6 +2481,84 @@ async def _resolve_db(archive):
         yield conn
     finally:
         await conn.close()
+
+
+@asynccontextmanager
+async def _fleet_dbs():
+    """Yield en liste af (kilde, db-handle) = lokal journal.db + ALLE replikerede arkiver
+    (read-only). Kun algoserveren har peers' arkiver; en workstation giver bare den lokale.
+    Arkiv-handles aabnes read-only og lukkes bagefter. Et daarligt arkiv springes over."""
+    dbs = [("__local__", journal.db)]
+    opened = []
+    try:
+        import replication_store
+        for source in replication_store.list_sources():
+            p = replication_store.archive_db_path(source)
+            if p is None:
+                continue
+            try:
+                conn = await aiosqlite.connect(f"file:{p.as_posix()}?mode=ro", uri=True)
+                opened.append(conn)
+                dbs.append((source, conn))
+            except Exception as e:
+                logger.warning(f"[fleet] kunne ikke aabne arkiv {source}: {e}")
+    except Exception as e:
+        logger.warning(f"[fleet] kunne ikke liste arkiver: {e}")
+    try:
+        yield dbs
+    finally:
+        for c in opened:
+            try:
+                await c.close()
+            except Exception:
+                pass
+
+
+async def _journal_trades_fleet(date_from, date_to, source, symbol, status,
+                                account_id, instance_id, limit, offset):
+    """Alle maskiner samlet: unionér lokal db + alle arkiver, sortér nyeste først,
+    paginer i Python, og kombinér per-db summaries (samme formler som trades_summary,
+    så P&L%/win-rate er konsistente med enkelt-maskine-visningen)."""
+    all_trades = []
+    combo = {"count": 0, "wins": 0, "losses": 0, "total_pnl": 0.0, "total_cost": 0.0,
+             "open_count": 0, "best": None, "worst": None}
+    async with _fleet_dbs() as dbs:
+        for _src, db in dbs:
+            all_trades += await trade_queries.list_trades(
+                db, date_from=date_from, date_to=date_to, source=source, symbol=symbol,
+                status=status, account_id=account_id, instance_id=instance_id,
+                limit=100000, offset=0)
+            s = await trade_queries.trades_summary(
+                db, date_from=date_from, date_to=date_to, source=source, symbol=symbol,
+                account_id=account_id, instance_id=instance_id)
+            combo["count"]      += s.get("count", 0)
+            combo["wins"]       += s.get("wins", 0)
+            combo["losses"]     += s.get("losses", 0)
+            combo["total_pnl"]  += s.get("total_pnl", 0.0)
+            combo["total_cost"] += s.get("total_cost", 0.0)
+            combo["open_count"] += s.get("open_count", 0)
+            if s.get("count", 0) > 0:
+                b, w = s.get("best_trade", 0.0), s.get("worst_trade", 0.0)
+                combo["best"]  = b if combo["best"]  is None else max(combo["best"], b)
+                combo["worst"] = w if combo["worst"] is None else min(combo["worst"], w)
+    all_trades.sort(key=lambda t: t.get("entry_time_et") or "", reverse=True)
+    total = len(all_trades)
+    cnt, tc = combo["count"], combo["total_cost"]
+    summary = {
+        "count":       cnt,
+        "wins":        combo["wins"],
+        "losses":      combo["losses"],
+        "win_rate":    round(combo["wins"] / cnt * 100.0, 2) if cnt else 0.0,
+        "total_pnl":   round(combo["total_pnl"], 2),
+        "total_cost":  round(tc, 2),
+        "pnl_pct":     round(combo["total_pnl"] / tc * 100.0, 2) if tc > 0 else 0.0,
+        "avg_pnl":     round(combo["total_pnl"] / cnt, 2) if cnt else 0.0,
+        "best_trade":  round(combo["best"]  or 0.0, 2),
+        "worst_trade": round(combo["worst"] or 0.0, 2),
+        "open_count":  combo["open_count"],
+    }
+    page = all_trades[offset:offset + limit]
+    return {"trades": page, "count": len(page), "total": total, "summary": summary}
 
 
 @app.get("/journal/trades")
@@ -2500,7 +2584,11 @@ async def journal_trades(
       status: "open", "closed", eller udelades for alle
       account_id, instance_id: filtrerer på maskine (på lokal: typisk udelades)
       limit, offset: paginering (default: 200 trades)
+      archive: "" = denne maskine · source_id = ét arkiv · "__fleet__" = ALLE maskiner samlet
     """
+    if archive == FLEET_ARCHIVE:
+        return await _journal_trades_fleet(
+            date_from, date_to, source, symbol, status, account_id, instance_id, limit, offset)
     async with _resolve_db(archive) as db:
         trades = await trade_queries.list_trades(
             db,
@@ -2530,6 +2618,14 @@ async def journal_trades(
 @app.get("/journal/trades/{trade_id}")
 async def journal_trade_detail(trade_id: str, archive: str = None):
     """Hent én specifik trade med fuld payload (forensics, indikatorer, etc.)."""
+    if archive == FLEET_ARCHIVE:
+        # Fleet: handlen kan ligge i et hvilket som helst arkiv — søg lokal + alle.
+        async with _fleet_dbs() as dbs:
+            for _src, db in dbs:
+                trade = await trade_queries.get_trade_by_id(db, trade_id)
+                if trade is not None:
+                    return trade
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
     async with _resolve_db(archive) as db:
         trade = await trade_queries.get_trade_by_id(db, trade_id)
     if trade is None:
@@ -3060,7 +3156,15 @@ async def strategirapport_pdf(start: str = None, end: str = None):
         raise HTTPException(status_code=400, detail="start er efter end")
     base = Path(__file__).parent
     out_pdf = base / "strategirapport_output" / f"strategirapport_{s}_{e}.pdf"
-    account = f"{identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})"
+    # Fleet: hvis denne maskine har peers' arkiver (= algoserveren), daekker rapporten
+    # hele flaaden -> sig det i konto-labelen i stedet for én konto.
+    try:
+        import replication_store as _rs
+        _n_arch = len(_rs.list_sources())
+    except Exception:
+        _n_arch = 0
+    account = (f"Hele flåden — {_n_arch + 1} maskiner (paper)" if _n_arch
+               else f"{identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
     db = str(base / "trading_dash.db")
     try:
         import gen_strategirapport as gsr

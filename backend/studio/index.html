@@ -1353,6 +1353,9 @@
 
             sel.innerHTML =
                 `<option value="">${selfLabel}</option>` +
+                // "Alle maskiner samlet" — kun meningsfuld hvis der ER peer-arkiver
+                // (dvs. paa algoserveren). Journal-endpoints unionerer paa __fleet__.
+                (others.length ? `<option value="__fleet__">⊕ Alle maskiner (samlet)</option>` : "") +
                 others.map(m => `<option value="${m.source_id}">${m.name}</option>`).join("");
 
             sel.onchange = () => {

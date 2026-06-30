@@ -124,6 +124,37 @@ def load_trades(db_path, start, end):
             columns=["day", "pnl", "hold", "win", "reason"]) for name, rows_ in buckets.items()}
 
 
+def load_trades_fleet(local_db_path, start, end):
+    """Som load_trades, men UNIONERER den lokale db + ALLE replikerede arkiver
+    (archives/<kilde>/trading_dash.db). Paa algoserveren = hele flaaden (alle maskiners
+    paper-handler); paa en workstation uden arkiver = kun lokal (samme resultat som
+    load_trades). Algoserveren arkiverer ikke sig selv, saa ingen dubletter. Et daarligt
+    arkiv springes over uden at vaelte rapporten."""
+    import logging
+    _log = logging.getLogger("strategirapport")
+    parts = [load_trades(local_db_path, start, end)]
+    try:
+        import replication_store
+        for source in replication_store.list_sources():
+            p = replication_store.archive_db_path(source)
+            if p is None:
+                continue
+            try:
+                parts.append(load_trades(str(p), start, end))
+            except Exception as e:
+                _log.warning(f"arkiv {source} sprunget over: {e}")
+    except Exception as e:
+        _log.warning(f"kunne ikke liste arkiver: {e}")
+    cols = ["day", "pnl", "hold", "win", "reason"]
+    merged = {name: [] for name in STRATS}
+    for part in parts:
+        for name, df in part.items():
+            if df is not None and not df.empty:
+                merged[name].append(df)
+    return {name: (pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols))
+            for name, dfs in merged.items()}
+
+
 def business_days(d0, d1):
     return [d.date() for d in pd.bdate_range(d0, d1)]
 
@@ -435,13 +466,17 @@ def build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, com
                       topMargin=14*mm, bottomMargin=14*mm, title="Strategirapport").build(story)
 
 
-def generate_report(db, start, end, out_pdf, account="—", notional=10_000.0) -> dict:
+def generate_report(db, start, end, out_pdf, account="—", notional=10_000.0, fleet=True) -> dict:
     """Byg PDF'en for [start, end] fra journalen i `db`. Returnerer et summary-dict.
-    Kaldes både fra CLI (main) og fra /strategirapport-endpointet."""
+    Kaldes både fra CLI (main) og fra /strategirapport-endpointet.
+
+    fleet=True (default): unionér lokal db + alle replikerede arkiver, så ALLE maskiners
+    paper-handler indgår (kun algoserveren har peers' arkiver; en workstation falder
+    automatisk tilbage til kun-lokal). fleet=False: kun den givne db."""
     out_pdf = Path(out_pdf)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     days = business_days(start, end)
-    trades = load_trades(db, start, end)
+    trades = load_trades_fleet(db, start, end) if fleet else load_trades(db, start, end)
     dailies, cums, mets = {}, {}, {}
     for s in STRATS:
         daily, cum = daily_curve(trades[s], days)
