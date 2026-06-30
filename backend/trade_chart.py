@@ -26,6 +26,7 @@ from __future__ import annotations
 import io
 import logging
 import math
+from statistics import pstdev
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -38,6 +39,13 @@ import matplotlib.dates as mdates
 import pandas as pd
 
 import trade_queries
+
+# Europa-reversions z-score-parametre — til at GENBEREGNE baand for aeldre handler der
+# mangler de gemte payload-baand (foer baand-logningen). Matcher rule.py 1:1 (pstdev).
+try:
+    from strategies.europa_reversion.config import LOOKBACK as EUREV_LOOKBACK, ENTRY_Z as EUREV_ENTRY_Z
+except Exception:   # pragma: no cover — fald tilbage til de kendte defaults
+    EUREV_LOOKBACK, EUREV_ENTRY_Z = 30, 2.0
 
 logger = logging.getLogger(__name__)
 
@@ -275,11 +283,28 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
         ax.text(n - 0.5, target, f" target {target:.2f}", color="#2e7d32", va="center",
                 ha="left", fontsize=12)
 
+    # Aeldre EUREVERSION-handler (foer baand-logningen) mangler payload-baand -> genberegn
+    # fra bars'ene med PRAECIS rule.py's formel: population-std (pstdev) + mean over de
+    # LOOKBACK closes der slutter paa signal-baren (baren foer fill = entry_pos-1). Saa faar
+    # ALLE EUREVERSION-handler baand, ikke kun de nyeste.
+    bands_recomputed = False
+    if band_mean is None and source == "Europa-reversion" and entry_pos >= EUREV_LOOKBACK:
+        window = [float(c) for c in df["Close"].iloc[entry_pos - EUREV_LOOKBACK:entry_pos]]
+        if len(window) >= 2:
+            ma = sum(window) / len(window)
+            sd = pstdev(window)
+            if sd > 0:
+                band_mean = ma
+                band_upper = ma + EUREV_ENTRY_Z * sd
+                band_lower = ma - EUREV_ENTRY_Z * sd
+                bands_recomputed = True
+
     # ── Europa-reversion: midter- + ydre bånd (entry ved ydre, exit mod midten) ──
     _bbox = dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.0)
+    _gb = " (genb.)" if bands_recomputed else ""
     if isinstance(band_mean, (int, float)):
         ax.axhline(band_mean, color="#1565c0", linestyle="-", linewidth=1.4, alpha=0.85, zorder=4)
-        ax.text(0.4, band_mean, f"middel {band_mean:.2f}", color="#1565c0", va="bottom",
+        ax.text(0.4, band_mean, f"middel {band_mean:.2f}{_gb}", color="#1565c0", va="bottom",
                 ha="left", fontsize=11, bbox=_bbox, zorder=5)
     if isinstance(band_upper, (int, float)):
         ax.axhline(band_upper, color="#6a1b9a", linestyle="--", linewidth=1.2, alpha=0.75, zorder=4)
