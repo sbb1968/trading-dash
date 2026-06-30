@@ -1,0 +1,233 @@
+import { useEffect, useState, useCallback } from "react";
+
+// Handels-chart (Stage B): trade-liste for ALLE 4 algoer + server-genereret PNG pr. handel,
+// genskabt med algoens egne bar-parametre (40 bars før entry · handlen · 40 bars efter exit),
+// med præcis grøn entry-pil og rød exit-pil. PNG hentes inline via direkte URL (workstation
+// dev-mode-auth); trade-listen via JSON. Kræver TWS forbundet (bar-genhentning er et IBKR-kald).
+const API = "http://127.0.0.1:8000";
+
+interface Trade {
+  trade_id: string;
+  symbol: string;
+  source: string;
+  side: string;
+  entry_time_et?: string;
+  exit_time_et?: string;
+  entry_price?: number;
+  exit_price?: number;
+  pnl?: number;
+  exit_reason?: string;
+  current_stop?: number;
+  current_target?: number;
+}
+
+const ALGOS = [
+  { source: "Konfluens 2",      label: "Konfluens 2",     color: "#2563eb" },
+  { source: "Europa-reversion", label: "EUREVERSION",     color: "#059669" },
+  { source: "BuyTheDip",        label: "BuyTheDip",       color: "#d97706" },
+  { source: "Trend Join Long",  label: "Trend Join Long", color: "#7c3aed" },
+];
+const COLOR_OF: Record<string, string> = Object.fromEntries(ALGOS.map(a => [a.source, a.color]));
+
+function isoDaysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtTime(et?: string): string {
+  // entry_time_et er ISO ("2026-06-29T15:40:14..."); vis dato + klokkeslæt kort
+  if (!et) return "—";
+  const [d, t] = et.split("T");
+  return `${d ?? ""} ${(t ?? "").slice(0, 5)}`.trim();
+}
+
+export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) => void }) {
+  const [start, setStart] = useState(isoDaysAgo(30));
+  const [end, setEnd] = useState(isoDaysAgo(0));
+  const [active, setActive] = useState<Set<string>>(new Set(ALGOS.map(a => a.source)));
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [sel, setSel] = useState<Trade | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [before, setBefore] = useState(40);
+  const [after, setAfter] = useState(40);
+  const [imgLoading, setImgLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      const srcs = [...active].join(",");
+      const url = `${API}/handels-chart/trades?start=${start}&end=${end}` +
+        (srcs ? `&sources=${encodeURIComponent(srcs)}` : "");
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      setTrades(j.trades || []);
+    } catch (e: any) {
+      setErr(e?.message || "Kunne ikke hente handler");
+      setTrades([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [start, end, active]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (sel) setImgLoading(true); }, [sel, before, after]);
+
+  const toggle = (src: string) => {
+    setActive(prev => {
+      const next = new Set(prev);
+      if (next.has(src)) next.delete(src); else next.add(src);
+      return next;
+    });
+  };
+
+  const input: React.CSSProperties = {
+    background: "var(--bg-base)", color: "var(--text-primary)",
+    border: "1px solid var(--border-default)", borderRadius: 5, padding: "4px 7px", fontSize: 12,
+  };
+  const pnlColor = (p?: number) => (typeof p !== "number" ? "var(--text-secondary)"
+    : p >= 0 ? "var(--bull, #16a34a)" : "var(--bear, #dc2626)");
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column",
+      background: "var(--bg-base)", color: "var(--text-primary)" }}>
+      {/* Header + filtre */}
+      <div style={{ padding: "12px 14px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--accent)", marginBottom: 6 }}>
+          📈 Handels-chart
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11,
+            color: "var(--text-secondary)" }}>
+            Fra
+            <input type="date" value={start} max={end} onChange={e => setStart(e.target.value)} style={input} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11,
+            color: "var(--text-secondary)" }}>
+            Til
+            <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={input} />
+          </label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {ALGOS.map(a => (
+              <button key={a.source} onClick={() => toggle(a.source)}
+                style={{ cursor: "pointer", padding: "5px 9px", borderRadius: 14, fontSize: 11.5,
+                  fontWeight: 700, border: `1px solid ${a.color}`,
+                  background: active.has(a.source) ? a.color : "transparent",
+                  color: active.has(a.source) ? "#fff" : a.color }}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Indhold: trade-liste (venstre) + chart (højre) */}
+      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        {/* Trade-liste */}
+        <div style={{ width: 360, borderRight: "1px solid var(--border-subtle)", overflow: "auto" }}>
+          {loading && <div style={{ padding: 14, color: "var(--text-secondary)" }}>Henter handler…</div>}
+          {err && <div style={{ padding: 14, color: "var(--bear)" }}>⚠ {err} — er backenden startet?</div>}
+          {!loading && !err && trades.length === 0 &&
+            <div style={{ padding: 14, color: "var(--text-secondary)", fontSize: 12.5, lineHeight: 1.5 }}>
+              Ingen lukkede handler i intervallet for de valgte algoer.
+            </div>}
+          {trades.map(t => {
+            const isSel = sel?.trade_id === t.trade_id;
+            return (
+              <div key={t.trade_id} onClick={() => setSel(t)}
+                style={{ padding: "8px 11px", cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
+                  background: isSel ? "var(--bg-elevated)" : "transparent",
+                  borderLeft: `3px solid ${isSel ? (COLOR_OF[t.source] || "var(--accent)") : "transparent"}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span style={{ fontWeight: 800, fontSize: 13 }}>{t.symbol}</span>
+                  <span style={{ fontWeight: 800, fontSize: 12.5, color: pnlColor(t.pnl) }}>
+                    {typeof t.pnl === "number" ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "—"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11,
+                  color: "var(--text-secondary)", marginTop: 2 }}>
+                  <span style={{ color: COLOR_OF[t.source] || "var(--text-secondary)" }}>{t.source}</span>
+                  <span>{(t.side || "").toUpperCase()} · {t.exit_reason || "?"}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: "var(--text-secondary)", marginTop: 2 }}>
+                  {fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Chart + metadata */}
+        <div style={{ flex: 1, overflow: "auto", padding: 14, minWidth: 0 }}>
+          {!sel && (
+            <div style={{ color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.6, paddingTop: 30,
+              textAlign: "center" }}>
+              Vælg en handel i listen for at se chartet.<br />
+              <span style={{ fontSize: 11.5 }}>
+                Chartet genskabes fra IBKR med algoens egne bar-parametre — {before} bars før entry,
+                selve handlen, {after} bars efter exit. Grøn pil = entry, rød pil = exit.
+              </span>
+            </div>
+          )}
+          {sel && (
+            <>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
+                marginBottom: 10 }}>
+                <span style={{ fontSize: 17, fontWeight: 800, cursor: onSelectTicker ? "pointer" : "default" }}
+                  onClick={() => onSelectTicker?.(sel.symbol)} title={onSelectTicker ? "Vælg ticker" : ""}>
+                  {sel.symbol}
+                </span>
+                <span style={{ color: COLOR_OF[sel.source] || "var(--text-secondary)", fontWeight: 700 }}>
+                  {sel.source}
+                </span>
+                <span style={{ color: pnlColor(sel.pnl), fontWeight: 800 }}>
+                  P&amp;L {typeof sel.pnl === "number" ? `${sel.pnl >= 0 ? "+" : ""}$${sel.pnl.toFixed(2)}` : "—"}
+                </span>
+                <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  {(sel.side || "").toUpperCase()} · entry ${sel.entry_price?.toFixed(2) ?? "—"} → exit
+                  ${sel.exit_price?.toFixed(2) ?? "—"} · {sel.exit_reason || "?"}
+                  {typeof sel.current_stop === "number" && ` · stop $${sel.current_stop.toFixed(2)}`}
+                  {typeof sel.current_target === "number" && ` · target $${sel.current_target.toFixed(2)}`}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10, fontSize: 11.5,
+                color: "var(--text-secondary)" }}>
+                <label style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                  Bars før
+                  <input type="number" min={5} max={200} value={before}
+                    onChange={e => setBefore(Math.max(5, Math.min(200, +e.target.value || 40)))}
+                    style={{ ...input, width: 64 }} />
+                </label>
+                <label style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                  Bars efter
+                  <input type="number" min={5} max={200} value={after}
+                    onChange={e => setAfter(Math.max(5, Math.min(200, +e.target.value || 40)))}
+                    style={{ ...input, width: 64 }} />
+                </label>
+                {imgLoading && <span>⏳ genhenter bars fra IBKR…</span>}
+              </div>
+
+              <img
+                key={`${sel.trade_id}-${before}-${after}`}
+                src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
+                alt={`Chart for ${sel.symbol}`}
+                onLoad={() => setImgLoading(false)}
+                onError={() => setImgLoading(false)}
+                style={{ maxWidth: "100%", borderRadius: 6, border: "1px solid var(--border-subtle)",
+                  opacity: imgLoading ? 0.4 : 1, transition: "opacity .2s" }}
+              />
+              <div style={{ marginTop: 8, fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Hvis chartet ikke vises: tjek at TWS/Gateway er forbundet (bars genhentes live fra IBKR).
+                Micro-caps ~6 mdr. tilbage i 1-min historik.
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

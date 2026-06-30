@@ -58,6 +58,7 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
     { id: "buyholdtop10",   shortcut: "B" },   // Buy-and-Hold Top-10
     { id: "intradagreport", shortcut: "T" },   // Intradag-rapport
     { id: "strategirapport",shortcut: "G" },   // Strategi-sammenligningsrapport
+    { id: "handelschart",   shortcut: "C" },   // Handels-chart (entry/exit pr. handel)
   ]},
   { label: "Konto & ordrer", icon: "💼", items: [
     { id: "account",        shortcut: "U" },

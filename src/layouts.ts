@@ -21,7 +21,8 @@ export type WindowId =
   | "haltscanner"
   | "sektorniche"
   | "strategirapport"
-  | "firmainfo";
+  | "firmainfo"
+  | "handelschart";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   watchlist:    "Watchlist",
@@ -55,6 +56,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   sektorniche:     "Sektorer",
   strategirapport: "Strategirapport",
   firmainfo:       "Firma-info",
+  handelschart:    "Handels-chart",
 };
 
 // ── WindowConfig ──────────────────────────────────────────────

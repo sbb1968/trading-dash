@@ -26,6 +26,7 @@ import { IntradagTop10 } from "./IntradagTop10";
 import { SectorNiche } from "./SectorNiche";
 import { StrategyReport } from "./StrategyReport";
 import { CompanyInfo } from "./CompanyInfo";
+import { HandelsChart } from "./HandelsChart";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -943,6 +944,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
     case "strategirapport": return <StrategyReport />;
     case "firmainfo": return <CompanyInfo ticker={props.selectedTicker} />;
+    case "handelschart": return <HandelsChart onSelectTicker={props.onSelectTicker} />;
     case "docs":    return <DocsWindow />;
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
