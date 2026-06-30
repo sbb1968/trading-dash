@@ -224,6 +224,12 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
     exit_price = trade.get("exit_price")
     stop = trade.get("current_stop")
     target = trade.get("current_target")
+    # Europa-reversion gemmer mean/upper_band/lower_band i payload ved entry — de
+    # tegnes som 3 vandrette linjer (midter + ydre bånd) saa man ser revert-geometrien.
+    payload = trade.get("payload") or {}
+    band_mean = payload.get("mean")
+    band_upper = payload.get("upper_band")
+    band_lower = payload.get("lower_band")
 
     entry_et = (_parse_iso_utc(trade.get("entry_time_utc")) or df.index[0].astimezone(timezone.utc)).astimezone(ET)
     exit_et = (_parse_iso_utc(trade.get("exit_time_utc")) or df.index[-1].astimezone(timezone.utc)).astimezone(ET)
@@ -268,6 +274,21 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
         ax.axhline(target, color="#2e7d32", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
         ax.text(n - 0.5, target, f" target {target:.2f}", color="#2e7d32", va="center",
                 ha="left", fontsize=12)
+
+    # ── Europa-reversion: midter- + ydre bånd (entry ved ydre, exit mod midten) ──
+    _bbox = dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.0)
+    if isinstance(band_mean, (int, float)):
+        ax.axhline(band_mean, color="#1565c0", linestyle="-", linewidth=1.4, alpha=0.85, zorder=4)
+        ax.text(0.4, band_mean, f"middel {band_mean:.2f}", color="#1565c0", va="bottom",
+                ha="left", fontsize=11, bbox=_bbox, zorder=5)
+    if isinstance(band_upper, (int, float)):
+        ax.axhline(band_upper, color="#6a1b9a", linestyle="--", linewidth=1.2, alpha=0.75, zorder=4)
+        ax.text(0.4, band_upper, f"øvre bånd {band_upper:.2f}", color="#6a1b9a", va="bottom",
+                ha="left", fontsize=11, bbox=_bbox, zorder=5)
+    if isinstance(band_lower, (int, float)):
+        ax.axhline(band_lower, color="#6a1b9a", linestyle="--", linewidth=1.2, alpha=0.75, zorder=4)
+        ax.text(0.4, band_lower, f"nedre bånd {band_lower:.2f}", color="#6a1b9a", va="bottom",
+                ha="left", fontsize=11, bbox=_bbox, zorder=5)
 
     # ── PRAECIS groen entry-pil + roed exit-pil (paa eksakt fill-pris) ──
     if isinstance(entry_price, (int, float)):
@@ -361,7 +382,10 @@ async def build_trade_bars_json(db, conn, trade_id: str,
         "bars": bars,
         "entry": {"time": int(entry_dt.timestamp()), "price": trade.get("entry_price")},
         "exit":  {"time": int(exit_dt.timestamp()),  "price": trade.get("exit_price")},
-        "levels": {"stop": trade.get("current_stop"), "target": trade.get("current_target")},
+        "levels": {"stop": trade.get("current_stop"), "target": trade.get("current_target"),
+                   "mean": (trade.get("payload") or {}).get("mean"),
+                   "upper_band": (trade.get("payload") or {}).get("upper_band"),
+                   "lower_band": (trade.get("payload") or {}).get("lower_band")},
         "meta": {"symbol": trade.get("symbol"), "source": trade.get("source"),
                  "side": trade.get("side"), "pnl": trade.get("pnl"),
                  "exit_reason": trade.get("exit_reason")},
