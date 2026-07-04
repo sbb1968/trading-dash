@@ -246,7 +246,7 @@ def main():
         description="Daglig top-10 swing-scanner (rs_3m forfilter -> fuld swing-scoring)")
     ap.add_argument("--fraction", type=float, default=0.25,
                     help="andel af universet til kortlisten efter rs_3m (default 0.25)")
-    ap.add_argument("--top", type=int, default=10, help="antal i slutlisten (default 10)")
+    ap.add_argument("--top", type=int, default=15, help="antal i slutlisten (default 15)")
     ap.add_argument("--source", default="ibkr", choices=["ibkr", "yfinance"])
     ap.add_argument("--period", default="1y")
     ap.add_argument("--delay", type=float, default=0.4,

@@ -54,7 +54,7 @@ EXCHANGES    = ["NYSE", "NASDAQ", "AMEX"]
 STALE_DAYS   = 7                 # genscore hvis cache-post aeldre end dette (fundamentals = kvartalsvis)
 MAX_PER_RUN  = 35                # kvote-budget pr. koersel (~250 FMP/dag / ~7 kald pr. ticker)
 SCORE_DELAY  = 3.0               # sek mellem fulde scoringer (FMP-venlig + IBKR-historik-pacing)
-TOP_N        = 10
+TOP_N        = 15
 
 CACHE_FIELDS = ["ticker", "final", "combined", "gate", "quality", "growth",
                 "valuation", "trend", "oe_yield", "company", "scored_utc", "error"]

@@ -161,11 +161,11 @@ export function BuyHoldTop10() {
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Buy-and-Hold Top-10</div>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Buy-and-Hold Top-15</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
             {data?.generated_local
               ? `Genereret ${data.generated_local} · ${data.scored_cached ?? 0}/${data.universe_size ?? 0} scoret · ${ageText(data.generated_utc)}`
-              : "Ingen top-10 genereret endnu"}
+              : "Ingen top-15 genereret endnu"}
           </div>
         </div>
         <button
@@ -185,7 +185,7 @@ export function BuyHoldTop10() {
 
       {/* Forklarende legende (som buy-and-hold-scorens kontekst) */}
       <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, borderBottom: "1px solid var(--border-subtle)" }}>
-        De 10 højest-scorende køb-og-hold-kandidater fra det kuraterede kvalitetsunivers. Alle scores er
+        De 15 højest-scorende køb-og-hold-kandidater fra det kuraterede kvalitetsunivers. Alle scores er
         <b> −100…+100</b> (grøn = medvind, rød = modvind). <b>SAMLET</b> = Kvalitet (35%) + Vækst &amp; holdbarhed
         (25%) + Værdiansættelse (25%) + Langsigtet trend (15%), ganget med <b>risiko-gaten</b> (0–1;
         konkurs/udvanding/FCF/gæld). Listen fyldes inkrementelt (FMP-kvote) og genfriskes ugentligt. Klik en
@@ -194,7 +194,7 @@ export function BuyHoldTop10() {
 
       {running && (
         <div style={{ padding: "8px 14px", background: "var(--bg-elevated)", color: "var(--text-primary)", fontSize: 12, borderBottom: "1px solid var(--border-subtle)" }}>
-          Ny top-10 kører{progText}{data?.started_utc ? ` · startet ${new Date(data.started_utc).toLocaleTimeString()}` : ""}. Listen opdateres automatisk når den er færdig.
+          Ny top-15 kører{progText}{data?.started_utc ? ` · startet ${new Date(data.started_utc).toLocaleTimeString()}` : ""}. Listen opdateres automatisk når den er færdig.
         </div>
       )}
       {note && (
@@ -206,7 +206,7 @@ export function BuyHoldTop10() {
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 12 }}>Henter…</div>
         ) : !data?.rows?.length ? (
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 12, lineHeight: 1.5 }}>
-            Ingen top-10 at vise endnu. Tryk <b>Kør ny</b> for at lave en. Kørslen er kvote-budgetteret (~35 navne) og bør køres uden for handelstid; første fyldning tager nogle dage.
+            Ingen top-15 at vise endnu. Tryk <b>Kør ny</b> for at lave en. Kørslen er kvote-budgetteret (~35 navne) og bør køres uden for handelstid; første fyldning tager nogle dage.
           </div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>

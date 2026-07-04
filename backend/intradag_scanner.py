@@ -38,7 +38,7 @@ MIN_AVG_VOL          = 300_000      # likviditetsgulv
 FLOAT_MAX            = None         # valgfrit loft (fx 100e6); None = lad forsynings-laget rangere float
 UNIVERSE_MAX         = 50           # raa kandidater fra TV
 SHORTLIST_N          = 18           # fuld-scores (pacing-balance ~3-5 min)
-TOP_N                = 10           # i listen
+TOP_N                = 15           # i listen
 SCAN_DELAY_SEC       = 9.0          # throttle mellem fulde scoringer (~6 historik/min)
 SCAN_TF              = "5 mins"
 SCAN_DURATION        = "5 D"

@@ -40,9 +40,9 @@ interface WinEntry { id: WindowId; shortcut: string }
 // AddWindowMenu via ChartSubmenu). Genvejstaster bevaret for muskelhukommelse.
 const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   { label: "Scannere", icon: "🔍", items: [
-    { id: "swingtop10",    shortcut: "S" },   // Swing Top-10
-    { id: "intradagtop10", shortcut: "I" },   // Day trading Top-10
-    { id: "buyholdtop10",  shortcut: "B" },   // Buy-and-Hold Top-10
+    { id: "swingtop10",    shortcut: "S" },   // Swing Top-15
+    { id: "intradagtop10", shortcut: "I" },   // Day trading Top-15
+    { id: "buyholdtop10",  shortcut: "B" },   // Buy-and-Hold Top-15
     { id: "haltscanner",   shortcut: "H" },   // Halt-scanner
   ]},
   { label: "Markedsdata", icon: "📊", items: [

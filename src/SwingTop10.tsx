@@ -144,17 +144,17 @@ export function SwingTop10() {
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border-subtle)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Swing trading Top-10</div>
+          <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "0.3px" }}>Swing trading Top-15</div>
           <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
             {data?.generated_local
               ? `Genereret ${data.generated_local} · kilde: ${data.source ?? "?"} · ${ageText(data.generated_utc)}`
-              : "Ingen top-10 genereret endnu"}
+              : "Ingen top-15 genereret endnu"}
           </div>
         </div>
         <button
           onClick={() => setShowConfirm(true)}
           disabled={disabled}
-          title="Kører en frisk top-10 mod IBKR. Tager et par timer. Kør uden for handelstid."
+          title="Kører en frisk top-15 mod IBKR. Tager et par timer. Kør uden for handelstid."
           style={{
             background: disabled ? "var(--bg-elevated)" : "var(--accent)",
             color: disabled ? "var(--text-muted)" : "#fff",
@@ -168,7 +168,7 @@ export function SwingTop10() {
 
       {/* Forklarende legende (som swing-scorens kontekst) */}
       <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, borderBottom: "1px solid var(--border-subtle)" }}>
-        De 10 højest-scorende swing trading-kandidater fra hele det likvide US-univers. Alle scores er
+        De 15 højest-scorende swing trading-kandidater fra hele det likvide US-univers. Alle scores er
         <b> −100…+100</b> (grøn = medvind, rød = modvind). <b>Samlet</b> = teknisk (55%) + fundamental (20%)
         + katalysator (25%), ganget med <b>handelbarheden</b> (0–1, likviditet/spænd). Listen er forfiltreret
         på 3-måneders relativ styrke før den fulde scoring.
@@ -176,7 +176,7 @@ export function SwingTop10() {
 
       {running && (
         <div style={{ padding: "8px 14px", background: "var(--bg-elevated)", color: "var(--text-primary)", fontSize: 12, borderBottom: "1px solid var(--border-subtle)" }}>
-          Ny top-10 kører{data?.started_utc ? ` — startet ${new Date(data.started_utc).toLocaleTimeString()}` : ""}. Det tager et par timer; listen opdateres automatisk når den er færdig.
+          Ny top-15 kører{data?.started_utc ? ` — startet ${new Date(data.started_utc).toLocaleTimeString()}` : ""}. Det tager et par timer; listen opdateres automatisk når den er færdig.
         </div>
       )}
       {note && (
@@ -188,7 +188,7 @@ export function SwingTop10() {
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 12 }}>Henter…</div>
         ) : !data?.rows?.length ? (
           <div style={{ color: "var(--text-muted)", fontSize: 13, padding: 12, lineHeight: 1.5 }}>
-            Ingen top-10 at vise endnu. Tryk <b>Kør ny (IBKR)</b> for at lave en. Det tager et par timer og bør køres uden for handelstid.
+            Ingen top-15 at vise endnu. Tryk <b>Kør ny (IBKR)</b> for at lave en. Det tager et par timer og bør køres uden for handelstid.
           </div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -235,7 +235,7 @@ export function SwingTop10() {
         <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20, padding: 16 }}>
           <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-strong)", borderRadius: 8, padding: 16, maxWidth: 440, color: "var(--text-primary)" }}>
             <div style={{ fontSize: 13, lineHeight: 1.55, marginBottom: 16 }}>
-              Denne kørsel tager et par timer. Den afvikles i baggrunden og du kan ikke følge den, start denne top-10 senere for at se resultatet. Vil du stadigt "køre nu"?
+              Denne kørsel tager et par timer. Den afvikles i baggrunden og du kan ikke følge den, start denne top-15 senere for at se resultatet. Vil du stadigt "køre nu"?
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button
