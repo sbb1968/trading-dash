@@ -105,7 +105,8 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
   );
 }
 
-export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string) => void }) {
+export function IntradagTop10({ onSelectTicker, onOpenDetail }:
+  { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void }) {
   const [data, setData] = useState<TopData | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -202,7 +203,8 @@ export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string)
             <thead>
               <tr>
                 <Th title="#" left tip="Rangering efter Samlet score — 1 = den bedste opstilling lige nu." />
-                <Th title="Symbol" left tip="Aktiens ticker. Klik på rækken for at sætte symbolet i de andre vinduer (charts, level 2 osv.)." />
+                <Th title="Symbol" left tip="Aktiens ticker. Klik rækken for at sætte symbolet i de andre vinduer; dobbeltklik symbolet for den detaljerede score i eget vindue." />
+                <Th title="Pris" sub="sidste kurs" tip="Aktiens sidste kurs fra scoringen (USD)." />
                 <Th title="Samlet" sub="gated konfluens" tip="Den samlede day trading-konfluens (−100…+100): teknisk + forsyning + katalysator vægtet sammen og ganget med handelbarheds-gaten. Det ene tal du dømmer på." />
                 <Th title="Vurdering" sub="bånd" left tip="Ord-bånd for Samlet: ≥50 Stærk · ≥20 Medvind · >−20 Neutral · >−50 Svag · ellers Frarådes." />
                 <Th title="Gate" sub="handelbarhed" tip="Handelbarhed 0–1: er aktien reelt til at handle? Den mindste delfaktor styrer (likviditet, dollar-volumen, pris, bid/ask-spænd, halt). Lav gate trækker Samlet kraftigt ned — en illikvid gapper med vildt gap kan stadig score lavt." />
@@ -219,7 +221,10 @@ export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string)
                   style={{ borderTop: "1px solid var(--border-subtle)", cursor: onSelectTicker ? "pointer" : "default" }}
                   title={onSelectTicker ? "Sæt symbol i de andre vinduer" : undefined}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
-                  <td style={{ ...tdStyle, textAlign: "left", fontWeight: 800, fontSize: 14 }}>{r.symbol}</td>
+                  <td style={{ ...tdStyle, textAlign: "left", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+                    onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail?.("intradag", String(r.symbol).toUpperCase()); }}
+                    title="Dobbeltklik for detaljeret score">{r.symbol}</td>
+                  <td style={tdStyle}>{r.price != null && r.price !== "" ? `$${plain(r.price, 2)}` : "—"}</td>
                   <td style={{ ...tdStyle, fontWeight: 800, fontSize: 15, color: scoreColor(r.final) }}>{num(r.final, 1)}</td>
                   <td style={{ ...tdStyle, textAlign: "left", color: bandColor(r.band), fontWeight: 600 }}>{bandLabel(r.band)}</td>
                   <td style={tdStyle}>{plain(r.gate, 3)}</td>

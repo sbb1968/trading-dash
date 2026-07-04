@@ -28,6 +28,7 @@ import { StrategyReport } from "./StrategyReport";
 import { CompanyInfo } from "./CompanyInfo";
 import { HandelsChart } from "./HandelsChart";
 import { SwingDetail } from "./SwingDetail";
+import { IntradagDetail } from "./IntradagDetail";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -941,8 +942,8 @@ export function renderWindowContent(id: WindowId, props: {
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "buyhold": return <BuyHoldReport />;
-    case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} />;
-    case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
+    case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
+    case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
     case "strategirapport": return <StrategyReport />;
     case "firmainfo": return <CompanyInfo ticker={props.selectedTicker} />;
@@ -1201,6 +1202,7 @@ function App() {
                   windowType="swingdetail"
                 >
                   {w.kind === "swing" && <SwingDetail ticker={w.ticker} />}
+                  {w.kind === "intradag" && <IntradagDetail ticker={w.ticker} />}
                 </FloatingWindow>
               ))}
             </>
