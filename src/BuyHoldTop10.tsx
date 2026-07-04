@@ -55,7 +55,7 @@ function plain(v: number | string, digits = 2): string {
   return n.toFixed(digits);
 }
 
-// Farve efter score (samme skala som buy-and-hold-rapporten): grøn medvind / rød modvind.
+// Farve efter score (samme skala som buy-and-hold-scoren): grøn medvind / rød modvind.
 function scoreColor(v: number | string): string {
   const n = typeof v === "number" ? v : parseFloat(v);
   if (isNaN(n)) return "var(--text-muted)";
@@ -64,7 +64,7 @@ function scoreColor(v: number | string): string {
   return "var(--neutral)";
 }
 
-// Backend sender ASCII-baand; vis dem pyntet på dansk (som buy-and-hold-rapporten).
+// Backend sender ASCII-baand; vis dem pyntet på dansk (som buy-and-hold-scoren).
 const BAND_LABEL: Record<string, string> = {
   "STAERK KOEB-OG-HOLD-KANDIDAT": "Stærk køb-og-hold-kandidat",
   "EGNET (langsigtet)": "Egnet (langsigtet)",
@@ -147,7 +147,7 @@ export function BuyHoldTop10() {
     }
   }
 
-  // Klik paa en raekke aabner Buy-and-Hold-rapporten for den ticker (ekstern browser).
+  // Klik paa en raekke aabner Buy-and-Hold-scoren for den ticker (ekstern browser).
   function openReport(ticker: string) {
     openUrl(`http://127.0.0.1:8000/buyhold/report.html?ticker=${encodeURIComponent(ticker)}`).catch(() => { });
   }
@@ -183,13 +183,13 @@ export function BuyHoldTop10() {
         </button>
       </div>
 
-      {/* Forklarende legende (som buy-and-hold-rapportens kontekst) */}
+      {/* Forklarende legende (som buy-and-hold-scorens kontekst) */}
       <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, borderBottom: "1px solid var(--border-subtle)" }}>
         De 10 højest-scorende køb-og-hold-kandidater fra det kuraterede kvalitetsunivers. Alle scores er
         <b> −100…+100</b> (grøn = medvind, rød = modvind). <b>SAMLET</b> = Kvalitet (35%) + Vækst &amp; holdbarhed
         (25%) + Værdiansættelse (25%) + Langsigtet trend (15%), ganget med <b>risiko-gaten</b> (0–1;
         konkurs/udvanding/FCF/gæld). Listen fyldes inkrementelt (FMP-kvote) og genfriskes ugentligt. Klik en
-        række for at åbne den fulde rapport.
+        række for at åbne den fulde score.
       </div>
 
       {running && (
@@ -213,7 +213,7 @@ export function BuyHoldTop10() {
             <thead>
               <tr>
                 <Th title="#" left tip="Rangering efter SAMLET score — 1 = bedste køb-og-hold-kandidat." />
-                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Klik rækken for den fulde rapport." />
+                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Klik rækken for den fulde score." />
                 <Th title="SAMLET" sub="vægtet + gated" tip="Vægtet lag-score (Kvalitet 35% + Vækst 25% + Værdi 25% + Trend 15%) ganget med risiko-gaten (−100…+100). Det samlede køb-og-hold-tal." />
                 <Th title="Vurdering" sub="samlet bånd" left tip="Ord-bånd for SAMLET: Stærk køb-og-hold-kandidat · Egnet (langsigtet) · Neutral – afvent · Svag · Frarådes." />
                 <Th title="Risiko-gate" sub="0–1" tip="Gate 0–1: konkurs (Altman Z), udvanding, FCF-fortegn, gæld (nettogæld/EBITDA), likviditet. Lav gate trækker SAMLET kraftigt ned." />
@@ -228,7 +228,7 @@ export function BuyHoldTop10() {
               {data.rows.map((r) => (
                 <tr key={r.rank}
                   onClick={() => openReport(r.ticker)}
-                  title={`Åbn Buy-and-Hold-rapport for ${r.ticker}`}
+                  title={`Åbn Buy-and-Hold-score for ${r.ticker}`}
                   style={{ borderTop: "1px solid var(--border-subtle)", cursor: "pointer" }}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
                   <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240 }}>

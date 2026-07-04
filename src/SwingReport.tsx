@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { SwingChart } from "./SwingChart";
 
 const API_JSON = "http://127.0.0.1:8000/swing/analyze_json";
-// PDF: den paene rapport aabnes i EKSTERN browser (print sker der -> app-vinduet
+// PDF: den paene score aabnes i EKSTERN browser (print sker der -> app-vinduet
 // rammes ikke, saa man ikke ved et uheld lukker Trading Dash via dets X).
 const API_HTML = "http://127.0.0.1:8000/swing/report.html";
 
@@ -211,7 +211,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
 
   function exportPdf(detail = false) {
     if (!data) return;
-    // Aaben den paene rapport i ekstern browser; brugeren gemmer som PDF derfra.
+    // Aaben den paene score i ekstern browser; brugeren gemmer som PDF derfra.
     // detail=true -> fuld faktor-nedbrydning pr. lag (til teknisk gennemgang).
     const p = new URLSearchParams({ ticker: data.ticker });
     if (useOverlay) { p.set("sr", String(sr)); p.set("pattern", String(pattern)); p.set("candle", String(candle)); }
@@ -233,7 +233,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
             {loading ? "Analyserer..." : "Analyser"}
           </button>
           <button onClick={() => exportPdf(false)} disabled={!data || loading}
-            title="Aabn den paene rapport i browseren og gem som PDF"
+            title="Aabn scoren i browseren og gem som PDF"
             style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
             PDF
           </button>
@@ -259,7 +259,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
         )}
       </div>
 
-      {/* Rapport-omraade */}
+      {/* Score-omraade */}
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         {error && (
           <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--bear)", borderRadius: 4, color: "var(--bear)", fontSize: 13 }}>{error}</div>
@@ -268,7 +268,7 @@ export function SwingReport({ onSelectTicker }: { onSelectTicker?: (t: string) =
           <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter daglige bars (IBKR), fundamentaler og float ... tager et par sekunder.</div>
         )}
         {!error && !loading && !data && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. Rapporten scorer aktien for swing trading-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast en ticker og tryk Analyser. Scoren vurderer aktiens swing trading-egnethed paa tvaers af teknik, fundamental og katalysator.</div>
         )}
         {!error && !loading && data && (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>

@@ -191,7 +191,7 @@ export function BuyHoldReport() {
   }
 
   const oe = data?.owner_earnings;
-  // Ingen rapport (fejl/ingen data) -> PDF giver ingen mening: inaktivér begge knapper.
+  // Ingen score (fejl/ingen data) -> PDF giver ingen mening: inaktivér begge knapper.
   const pdfDisabled = !data || loading || !!error;
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-base)", color: "var(--text-primary)" }}>
@@ -205,7 +205,7 @@ export function BuyHoldReport() {
           {loading ? "Analyserer..." : "Analyser"}
         </button>
         <button onClick={() => exportPdf(false)} disabled={pdfDisabled}
-          title="Aabn den paene rapport i browseren og gem som PDF"
+          title="Aabn scoren i browseren og gem som PDF"
           style={{ background: "var(--bg-elevated)", color: pdfDisabled ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: pdfDisabled ? "default" : "pointer" }}>
           PDF
         </button>

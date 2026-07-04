@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { IntradagChart } from "./IntradagChart";
 
 const API_JSON = "http://127.0.0.1:8000/intradag/analyze_json";
-// PDF: den paene rapport aabnes i EKSTERN browser (print sker der -> app-vinduet
+// PDF: den paene score aabnes i EKSTERN browser (print sker der -> app-vinduet
 // rammes ikke, saa man ikke ved et uheld lukker Trading Dash via dets X).
 const API_HTML = "http://127.0.0.1:8000/intradag/report.html";
 
@@ -228,7 +228,7 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
             {loading ? "Henter..." : "Opdater"}
           </button>
           <button onClick={() => exportPdf(false)} disabled={!data || loading}
-            title="Aabn den paene rapport i browseren og gem som PDF"
+            title="Aabn scoren i browseren og gem som PDF"
             style={{ background: "var(--bg-elevated)", color: (!data || loading) ? "var(--text-muted)" : "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: (!data || loading) ? "default" : "pointer" }}>
             PDF
           </button>
@@ -254,7 +254,7 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
         )}
       </div>
 
-      {/* Rapport-omraade */}
+      {/* Score-omraade */}
       <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
         {error && (
           <div style={{ margin: 12, padding: "10px 12px", border: "1px solid var(--bear)", borderRadius: 4, color: "var(--bear)", fontSize: 13 }}>{error}</div>
@@ -263,7 +263,7 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
           <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Henter Day trading-bars (IBKR), SPY og float ... tager et par sekunder.</div>
         )}
         {!error && !loading && !data && (
-          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast et symbol, vælg tidsramme og tryk Opdater. Rapporten scorer aktien for Day trading-konfluens (teknik, forsyning, katalysator) og en handelbarheds-gate.</div>
+          <div style={{ padding: 24, color: "var(--text-muted)", fontSize: 14 }}>Indtast et symbol, vælg tidsramme og tryk Opdater. Scoren vurderer aktien for Day trading-konfluens (teknik, forsyning, katalysator) og en handelbarheds-gate.</div>
         )}
         {!error && !loading && data && (
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>

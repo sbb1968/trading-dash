@@ -41,7 +41,8 @@ interface WinEntry { id: WindowId; shortcut: string }
 const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   { label: "Scannere", icon: "🔍", items: [
     { id: "swingtop10",    shortcut: "S" },   // Swing Top-10
-    { id: "intradagtop10", shortcut: "I" },   // Intradag Top-10
+    { id: "intradagtop10", shortcut: "I" },   // Day trading Top-10
+    { id: "buyholdtop10",  shortcut: "B" },   // Buy-and-Hold Top-10
     { id: "haltscanner",   shortcut: "H" },   // Halt-scanner
   ]},
   { label: "Markedsdata", icon: "📊", items: [
@@ -53,10 +54,9 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
     { id: "firmainfo",      shortcut: "F" },   // Firma-info for valgt ticker
   ]},
   { label: "Analyse", icon: "🎯", items: [
-    { id: "swing",          shortcut: "W" },   // Swing-rapport
-    { id: "buyhold",        shortcut: "H" },   // Buy-and-Hold-rapport
-    { id: "buyholdtop10",   shortcut: "B" },   // Buy-and-Hold Top-10
-    { id: "intradagreport", shortcut: "T" },   // Intradag-rapport
+    { id: "swing",          shortcut: "W" },   // Swing-scores
+    { id: "buyhold",        shortcut: "H" },   // Buy-and-Hold-scores
+    { id: "intradagreport", shortcut: "T" },   // Day trading-scores
     { id: "strategirapport",shortcut: "G" },   // Strategi-sammenligningsrapport
     { id: "handelschart",   shortcut: "C" },   // Handels-chart (entry/exit pr. handel)
   ]},

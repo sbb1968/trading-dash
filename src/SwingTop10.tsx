@@ -45,7 +45,7 @@ function num(v: number | string, digits = 1): string {
   return (n >= 0 ? "+" : "") + n.toFixed(digits);
 }
 
-// Farve efter score (samme skala som swing-rapporten): grøn medvind / rød modvind.
+// Farve efter score (samme skala som swing-scoren): grøn medvind / rød modvind.
 function scoreColor(v: number | string): string {
   const n = typeof v === "number" ? v : parseFloat(v);
   if (isNaN(n)) return "var(--text-muted)";
@@ -54,7 +54,7 @@ function scoreColor(v: number | string): string {
   return "var(--neutral)";
 }
 
-// Backend sender ASCII-baand; vis dem pyntet på dansk (som swing-rapporten).
+// Backend sender ASCII-baand; vis dem pyntet på dansk (som swing-scoren).
 const BAND_LABEL: Record<string, string> = {
   "STAERK SWING-KANDIDAT": "Stærk swing trading-kandidat",
   "EGNET MED FORBEHOLD": "Egnet med forbehold",
@@ -166,7 +166,7 @@ export function SwingTop10() {
         </button>
       </div>
 
-      {/* Forklarende legende (som swing-rapportens kontekst) */}
+      {/* Forklarende legende (som swing-scorens kontekst) */}
       <div style={{ padding: "8px 14px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, borderBottom: "1px solid var(--border-subtle)" }}>
         De 10 højest-scorende swing trading-kandidater fra hele det likvide US-univers. Alle scores er
         <b> −100…+100</b> (grøn = medvind, rød = modvind). <b>Samlet</b> = teknisk (55%) + fundamental (20%)
