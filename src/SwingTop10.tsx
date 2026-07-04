@@ -7,6 +7,7 @@ interface Row {
   rank: number;
   ticker: string;
   company?: string | null;
+  price: number | string;
   final: number | string;
   band: string;
   combined: number | string;
@@ -196,7 +197,8 @@ export function SwingTop10({ onSelectTicker, onOpenDetail }:
             <thead>
               <tr>
                 <Th title="#" left tip="Rangering efter Samlet score — 1 = bedste swing trading-kandidat." />
-                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn." />
+                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Dobbeltklik for den detaljerede score i eget vindue." />
+                <Th title="Pris" sub="sidste kurs" tip="Aktiens sidste kurs fra scoringen (USD)." />
                 <Th title="Samlet" sub="vægtet + gated" tip="Vægtet lag-score (teknisk 55% + fundamental 20% + katalysator 25%) ganget med handelbarheds-gaten (−100…+100). Det samlede swing trading-tal." />
                 <Th title="Vurdering" sub="samlet bånd" left tip="Ord-bånd for Samlet: Stærk swing trading-kandidat · Egnet med forbehold · Neutral – afvent · Svag · Frarådes." />
                 <Th title="Handelbarhed" sub="likviditet 0–1" tip="Gate 0–1: likviditet og bid/ask-spænd. Lav handelbarhed trækker Samlet ned — en flot opstilling i en illikvid aktie scorer stadig lavt." />
@@ -221,6 +223,7 @@ export function SwingTop10({ onSelectTicker, onOpenDetail }:
                       </div>
                     )}
                   </td>
+                  <td style={tdStyle}>{r.price != null && r.price !== "" ? `$${(typeof r.price === "number" ? r.price : parseFloat(r.price)).toFixed(2)}` : "—"}</td>
                   <td style={{ ...tdStyle, fontWeight: 800, fontSize: 15, color: scoreColor(r.final) }}>{num(r.final, 1)}</td>
                   <td style={{ ...tdStyle, textAlign: "left", color: bandColor(r.band), fontWeight: 600 }}>{bandLabel(r.band)}</td>
                   <td style={tdStyle}>{num(r.gate, 2)}</td>

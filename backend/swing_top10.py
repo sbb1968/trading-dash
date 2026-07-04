@@ -49,7 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # med det swing_calibrate.py validerede. Ingen re-implementering, ingen drift.
 from swing_calibrate import tv_universe, cheap_signals, _ohlcv, score_ticker
 
-SCORE_FIELDS = ["ticker", "final", "combined", "gate", "tech", "fund", "cat", "rs_3m", "error"]
+SCORE_FIELDS = ["ticker", "final", "combined", "gate", "tech", "fund", "cat", "price", "rs_3m", "error"]
 
 # Faste filnavne som Swing top-10-vinduet (UI) laeser:
 LATEST_JSON = "swing_top10_latest.json"   # seneste resultat + genereret-tidsstempel
@@ -126,7 +126,7 @@ def score_shortlist(shortlist, rs, api_key, source, period, delay, scores_path):
             row["rs_3m"] = round(rs[t], 2) if rs.get(t) is not None else ""
             try:
                 res = score_ticker(t, api_key, source=source, period=period)
-                for k in ("final", "combined", "gate", "tech", "fund", "cat"):
+                for k in ("final", "combined", "gate", "tech", "fund", "cat", "price"):
                     if res.get(k) is not None:
                         row[k] = res.get(k)
                 row["error"] = res.get("error", "") or ""
@@ -160,9 +160,9 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
 
     with open(top_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["rank", "ticker", "final", "band", "combined", "gate", "tech", "fund", "cat", "rs_3m"])
+        w.writerow(["rank", "ticker", "price", "final", "band", "combined", "gate", "tech", "fund", "cat", "rs_3m"])
         for rank, r in enumerate(top, 1):
-            w.writerow([rank, r["ticker"], f'{r["final_num"]:.2f}', _band(r["final_num"]),
+            w.writerow([rank, r["ticker"], r.get("price", ""), f'{r["final_num"]:.2f}', _band(r["final_num"]),
                         r.get("combined", ""), r.get("gate", ""), r.get("tech", ""),
                         r.get("fund", ""), r.get("cat", ""), r.get("rs_3m", "")])
 
@@ -198,6 +198,7 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
                 "rank": rank,
                 "ticker": r["ticker"],
                 "company": _fund._company_name_yf(r["ticker"]),
+                "price": r.get("price", ""),
                 "final": round(r["final_num"], 2),
                 "band": _band(r["final_num"]),
                 "combined": r.get("combined", ""),
