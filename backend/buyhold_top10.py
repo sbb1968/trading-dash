@@ -57,7 +57,7 @@ SCORE_DELAY  = 3.0               # sek mellem fulde scoringer (FMP-venlig + IBKR
 TOP_N        = 15
 
 CACHE_FIELDS = ["ticker", "final", "combined", "gate", "quality", "growth",
-                "valuation", "trend", "oe_yield", "company", "scored_utc", "error"]
+                "valuation", "trend", "oe_yield", "price", "company", "scored_utc", "error"]
 
 
 def _now_pair():
@@ -182,6 +182,7 @@ def _row_from_core(t: str, core: dict) -> dict:
         "valuation": round(L["valuation"]["lag_score"], 1),
         "trend": round(L["trend"]["lag_score"], 1),
         "oe_yield": round(oy * 100, 2) if oy is not None else "",
+        "price": round(c["price"], 2) if c.get("price") is not None else "",
         "company": c.get("company_name") or "",
         "scored_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "error": "",
@@ -288,6 +289,7 @@ def emit_top(uni: list[dict], cache: dict):
         "rows": [{
             "rank": i, "ticker": r["ticker"],
             "company": r.get("company") or info[r["ticker"]].get("name") or "",
+            "price": r.get("price", ""),
             "final": round(r["_final"], 2), "band": _band_final(r["_final"]),
             "gate": r.get("gate", ""), "quality": r.get("quality", ""),
             "growth": r.get("growth", ""), "valuation": r.get("valuation", ""),

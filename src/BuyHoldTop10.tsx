@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
 const API_GET = "http://127.0.0.1:8000/buyhold/top10";
 const API_RUN = "http://127.0.0.1:8000/buyhold/top10/run";
@@ -8,6 +7,7 @@ interface Row {
   rank: number;
   ticker: string;
   company?: string | null;
+  price: number | string;
   final: number | string;
   band: string;
   gate: number | string;
@@ -104,7 +104,8 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
   );
 }
 
-export function BuyHoldTop10() {
+export function BuyHoldTop10({ onSelectTicker, onOpenDetail }:
+  { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void } = {}) {
   const [data, setData] = useState<TopData | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -147,10 +148,6 @@ export function BuyHoldTop10() {
     }
   }
 
-  // Klik paa en raekke aabner Buy-and-Hold-scoren for den ticker (ekstern browser).
-  function openReport(ticker: string) {
-    openUrl(`http://127.0.0.1:8000/buyhold/report.html?ticker=${encodeURIComponent(ticker)}`).catch(() => { });
-  }
 
   const running = data?.running ?? false;
   const disabled = starting || running;
@@ -213,7 +210,8 @@ export function BuyHoldTop10() {
             <thead>
               <tr>
                 <Th title="#" left tip="Rangering efter SAMLET score — 1 = bedste køb-og-hold-kandidat." />
-                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Klik rækken for den fulde score." />
+                <Th title="Aktie" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Dobbeltklik for den detaljerede score i eget vindue." />
+                <Th title="Pris" sub="sidste kurs" tip="Aktiens sidste kurs fra scoringen (USD)." />
                 <Th title="SAMLET" sub="vægtet + gated" tip="Vægtet lag-score (Kvalitet 35% + Vækst 25% + Værdi 25% + Trend 15%) ganget med risiko-gaten (−100…+100). Det samlede køb-og-hold-tal." />
                 <Th title="Vurdering" sub="samlet bånd" left tip="Ord-bånd for SAMLET: Stærk køb-og-hold-kandidat · Egnet (langsigtet) · Neutral – afvent · Svag · Frarådes." />
                 <Th title="Risiko-gate" sub="0–1" tip="Gate 0–1: konkurs (Altman Z), udvanding, FCF-fortegn, gæld (nettogæld/EBITDA), likviditet. Lav gate trækker SAMLET kraftigt ned." />
@@ -226,12 +224,12 @@ export function BuyHoldTop10() {
             </thead>
             <tbody>
               {data.rows.map((r) => (
-                <tr key={r.rank}
-                  onClick={() => openReport(r.ticker)}
-                  title={`Åbn Buy-and-Hold-score for ${r.ticker}`}
-                  style={{ borderTop: "1px solid var(--border-subtle)", cursor: "pointer" }}>
+                <tr key={r.rank} style={{ borderTop: "1px solid var(--border-subtle)" }}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
-                  <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240 }}>
+                  <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240, cursor: "pointer" }}
+                    onDoubleClick={() => onOpenDetail?.("buyhold", r.ticker)}
+                    onClick={() => onSelectTicker?.(r.ticker)}
+                    title="Dobbeltklik for detaljeret score">
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{r.ticker}</div>
                     {r.company && (
                       <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -239,6 +237,7 @@ export function BuyHoldTop10() {
                       </div>
                     )}
                   </td>
+                  <td style={tdStyle}>{r.price != null && r.price !== "" ? `$${(typeof r.price === "number" ? r.price : parseFloat(r.price)).toFixed(2)}` : "—"}</td>
                   <td style={{ ...tdStyle, fontWeight: 800, fontSize: 15, color: scoreColor(r.final) }}>{num(r.final, 1)}</td>
                   <td style={{ ...tdStyle, textAlign: "left", color: bandColor(r.band), fontWeight: 600 }}>{bandLabel(r.band)}</td>
                   <td style={tdStyle}>{plain(r.gate, 2)}</td>

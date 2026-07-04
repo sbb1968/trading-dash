@@ -29,6 +29,7 @@ import { CompanyInfo } from "./CompanyInfo";
 import { HandelsChart } from "./HandelsChart";
 import { SwingDetail } from "./SwingDetail";
 import { IntradagDetail } from "./IntradagDetail";
+import { BuyHoldDetail } from "./BuyHoldDetail";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -941,7 +942,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
-    case "buyhold": return <BuyHoldReport />;
+    case "buyhold": return <BuyHoldReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
@@ -953,7 +954,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
     case "assistent": return <HelpAssistant />;
     case "swingtop10": return <SwingTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
-    case "buyholdtop10": return <BuyHoldTop10 />;
+    case "buyholdtop10": return <BuyHoldTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }
@@ -1203,6 +1204,7 @@ function App() {
                 >
                   {w.kind === "swing" && <SwingDetail ticker={w.ticker} />}
                   {w.kind === "intradag" && <IntradagDetail ticker={w.ticker} />}
+                  {w.kind === "buyhold" && <BuyHoldDetail ticker={w.ticker} />}
                 </FloatingWindow>
               ))}
             </>
