@@ -171,7 +171,7 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
             <>
               IBKR-konto: <code style={{ background: "var(--bg-base)", padding: "2px 6px", borderRadius: 3, color: "var(--text-primary)" }}>{snapshot.ibkr_account}</code>
               {snapshot.paper_trading && (
-                <span style={{ marginLeft: 8, padding: "2px 6px", background: "var(--accent)", color: "var(--bg-base)", borderRadius: 3, fontSize: 10, fontWeight: 700 }}>PAPIR</span>
+                <span style={{ marginLeft: 8, padding: "2px 6px", background: "var(--accent)", color: "#fff", borderRadius: 3, fontSize: 10, fontWeight: 700 }}>PAPIR</span>
               )}
             </>
           ) : (

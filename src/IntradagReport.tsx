@@ -224,7 +224,7 @@ export function IntradagReport({ onSelectTicker }: { onSelectTicker?: (t: string
             {TIMEFRAMES.map(tf => <option key={tf} value={tf}>{tf}</option>)}
           </select>
           <button onClick={analyze} disabled={loading}
-            style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
+            style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "#fff", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
             {loading ? "Henter..." : "Opdater"}
           </button>
           <button onClick={() => exportPdf(false)} disabled={!data || loading}

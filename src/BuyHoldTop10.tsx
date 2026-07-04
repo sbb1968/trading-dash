@@ -174,7 +174,7 @@ export function BuyHoldTop10() {
           title="Henter FMP-regnskaber + IBKR-bars. Kvote-budgetteret (~35 navne/kørsel). Kør uden for handelstid."
           style={{
             background: disabled ? "var(--bg-elevated)" : "var(--accent)",
-            color: disabled ? "var(--text-muted)" : "var(--bg-base)",
+            color: disabled ? "var(--text-muted)" : "#fff",
             border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 13, fontWeight: 700,
             cursor: disabled ? "default" : "pointer", whiteSpace: "nowrap",
           }}
@@ -272,7 +272,7 @@ export function BuyHoldTop10() {
               </button>
               <button
                 onClick={confirmRun}
-                style={{ background: "var(--accent)", color: "var(--bg-base)", border: "none", borderRadius: 4, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 4, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
               >
                 Ja, kør nu
               </button>

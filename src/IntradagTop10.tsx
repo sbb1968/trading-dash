@@ -167,7 +167,7 @@ export function IntradagTop10({ onSelectTicker }: { onSelectTicker?: (t: string)
           title="Scorer dagens momentum-kandidater gennem den gatede konfluens. Tager et par minutter."
           style={{
             background: disabled ? "var(--bg-elevated)" : "var(--accent)",
-            color: disabled ? "var(--text-muted)" : "var(--bg-base)",
+            color: disabled ? "var(--text-muted)" : "#fff",
             border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 13, fontWeight: 700,
             cursor: disabled ? "default" : "pointer", whiteSpace: "nowrap",
           }}

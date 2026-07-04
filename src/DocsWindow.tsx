@@ -87,7 +87,7 @@ export function DocsWindow() {
                          border: "1px solid var(--border-default)", borderRadius: 6,
                          padding: "10px 12px", fontSize: 13, cursor: "pointer" }}
               >
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--bg-base)",
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#fff",
                                background: "var(--accent)", borderRadius: 3, padding: "2px 5px" }}>PDF</span>
                 <span style={{ flex: 1 }}>{d.title}</span>
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Vis</span>

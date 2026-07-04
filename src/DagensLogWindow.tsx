@@ -25,7 +25,7 @@ const md: Record<string, (p: any) => JSX.Element> = {
 };
 
 const btn: CSSProperties = {
-  background: "var(--accent)", color: "var(--bg-base)", border: "none",
+  background: "var(--accent)", color: "#fff", border: "none",
   borderRadius: 6, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer",
 };
 const inp: CSSProperties = {

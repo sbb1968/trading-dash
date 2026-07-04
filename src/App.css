@@ -923,7 +923,7 @@ button {
 /* Badge "åben" — fremhævet med accent-farve */
 .menu-badge-open {
   background: var(--accent)  !important;
-  color:      var(--bg-base) !important;
+  color:      #fff           !important;
   font-weight: 700           !important;
 }
 

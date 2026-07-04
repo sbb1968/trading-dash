@@ -201,7 +201,7 @@ export function BuyHoldReport() {
           onKeyDown={e => { if (e.key === "Enter" && !loading) analyze(); }} maxLength={6}
           style={{ flex: 1, background: "var(--bg-input)", color: "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 10px", fontSize: 14, fontWeight: 700, letterSpacing: "0.5px" }} />
         <button onClick={analyze} disabled={loading}
-          style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "var(--bg-base)", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
+          style={{ background: loading ? "var(--bg-elevated)" : "var(--accent)", color: loading ? "var(--text-muted)" : "#fff", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: loading ? "default" : "pointer" }}>
           {loading ? "Analyserer..." : "Analyser"}
         </button>
         <button onClick={() => exportPdf(false)} disabled={pdfDisabled}

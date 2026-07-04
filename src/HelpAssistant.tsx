@@ -110,7 +110,7 @@ export function HelpAssistant() {
           disabled={loading || !input.trim()}
           style={{
             background: loading || !input.trim() ? "var(--bg-elevated)" : "var(--accent)",
-            color: loading || !input.trim() ? "var(--text-muted)" : "var(--bg-base)",
+            color: loading || !input.trim() ? "var(--text-muted)" : "#fff",
             border: "none",
             borderRadius: 4,
             padding: "8px 16px",
