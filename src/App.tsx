@@ -27,6 +27,7 @@ import { SectorNiche } from "./SectorNiche";
 import { StrategyReport } from "./StrategyReport";
 import { CompanyInfo } from "./CompanyInfo";
 import { HandelsChart } from "./HandelsChart";
+import { SwingDetail } from "./SwingDetail";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
@@ -917,6 +918,7 @@ export function renderWindowContent(id: WindowId, props: {
   currentPrice: number;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
+  onOpenDetail: (kind: string, ticker: string) => void;
 }) {
   switch(id) {
     case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
@@ -937,7 +939,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "marketoverview": return <MarketOverview />;
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     case "orders":  return <OrdersWindow />;
-    case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} />;
+    case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "buyhold": return <BuyHoldReport />;
     case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} />;
     case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} />;
@@ -949,7 +951,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
     case "assistent": return <HelpAssistant />;
-    case "swingtop10": return <SwingTop10 />;
+    case "swingtop10": return <SwingTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "buyholdtop10": return <BuyHoldTop10 />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
@@ -993,6 +995,14 @@ function App() {
   // Den levende vindues-opsaetning (= sidste session). Genskabes ved opstart;
   // foerste gang -> Ibens ORB. Live-aendringer roerer KUN workspace, ikke layouts.
   const [workspace, setWorkspace]           = useState<WindowConfig[]>(() => loadWorkspace(window.innerWidth, window.innerHeight));
+
+  // Detalje-vinduer (detaljeret score pr. ticker) — et selvstændigt, session-only lag
+  // uden for WindowId/workspace-systemet, så FLERE kan være åbne samtidig for
+  // forskellige tickers. Åbnes ved dobbeltklik på en ticker i scores/Top-15-listerne.
+  const [detailWins, setDetailWins] = useState<{
+    key: string; kind: string; ticker: string;
+    st: { x: number; y: number; width: number; height: number; minimized: boolean; maximized: boolean; closed: boolean; zIndex: number };
+  }[]>([]);
 
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
   useEffect(() => { localStorage.setItem("watchlist",      JSON.stringify(watchlist)); }, [watchlist]);
@@ -1087,6 +1097,26 @@ function App() {
     setWorkspace(ws => ws.map(w => w.id === id ? { ...w, ...state } : w));
   }
 
+  // Åbn (eller fokusér) et detaljeret score-vindue for en ticker. Flere tickers =
+  // flere vinduer; samme ticker igen fokuserer det eksisterende.
+  function openDetail(kind: string, ticker: string) {
+    const t = (ticker || "").trim().toUpperCase();
+    if (!t) return;
+    const key = `detail:${kind}:${t}`;
+    setDetailWins(ws => {
+      if (ws.some(w => w.key === key)) {
+        return ws.map(w => w.key === key ? { ...w, st: { ...w.st, closed: false, minimized: false, zIndex: getNextZ() } } : w);
+      }
+      const W = window.innerWidth, H = window.innerHeight;
+      const off = (ws.length % 8) * 30;
+      return [...ws, { key, kind, ticker: t, st: {
+        x: Math.max(20, Math.floor(W / 2) - 380) + off, y: 80 + off,
+        width: Math.min(780, W - 120), height: Math.min(760, H - 140),
+        minimized: false, maximized: false, closed: false, zIndex: getNextZ(),
+      } }];
+    });
+  }
+
   const windowProps = {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
@@ -1094,6 +1124,7 @@ function App() {
     currentPrice,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
+    onOpenDetail: openDetail,
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
       setOrderConfirm({ action, ticker, shares, price });
     },
@@ -1156,6 +1187,20 @@ function App() {
                   windowType={getWindowType(win.id as WindowId)}
                 >
                   {renderWindowContent(win.id as WindowId, windowProps)}
+                </FloatingWindow>
+              ))}
+
+              {/* Detalje-vinduer (detaljeret score pr. ticker; flere kan være åbne samtidig) */}
+              {detailWins.filter(w => !w.st.closed).map(w => (
+                <FloatingWindow
+                  key={w.key} id={w.key}
+                  title={`${w.kind === "swing" ? "Swing" : w.kind === "intradag" ? "Day trading" : "Buy-and-Hold"}-score: ${w.ticker}`}
+                  defaultState={w.st}
+                  onClose={() => setDetailWins(ws => ws.filter(x => x.key !== w.key))}
+                  onStateChange={(s) => setDetailWins(ws => ws.map(x => x.key === w.key ? { ...x, st: { ...x.st, ...s } } : x))}
+                  windowType="swingdetail"
+                >
+                  {w.kind === "swing" && <SwingDetail ticker={w.ticker} />}
                 </FloatingWindow>
               ))}
             </>

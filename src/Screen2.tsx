@@ -198,7 +198,7 @@ export default function Screen2() {
               tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
               onStateChange={(state) => updateWindowState(win.id as WindowId, state)}
             >
-              {renderWindowContent(win.id as WindowId, windowProps)}
+              {renderWindowContent(win.id as WindowId, { ...windowProps, onOpenDetail: () => {} })}
             </FloatingWindow>
           ))}
 

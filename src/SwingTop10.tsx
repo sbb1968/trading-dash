@@ -94,7 +94,8 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
   );
 }
 
-export function SwingTop10() {
+export function SwingTop10({ onSelectTicker, onOpenDetail }:
+  { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void } = {}) {
   const [data, setData] = useState<TopData | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -209,7 +210,10 @@ export function SwingTop10() {
               {data.rows.map((r) => (
                 <tr key={r.rank} style={{ borderTop: "1px solid var(--border-subtle)" }}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
-                  <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240 }}>
+                  <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240, cursor: "pointer" }}
+                    onDoubleClick={() => onOpenDetail?.("swing", r.ticker)}
+                    onClick={() => onSelectTicker?.(r.ticker)}
+                    title="Dobbeltklik for detaljeret score">
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{r.ticker}</div>
                     {r.company && (
                       <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
