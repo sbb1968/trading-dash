@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
 
-const API_GET = "http://127.0.0.1:8000/buyhold/top10";
-const API_RUN = "http://127.0.0.1:8000/buyhold/top10/run";
+const API_GET = "http://127.0.0.1:8000/buyhold/top15";
+const API_RUN = "http://127.0.0.1:8000/buyhold/top15/run";
 
 interface Row {
   rank: number;
@@ -104,7 +104,7 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
   );
 }
 
-export function BuyHoldTop10({ onSelectTicker, onOpenDetail }:
+export function BuyHoldTop15({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void } = {}) {
   const [data, setData] = useState<TopData | null>(null);
   const [loading, setLoading] = useState(true);

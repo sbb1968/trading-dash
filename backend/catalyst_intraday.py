@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-catalyst_intraday.py — intradag katalysator-lag (trin 7): realtids-news + halts.
+catalyst_intraday.py — day trading katalysator-lag (trin 7): realtids-news + halts.
 
 Day-tradings pendant til swings catalyst_score. Tre faktorer:
     news_fresh  — minutter siden seneste overskrift (recency; fersk = momentum)
@@ -14,7 +14,7 @@ naar der ER en katalysator.
 
 Nyhederne hentes i data_source_intraday.fetch_catalyst_news (Finnhub + IBKR DJ,
 flettet); _build_catalyst_data her samler dem til catalyst_data-dicten. Sentiment-
-heuristikken (ordlister + _guess_sentiment) er KOPIERET fra finnhub_news (intradag-
+heuristikken (ordlister + _guess_sentiment) er KOPIERET fra finnhub_news (day trading-
 laget er selvstaendigt; "Python regner, LLM narrerer kun" -> keyword, ikke LLM).
 Returnerer samme form som de oevrige lag: {results, excluded, lag_score}.
 ASCII i kode; dansk prosa.

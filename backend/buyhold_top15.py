@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-buyhold_top10.py - Buy-and-Hold Top-10-scanner.
+buyhold_top15.py - Buy-and-Hold Top-15-scanner.
 
 Maal: de 10 hoejst-scorende koeb-og-hold-kandidater (final/SAMLET fra compute_buyhold)
 fra et kurateret KVALITETS-univers.
 
-Hvorfor anderledes end swing_top10/intradag_top10: se SPEC_buyhold_top10.md SS0.
+Hvorfor anderledes end swing_top15/daytrading_top15: se SPEC_buyhold_top15.md SS0.
 Kort: ~6-8 FMP-kald pr. ticker + ~250 FMP/dag -> kun ~30-35 navne/dag. Derfor lille
 kurateret univers, fuld scoring af ALLE navne (ingen ukalibreret pre-rank), PERSISTENT
 cache paa tvaers af dage (kun manglende/foraeldede scores), kvote-budget pr. koersel,
@@ -13,10 +13,10 @@ ugentlig kadence. Rangering = den fulde gatede SAMLET (byte-identisk med rapport
 
 Koer fra backend/ (FMP_API_KEY i miljoeet + IBKR oppe paa 7497, UDEN FOR HANDELSTID):
   $env:FMP_API_KEY="..."
-  python buyhold_top10.py                  # en koersel (op til MAX_PER_RUN nye/foraeldede)
-  python buyhold_top10.py --max 35         # override kvote-budget
-  python buyhold_top10.py --universe-only  # kun TV-kvalitetsscreen (ingen FMP/IBKR)
-  python buyhold_top10.py --fresh          # ignorer cache, score forfra (DYRT - mange dages kvote)
+  python buyhold_top15.py                  # en koersel (op til MAX_PER_RUN nye/foraeldede)
+  python buyhold_top15.py --max 35         # override kvote-budget
+  python buyhold_top15.py --universe-only  # kun TV-kvalitetsscreen (ingen FMP/IBKR)
+  python buyhold_top15.py --fresh          # ignorer cache, score forfra (DYRT - mange dages kvote)
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ from buyhold import compute_buyhold, _band_final   # GENBRUG - byte-identisk sco
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_CSV   = os.path.join(_DIR, "buyhold_scores_cache.csv")    # PERSISTENT (ikke dato-stemplet)
-LATEST_JSON = os.path.join(_DIR, "buyhold_top10_latest.json")
-RUN_LOCK    = os.path.join(_DIR, "buyhold_top10_running.lock")
+LATEST_JSON = os.path.join(_DIR, "buyhold_top15_latest.json")
+RUN_LOCK    = os.path.join(_DIR, "buyhold_top15_running.lock")
 
 # --- Univers: tight TV-KVALITETSSCREEN (felter verificeret mod build_test_universe.py:
 #     close/market_cap_basic/average_volume_30d_calc/exchange/type. De fundamentale
@@ -100,12 +100,12 @@ def fetch_quality_universe() -> list[dict]:
     try:
         df = _run(base + fund, sel_full)
     except Exception as e:
-        print(f"[bh-top10] TV-query med fundamentale filtre fejlede ({type(e).__name__}: {e}); "
+        print(f"[bh-top15] TV-query med fundamentale filtre fejlede ({type(e).__name__}: {e}); "
               f"falder tilbage til strukturel screen (pris/cap/vol).")
         try:
             df = _run(base, sel_base)
         except Exception as e2:
-            print(f"[bh-top10] TV-query fejlede helt: {type(e2).__name__}: {e2}")
+            print(f"[bh-top15] TV-query fejlede helt: {type(e2).__name__}: {e2}")
             return []
     if df is None or df.empty:
         return []
@@ -222,15 +222,15 @@ def _remove_lock():
 async def score_universe(api_key: str, max_per_run: int, fresh: bool):
     uni = await asyncio.to_thread(fetch_quality_universe)
     if not uni:
-        print("[bh-top10] tomt univers fra TradingView - afbryder.")
+        print("[bh-top15] tomt univers fra TradingView - afbryder.")
         return False
-    print(f"[bh-top10] kvalitetsunivers: {len(uni)} navne.")
+    print(f"[bh-top15] kvalitetsunivers: {len(uni)} navne.")
 
     cache = {} if fresh else load_cache()
     now = datetime.datetime.now(datetime.timezone.utc)
     uni_syms = [u["ticker"] for u in uni]
     todo = [t for t in uni_syms if _is_stale(cache.get(t), now)][:max_per_run]
-    print(f"[bh-top10] {len(todo)} navne at score i denne koersel "
+    print(f"[bh-top15] {len(todo)} navne at score i denne koersel "
           f"(kvote-budget {max_per_run}; {len(uni)-len(todo)} friske/udskudt).")
     _write_lock(len(todo))
 
@@ -242,7 +242,7 @@ async def score_universe(api_key: str, max_per_run: int, fresh: bool):
         conn = IBKRConnection(paper_trading=True)
         ib = conn.ib if await conn.connect() else None
         if ib is None:
-            print("[bh-top10] ADVARSEL: IBKR ikke forbundet - trend-laget (15%) udelades.")
+            print("[bh-top15] ADVARSEL: IBKR ikke forbundet - trend-laget (15%) udelades.")
         for i, t in enumerate(todo, 1):
             try:
                 core = await compute_buyhold(ib, t, api_key)
@@ -265,7 +265,7 @@ async def score_universe(api_key: str, max_per_run: int, fresh: bool):
     return True
 
 
-# === Trin 3: top-10 af cachen (kun navne i NUVAERENDE univers) ================
+# === Trin 3: top-15 af cachen (kun navne i NUVAERENDE univers) ================
 def emit_top(uni: list[dict], cache: dict):
     info = {u["ticker"]: u for u in uni}
     rows = []
@@ -305,7 +305,7 @@ def emit_top(uni: list[dict], cache: dict):
         print(f"  {r['rank']:>2}  {r['ticker']:<6} SAMLET {float(r['final']):>+7.2f}  "
               f"[{r['band']}]  Kv {r['quality']} / Va {r['growth']} / "
               f"Vae {r['valuation']} / Tr {r['trend']}")
-    print(f"[bh-top10] JSON til UI: {LATEST_JSON}")
+    print(f"[bh-top15] JSON til UI: {LATEST_JSON}")
 
 
 def main():
@@ -313,7 +313,7 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):
         pass
-    ap = argparse.ArgumentParser(description="Buy-and-Hold Top-10 (kurateret kvalitetsunivers)")
+    ap = argparse.ArgumentParser(description="Buy-and-Hold Top-15 (kurateret kvalitetsunivers)")
     ap.add_argument("--max", type=int, default=MAX_PER_RUN, help=f"kvote-budget pr. koersel (default {MAX_PER_RUN})")
     ap.add_argument("--universe-only", action="store_true", help="kun TV-kvalitetsscreen (ingen FMP/IBKR)")
     ap.add_argument("--fresh", action="store_true", help="ignorer cache, score forfra (DYRT)")
@@ -322,7 +322,7 @@ def main():
 
     if a.universe_only:
         uni = fetch_quality_universe()
-        print(f"[bh-top10] {len(uni)} navne i kvalitetsuniverset:")
+        print(f"[bh-top15] {len(uni)} navne i kvalitetsuniverset:")
         for u in uni:
             print(f"   {u['ticker']:<6} cap={u['cap']} roe={u['roe']} pe={u['pe']} {u.get('sector')}")
         return

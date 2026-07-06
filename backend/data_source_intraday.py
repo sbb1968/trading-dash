@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-data_source_intraday.py — Intradag-datakilde (trin 3).
+data_source_intraday.py — Day trading-datakilde (trin 3).
 
 Henter bars fra IBKR og producerer praecis den triple (bars, spy_bars, daily) som
 technical_intraday.py (trin 2, verificeret 7/7 mod Pine) allerede er bevist korrekt
-paa. Dermed kan intradag-rapporten/scanneren koere live uden manuelle TradingView-
+paa. Dermed kan day trading-rapporten/scanneren koere live uden manuelle TradingView-
 eksporter.
 
 SCOPE: henter bars for GIVNE symboler. Bygger IKKE dagens univers (det er scanneren,
@@ -20,11 +20,11 @@ OUTPUT-KONTRAKT (matcher trin 2 eksakt):
              adv20, adr20.
 
 KRITISK (de tre bugs fra trin 2 — maa ikke genindfoeres):
-  * Intradag-tid -> ET via unit="s" hvis numerisk epoch (ellers tolkes sekunder
+  * Day trading-tid -> ET via unit="s" hvis numerisk epoch (ellers tolkes sekunder
     som nanosekunder). datetime64-aritmetik, ingen float(epoch_ns).
   * Daglig dato = session-dato UDEN tz-konvertering (tz_convert paa UTC-midnat
     skubber datoen en dag tilbage og oedelaegger join'et).
-  * useRTH=False paa intradag (ellers nulstiller dags-akkumulatorerne ikke pr.
+  * useRTH=False paa day trading (ellers nulstiller dags-akkumulatorerne ikke pr.
     dag — praecis ETH-fra-fejlen).
 
 ASCII i kode + konsol (Windows cp1252); dansk prosa.
@@ -55,7 +55,7 @@ def _norm_tf(tf: str) -> str:
 
 # === Tid/index-byggere (robuste mod epoch vs datetime) =====================
 def _to_et_index(date_col) -> pd.DatetimeIndex:
-    """Intradag-tidsstempel -> tz-aware ET-index. formatDate=2 giver epoch, men
+    """Day trading-tidsstempel -> tz-aware ET-index. formatDate=2 giver epoch, men
     util.df kan levere numerisk epoch ELLER datetime afhaengig af version."""
     if pd.api.types.is_numeric_dtype(date_col):
         idx = pd.to_datetime(date_col, unit="s", utc=True)   # epoch-SEKUNDER (ikke ns!)
@@ -193,7 +193,7 @@ async def fetch_spread(ib, symbol: str) -> float | None:
 
 
 # === Katalysator-nyheder: Finnhub company-news + IBKR Dow Jones (flettet) ===
-# Moenstre KOPIERET fra finnhub_news / catalyst_history_probe (intradag-laget er
+# Moenstre KOPIERET fra finnhub_news / catalyst_history_probe (day trading-laget er
 # selvstaendigt). Finnhub-noeglen GENBRUGES via import (allerede committet i
 # finnhub_news; ingen ny secret-kopi) - som fundamental_score goer.
 _DJ_HISTORICAL_CANDIDATES = ["DJ-N", "DJ-RTG", "DJ-RTPRO", "DJ-RTA", "DJ-RTE", "DJ-RTW"]
@@ -343,7 +343,7 @@ def fetch_supply(symbol: str) -> dict:
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Smoke-test intradag-datakilden mod IBKR")
+    ap = argparse.ArgumentParser(description="Smoke-test day trading-datakilden mod IBKR")
     ap.add_argument("--symbol", default="AMAT")
     ap.add_argument("--timeframe", default="5 mins")
     ap.add_argument("--duration", default="5 D")
@@ -360,7 +360,7 @@ if __name__ == "__main__":
         try:
             ib = conn.ib
             print("=" * 72)
-            print(f" Intradag-datakilde smoke-test: {args.symbol}  ({args.timeframe})")
+            print(f" Day trading-datakilde smoke-test: {args.symbol}  ({args.timeframe})")
             print("=" * 72)
             bars, spy, daily = await load_intraday_context(
                 ib, args.symbol, timeframe=args.timeframe,
@@ -369,7 +369,7 @@ if __name__ == "__main__":
             # 1) bars + premarket-bekraeftelse
             print(f"\nbars: {len(bars)}  spy: {len(spy)}  daily: {len(daily)}")
             if bars.empty:
-                print("FEJL: ingen intradag-bars returneret.")
+                print("FEJL: ingen day trading-bars returneret.")
                 return
             print(f"foerste ET-bar: {bars.index[0]}   sidste: {bars.index[-1]}")
             firsts = {}

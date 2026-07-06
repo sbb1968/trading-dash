@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-intradag_report.py (trin 4) — orkestrator: lag + gate + baand.
+daytrading_report.py (trin 4) — orkestrator: lag + gate + baand.
 
 Spejler swing_report.py 1:1. Eet strukturelt afvig (renormalisering for pending
 lag) + to domaene-deltas i gaten. Alt andet er kopieret fra swings combine/gate/
 overlay/baand (verificeret i produktion).
 
-Kombinerer de tre intradag-lag til EET tal:
+Kombinerer de tre day trading-lag til EET tal:
     teknisk  (compute_technical_intraday) — verificeret 7/7 mod Pine
     forsyning (compute_supply)            — float-centreret (commit 33d9736)
     katalysator (compute_catalyst_intraday) — STUBBET pending (trin 7)
@@ -166,7 +166,7 @@ def combine(layers: dict, gate: float = 1.0, manual: Optional[float] = None) -> 
 
 
 # === Orkestrator (async, spejler _compute_swing) ===========================
-async def compute_intradag_report(
+async def compute_daytrading_report(
         ib, symbol: str, *,
         timeframe: str = "5 mins", duration: str = "5 D",
         daily_duration: str = "45 D", spy: str = "SPY", end: str = "",
@@ -240,12 +240,12 @@ async def compute_intradag_report(
 
 
 # === Konsol-rapport (ASCII) ================================================
-def format_intradag_report(report: dict) -> str:
+def format_daytrading_report(report: dict) -> str:
     L = []
     fin = report["final"]
     price = report["price"]
     L.append("=" * 78)
-    L.append(f" INTRADAG-RAPPORT  {report['symbol']}  "
+    L.append(f" DAY TRADING-RAPPORT  {report['symbol']}  "
              f"${'-' if price is None else round(price, 2)}  =>  "
              f"{'-' if fin is None else round(fin, 1)}  ({report['band']})")
     L.append(f" asof {report['asof']}   tf {report['timeframe']}")
@@ -263,10 +263,10 @@ def format_intradag_report(report: dict) -> str:
 
 # === UI-serialisering (spejler swing_report._report_to_json) ===============
 def report_to_json(report: dict) -> dict:
-    """Strukturér compute_intradag_report-output til UI-JSON. Samme form som
-    /swing/analyze_json (lag keyes technical/supply/catalyst), saa IntradagReport.tsx
+    """Strukturér compute_daytrading_report-output til UI-JSON. Samme form som
+    /swing/analyze_json (lag keyes technical/supply/catalyst), saa Day tradingReport.tsx
     kan genbruge SwingReport.tsx's render. _band bruges til baade slut- OG lag-baand
-    (eet vokabular i intradag-domaenet); _band(None) -> 'ingen data' (pending katalysator)."""
+    (eet vokabular i day trading-domaenet); _band(None) -> 'ingen data' (pending katalysator)."""
 
     def _layer(res: dict, weight) -> dict:
         groups, gmap = [], {}
@@ -387,7 +387,7 @@ def _run_selftest():
 
     # 7. Baand
     check("7 _band(36.0) == Medvind", _band(36.0) == "Medvind")
-    check("7 _band(-60.0) == Fraraades (intradag)", _band(-60.0) == "Fraraades (intradag)")
+    check("7 _band(-60.0) == Fraraades (day trading)", _band(-60.0) == "Fraraades (day trading)")
     check("7 _band(None) == ingen data", _band(None) == "ingen data")
 
     # 8. Supply ogsaa udeladt
@@ -419,7 +419,7 @@ def _run_selftest():
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="Intradag-rapport: selftest eller live smoke-test")
+    ap = argparse.ArgumentParser(description="Day trading-rapport: selftest eller live smoke-test")
     ap.add_argument("--selftest", action="store_true", help="koer combine/gate-assertions uden IBKR")
     ap.add_argument("--symbol", default="AMAT")
     ap.add_argument("--timeframe", default="5 mins")
@@ -439,10 +439,10 @@ if __name__ == "__main__":
                 print("FEJL: kunne ikke forbinde til IBKR (TWS/Gateway paa 7497 paa DENNE maskine?)")
                 return
             try:
-                rep = await compute_intradag_report(
+                rep = await compute_daytrading_report(
                     conn.ib, args.symbol, timeframe=args.timeframe, duration=args.duration,
                     sr=args.sr, chart_pattern=args.pattern, candlestick=args.candle)
-                print(format_intradag_report(rep))
+                print(format_daytrading_report(rep))
             finally:
                 conn.disconnect()
         asyncio.run(_live())

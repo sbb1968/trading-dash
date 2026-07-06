@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-intradag_scanner.py — Intradag Top-10 Konfluens-scanner (trin 6).
+daytrading_scanner.py — Day trading Top-15 Konfluens-scanner (trin 6).
 
 Rangerer dagens momentum-kandidater gennem den GATEDE konfluens
-(compute_intradag_report) — "de bedste opstillinger lige nu". Spejler
-swing_top10.py's to-trins-moenster (billig pre-rank -> shortlist -> fuld score
+(compute_daytrading_report) — "de bedste opstillinger lige nu". Spejler
+swing_top15.py's to-trins-moenster (billig pre-rank -> shortlist -> fuld score
 -> top-N), men tilpasset day-tradings friskheds-krav (minutter, ikke timer).
 
-TILPASNINGER ift. swing_top10:
+TILPASNINGER ift. swing_top15:
   A) FRISKHED: univers er allerede LILLE (dagens gappers/RVOL fra eet TV-query);
      delt SPY (hentes EEN gang), float fra TV-scanens query (ikke per-symbol).
      Realistisk ~3-5 min for en shortlist paa ~18 navne, gentageligt i sessionen.
@@ -26,7 +26,7 @@ import asyncio
 
 from technical_intraday import _band
 from data_source_intraday import fetch_benchmark_bars
-from intradag_report import compute_intradag_report
+from daytrading_report import compute_daytrading_report
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -43,7 +43,7 @@ SCAN_DELAY_SEC       = 9.0          # throttle mellem fulde scoringer (~6 histor
 SCAN_TF              = "5 mins"
 SCAN_DURATION        = "5 D"
 EXCHANGES            = ["NYSE", "NASDAQ", "AMEX"]
-LATEST_JSON          = "intradag_top10_latest.json"
+LATEST_JSON          = "daytrading_top15_latest.json"
 
 
 def _now_pair():
@@ -84,7 +84,7 @@ def fetch_momentum_universe() -> list[dict]:
             .get_scanner_data()
         )
     except Exception as e:
-        print(f"[intradag-scan] TV-query fejlede: {type(e).__name__}: {e}")
+        print(f"[day trading-scan] TV-query fejlede: {type(e).__name__}: {e}")
         return []
     if df is None or df.empty:
         return []
@@ -161,7 +161,7 @@ def _write_latest(rows: list[dict], started_utc, *, total, done, progress_done):
             json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)                      # atomisk (UI laeser aldrig en halv fil)
     except OSError as e:
-        print(f"[intradag-scan] kunne ikke skrive {LATEST_JSON}: {e}")
+        print(f"[day trading-scan] kunne ikke skrive {LATEST_JSON}: {e}")
 
 
 # === Trin 3-5: throttlet, inkrementel scan paa delt ib =====================
@@ -172,7 +172,7 @@ async def run_scan(ib) -> None:
     try:
         rows = await asyncio.to_thread(fetch_momentum_universe)
         shortlist = _prerank(rows)
-        print(f"[intradag-scan] univers={len(rows)} -> shortlist={len(shortlist)}")
+        print(f"[day trading-scan] univers={len(rows)} -> shortlist={len(shortlist)}")
         if not shortlist:
             _write_latest([], started_utc, total=0, done=True, progress_done=0)
             return
@@ -187,7 +187,7 @@ async def run_scan(ib) -> None:
                 "short_float_pct": None, "days_to_cover": None,
             }
             try:
-                rep = await compute_intradag_report(
+                rep = await compute_daytrading_report(
                     ib, sym, timeframe=SCAN_TF, spy_bars=spy_bars, supply_data=supply_data,
                     with_chart=False)
                 if rep["final"] is not None:
@@ -214,7 +214,7 @@ async def run_scan(ib) -> None:
 
         top = sorted(scored, key=lambda x: x["final"], reverse=True)[:TOP_N]
         _write_latest(top, started_utc, total=total, done=True, progress_done=total)
-        print(f"[intradag-scan] faerdig: {len(top)} i top-listen (af {len(scored)} scorede).")
+        print(f"[day trading-scan] faerdig: {len(top)} i top-listen (af {len(scored)} scorede).")
     except Exception as e:
-        print(f"[intradag-scan] FEJL i scan: {type(e).__name__}: {e}")
+        print(f"[day trading-scan] FEJL i scan: {type(e).__name__}: {e}")
         _write_latest([], started_utc, total=0, done=True, progress_done=0)

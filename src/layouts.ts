@@ -13,10 +13,10 @@ export type WindowId =
   | "buyhold"
   | "docs"
   | "assistent"
-  | "swingtop10"
-  | "buyholdtop10"
-  | "intradagreport"
-  | "intradagtop10"
+  | "swingtop15"
+  | "buyholdtop15"
+  | "daytradingreport"
+  | "daytradingtop15"
   | "dagenslog"
   | "haltscanner"
   | "sektorniche"
@@ -47,10 +47,10 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   buyhold:         "Buy-and-Hold-scores",
   docs:            "Dokumentation",
   assistent:       "Hjælp (Claude)",
-  swingtop10:      "Swing trading Top-15",
-  buyholdtop10:    "Buy-and-Hold Top-15",
-  intradagreport:  "Day trading-scores",
-  intradagtop10:   "Day trading Top-15",
+  swingtop15:      "Swing trading Top-15",
+  buyholdtop15:    "Buy-and-Hold Top-15",
+  daytradingreport:  "Day trading-scores",
+  daytradingtop15:   "Day trading Top-15",
   dagenslog:       "Dagens log",
   haltscanner:     "Halt-scanner",
   sektorniche:     "Sektorer",
@@ -224,6 +224,59 @@ export function migrateLayoutsOnce(W: number, H: number) {
   } catch { /* ignore */ }
   localStorage.setItem("td_layouts_clean_v2", "1");
 }
+
+// ── Engangs-migrering: WindowId-omdoebning (Top10->Top15, Intradag->Daytrading) ──
+// De gamle vindues-id'er blev persisteret i workspace + layouts. Skriv dem om til de
+// nye, saa Ibens gemte opsaetninger/layouts overlever omdoebningen. Koeres paa
+// modul-import (baade skaerm 1 og skaerm 2) FOER noget laeses. Ogsaa scores-noeglen.
+const _ID_RENAME: Record<string, string> = {
+  swingtop10:     "swingtop15",
+  buyholdtop10:   "buyholdtop15",
+  intradagtop10:  "daytradingtop15",
+  intradagreport: "daytradingreport",
+};
+function _rewriteIds(arr: any): any {
+  return Array.isArray(arr)
+    ? arr.map(w => (w && _ID_RENAME[w.id] ? { ...w, id: _ID_RENAME[w.id] } : w))
+    : arr;
+}
+export function migrateRenamedIdsOnce() {
+  if (localStorage.getItem("td_ids_daytrading_v1")) return;
+  // Levende workspaces (skaerm 1 + 2)
+  for (const key of ["td_workspace", "td_workspace_screen2"]) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) localStorage.setItem(key, JSON.stringify(_rewriteIds(JSON.parse(raw))));
+    } catch { /* ignore */ }
+  }
+  // Navngivne layouts (skaerm 1 + 2) — hver har windows[] (+ evt. screen2Windows[])
+  for (const key of ["td_layouts", "td_layouts_screen2"]) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const layouts = JSON.parse(raw);
+      if (!Array.isArray(layouts)) continue;
+      const out = layouts.map((l: any) => ({
+        ...l,
+        windows: _rewriteIds(l.windows),
+        ...(l.screen2Windows ? { screen2Windows: _rewriteIds(l.screen2Windows) } : {}),
+      }));
+      localStorage.setItem(key, JSON.stringify(out));
+    } catch { /* ignore */ }
+  }
+  // Scores-liste-noegle (day trading tilfoej-ticker-vindue)
+  try {
+    const old = localStorage.getItem("td_intradag_scores");
+    if (old !== null && localStorage.getItem("td_daytrading_scores") === null) {
+      localStorage.setItem("td_daytrading_scores", old);
+      localStorage.removeItem("td_intradag_scores");
+    }
+  } catch { /* ignore */ }
+  localStorage.setItem("td_ids_daytrading_v1", "1");
+}
+
+// Koer migreringen ved modul-import (foer App/Screen2's initialisatorer laeser noget).
+migrateRenamedIdsOnce();
 
 // ── Workspace (den levende vindues-opsaetning = "sidste session") ─────────────
 // Persisteres loebende og genskabes ved opstart. Foerste gang nogensinde (ingen

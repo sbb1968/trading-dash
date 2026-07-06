@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-swing_top10.py - Daglig top-10 swing-scanner.
+swing_top15.py - Daglig top-15 swing-scanner.
 
 Maal: find de 10 aktier med hoejest SAMLET (final) fra swing_report, UDEN at
 koere den dyre fulde rapport paa hele universet.
@@ -12,7 +12,7 @@ Pipeline (kalibreret i swing_calibrate.py):
   4. Koer fuld swing-scoring paa kortlisten.                 -> score_ticker()
   5. Sorter efter final, tag top TOP (default 10).
 
-Hvorfor 25 %: kalibreringen viste at rs_3m top-25 % fanger HELE den aegte top-10
+Hvorfor 25 %: kalibreringen viste at rs_3m top-25 % fanger HELE den aegte top-15
 (recall 1.00) - forfilteret koster ingen gode navne. Se swing_calibrate.py.
 
 VIGTIGT:
@@ -27,9 +27,9 @@ VIGTIGT:
 
 Koer fra backend/ (FMP_API_KEY i miljoeet for trin 4):
   $env:FMP_API_KEY="..."                  # PowerShell
-  python swing_top10.py                    # fuld koersel
-  python swing_top10.py --prefilter-only   # kun rs_3m + kortliste (FMP ikke noedvendig)
-  python swing_top10.py --fresh            # ignorer i dags gamle scores-fil
+  python swing_top15.py                    # fuld koersel
+  python swing_top15.py --prefilter-only   # kun rs_3m + kortliste (FMP ikke noedvendig)
+  python swing_top15.py --fresh            # ignorer i dags gamle scores-fil
 """
 
 from __future__ import annotations
@@ -51,9 +51,9 @@ from swing_calibrate import tv_universe, cheap_signals, _ohlcv, score_ticker
 
 SCORE_FIELDS = ["ticker", "final", "combined", "gate", "tech", "fund", "cat", "price", "rs_3m", "error"]
 
-# Faste filnavne som Swing top-10-vinduet (UI) laeser:
-LATEST_JSON = "swing_top10_latest.json"   # seneste resultat + genereret-tidsstempel
-RUN_LOCK = "swing_top10_running.lock"     # findes mens en koersel er i gang
+# Faste filnavne som Swing top-15-vinduet (UI) laeser:
+LATEST_JSON = "swing_top15_latest.json"   # seneste resultat + genereret-tidsstempel
+RUN_LOCK = "swing_top15_running.lock"     # findes mens en koersel er i gang
 
 
 def compute_rs(source, period):
@@ -61,13 +61,13 @@ def compute_rs(source, period):
     Returnerer {ticker: rs_3m} for de navne der har tilstraekkelige bars."""
     uni = tv_universe()
     if not uni:
-        print("[top10] tomt univers fra TradingView - afbryder.")
+        print("[top15] tomt univers fra TradingView - afbryder.")
         return None
     bench = _ohlcv("SPY", source, period)
     if bench is None or getattr(bench, "empty", True):
-        print("[top10] kunne ikke hente SPY (benchmark) - rs_3m umulig. Afbryder.")
+        print("[top15] kunne ikke hente SPY (benchmark) - rs_3m umulig. Afbryder.")
         return None
-    print(f"[top10] beregner rs_3m for {len(uni)} navne (kun dagsbars)...")
+    print(f"[top15] beregner rs_3m for {len(uni)} navne (kun dagsbars)...")
     rs = {}
     missing = 0
     for i, t in enumerate(uni, 1):
@@ -87,7 +87,7 @@ def compute_rs(source, period):
                 print(f"  {t}: bar-fejl ({type(e).__name__})")
         if i % 250 == 0:
             print(f"  ... {i}/{len(uni)} ({len(rs)} med rs_3m)")
-    print(f"[top10] {len(rs)} navne med gyldig rs_3m ({missing} uden tilstraekkelige bars).")
+    print(f"[top15] {len(rs)} navne med gyldig rs_3m ({missing} uden tilstraekkelige bars).")
     return rs
 
 
@@ -114,7 +114,7 @@ def score_shortlist(shortlist, rs, api_key, source, period, delay, scores_path):
     """Trin 4: fuld scoring af kortlisten (RESUMERBAR). Append pr. ticker, flush hver gang."""
     done = load_done(scores_path)
     todo = [t for t in shortlist if t.upper() not in done]
-    print(f"[top10] scorer {len(todo)} navne ({len(done)} allerede gjort) -> {scores_path}")
+    print(f"[top15] scorer {len(todo)} navne ({len(done)} allerede gjort) -> {scores_path}")
     new_file = not os.path.exists(scores_path)
     with open(scores_path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=SCORE_FIELDS)
@@ -182,9 +182,9 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
               f"{num(r.get('tech'), '+.1f'):>6} {num(r.get('fund'), '+.1f'):>6} "
               f"{num(r.get('cat'), '+.1f'):>6}  {num(r.get('rs_3m'), '+.1f'):>7}")
     print()
-    print(f"[top10] skrevet: {top_path}  ({len(top)} navne)")
+    print(f"[top15] skrevet: {top_path}  ({len(top)} navne)")
 
-    # Skriv ogsaa et fast-navngivet JSON som Swing top-10-vinduet laeser (med tidsstempel).
+    # Skriv ogsaa et fast-navngivet JSON som Swing top-15-vinduet laeser (med tidsstempel).
     import json
     import fundamental_score as _fund   # firmanavn (yfinance, cachet) til UI'et
     gen_local, gen_utc = _now_pair()
@@ -213,7 +213,7 @@ def emit_top(scores_path, top_n, top_path, latest_json_path, source):
     }
     with open(latest_json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"[top10] JSON til UI: {latest_json_path}")
+    print(f"[top15] JSON til UI: {latest_json_path}")
 
 
 def _now_pair():
@@ -244,7 +244,7 @@ def _remove_lock(out_dir):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Daglig top-10 swing-scanner (rs_3m forfilter -> fuld swing-scoring)")
+        description="Daglig top-15 swing-scanner (rs_3m forfilter -> fuld swing-scoring)")
     ap.add_argument("--fraction", type=float, default=0.25,
                     help="andel af universet til kortlisten efter rs_3m (default 0.25)")
     ap.add_argument("--top", type=int, default=15, help="antal i slutlisten (default 15)")
@@ -271,9 +271,9 @@ def main():
         if not rs:
             sys.exit(1)
         shortlist, cutoff = shortlist_from_rs(rs, args.fraction)
-        print(f"[top10] kortliste = top {args.fraction:.0%} efter rs_3m = {cutoff} navne "
+        print(f"[top15] kortliste = top {args.fraction:.0%} efter rs_3m = {cutoff} navne "
               f"(af {len(rs)} med gyldig rs_3m).")
-        print("[top10] --prefilter-only: stopper foer fuld scoring. Top 20 efter rs_3m:")
+        print("[top15] --prefilter-only: stopper foer fuld scoring. Top 20 efter rs_3m:")
         for i, (t, v) in enumerate(sorted(rs.items(), key=lambda kv: kv[1], reverse=True)[:20], 1):
             print(f"   {i:>2}  {t:<6} rs_3m={v:+.1f}")
         return
@@ -285,7 +285,7 @@ def main():
 
     if args.fresh and os.path.exists(scores_path):
         os.remove(scores_path)
-        print(f"[top10] --fresh: slettede {scores_path}")
+        print(f"[top15] --fresh: slettede {scores_path}")
 
     # Laas hele den lange koersel (forfilter + scoring), saa UI viser 'koerer'
     # og backend ikke starter to samtidige koersler. Fjernes uanset udfald.
@@ -295,7 +295,7 @@ def main():
         if not rs:
             sys.exit(1)
         shortlist, cutoff = shortlist_from_rs(rs, args.fraction)
-        print(f"[top10] kortliste = top {args.fraction:.0%} efter rs_3m = {cutoff} navne "
+        print(f"[top15] kortliste = top {args.fraction:.0%} efter rs_3m = {cutoff} navne "
               f"(af {len(rs)} med gyldig rs_3m).")
         score_shortlist(shortlist, rs, args.api_key, args.source, args.period, args.delay, scores_path)
         emit_top(scores_path, args.top, top_path, latest_json_path, args.source)

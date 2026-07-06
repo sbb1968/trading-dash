@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-technical_intraday.py — Intradag teknisk lag (DAG-SCORE).
+technical_intraday.py — Day trading teknisk lag (DAG-SCORE).
 
 Python-tvilling til Pine-indikatoren "Day trading konfluens v1 [Long]".
-Den producerer den TEKNISKE intradag-score (DAG-SCORE) ud fra de samme bars
-som chartet, saa intradag-rapporten og chartet viser SAMME tal — verificeret
+Den producerer den TEKNISKE day trading-score (DAG-SCORE) ud fra de samme bars
+som chartet, saa day trading-rapporten og chartet viser SAMME tal — verificeret
 bit-for-bit mod Pine via sammenlign_pine_intraday.py.
 
 DESIGN: spejler swing-laget (technical_score.py) saa taet som muligt, saa de to
@@ -17,14 +17,14 @@ tidsrammer er ens i struktur:
     * ParamResult med .raw/.signal/.weight/.weighted  (SAMME dataklasse som swing)
     * compute_technical_intraday() returnerer en dict i SAMME form som swing's
       compute_technical() {results, excluded, lag_score} + group_scores + asof,
-      saa intradag_report.py (trin 4) kan plugge det ind identisk.
+      saa daytrading_report.py (trin 4) kan plugge det ind identisk.
     * _band() + format_technical_report() som swing.
 
 Hvor desktop-Claude-spec'en foreslog egne dataklasser (IntradayParamResult /
 IntradayTechnicalResult med .detail), VINDER swing-moenstret bevidst: vi bruger
 ParamResult.raw og dict-returen, saa de to lag er kodemaessigt ens.
 
-Forskellen fra swing er teknisk noedvendig: intradag-laget er VEKTORISERET pr.
+Forskellen fra swing er teknisk noedvendig: day trading-laget er VEKTORISERET pr.
 bar (hele serien kan sammenlignes med Pine), fordi dags-akkumulatorerne (VWAP,
 cumVol, OBV, ORB, dayHigh/Low) afhaenger af reset-punkter i loebet af dagen.
 Indikatorerne genbruges fra strategies/shared/indicators.py (Pine-matchet).
@@ -180,7 +180,7 @@ def _to_et(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _norm_cols(df: pd.DataFrame) -> pd.DataFrame:
-    """Accepter baade 'Close' (swing-konvention) og 'close' (intradag-kontrakt)."""
+    """Accepter baade 'Close' (swing-konvention) og 'close' (day trading-kontrakt)."""
     ren = {col: col.lower() for col in df.columns}
     return df.rename(columns=ren)
 
@@ -634,7 +634,7 @@ def compute_technical_intraday(bars: pd.DataFrame, spy_bars: pd.DataFrame,
                                daily: pd.DataFrame, *, params: IntradayParams = DEFAULT_PARAMS) -> dict:
     """Seneste-bar resultat i SAMME form som swing's compute_technical:
        {results, excluded, lag_score} + group_scores + asof.
-       Bruges af intradag_report.py og scanneren."""
+       Bruges af daytrading_report.py og scanneren."""
     if bars is None or bars.empty:
         return {"results": [], "excluded": [("alle", "ingen prisdata")],
                 "lag_score": None, "group_scores": {}, "asof": None}
@@ -741,20 +741,20 @@ def _band(score) -> str:
     if score is None:
         return "ingen data"
     if score >= 50:
-        return "Staerk intradag-opstilling"
+        return "Staerk day trading-opstilling"
     if score >= 20:
         return "Medvind"
     if score > -20:
         return "Neutral / blandet"
     if score > -50:
         return "Svag"
-    return "Fraraades (intradag)"
+    return "Fraraades (day trading)"
 
 
 def format_technical_report(ticker: str, res: dict) -> str:
     L = []
     L.append("=" * 78)
-    L.append(f" INTRADAG TEKNISK LAG — {ticker.upper()}   (asof {res.get('asof')})")
+    L.append(f" DAY TRADING TEKNISK LAG — {ticker.upper()}   (asof {res.get('asof')})")
     L.append("=" * 78)
     L.append(f"{'Parameter':<28}{'Vaerdi':<22}{'Bidrag':>7}{'Vaegt':>8}{'Vaegtet':>9}")
     L.append("-" * 78)
@@ -767,7 +767,7 @@ def format_technical_report(ticker: str, res: dict) -> str:
     L.append("-" * 78)
     score = res["lag_score"]
     sval = 0.0 if score is None else score
-    L.append(f"{'INTRADAG LAG-SCORE (DAG-SCORE)':<60}{sval:>+8.1f}")
+    L.append(f"{'DAY TRADING LAG-SCORE (DAG-SCORE)':<60}{sval:>+8.1f}")
     L.append(f"  -> {_band(score)}")
     if res.get("group_scores"):
         L.append("")

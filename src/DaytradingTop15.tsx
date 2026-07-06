@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
 
-const API_GET = "http://127.0.0.1:8000/intradag/top10";
-const API_RUN = "http://127.0.0.1:8000/intradag/top10/run";
+const API_GET = "http://127.0.0.1:8000/daytrading/top15";
+const API_RUN = "http://127.0.0.1:8000/daytrading/top15/run";
 
 interface Row {
   rank: number;
@@ -66,13 +66,13 @@ function scoreColor(v: number | string): string {
   return "var(--neutral)";
 }
 
-// Backend sender intradag-baand (technical_intraday._band) som ASCII; vis pyntet.
+// Backend sender day trading-baand (technical_intraday._band) som ASCII; vis pyntet.
 const BAND_LABEL: Record<string, string> = {
-  "Staerk intradag-opstilling": "Stærk",
+  "Staerk day trading-opstilling": "Stærk",
   "Medvind": "Medvind",
   "Neutral / blandet": "Neutral",
   "Svag": "Svag",
-  "Fraraades (intradag)": "Frarådes",
+  "Fraraades (day trading)": "Frarådes",
   "ingen data": "Afventer",
 };
 const bandLabel = (b: string) => BAND_LABEL[b] ?? b;
@@ -105,7 +105,7 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
   );
 }
 
-export function IntradagTop10({ onSelectTicker, onOpenDetail }:
+export function DaytradingTop15({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void }) {
   const [data, setData] = useState<TopData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -222,7 +222,7 @@ export function IntradagTop10({ onSelectTicker, onOpenDetail }:
                   title={onSelectTicker ? "Sæt symbol i de andre vinduer" : undefined}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
                   <td style={{ ...tdStyle, textAlign: "left", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
-                    onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail?.("intradag", String(r.symbol).toUpperCase()); }}
+                    onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail?.("daytrading", String(r.symbol).toUpperCase()); }}
                     title="Dobbeltklik for detaljeret score">{r.symbol}</td>
                   <td style={tdStyle}>{r.price != null && r.price !== "" ? `$${plain(r.price, 2)}` : "—"}</td>
                   <td style={{ ...tdStyle, fontWeight: 800, fontSize: 15, color: scoreColor(r.final) }}>{num(r.final, 1)}</td>

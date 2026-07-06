@@ -7,7 +7,7 @@ Overvaager et movers-univers for IBKR's `halted`-felt paa den DELTE forbindelse
 klient). En halt er i sig selv et signal: LULD = voldsom bevaegelse, T1/NYHED =
 materiel nyhed. Listen er reelt "de mest eksplosive navne i markedet lige nu".
 
-Spejler intradag_scanner's livscyklus (in-process asyncio.Task paa delt ib,
+Spejler daytrading_scanner's livscyklus (in-process asyncio.Task paa delt ib,
 throttlet, best-effort) og genbruger DENS univers-funktion (fetch_momentum_universe
 = TV-movers/top-gainers). EET reqTickersAsync-kald pr. cyklus daekker hele
 universet; vi laeser `.halted` (samme felt som katalysator-lagets fetch_quote:
@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 
-from intradag_scanner import fetch_momentum_universe   # genbrug univers-bygning
+from daytrading_scanner import fetch_momentum_universe   # genbrug univers-bygning
 
 try:
     import pytz
@@ -79,7 +79,7 @@ def _num(v):
         return None
 
 
-# === Univers-bygning (genbruger intradag_scanner) ==========================
+# === Univers-bygning (genbruger daytrading_scanner) ==========================
 async def _build_universe() -> list[str]:
     rows = await asyncio.to_thread(fetch_momentum_universe)
     syms: list[str] = []

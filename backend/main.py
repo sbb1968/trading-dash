@@ -876,7 +876,7 @@ async def swing_analyze_json(req: SwingAnalyzeRequest):
     return data
 
 
-class IntradagAnalyzeRequest(BaseModel):
+class DaytradingAnalyzeRequest(BaseModel):
     symbol:    str
     timeframe: str = "5 mins"            # "1 min" / "3 mins" / "5 mins"
     sr:        float | None = None       # manuelle chart-overlays (default FRA)
@@ -884,13 +884,13 @@ class IntradagAnalyzeRequest(BaseModel):
     candle:    float | None = None
 
 
-@app.post("/intradag/analyze_json")
-async def intradag_analyze_json(req: IntradagAnalyzeRequest):
-    """Intradag-konfluens for EET symbol -> struktureret JSON (UI). Genbruger appens
-    DELTE IBKR-forbindelse. compute_intradag_report er native-async paa den forbindelses
+@app.post("/daytrading/analyze_json")
+async def daytrading_analyze_json(req: DaytradingAnalyzeRequest):
+    """Day trading-konfluens for EET symbol -> struktureret JSON (UI). Genbruger appens
+    DELTE IBKR-forbindelse. compute_daytrading_report er native-async paa den forbindelses
     event-loop -> await DIREKTE, ALDRIG asyncio.to_thread (modsat /swing/analyze, hvor
     swing_report er SYNC og derfor MAA to_thread'es paa det koerende loop)."""
-    import intradag_report
+    import daytrading_report
     symbol = (req.symbol or "").strip().upper()
     if not symbol:
         raise HTTPException(status_code=400, detail="Mangler symbol")
@@ -901,14 +901,14 @@ async def intradag_analyze_json(req: IntradagAnalyzeRequest):
         return {"error": "IBKR ikke forbundet (er TWS/Gateway logget ind paa 7497?)",
                 "ibkr_connected": False}
     try:
-        report = await intradag_report.compute_intradag_report(
+        report = await daytrading_report.compute_daytrading_report(
             conn.ib, symbol, timeframe=req.timeframe,
             sr=req.sr, chart_pattern=req.pattern, candlestick=req.candle)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Day trading-analyse fejlede: {e}")
-    return intradag_report.report_to_json(report)
+    return daytrading_report.report_to_json(report)
 
 
 # Vanilla-JS der tegner den annoterede swing-chart i PDF-siden. Samme layout som
@@ -1248,11 +1248,11 @@ async def swing_report_html(ticker: str, sr: float | None = None,
     return HTMLResponse(_swing_report_html(d, detail=bool(detail)))
 
 
-# Vanilla-JS draw-script til intradag-PDF'en — PORT af IntradagChart.tsx (samme
+# Vanilla-JS draw-script til day trading-PDF'en — PORT af Day tradingChart.tsx (samme
 # skalaer/candlestick/polylinje/niveau/volumen-logik) men med PRINT-farver (lyst
 # tema) og fast 900x460 viewBox. Browseren tegner SVG'en naar report.html aabnes ->
-# med i print. CHART injiceres som JSON foran scriptet i _intradag_report_html.
-INTRADAG_CHART_JS = r"""(function(){
+# med i print. CHART injiceres som JSON foran scriptet i _daytrading_report_html.
+DAYTRADING_CHART_JS = r"""(function(){
   if(!CHART || !CHART.bars || !CHART.bars.length) return;
   var W=900, H=460, TOP=22, BOTM=46, XL=14, GUTTER=58, VOL_H=70, PILL_H=20;
   var BULL="#15803d", BEAR="#b91c1c", GRID="#e5e7eb", MUT="#6b7280", PILLBG="#fff", TAGBG="#374151";
@@ -1322,12 +1322,12 @@ INTRADAG_CHART_JS = r"""(function(){
   s+='<text x="'+(XL+44)+'" y="13" font-size="11" font-weight="700" fill="#d97706">EMA9</text>';
   s+='<text x="'+(XL+88)+'" y="13" font-size="11" font-weight="700" fill="#2563eb">EMA20</text>';
   s+='</svg>';
-  document.getElementById("intradag-chart").innerHTML=s;
+  document.getElementById("daytrading-chart").innerHTML=s;
 })();"""
 
 
-def _intradag_report_html(d: dict, detail: bool = False) -> str:
-    """Render intradag report_to_json som en paen, print-venlig HTML-side (lyst tema),
+def _daytrading_report_html(d: dict, detail: bool = False) -> str:
+    """Render day trading report_to_json som en paen, print-venlig HTML-side (lyst tema),
     aabnet i EKSTERN browser fra PDF-knappen. Spejler _swing_report_html.
 
     detail=True tilfoejer fuld faktor-nedbrydning pr. lag (Parameter/Vaerdi/Bidrag/Vaegt/
@@ -1336,17 +1336,17 @@ def _intradag_report_html(d: dict, detail: bool = False) -> str:
     import html as _html
     esc = _html.escape
     BULL, BEAR, NEU, MUT = "#15803d", "#b91c1c", "#b45309", "#6b7280"
-    # Intradag-baand (technical_intraday._band, brugt for baade slut+lag) -> pyntet dansk.
+    # Day trading-baand (technical_intraday._band, brugt for baade slut+lag) -> pyntet dansk.
     BAND = {
-        "Staerk intradag-opstilling": "Stærk", "Medvind": "Medvind",
+        "Staerk day trading-opstilling": "Stærk", "Medvind": "Medvind",
         "Neutral / blandet": "Neutral", "Svag": "Svag",
-        "Fraraades (intradag)": "Frarådes", "ingen data": "Afventer",
+        "Fraraades (day trading)": "Frarådes", "ingen data": "Afventer",
     }
 
     def sc(v): return BULL if v >= 15 else BEAR if v <= -15 else NEU
     def bandcolor(b):
         if b is None: return MUT
-        if b.startswith("Staerk"): return BULL          # "Staerk intradag-opstilling"
+        if b.startswith("Staerk"): return BULL          # "Staerk day trading-opstilling"
         if b == "Medvind": return BULL
         if b.startswith("Neutral"): return NEU          # "Neutral / blandet"
         if b.startswith("Svag") or b.startswith("Fraraades"): return BEAR
@@ -1396,13 +1396,13 @@ def _intradag_report_html(d: dict, detail: bool = False) -> str:
         )
 
     def detail_section_html(layers) -> str:
-        """Fuld faktor-nedbrydning pr. lag — spejler swing-detaljen, men intradag-lag
+        """Fuld faktor-nedbrydning pr. lag — spejler swing-detaljen, men day trading-lag
         (teknisk/forsyning/katalysator) og haandterer pending katalysator (score=None)."""
         INTRO = {
-            "technical": ("Det tungeste lag. Faktorer i grupper der maaler intradag-momentum og "
+            "technical": ("Det tungeste lag. Faktorer i grupper der maaler day trading-momentum og "
                           "trend-sundhed lige nu. Hver faktor scorer -100..+100; Bidrag = raa "
                           "signal, Vaegt = hvor meget den taeller, Vaegtet = de to ganget."),
-            "supply": "Float-centreret forsynings-lag — lav float = mere eksplosiv intradag-bevaegelse.",
+            "supply": "Float-centreret forsynings-lag — lav float = mere eksplosiv day trading-bevaegelse.",
             "catalyst": "Realtids-katalysatorer: friske nyheder og handels-halts.",
         }
         TITLES = {"technical": "Teknisk", "supply": "Forsyning", "catalyst": "Katalysator"}
@@ -1514,8 +1514,8 @@ def _intradag_report_html(d: dict, detail: bool = False) -> str:
     combtxt = "—" if d.get("combined") is None else sg(d["combined"])
     chart = d.get("chart")
     has_chart = bool(chart and chart.get("bars"))
-    chart_block = '<div id="intradag-chart" style="margin:6px 0"></div>' if has_chart else ''
-    chart_script = ('<script>const CHART=' + _json.dumps(chart) + ';' + INTRADAG_CHART_JS + '</script>') if has_chart else ''
+    chart_block = '<div id="daytrading-chart" style="margin:6px 0"></div>' if has_chart else ''
+    chart_script = ('<script>const CHART=' + _json.dumps(chart) + ';' + DAYTRADING_CHART_JS + '</script>') if has_chart else ''
     detail_section = detail_section_html(d["layers"]) if detail else ""
     return (
         f'<!DOCTYPE html><html lang="da"><head><meta charset="utf-8"><title>Day trading - {t}</title>'
@@ -1537,8 +1537,8 @@ def _intradag_report_html(d: dict, detail: bool = False) -> str:
     )
 
 
-@app.get("/intradag/report.html", response_class=HTMLResponse)
-async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
+@app.get("/daytrading/report.html", response_class=HTMLResponse)
+async def daytrading_report_html(symbol: str, timeframe: str = "5 mins",
                                sr: float | None = None,        # LAERDOM Fix A: default None, ALDRIG 0
                                pattern: float | None = None,
                                candle: float | None = None,
@@ -1547,7 +1547,7 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
     Print-knappen (print sker i browserens eget vindue -> ingen overlay paa app'en, saa
     man ikke ved et uheld lukker Trading Dash via app'ens X). Samme scoring som skaermen;
     overlay-FRA (None) = identisk med skaerm. await DIREKTE paa delt ib (som 5a)."""
-    import intradag_report
+    import daytrading_report
     s = (symbol or "").strip().upper()
     if not s:
         raise HTTPException(status_code=400, detail="Mangler symbol")
@@ -1557,13 +1557,13 @@ async def intradag_report_html(symbol: str, timeframe: str = "5 mins",
         return HTMLResponse("<h2>IBKR ikke forbundet (er TWS/Gateway logget ind paa 7497?)</h2>",
                             status_code=503)
     try:
-        report = await intradag_report.compute_intradag_report(
+        report = await daytrading_report.compute_daytrading_report(
             conn.ib, s, timeframe=timeframe, sr=sr, chart_pattern=pattern, candlestick=candle)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Day trading-rapport fejlede: {e}")
-    return HTMLResponse(_intradag_report_html(intradag_report.report_to_json(report), detail=bool(detail)))
+    return HTMLResponse(_daytrading_report_html(daytrading_report.report_to_json(report), detail=bool(detail)))
 
 
 # Vanilla-JS uge-trend-chart til buyhold-PDF'en — candlesticks + 10/30/40-uge MA + ATH
@@ -1904,7 +1904,7 @@ class BuyHoldAnalyzeRequest(BaseModel):
 @app.post("/buyhold/analyze_json")
 async def buyhold_analyze_json(req: BuyHoldAnalyzeRequest):
     """Buy-and-Hold struktureret JSON. compute_buyhold er ASYNC + kraever ib til Lag 4 ->
-    await DIREKTE paa delt ib (som /intradag, IKKE to_thread). FMP-kaldet er to_thread'et
+    await DIREKTE paa delt ib (som /day trading, IKKE to_thread). FMP-kaldet er to_thread'et
     inde i compute_buyhold. Er ib nede, ekskluderes Lag 4 paent."""
     import buyhold
     import buyhold_report
@@ -1984,10 +1984,10 @@ async def help_ask(req: HelpRequest):
         }
 
 
-# ── Swing top-10 (vindue) ─────────────────────────────────────
-# Vinduet viser seneste top-10 + tidsstempel og kan starte en frisk koersel
-# (IBKR-kilde, ~et par timer) som baggrundsproces. swing_top10.py skriver
-# swing_top10_latest.json (resultatet) og en laasefil mens den koerer.
+# ── Swing top-15 (vindue) ─────────────────────────────────────
+# Vinduet viser seneste top-15 + tidsstempel og kan starte en frisk koersel
+# (IBKR-kilde, ~et par timer) som baggrundsproces. swing_top15.py skriver
+# swing_top15_latest.json (resultatet) og en laasefil mens den koerer.
 # NB: os/sys er IKKE modul-importeret oeverst i main.py (kun lokalt) -> importer her.
 import os
 import sys
@@ -1996,9 +1996,9 @@ import subprocess as _subprocess
 import datetime as _datetime
 
 _SWING_DIR = os.path.dirname(os.path.abspath(__file__))   # backend/
-_SWING_LATEST_PATH = os.path.join(_SWING_DIR, "swing_top10_latest.json")
-_SWING_LOCK_PATH = os.path.join(_SWING_DIR, "swing_top10_running.lock")
-_SWING_RUNLOG_PATH = os.path.join(_SWING_DIR, "swing_top10_run.log")
+_SWING_LATEST_PATH = os.path.join(_SWING_DIR, "swing_top15_latest.json")
+_SWING_LOCK_PATH = os.path.join(_SWING_DIR, "swing_top15_running.lock")
+_SWING_RUNLOG_PATH = os.path.join(_SWING_DIR, "swing_top15_run.log")
 _SWING_STALE_SEC = 4 * 3600   # laas aeldre end dette = staale (proces doede) -> ikke koerende
 
 
@@ -2017,9 +2017,9 @@ def _swing_running():
         return False, None
 
 
-@app.get("/swing/top10")
-async def swing_top10_get():
-    """Seneste top-10 (fra swing_top10_latest.json) + om en koersel er i gang."""
+@app.get("/swing/top15")
+async def swing_top15_get():
+    """Seneste top-15 (fra swing_top15_latest.json) + om en koersel er i gang."""
     data = {"generated_local": None, "generated_utc": None, "source": None, "count": 0, "rows": []}
     if os.path.exists(_SWING_LATEST_PATH):
         try:
@@ -2033,9 +2033,9 @@ async def swing_top10_get():
     return data
 
 
-@app.post("/swing/top10/run")
-async def swing_top10_run():
-    """Start en frisk top-10-koersel (IBKR) som baggrundsproces. Afvis hvis en allerede koerer."""
+@app.post("/swing/top15/run")
+async def swing_top15_run():
+    """Start en frisk top-15-koersel (IBKR) som baggrundsproces. Afvis hvis en allerede koerer."""
     running, started = _swing_running()
     if running:
         return {"started": False, "already_running": True, "started_utc": started}
@@ -2048,7 +2048,7 @@ async def swing_top10_run():
     try:
         logf = open(_SWING_RUNLOG_PATH, "a", encoding="utf-8")
         _subprocess.Popen(
-            [sys.executable, "swing_top10.py", "--source", "ibkr"],
+            [sys.executable, "swing_top15.py", "--source", "ibkr"],
             cwd=_SWING_DIR, stdout=logf, stderr=_subprocess.STDOUT,
         )
     except Exception as e:
@@ -2056,67 +2056,67 @@ async def swing_top10_run():
     return {"started": True}
 
 
-# ── Buy-and-Hold Top-10 (vindue) ─────────────────────────────────────
-# Spejler swing-top10: subprocess (egen ib, koeres uden for handelstid), laasefil
-# med staale-backstop, latest.json. buyhold_top10.py er kvote-budgetteret + resumerbar.
-_BH_TOP10_LATEST = os.path.join(_SWING_DIR, "buyhold_top10_latest.json")
-_BH_TOP10_LOCK   = os.path.join(_SWING_DIR, "buyhold_top10_running.lock")
-_BH_TOP10_RUNLOG = os.path.join(_SWING_DIR, "buyhold_top10_run.log")
-_BH_TOP10_STALE_SEC = 2 * 3600   # koersel er kvote-kappet (~MAX_PER_RUN navne) -> ~minutter; 2t backstop
+# ── Buy-and-Hold Top-15 (vindue) ─────────────────────────────────────
+# Spejler swing-top15: subprocess (egen ib, koeres uden for handelstid), laasefil
+# med staale-backstop, latest.json. buyhold_top15.py er kvote-budgetteret + resumerbar.
+_BH_TOP15_LATEST = os.path.join(_SWING_DIR, "buyhold_top15_latest.json")
+_BH_TOP15_LOCK   = os.path.join(_SWING_DIR, "buyhold_top15_running.lock")
+_BH_TOP15_RUNLOG = os.path.join(_SWING_DIR, "buyhold_top15_run.log")
+_BH_TOP15_STALE_SEC = 2 * 3600   # koersel er kvote-kappet (~MAX_PER_RUN navne) -> ~minutter; 2t backstop
 
 
-def _bh_top10_running():
+def _bh_top15_running():
     """(running, started_utc, progress). Laasefilen er kilden, med staale-backstop."""
-    if not os.path.exists(_BH_TOP10_LOCK):
+    if not os.path.exists(_BH_TOP15_LOCK):
         return False, None, None
     try:
-        with open(_BH_TOP10_LOCK, encoding="utf-8") as f:
+        with open(_BH_TOP15_LOCK, encoding="utf-8") as f:
             lock = _json.load(f)
         started = lock.get("started_utc")
         age = (_datetime.datetime.now(_datetime.timezone.utc)
                - _datetime.datetime.fromisoformat(started)).total_seconds()
         prog = {"done": lock.get("done"), "total": lock.get("total")}
-        return (age <= _BH_TOP10_STALE_SEC), started, prog
+        return (age <= _BH_TOP15_STALE_SEC), started, prog
     except Exception:
         return False, None, None
 
 
-@app.get("/buyhold/top10")
-async def buyhold_top10_get():
-    """Seneste buy-and-hold top-10 (fra buyhold_top10_latest.json) + running/progress."""
+@app.get("/buyhold/top15")
+async def buyhold_top15_get():
+    """Seneste buy-and-hold top-15 (fra buyhold_top15_latest.json) + running/progress."""
     data = {"generated_local": None, "generated_utc": None, "source": None,
             "universe_size": 0, "scored_cached": 0, "count": 0, "rows": []}
-    if os.path.exists(_BH_TOP10_LATEST):
+    if os.path.exists(_BH_TOP15_LATEST):
         try:
-            with open(_BH_TOP10_LATEST, encoding="utf-8") as f:
+            with open(_BH_TOP15_LATEST, encoding="utf-8") as f:
                 data = _json.load(f)
         except Exception:
             pass
-    running, started, prog = _bh_top10_running()
+    running, started, prog = _bh_top15_running()
     data["running"] = running
     data["started_utc"] = started
     data["progress"] = prog
     return data
 
 
-@app.post("/buyhold/top10/run")
-async def buyhold_top10_run():
-    """Start en frisk buy-and-hold top-10-koersel (subprocess). Afvis hvis en koerer.
+@app.post("/buyhold/top15/run")
+async def buyhold_top15_run():
+    """Start en frisk buy-and-hold top-15-koersel (subprocess). Afvis hvis en koerer.
     Kraever FMP_API_KEY i backendens miljoe + (helst) IBKR oppe paa 7497."""
     if not os.environ.get("FMP_API_KEY", ""):
         return {"started": False, "error": "FMP_API_KEY ikke sat i backendens miljoe"}
-    running, started, _ = _bh_top10_running()
+    running, started, _ = _bh_top15_running()
     if running:
         return {"started": False, "already_running": True, "started_utc": started}
-    if os.path.exists(_BH_TOP10_LOCK):
+    if os.path.exists(_BH_TOP15_LOCK):
         try:
-            os.remove(_BH_TOP10_LOCK)
+            os.remove(_BH_TOP15_LOCK)
         except OSError:
             pass
     try:
-        logf = open(_BH_TOP10_RUNLOG, "a", encoding="utf-8")
+        logf = open(_BH_TOP15_RUNLOG, "a", encoding="utf-8")
         _subprocess.Popen(
-            [sys.executable, "buyhold_top10.py"],
+            [sys.executable, "buyhold_top15.py"],
             cwd=_SWING_DIR, stdout=logf, stderr=_subprocess.STDOUT,
         )
     except Exception as e:
@@ -2124,51 +2124,51 @@ async def buyhold_top10_run():
     return {"started": True}
 
 
-# ── Intradag Top-10 Konfluens (trin 6) ──────────────────────────────────────
-# Spejler swing-top10-endpoints, MEN scanen koerer IN-PROCESS som en asyncio.Task
+# ── Day trading Top-15 Konfluens (trin 6) ──────────────────────────────────────
+# Spejler swing-top15-endpoints, MEN scanen koerer IN-PROCESS som en asyncio.Task
 # paa den DELTE ib (ikke en subprocess med egen klient, der konkurrerer om feed).
-import intradag_scanner
+import daytrading_scanner
 
-_INTRADAG_TOP10_JSON = os.path.join(_SWING_DIR, "intradag_top10_latest.json")
-_intradag_top10 = {"task": None, "started_utc": None}
-_INTRADAG_STALE_SEC = 15 * 60   # task aeldre end dette uden at vaere done = staale
+_DAYTRADING_TOP15_JSON = os.path.join(_SWING_DIR, "daytrading_top15_latest.json")
+_daytrading_top15 = {"task": None, "started_utc": None}
+_DAYTRADING_STALE_SEC = 15 * 60   # task aeldre end dette uden at vaere done = staale
 
 
-def _intradag_running():
+def _daytrading_running():
     """(running: bool, started_utc: str|None). Task-tilstand med staale-backstop."""
-    t = _intradag_top10["task"]
+    t = _daytrading_top15["task"]
     if t is None or t.done():
         return False, None
-    started = _intradag_top10["started_utc"]
+    started = _daytrading_top15["started_utc"]
     if started:
         age = (_datetime.datetime.now(_datetime.timezone.utc)
                - _datetime.datetime.fromisoformat(started)).total_seconds()
-        if age > _INTRADAG_STALE_SEC:
+        if age > _DAYTRADING_STALE_SEC:
             return False, started
     return True, started
 
 
-@app.get("/intradag/top10")
-async def intradag_top10_get():
-    """Seneste intradag top-10 (fra intradag_top10_latest.json) + fremdrift/running."""
+@app.get("/daytrading/top15")
+async def daytrading_top15_get():
+    """Seneste day trading top-15 (fra daytrading_top15_latest.json) + fremdrift/running."""
     data = {"generated_local": None, "generated_utc": None, "source": None,
             "count": 0, "rows": [], "progress": None}
-    if os.path.exists(_INTRADAG_TOP10_JSON):
+    if os.path.exists(_DAYTRADING_TOP15_JSON):
         try:
-            with open(_INTRADAG_TOP10_JSON, encoding="utf-8") as f:
+            with open(_DAYTRADING_TOP15_JSON, encoding="utf-8") as f:
                 data = _json.load(f)
         except Exception:
             pass
-    running, started = _intradag_running()
+    running, started = _daytrading_running()
     data["running"] = running
     data["started_utc"] = started
     return data
 
 
-@app.post("/intradag/top10/run")
-async def intradag_top10_run():
-    """Start en frisk intradag-scan (in-process async paa delt ib). Afvis hvis en koerer."""
-    running, started = _intradag_running()
+@app.post("/daytrading/top15/run")
+async def daytrading_top15_run():
+    """Start en frisk day trading-scan (in-process async paa delt ib). Afvis hvis en koerer."""
+    running, started = _daytrading_running()
     if running:
         return {"started": False, "already_running": True, "started_utc": started}
     await strategy_manager.connect_ibkr(paper_trading=True)
@@ -2176,9 +2176,9 @@ async def intradag_top10_run():
     if conn is None or not conn.connected:
         return {"started": False, "error": "IBKR ikke forbundet (er TWS/Gateway logget ind paa 7497?)"}
     ib = conn.ib
-    _intradag_top10["started_utc"] = _datetime.datetime.now(_datetime.timezone.utc).isoformat()
-    _intradag_top10["task"] = asyncio.create_task(intradag_scanner.run_scan(ib))
-    return {"started": True, "already_running": False, "started_utc": _intradag_top10["started_utc"]}
+    _daytrading_top15["started_utc"] = _datetime.datetime.now(_datetime.timezone.utc).isoformat()
+    _daytrading_top15["task"] = asyncio.create_task(daytrading_scanner.run_scan(ib))
+    return {"started": True, "already_running": False, "started_utc": _daytrading_top15["started_utc"]}
 
 
 # ── Live halt-scanner (movers-univers, halted-overvaagning paa delt ib) ──────

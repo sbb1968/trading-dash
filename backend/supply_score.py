@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-supply_score.py — Intradag FORSYNINGS-lag (day-tradings pendant til swings
+supply_score.py — Day trading FORSYNINGS-lag (day-tradings pendant til swings
 fundamentale lag).
 
 Hvor swings fundamental_score scorer en virksomheds kvalitet/vaekst/vaerdi,
 scorer dette lag en akties FORSYNINGSPROFIL — frem for alt FLOAT (frit
 omsaettelige aktier), fordi lav float er kernen i Warrior/Ross Cameron-momentum:
 faa aktier = eksplosive bevaegelser. Returnerer samme form som compute_fundamental
-({results, excluded, lag_score}), saa intradag_report.py (trin 4) kan plugge det
+({results, excluded, lag_score}), saa daytrading_report.py (trin 4) kan plugge det
 ind IDENTISK med swing.
 
 VIRKELIGHED (afsoegt + verificeret, juni 2026):
@@ -19,7 +19,7 @@ VIRKELIGHED (afsoegt + verificeret, juni 2026):
      som det tekniske lag udelader faktorer uden data. Naar en SI-kilde findes,
      plugges de ind uden arkitektur-aendring. Re-probe IKKE TV/Finnhub for SI.
 
-Genbruger ParamResult fra technical_intraday (homogene intradag-resultater).
+Genbruger ParamResult fra technical_intraday (homogene day trading-resultater).
 ASCII i kode + konsol; dansk prosa.
 """
 from __future__ import annotations
@@ -180,7 +180,7 @@ def format_supply_report(ticker: str, res: dict) -> str:
 # === Float-rotation: dynamisk hjaelper (IKKE en vaegtet faktor) ==============
 def float_rotation(cum_vol, float_shares):
     """Hvor mange gange floaten er omsat i dag (dagens volumen / float) — et af
-    de staerkeste day-trade-forsyningssignaler, men DYNAMISK (kraever intradag-
+    de staerkeste day-trade-forsyningssignaler, men DYNAMISK (kraever day trading-
     volumen), saa det hoerer ikke i den statiske score. Rapporten/scanneren viser
     den; cum_vol tages fra det tekniske lags context. Returnerer (multiple, label)."""
     if not float_shares or float_shares <= 0 or cum_vol is None:
@@ -194,7 +194,7 @@ def float_rotation(cum_vol, float_shares):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="Forsynings-lag (intradag) — scorer + live float")
+    ap = argparse.ArgumentParser(description="Forsynings-lag (day trading) — scorer + live float")
     ap.add_argument("--symbol", default="TEST")
     ap.add_argument("--float", type=float, default=None,
                     help="float i MILLIONER (syntetisk scorer-test uden net)")

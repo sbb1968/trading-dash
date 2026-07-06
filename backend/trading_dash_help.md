@@ -17,8 +17,8 @@ Menuen er delt i grupper. Disse vinduer findes:
 **Charts** – 1, 2, 3, 5, 10, 15, 30 min, 1 time, 4 time, daily, weekly. Vælg tidsramme i dropdownen og tryk Tilføj.
 
 **Scannere**
-- **Swing trading Top-10** – de 10 bedste swing-kandidater lige nu.
-- **Day trading Top-10** (intradag) – de 10 bedste intradag-kandidater.
+- **Swing trading Top-15** – de 15 bedste swing-kandidater lige nu.
+- **Day trading Top-15** – de 15 bedste day trading-kandidater.
 - **Halt-scanner** – aktier der er handelsstoppet (halted).
 
 **Markedsdata**
@@ -30,8 +30,8 @@ Menuen er delt i grupper. Disse vinduer findes:
 **Analyse**
 - **Swing trading-rapport** – scorer ÉN aktie på egnethed til swing-handel; rapport kan åbnes/printes som PDF via knappen.
 - **Buy-and-Hold-rapport** – langsigtet trend-rapport for én aktie (PDF).
-- **Buy-and-Hold Top-10** – de 10 bedste buy-and-hold-kandidater.
-- **Day trading-rapport** – intradag-rapport.
+- **Buy-and-Hold Top-15** – de 15 bedste buy-and-hold-kandidater.
+- **Day trading-rapport** – day trading-rapport.
 
 **Konto & ordrer**
 - **Konto** – IBKR konto-balance, equity og positioner.
@@ -65,7 +65,7 @@ Vinduet opdaterer automatisk ca. hvert minut og kan opdateres manuelt med **↻ 
 
 ## Sådan opdateres data (kort regel)
 - **Realtids-vinduer** (Live Algo, Level 2, Time & Sales, Watchlist) opdaterer løbende af sig selv via backenden.
-- **Øjebliksbillede-vinduer** (Markedsoverblik, Sektorer, Top-10-lister, rapporter) opdateres med en **opdater-knap i selve vinduet** (↺ / ↻) – de er ikke realtids. Sektorer opdaterer dog også automatisk hvert minut.
+- **Øjebliksbillede-vinduer** (Markedsoverblik, Sektorer, Top-15-lister, rapporter) opdateres med en **opdater-knap i selve vinduet** (↺ / ↻) – de er ikke realtids. Sektorer opdaterer dog også automatisk hvert minut.
 
 ## Sådan åbner du en chart
 1. Tryk **ALT+T** for at åbne "Tilføj vindue"-menuen.
@@ -91,7 +91,7 @@ En selvstændig skærm 2 kan åbnes under **Værktøjer → Åbn Skærm 2**. Lay
 egne vinduer på skærm 2.
 
 ## Adfærd / hvorfor gør den sådan (typiske spørgsmål)
-- **"Hvordan får jeg friske tal i Markedsoverblik / Sektorer / en Top-10-liste?":** Klik
+- **"Hvordan får jeg friske tal i Markedsoverblik / Sektorer / en Top-15-liste?":** Klik
   opdater-knappen (↺ / ↻) øverst i vinduet. De er øjebliksbilleder, ikke realtid. I
   Markedsoverblik viser "Beregnet af backend"-tiden om tallene rent faktisk blev genberegnet.
 - **Markedsoverblik-scoren står stille (fx 40):** Hvis "Beregnet"-tiden rykker når du

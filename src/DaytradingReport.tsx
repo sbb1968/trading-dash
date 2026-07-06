@@ -3,9 +3,9 @@ import { useState, useEffect, useCallback, CSSProperties } from "react";
 // Day trading-scores — en LISTE af symboler man selv tilføjer. Hvert symbol scores via
 // analyze-endpointet og vises som ÉN linje (samme layout som Day trading Top-15) + pris,
 // sorteret højeste Samlet øverst, gemt i localStorage. Dobbeltklik på symbolet åbner den
-// detaljerede score i sit eget vindue (IntradagDetail). Flere kan være åbne samtidig.
-const API_JSON = "http://127.0.0.1:8000/intradag/analyze_json";
-const LS_KEY = "td_intradag_scores";
+// detaljerede score i sit eget vindue (DaytradingDetail). Flere kan være åbne samtidig.
+const API_JSON = "http://127.0.0.1:8000/daytrading/analyze_json";
+const LS_KEY = "td_daytrading_scores";
 
 interface ScoreRow {
   symbol: string; price: number | null; final: number | null; band: string;
@@ -13,9 +13,9 @@ interface ScoreRow {
 }
 
 const BAND_LABEL: Record<string, string> = {
-  "Staerk intradag-opstilling": "Stærk", "Medvind": "Medvind",
+  "Staerk day trading-opstilling": "Stærk", "Medvind": "Medvind",
   "Neutral / blandet": "Neutral", "Svag": "Svag",
-  "Fraraades (intradag)": "Frarådes", "ingen data": "Afventer",
+  "Fraraades (day trading)": "Frarådes", "ingen data": "Afventer",
 };
 const bandLabel = (b: string) => BAND_LABEL[b] ?? b;
 function bandColor(b: string): string {
@@ -68,7 +68,7 @@ function loadRows(): ScoreRow[] {
   try { const s = localStorage.getItem(LS_KEY); return s ? JSON.parse(s) : []; } catch { return []; }
 }
 
-export function IntradagReport({ onSelectTicker, onOpenDetail }:
+export function DaytradingReport({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void }) {
   const [rows, setRows] = useState<ScoreRow[]>(loadRows);
   const [symbol, setSymbol] = useState("");
@@ -158,7 +158,7 @@ export function IntradagReport({ onSelectTicker, onOpenDetail }:
                 <tr key={r.symbol} style={{ borderTop: "1px solid var(--border-subtle)" }}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{i + 1}</td>
                   <td style={{ ...tdStyle, textAlign: "left", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
-                    onDoubleClick={() => onOpenDetail?.("intradag", r.symbol)}
+                    onDoubleClick={() => onOpenDetail?.("daytrading", r.symbol)}
                     onClick={() => onSelectTicker?.(r.symbol)}
                     title="Dobbeltklik for detaljeret score">{r.symbol}</td>
                   <td style={tdStyle}>{r.price != null ? `$${r.price.toFixed(2)}` : "—"}</td>

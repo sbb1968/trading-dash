@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { IntradagChart } from "./IntradagChart";
+import { DaytradingChart } from "./DaytradingChart";
 
-// IntradagDetail — den DETALJEREDE day trading-score for ÉT symbol, vist i sit eget
+// DaytradingDetail — den DETALJEREDE day trading-score for ÉT symbol, vist i sit eget
 // vindue (åbnes ved dobbeltklik i Day trading-scores eller Top-15). Flere kan være
 // åbne samtidig. Selv-analyserer ved mount / når symbol/tidsramme skifter.
-const API_JSON = "http://127.0.0.1:8000/intradag/analyze_json";
-const API_HTML = "http://127.0.0.1:8000/intradag/report.html";
+const API_JSON = "http://127.0.0.1:8000/daytrading/analyze_json";
+const API_HTML = "http://127.0.0.1:8000/daytrading/report.html";
 
 interface Factor { name: string; raw: number | string | null; signal: number; weight: number; weighted: number; }
 interface Group { name: string; score: number; factors: Factor[]; }
@@ -16,7 +16,7 @@ interface GateInputs {
   adv20: number | null; dollar_vol: number | null; price: number | null;
   spread_pct: number | null; market_cap: number | null; halted: boolean | null;
 }
-export interface IntradagData {
+export interface DaytradingData {
   symbol: string; asof: string | null; timeframe: string | null;
   price: number | null; final: number | null; final_band: string;
   combined: number | null; gate: number; gate_straf: number;
@@ -30,9 +30,9 @@ export interface IntradagData {
 }
 
 const BAND_LABEL: Record<string, string> = {
-  "Staerk intradag-opstilling": "Stærk", "Medvind": "Medvind",
+  "Staerk day trading-opstilling": "Stærk", "Medvind": "Medvind",
   "Neutral / blandet": "Neutral", "Svag": "Svag",
-  "Fraraades (intradag)": "Frarådes", "ingen data": "Afventer",
+  "Fraraades (day trading)": "Frarådes", "ingen data": "Afventer",
 };
 const bandLabel = (b: string) => BAND_LABEL[b] ?? b;
 
@@ -145,13 +145,13 @@ function Slider({ label, value, onChange }: { label: string; value: number; onCh
 const TIMEFRAMES = ["1 min", "3 mins", "5 mins"];
 
 // ============================================================================
-export function IntradagDetail({ ticker }: { ticker: string }) {
+export function DaytradingDetail({ ticker }: { ticker: string }) {
   const [timeframe, setTimeframe]   = useState("5 mins");
   const [useOverlay, setUseOverlay] = useState(false);
   const [sr, setSr]                 = useState(0);
   const [pattern, setPattern]       = useState(0);
   const [candle, setCandle]         = useState(0);
-  const [data, setData]             = useState<IntradagData | null>(null);
+  const [data, setData]             = useState<DaytradingData | null>(null);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
 
@@ -172,7 +172,7 @@ export function IntradagDetail({ ticker }: { ticker: string }) {
       }
       const d = await resp.json();
       if (d.error) { setError(d.error); return; }
-      setData(d as IntradagData);
+      setData(d as DaytradingData);
     } catch (e: any) {
       setError(`Kunne ikke naa backenden (kører den på :8000?): ${e?.message || e}`);
     } finally {
@@ -282,7 +282,7 @@ export function IntradagDetail({ ticker }: { ticker: string }) {
               {data.info.gate_inputs.market_cap != null && <Chip label="Market cap" value={fmtUSD(data.info.gate_inputs.market_cap)} />}
             </div>
 
-            {data.chart && data.chart.bars?.length > 0 && <IntradagChart data={data.chart} />}
+            {data.chart && data.chart.bars?.length > 0 && <DaytradingChart data={data.chart} />}
           </div>
         )}
       </div>

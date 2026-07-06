@@ -1,19 +1,19 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 
-// Intradag-candlestick-chart der spejler Pine-tvillingen "Day trading konfluens v1":
+// Day trading-candlestick-chart der spejler Pine-tvillingen "Day trading konfluens v1":
 // candlesticks + VWAP + EMA9/EMA20 + ORB/PDH/PDL/PDC/HOD-niveauer + volumen-strip.
 // Real-pixel SVG (viewBox = maalt bredde x fast hoejde) som SwingChart.
 
-interface IntradagBar { t: string; o: number; h: number; l: number; c: number; v: number; }
-interface IntradagLevel { kind: string; label: string; price: number; }
-interface IntradagChartData {
+interface DaytradingBar { t: string; o: number; h: number; l: number; c: number; v: number; }
+interface DaytradingLevel { kind: string; label: string; price: number; }
+interface DaytradingChartData {
   current_price: number;
-  bars: IntradagBar[];
+  bars: DaytradingBar[];
   overlays: {
     vwap: (number | null)[]; ema9: (number | null)[]; ema20: (number | null)[];
     vw_upper: (number | null)[]; vw_lower: (number | null)[];
   };
-  levels: IntradagLevel[];
+  levels: DaytradingLevel[];
 }
 
 const CHART_H = 440;
@@ -53,7 +53,7 @@ function segments(arr: (number | null)[], x: (i: number) => number, y: (p: numbe
   return segs;
 }
 
-function buildLayout(chart: IntradagChartData, W: number, H: number) {
+function buildLayout(chart: DaytradingChartData, W: number, H: number) {
   const xr = W - GUTTER;
   const priceBot = H - BOTM - VOL_H;
   const volTop = priceBot + 8, volBot = H - BOTM;
@@ -102,7 +102,7 @@ function buildLayout(chart: IntradagChartData, W: number, H: number) {
   return { bars, n, x, y, slot, xr, priceBot, volTop, volBot, vy, ticks, timeTicks, levelPills };
 }
 
-export function IntradagChart({ data }: { data: IntradagChartData }) {
+export function DaytradingChart({ data }: { data: DaytradingChartData }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1000);
   useEffect(() => {

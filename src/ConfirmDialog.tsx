@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 /**
- * Lille, genbrugelig bekraeftelses-dialog (samme look som SwingTop10's koersels-dialog).
+ * Lille, genbrugelig bekraeftelses-dialog (samme look som SwingTop15's koersels-dialog).
  * Tastatur-sikker: default-fokus paa ANNULLER (et utilsigtet Enter afviser i stedet for at
  * bekraefte), Esc og backdrop-klik annullerer — aldrig auto-bekraeft. Bekraeft kraever et
  * eksplicit klik (eller at brugeren bevidst har tabbet til bekraeft-knappen og trykker Enter).

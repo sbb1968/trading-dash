@@ -21,21 +21,21 @@ import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
 import { SwingReport } from "./SwingReport";
 import { BuyHoldReport } from "./BuyHoldReport";
-import { IntradagReport } from "./IntradagReport";
-import { IntradagTop10 } from "./IntradagTop10";
+import { DaytradingReport } from "./DaytradingReport";
+import { DaytradingTop15 } from "./DaytradingTop15";
 import { SectorNiche } from "./SectorNiche";
 import { StrategyReport } from "./StrategyReport";
 import { CompanyInfo } from "./CompanyInfo";
 import { HandelsChart } from "./HandelsChart";
 import { SwingDetail } from "./SwingDetail";
-import { IntradagDetail } from "./IntradagDetail";
+import { DaytradingDetail } from "./DaytradingDetail";
 import { BuyHoldDetail } from "./BuyHoldDetail";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
 import { HelpAssistant } from "./HelpAssistant";
-import { SwingTop10 } from "./SwingTop10";
-import { BuyHoldTop10 } from "./BuyHoldTop10";
+import { SwingTop15 } from "./SwingTop15";
+import { BuyHoldTop15 } from "./BuyHoldTop15";
 import { useTickerName } from "./useTickerName";
 
 
@@ -1131,8 +1131,8 @@ export function renderWindowContent(id: WindowId, props: {
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "buyhold": return <BuyHoldReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
-    case "intradagreport": return <IntradagReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
-    case "intradagtop10": return <IntradagTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
+    case "daytradingreport": return <DaytradingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
+    case "daytradingtop15": return <DaytradingTop15 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "sektorniche": return <SectorNiche onSelectTicker={props.onSelectTicker} />;
     case "strategirapport": return <StrategyReport />;
     case "firmainfo": return <CompanyInfo ticker={props.selectedTicker} />;
@@ -1141,8 +1141,8 @@ export function renderWindowContent(id: WindowId, props: {
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
     case "assistent": return <HelpAssistant />;
-    case "swingtop10": return <SwingTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
-    case "buyholdtop10": return <BuyHoldTop10 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
+    case "swingtop15": return <SwingTop15 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
+    case "buyholdtop15": return <BuyHoldTop15 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     default:            return <div className="pt-empty">Ukendt vindue</div>;
   }
 }
@@ -1396,14 +1396,14 @@ function App() {
               {detailWins.filter(w => !w.st.closed).map(w => (
                 <FloatingWindow
                   key={w.key} id={w.key}
-                  title={`${w.kind === "swing" ? "Swing" : w.kind === "intradag" ? "Day trading" : "Buy-and-Hold"}-score: ${w.ticker}`}
+                  title={`${w.kind === "swing" ? "Swing" : w.kind === "daytrading" ? "Day trading" : "Buy-and-Hold"}-score: ${w.ticker}`}
                   defaultState={w.st}
                   onClose={() => setDetailWins(ws => ws.filter(x => x.key !== w.key))}
                   onStateChange={(s) => setDetailWins(ws => ws.map(x => x.key === w.key ? { ...x, st: { ...x.st, ...s } } : x))}
                   windowType="swingdetail"
                 >
                   {w.kind === "swing" && <SwingDetail ticker={w.ticker} />}
-                  {w.kind === "intradag" && <IntradagDetail ticker={w.ticker} />}
+                  {w.kind === "daytrading" && <DaytradingDetail ticker={w.ticker} />}
                   {w.kind === "buyhold" && <BuyHoldDetail ticker={w.ticker} />}
                 </FloatingWindow>
               ))}

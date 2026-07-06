@@ -40,9 +40,9 @@ interface WinEntry { id: WindowId; shortcut: string }
 // AddWindowMenu via ChartSubmenu). Genvejstaster bevaret for muskelhukommelse.
 const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   { label: "Scannere", icon: "🔍", items: [
-    { id: "swingtop10",    shortcut: "S" },   // Swing Top-15
-    { id: "intradagtop10", shortcut: "I" },   // Day trading Top-15
-    { id: "buyholdtop10",  shortcut: "B" },   // Buy-and-Hold Top-15
+    { id: "swingtop15",    shortcut: "S" },   // Swing Top-15
+    { id: "daytradingtop15", shortcut: "I" },   // Day trading Top-15
+    { id: "buyholdtop15",  shortcut: "B" },   // Buy-and-Hold Top-15
     { id: "haltscanner",   shortcut: "H" },   // Halt-scanner
   ]},
   { label: "Markedsdata", icon: "📊", items: [
@@ -56,7 +56,7 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   { label: "Analyse", icon: "🎯", items: [
     { id: "swing",          shortcut: "W" },   // Swing-scores
     { id: "buyhold",        shortcut: "H" },   // Buy-and-Hold-scores
-    { id: "intradagreport", shortcut: "T" },   // Day trading-scores
+    { id: "daytradingreport", shortcut: "T" },   // Day trading-scores
     { id: "strategirapport",shortcut: "G" },   // Strategi-sammenligningsrapport
     { id: "handelschart",   shortcut: "C" },   // Handels-chart (entry/exit pr. handel)
   ]},
