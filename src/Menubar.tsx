@@ -123,7 +123,17 @@ export function LabelWithShortcut({ text, shortcut }: { text: string; shortcut: 
   );
 }
 
-// ── DropdownMenu med hover-luk, ALT-shortcut og item-shortcuts ─
+// ── Koordinering: kun ÉN dropdown åben ad gangen (pr. vindue) ──
+// En simpel intern kanal: naar en dropdown aabner, beder den alle andre lukke.
+// Delt paa modul-niveau -> gaelder alle DropdownMenu i samme vindue (skaerm 1 og
+// skaerm 2 er separate webviews og faar hver deres egen kanal).
+const dropdownOpenListeners = new Set<(openerId: number) => void>();
+let dropdownIdSeq = 0;
+function announceDropdownOpen(id: number) {
+  dropdownOpenListeners.forEach(fn => fn(id));
+}
+
+// ── DropdownMenu med ALT-shortcut, item-shortcuts, Esc-luk og "kun én ad gangen" ─
 function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
   label: string;
   children: React.ReactNode;
@@ -134,6 +144,19 @@ function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const idRef = useRef(0);
+  if (idRef.current === 0) idRef.current = ++dropdownIdSeq;
+
+  // Aabn = luk alle andre foerst (kun én ad gangen). closeMenu er neutral.
+  const openMenu  = () => { setOpen(true); announceDropdownOpen(idRef.current); };
+  const closeMenu = () => setOpen(false);
+
+  // Luk hvis en ANDEN dropdown aabner.
+  useEffect(() => {
+    const onOther = (openerId: number) => { if (openerId !== idRef.current) setOpen(false); };
+    dropdownOpenListeners.add(onOther);
+    return () => { dropdownOpenListeners.delete(onOther); };
+  }, []);
 
   // Luk ved klik udenfor
   useEffect(() => {
@@ -144,13 +167,20 @@ function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Keyboard handler — ALT+bogstav åbner, bare bogstav aktiverer item
+  // Keyboard: ALT+bogstav åbner/lukker · Esc lukker · bare bogstav aktiverer item
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       // ALT + altKey åbner/lukker denne dropdown
       if (altKey && e.altKey && e.key.toUpperCase() === altKey.toUpperCase()) {
         e.preventDefault();
-        setOpen(o => !o);
+        if (open) closeMenu(); else openMenu();
+        return;
+      }
+
+      // Esc lukker den aabne dropdown
+      if (open && e.key === "Escape") {
+        e.preventDefault();
+        closeMenu();
         return;
       }
 
@@ -160,7 +190,7 @@ function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
         if (cb) {
           e.preventDefault();
           cb();
-          setOpen(false);
+          closeMenu();
         }
       }
     }
@@ -169,14 +199,10 @@ function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
   }, [altKey, open, itemShortcuts]);
 
   return (
-    <div
-      className="menu-item-wrapper"
-      ref={ref}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div className="menu-item-wrapper" ref={ref}>
       <button
         className={`menu-btn ${open ? "menu-btn-open" : ""} ${isActive ? "menu-btn-active" : ""}`}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => (open ? closeMenu() : openMenu())}
       >
         {altKey ? <LabelWithShortcut text={label} shortcut={altKey} /> : label}
         {" "}<span className="menu-arrow">{open ? "▲" : "▼"}</span>
