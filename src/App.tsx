@@ -265,6 +265,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // valgte række med dens Stk-mængde. Stabil listener; logikken holdes i en ref så den
   // altid ser den nyeste liste + valg (opdateres lige før render nedenfor).
   const shortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  const stkRefs = useRef<Record<number, HTMLInputElement | null>>({});   // Stk-input pr. række (til ALT+tal-fokus)
   useEffect(() => {
     const h = (e: KeyboardEvent) => shortcutRef.current(e);
     window.addEventListener("keydown", h);
@@ -397,8 +398,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       const idx = parseInt(e.key, 10) - 1;
       if (idx < watchedStocks.length) {
         e.preventDefault();
-        (document.activeElement as HTMLElement | null)?.blur?.();
         setSelectedNum(idx + 1);
+        const inp = stkRefs.current[idx];   // stil cursoren i Stk-feltet -> klar til at ændre mængde inden K/S
+        if (inp) { inp.focus(); inp.select(); }
       }
       return;
     }
@@ -479,9 +481,18 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
+                      ref={el => { stkRefs.current[i] = el; }}
                       onChange={e => setShares(stock.ticker, e.target.value)}
                       onFocus={() => setSelectedNum(i + 1)}
                       onClick={e => { e.stopPropagation(); setSelectedNum(i + 1); }}
+                      onKeyDown={e => {
+                        // K/S virker mens cursoren står i Stk-feltet: tast mængde -> K/S handler straks
+                        if (!e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
+                          e.preventDefault();
+                          handleOrder(e.key.toLowerCase() === "k" ? "BUY" : "SELL", stock);
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
                       style={{ width: 60, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 7px", textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
