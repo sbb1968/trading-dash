@@ -1256,8 +1256,12 @@ function App() {
     const updated = deleteLayout(id, window.innerWidth, window.innerHeight);
     setLayouts(updated);
     // Roer IKKE workspace ved sletning — flyt kun "aktiv"-markeringen hvis det
-    // slettede layout var markeret. Brugerens aabne vinduer forbliver praecis som de er.
-    if (activeLayoutId === id) { setActiveLayoutId("ibens-orb"); setActiveLayoutIdState("ibens-orb"); }
+    // slettede layout var markeret. Fald tilbage til foerste tilbagevaerende (kan
+    // vaere tom hvis alt er slettet). Brugerens aabne vinduer forbliver som de er.
+    if (activeLayoutId === id) {
+      const next = updated[0]?.id ?? "";
+      setActiveLayoutId(next); setActiveLayoutIdState(next);
+    }
   }
 
   function autoArrange() {

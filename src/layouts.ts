@@ -169,13 +169,26 @@ const STORAGE_KEY = "td_layouts";
 // arrangement bor i "workspace" (se nedenfor). loadLayouts returnerer derfor rene
 // defaults + brugerens egne gemte (custom_*) layouts. Det fjerner den gamle
 // forurening hvor aabnede/trukne vinduer sneg sig ind i fx "Ibens ORB".
+// Standard-skabeloner som brugeren HAR slettet. loadLayouts genskaber ellers
+// skabeloner ved hvert kald — denne liste holder en sletning permanent.
+const DELETED_DEFAULTS_KEY = "td_deleted_default_layouts";
+function loadDeletedDefaults(): string[] {
+  try {
+    const s = localStorage.getItem(DELETED_DEFAULTS_KEY);
+    const p = s ? JSON.parse(s) : [];
+    return Array.isArray(p) ? p : [];
+  } catch { return []; }
+}
+
 export function loadLayouts(W: number, H: number): Layout[] {
-  const defaults = makeDefaultLayouts(W, H);
+  const allDefaults = makeDefaultLayouts(W, H);
+  const deleted = loadDeletedDefaults();
+  const defaults = allDefaults.filter(d => !deleted.includes(d.id));
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (!saved) return defaults;
     const parsed: Layout[] = JSON.parse(saved);
-    const defaultIds = defaults.map(d => d.id);
+    const defaultIds = allDefaults.map(d => d.id);
     // Bevar EKSPLICIT gemte aendringer af defaults ("Opdater aktuelt layout").
     // Live-aendringer forurener dem ikke laengere — de gaar i workspace.
     const merged = defaults.map(def => {
@@ -298,9 +311,20 @@ export function saveCurrentAsLayout(name: string, windows: WindowConfig[], W: nu
 }
 
 export function deleteLayout(id: string, W: number, H: number): Layout[] {
-  const layouts = loadLayouts(W, H).filter(l => l.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts));
-  return layouts;
+  // Fjern fra de gemte layouts.
+  let stored: Layout[] = [];
+  try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { stored = []; }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored.filter(l => l.id !== id)));
+  // Er det en standard-skabelon? Husk sletningen, ellers genskaber loadLayouts den.
+  const defaultIds = makeDefaultLayouts(W, H).map(d => d.id);
+  if (defaultIds.includes(id)) {
+    const del = loadDeletedDefaults();
+    if (!del.includes(id)) {
+      del.push(id);
+      localStorage.setItem(DELETED_DEFAULTS_KEY, JSON.stringify(del));
+    }
+  }
+  return loadLayouts(W, H);
 }
 
 // ── Skærm 2 layouts — HELT adskilt liste fra skærm 1 ─────────────────────────

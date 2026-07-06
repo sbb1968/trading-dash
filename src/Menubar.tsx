@@ -256,10 +256,8 @@ export function LayoutMenu({
             {layout.id === activeLayoutId && !layoutDirty ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
             {layout.name}
           </div>
-          {!layout.isDefault && (
-            <button className="menu-layout-delete" title="Slet layout"
-              onClick={e => { e.stopPropagation(); if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id); }}>✕</button>
-          )}
+          <button className="menu-layout-delete" title="Slet layout"
+            onClick={e => { e.stopPropagation(); if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id); }}>✕</button>
         </div>
       ))}
 
@@ -523,16 +521,14 @@ export function Menubar({
               {layout.id === activeLayoutId && !layoutDirty ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
               {layout.name}
             </div>
-            {!layout.isDefault && (
-              <button
-                className="menu-layout-delete"
-                onClick={e => {
-                  e.stopPropagation();
-                  if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id);
-                }}
-                title="Slet layout"
-              >✕</button>
-            )}
+            <button
+              className="menu-layout-delete"
+              onClick={e => {
+                e.stopPropagation();
+                if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id);
+              }}
+              title="Slet layout"
+            >✕</button>
           </div>
         ))}
 
