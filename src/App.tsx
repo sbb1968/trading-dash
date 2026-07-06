@@ -115,19 +115,23 @@ function Clock() {
 }
 
 // ── Market Status ─────────────────────────────────────────────
+// Markedsstatus fra ET-tid (delt af MarketStatus-badgen + Watchlist).
+// open = RTH 9:30–16:00 ET (= 15:30–22:00 dansk tid); ellers pre/after/closed.
+function getMarketStatus(): "open" | "pre" | "after" | "closed" {
+  const now = new Date(), day = now.getDay();
+  const et  = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  if (day === 0 || day === 6)     return "closed";
+  if (mins >= 240 && mins < 570)  return "pre";
+  if (mins >= 570 && mins < 960)  return "open";
+  if (mins >= 960 && mins < 1200) return "after";
+  return "closed";
+}
+
 function MarketStatus() {
   const [status, setStatus] = useState<"open" | "pre" | "after" | "closed">("closed");
   useEffect(() => {
-    function update() {
-      const now = new Date(), day = now.getDay();
-      const et  = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-      const mins = et.getHours() * 60 + et.getMinutes();
-      if (day === 0 || day === 6)     { setStatus("closed"); return; }
-      if (mins >= 240 && mins < 570)  { setStatus("pre");    return; }
-      if (mins >= 570 && mins < 960)  { setStatus("open");   return; }
-      if (mins >= 960 && mins < 1200) { setStatus("after");  return; }
-      setStatus("closed");
-    }
+    const update = () => setStatus(getMarketStatus());
     update();
     const interval = setInterval(update, 10000);
     return () => clearInterval(interval);
@@ -173,12 +177,23 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   });
   useEffect(() => { localStorage.setItem("watchlist_meta", JSON.stringify(meta)); }, [meta]);
 
+  // Markedsstatus (RTH) — styrer om KØB/SÆLG er muligt + farve pr. ticker.
+  const [mkt, setMkt] = useState<"open" | "pre" | "after" | "closed">(getMarketStatus);
+  useEffect(() => { const id = setInterval(() => setMkt(getMarketStatus()), 10000); return () => clearInterval(id); }, []);
+  const marketOpen = mkt === "open";
+
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
     setOrderShares(prev => ({ ...prev, [ticker]: value.replace(/\D/g, "").slice(0, 6) }));
   }
 
   function handleOrder(action: "BUY" | "SELL", stock: any) {
+    if (!marketOpen) {
+      const lbl = mkt === "pre" ? "pre-market" : mkt === "after" ? "after-hours" : "lukket";
+      alert(`Markedet er ikke åbent (${lbl}) — ${stock.ticker} kan ikke handles nu.\n\n` +
+        `Vent til markedet åbner (RTH kl. 15:30–22:00 dansk tid).`);
+      return;
+    }
     const shares = parseInt(getShares(stock.ticker), 10);
     if (!shares || shares <= 0) { alert(`Angiv en gyldig mængde for ${stock.ticker}`); return; }
     if (!stock.price || stock.price <= 0) {
@@ -244,7 +259,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             <tr>
               <th style={{ textAlign: "left" }}>Ticker</th>
               <th style={R}>Pris</th>
-              <th style={{ textAlign: "center", width: 56 }}>Stk</th>
+              <th style={{ textAlign: "center", width: 76 }}>Stk</th>
               <th style={{ textAlign: "center", width: 130 }}>Handel</th>
               <th style={R}>Købspris</th>
               <th style={R}>Aktuel pris</th>
@@ -270,15 +285,15 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   onClick={() => onSelectTicker(stock.ticker)}>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
-                      title={`Åbn ${stock.ticker}'s hjemmeside i browser`}
-                      style={{ cursor: "pointer", textDecoration: "underline dotted" }}>{stock.ticker}</span>
+                      title={`${stock.ticker} — ${marketOpen ? "marked ÅBENT (kan handles nu)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
+                      style={{ cursor: "pointer", textDecoration: "underline dotted", color: marketOpen ? "var(--bull)" : "var(--bear)", fontWeight: 700 }}>{stock.ticker}</span>
                   </td>
                   <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
                       onChange={e => setShares(stock.ticker, e.target.value)}
                       onClick={e => e.stopPropagation()}
-                      style={{ width: 50, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 6px", textAlign: "right", fontFamily: "inherit", outline: "none" }} />
+                      style={{ width: 60, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 7px", textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
@@ -343,6 +358,10 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
   useEffect(() => { localStorage.setItem("columns_watchlist", JSON.stringify(colsWatchlist)); }, [colsWatchlist]);
   useEffect(() => { localStorage.setItem("columns_level2",    JSON.stringify(colsLevel2)); }, [colsLevel2]);
   useEffect(() => { localStorage.setItem("columns_timesales", JSON.stringify(colsTimeSales)); }, [colsTimeSales]);
+
+  // Handels-indstilling: spring ordre-bekræftelse over (KØB/SÆLG handler direkte).
+  const [skipConfirm, setSkipConfirm] = useState<boolean>(() => localStorage.getItem("skip_order_confirm") === "true");
+  useEffect(() => { localStorage.setItem("skip_order_confirm", skipConfirm ? "true" : "false"); }, [skipConfirm]);
 
   // Anvend font-ændringer live
   useEffect(() => {
@@ -448,7 +467,17 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="konfigurator-divider" />
-        <ColSection title="Watchlist — Kolonner"         columns={WATCHLIST_COLUMNS} selected={colsWatchlist} setSelected={setColsWatchlist} />
+        <div className="konfigurator-panel">
+          <div className="konfigurator-panel-title">Watchlist &amp; handel</div>
+          <label className="konfigurator-col-item" style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input type="checkbox" checked={skipConfirm} onChange={e => setSkipConfirm(e.target.checked)} />
+            <span>Spring ordre-bekræftelse over — KØB/SÆLG handler <b>direkte</b> uden pop-up</span>
+          </label>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
+            Watchlist-kolonnerne er nu en fast handels-opsætning (Ticker · Pris · Stk · KØB/SÆLG ·
+            Købspris · Aktuel pris · Beholdning · Ur. P/L) og konfigureres ikke længere her.
+          </div>
+        </div>
         <div className="konfigurator-divider" />
         <ColSection title="Level 2 — Kolonner"           columns={LEVEL2_COLUMNS}    selected={colsLevel2}    setSelected={setColsLevel2} />
         <div className="konfigurator-divider" />
@@ -1079,7 +1108,12 @@ function App() {
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onOpenDetail: openDetail,
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
-      setOrderConfirm({ action, ticker, shares, price });
+      // Konfigurator-indstilling: spring bekræftelses-pop-up over og handl direkte.
+      if (localStorage.getItem("skip_order_confirm") === "true") {
+        if (action === "BUY") ibkrBuy(ticker, shares); else ibkrSell(ticker, shares);
+      } else {
+        setOrderConfirm({ action, ticker, shares, price });
+      }
     },
   };
 
