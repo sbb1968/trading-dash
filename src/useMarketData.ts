@@ -132,9 +132,17 @@ export function useMarketData() {
 
   const clearLastOrderResult = useCallback(() => setLastOrderResult(null), []);
 
+  // Trin 3: bed backenden abonnere på watchlist-tickers' live-kurs (så "Aktuel pris"
+  // virker for enhver ticker, ikke kun feed-universet).
+  const subscribeTickers = useCallback((tickers: string[]) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && tickers.length) {
+      wsRef.current.send(JSON.stringify({ type: "watchlist_subscribe", tickers }));
+    }
+  }, []);
+
   const stocksArray = Array.from(stocks.values());
   return {
     stocksArray, news, status, sendMessage,
-    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
+    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult, subscribeTickers,
   };
 }

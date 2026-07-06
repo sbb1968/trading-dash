@@ -1097,8 +1097,13 @@ function App() {
 
   const {
     stocksArray, status,
-    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult,
+    ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult, subscribeTickers,
   } = useMarketData();
+
+  // Trin 3: abonnér på watchlist-tickers' live-kurs når listen ændres / ved (gen)forbindelse.
+  useEffect(() => {
+    if (status === "connected" && watchlist.length) subscribeTickers(watchlist);
+  }, [watchlist, status, subscribeTickers]);
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
   // Vis kun et layout som aktivt (✓) hvis workspace matcher det layout den er baseret
   // paa. Er opsaetningen aendret (ugemt), er der INTET aktivt layout.

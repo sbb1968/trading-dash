@@ -110,6 +110,28 @@ class IBKRLiveFeed:
             logger.warning(f"[LiveFeed] Scanner fejl: {e} — bruger fallback")
         return FALLBACK_UNIVERSE[:MAX_UNIVERSE_SIZE]
 
+    async def add_symbols(self, symbols: list[str]):
+        """Tilføj EKSTRA symboler til det levende feed dynamisk (fx watchlist-tickers,
+        trin 3). Springer allerede-abonnerede over; best-effort pr. symbol. Deres ticks
+        indgår i næste broadcast, så frontendens 'Aktuel pris' begynder at leve."""
+        if not self.conn.connected:
+            return
+        new: list[str] = []
+        for sym in symbols:
+            s = (sym or "").upper().strip()
+            if not s or s in self._tickers:
+                continue
+            try:
+                contract = Stock(s, "SMART", "USD")
+                await self.conn.ib.qualifyContractsAsync(contract)
+                self._tickers[s] = self.conn.ib.reqMktData(contract, "", False, False)
+                new.append(s)
+            except Exception as e:
+                logger.warning(f"[LiveFeed] watchlist-abonnement {s}: {e}")
+        if new:
+            await self._fetch_prev_closes(new)
+            logger.info(f"[LiveFeed] +{len(new)} watchlist-symbol(er): {new}")
+
     async def _subscribe(self, symbols: list[str]):
         for sym in symbols:
             try:

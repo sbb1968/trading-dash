@@ -553,6 +553,17 @@ async def websocket_endpoint(websocket: WebSocket):
             elif message["type"] == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
+            elif message["type"] == "watchlist_subscribe":
+                # Trin 3: abonnér på watchlist-tickers' live-kurs, så "Aktuel pris"
+                # (og urealiseret P/L) virker for enhver ticker Iben tilføjer — ikke
+                # kun feed-universet. No-op i mock-tilstand (live_feed None).
+                syms = [str(t).upper().strip() for t in (message.get("tickers") or []) if str(t).strip()]
+                if syms and live_feed is not None:
+                    try:
+                        await live_feed.add_symbols(syms)
+                    except Exception as e:
+                        logger.warning(f"[WS] watchlist_subscribe fejl: {e}")
+
             elif message["type"] in ("ibkr_buy", "ibkr_sell"):
                 # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR
                 # paper trading kontoen (ikke den lokale mock-portfolio).
