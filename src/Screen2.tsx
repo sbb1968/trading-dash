@@ -185,27 +185,12 @@ export default function Screen2() {
   return (
     <div className="app" style={{ position: "relative" }}>
 
-      {/* Skærm 2 menubar */}
+      {/* Skærm 2 menubar — samme opsaetning/placeringer som skærm 1 */}
       <div className="menubar" style={{ position: "relative", zIndex: 500 }}>
-        <span style={{ fontSize: 12, color: "var(--text-muted)", padding: "0 10px", fontWeight: 600, letterSpacing: "0.5px" }}>
-          SKÆRM 2
-        </span>
 
-        <div style={{ width: "1px", height: "16px", background: "var(--border-default)", margin: "0 4px" }} />
-
-        {/* Tilføj vindue — DELT komponent (præcis som skærm 1: ChartSubmenu + grupper) */}
+        {/* Venstre: samme raekkefoelge som skærm 1 (Tilføj vindue · dropdown · Auto-arrange) */}
         <AddWindowMenu onAddWindow={handleAddWindow} activeWindowIds={activeWindowIds} />
 
-        {/* Auto-arrange knap */}
-        <button
-          className="menu-btn"
-          onClick={autoArrange}
-          title="Arrangér alle vinduer automatisk (ALT+A)"
-        >
-          ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
-        </button>
-
-        {/* Layouts — KUN skærm 2's egen liste */}
         <LayoutMenu
           layouts={layouts2}
           activeLayoutId={activeLayoutId2}
@@ -215,24 +200,31 @@ export default function Screen2() {
           altKey="L"
         />
 
-        {/* Dokumentation + Hjælp — direkte synlige knapper (nemt for Iben) */}
-        <button className="menu-btn" onClick={() => handleAddWindow("docs")} title="Åbn dokumentation">
-          📄 {WINDOW_LABELS["docs"]}
-        </button>
-        <button className="menu-btn" onClick={() => handleAddWindow("assistent")} title="Åbn hjælp fra Claude">
-          💬 {WINDOW_LABELS["assistent"]}
+        <button
+          className="menu-btn"
+          onClick={autoArrange}
+          title="Arrangér alle vinduer automatisk (ALT+A)"
+        >
+          ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
         </button>
 
-        {/* Valgt ticker */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, paddingRight: 10 }}>
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Ticker:</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{selectedTicker}</span>
+        {/* Hoejre: doere som skærm 1 (Docs/Hjælp) + skaerm-indikator og valgt ticker */}
+        <div className="menubar-right">
+          <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.5px" }}>SKÆRM 2</span>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>· {selectedTicker}</span>
+          <span className="menubar-sep" />
+          <button className="menu-btn menu-btn-door" onClick={() => handleAddWindow("docs")} title="Åbn dokumentation">
+            📄 {WINDOW_LABELS["docs"]}
+          </button>
+          <button className="menu-btn menu-btn-door" onClick={() => handleAddWindow("assistent")} title="Åbn hjælp fra Claude">
+            💬 {WINDOW_LABELS["assistent"]}
+          </button>
         </div>
       </div>
 
       {/* Desktop */}
       <LiveLogProvider>
-        <div className="desktop-area" style={{ position: "absolute", top: 32, left: 0, right: 0, bottom: 0 }}>
+        <div className="desktop-area" style={{ position: "absolute", top: 36, left: 0, right: 0, bottom: 0 }}>
           {windows.filter(w => !w.closed).map(win => (
             <FloatingWindow
               key={win.id}
