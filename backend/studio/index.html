@@ -1990,8 +1990,13 @@
         // Header-urealiseret = SUM af linjernes urealiseret (det forventede).
         // Falder tilbage til IBKR's konto-aggregat hvis ingen linje kunne beregnes.
         function sumUnrealized(views, snap) {
+            // Ingen aabne (algo-)positioner -> urealiseret er 0. Fald IKKE tilbage til
+            // IBKR's konto-aggregat her, da det ogsaa daekker positioner algoerne ikke
+            // styrer (fx en manuel short) -> ville vise et grroent tal ved 0 positioner.
+            if (!views || views.length === 0) return 0;
             const c = views.filter(v => v.unrPnl != null);
             if (c.length > 0) return c.reduce((a, v) => a + v.unrPnl, 0);
+            // Positioner FINDES men kunne ikke prises -> brug IBKR-aggregatet.
             if (snap && snap.ok && snap.unrealized_pnl != null) return snap.unrealized_pnl;
             return null;
         }
