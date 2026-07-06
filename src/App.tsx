@@ -180,7 +180,10 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // Markedsstatus (RTH) — styrer om KØB/SÆLG er muligt + farve pr. ticker.
   const [mkt, setMkt] = useState<"open" | "pre" | "after" | "closed">(getMarketStatus);
   useEffect(() => { const id = setInterval(() => setMkt(getMarketStatus()), 10000); return () => clearInterval(id); }, []);
-  const marketOpen = mkt === "open";
+  // Handelbar = RTH (open) ELLER pre-market. After-hours + lukket = IKKE handelbar.
+  const canTrade = mkt === "open" || mkt === "pre";
+  // Ticker-farve: grøn=åbent · gul=pre-market · rød=after-hours/lukket.
+  const tickerColor = mkt === "open" ? "var(--bull)" : mkt === "pre" ? "var(--neutral)" : "var(--bear)";
 
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
@@ -188,10 +191,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   }
 
   function handleOrder(action: "BUY" | "SELL", stock: any) {
-    if (!marketOpen) {
-      const lbl = mkt === "pre" ? "pre-market" : mkt === "after" ? "after-hours" : "lukket";
-      alert(`Markedet er ikke åbent (${lbl}) — ${stock.ticker} kan ikke handles nu.\n\n` +
-        `Vent til markedet åbner (RTH kl. 15:30–22:00 dansk tid).`);
+    if (!canTrade) {
+      const lbl = mkt === "after" ? "after-hours — handel er slået fra" : "markedet er lukket";
+      alert(`${stock.ticker} kan ikke handles nu (${lbl}).\n\n` +
+        `Handel er muligt i pre-market (fra kl. 10:00 dansk tid) og regulær åbningstid (15:30–22:00). ` +
+        `After-hours er ikke tilladt.`);
       return;
     }
     const shares = parseInt(getShares(stock.ticker), 10);
@@ -285,8 +289,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   onClick={() => onSelectTicker(stock.ticker)}>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
-                      title={`${stock.ticker} — ${marketOpen ? "marked ÅBENT (kan handles nu)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
-                      style={{ cursor: "pointer", textDecoration: "underline dotted", color: marketOpen ? "var(--bull)" : "var(--bear)", fontWeight: 700 }}>{stock.ticker}</span>
+                      title={`${stock.ticker} — ${mkt === "open" ? "marked ÅBENT (kan handles)" : mkt === "pre" ? "PRE-MARKET (kan handles)" : mkt === "after" ? "AFTER-HOURS (handel ikke tilladt)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
+                      style={{ cursor: "pointer", textDecoration: "underline dotted", color: tickerColor, fontWeight: 700 }}>{stock.ticker}</span>
                   </td>
                   <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
