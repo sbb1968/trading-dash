@@ -257,7 +257,8 @@ export function LayoutMenu({
             {layout.name}
           </div>
           {!layout.isDefault && (
-            <button className="menu-layout-delete" onClick={e => { e.stopPropagation(); onDeleteLayout(layout.id); }} title="Slet layout">✕</button>
+            <button className="menu-layout-delete" title="Slet layout"
+              onClick={e => { e.stopPropagation(); if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id); }}>✕</button>
           )}
         </div>
       ))}
@@ -525,7 +526,10 @@ export function Menubar({
             {!layout.isDefault && (
               <button
                 className="menu-layout-delete"
-                onClick={e => { e.stopPropagation(); onDeleteLayout(layout.id); }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id);
+                }}
                 title="Slet layout"
               >✕</button>
             )}

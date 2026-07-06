@@ -254,14 +254,18 @@ button {
   border:        1px solid var(--border-default);
 }
 .menu-layout-delete {
-  background:  transparent;
-  border:      none;
-  color:       var(--text-muted);
-  padding:     4px 8px;
-  font-size:   11px;
-  flex-shrink: 0;
+  background:    transparent;
+  border:        1px solid var(--border-default);
+  border-radius: 3px;
+  color:         var(--bear);
+  padding:       1px 7px;
+  font-size:     12px;
+  font-weight:   700;
+  line-height:   1.4;
+  flex-shrink:   0;
+  margin-left:   6px;
 }
-.menu-layout-delete:hover { color: var(--bear); }
+.menu-layout-delete:hover { background: var(--bear); color: #fff; border-color: var(--bear); }
 
 .menu-window-active       { color: var(--text-muted); cursor: default; }
 .menu-window-active:hover { background: transparent; color: var(--text-muted); }
