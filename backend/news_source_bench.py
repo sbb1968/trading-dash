@@ -197,6 +197,28 @@ async def fetch_alpaca(session, ticker, start, end) -> list[NewsRecord]:
     return out
 
 
+async def fetch_polygon(session, ticker, start, end) -> list[NewsRecord]:
+    """Polygon.io news — ren ticker-tagging + published_utc dato-vindue. Gratis-tier =
+    5 kald/min (derfor hoej rate i SourceSpec). Endpoint: /v2/reference/news."""
+    key = os.environ.get("POLYGON_API_KEY")
+    params = {"ticker": ticker,
+              "published_utc.gte": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "published_utc.lte": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "order": "desc", "sort": "published_utc", "limit": 50, "apiKey": key}
+    data = await _get_json(session, "https://api.polygon.io/v2/reference/news", params=params)
+    out = []
+    for it in (data.get("results", []) if isinstance(data, dict) else []):
+        ts = _parse_dt(it.get("published_utc"))
+        head = (it.get("title") or "").strip()
+        if not (ts and head):
+            continue
+        pub = it.get("publisher") or {}
+        out.append(NewsRecord("polygon", ticker, head, ts,
+                              url=it.get("article_url", ""), sentiment=None,
+                              category=pub.get("name") if isinstance(pub, dict) else None))
+    return out
+
+
 async def fetch_alpha_vantage(session, ticker, start, end) -> list[NewsRecord]:
     key = os.environ.get("ALPHAVANTAGE_API_KEY")
     params = {"function": "NEWS_SENTIMENT", "tickers": ticker, "apikey": key,
@@ -364,6 +386,7 @@ SOURCES: list[SourceSpec] = [
     SourceSpec("alpha_vantage", ["ALPHAVANTAGE_API_KEY"], 12.5, fetch_alpha_vantage, warn_over_tickers=25),
     SourceSpec("marketaux",     ["MARKETAUX_API_KEY"], 1.0, fetch_marketaux, warn_over_tickers=100),
     SourceSpec("fmp",           ["FMP_API_KEY"], 0.3, fetch_fmp, warn_over_tickers=250),
+    SourceSpec("polygon",       ["POLYGON_API_KEY"], 12.5, fetch_polygon),   # gratis: 5 kald/min
     SourceSpec("yfinance",      [], 0.7, fetch_yfinance, needs_pkg="yfinance"),
     SourceSpec("sec_8k",        [], 0.15, fetch_sec_8k),
 ]
@@ -612,9 +635,14 @@ def main():
     ap.add_argument("--top-n", type=int, default=UNIVERSE_TOP_N, dest="top_n",
                     help="antal TV top-gainers naar intet override er givet (default 25)")
     ap.add_argument("--sources", help="komma-liste der begraenser kilder, fx alpaca,finnhub,fmp")
+    ap.add_argument("--asof", help="slut-dato for nyhedsvinduet (YYYY-MM-DD, UTC) — til HISTORISKE "
+                    "benchmarks (fx test mod gamle gappers). Default: nu.")
     args = ap.parse_args()
 
-    now = _now_utc()
+    if args.asof:
+        now = datetime.strptime(args.asof, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    else:
+        now = _now_utc()
     start = now - timedelta(hours=args.window_hours)
 
     print("=" * 78)
