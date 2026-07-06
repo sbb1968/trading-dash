@@ -88,7 +88,7 @@ function getWindowType(id: WindowId): string {
 
 // Workspace "dirty" = afviger fra det layout den er baseret paa (saa intet layout
 // vises som aktivt). Sammenligner geometri + aaben/lukket (IKKE z-orden/fokus).
-function sameArrangement(a: WindowConfig[], b: WindowConfig[]): boolean {
+export function sameArrangement(a: WindowConfig[], b: WindowConfig[]): boolean {
   const sig = (ws: WindowConfig[]) => JSON.stringify(
     ws.map(w => ({ id: w.id, x: w.x, y: w.y, width: w.width, height: w.height,
                    minimized: w.minimized, maximized: w.maximized, closed: w.closed }))
@@ -530,7 +530,7 @@ function NewsTickerName({ ticker }: { ticker: string }) {
 }
 
 // ── Konfigurator ──────────────────────────────────────────────
-function Konfigurator({ onClose }: { onClose: () => void }) {
+export function Konfigurator({ onClose }: { onClose: () => void }) {
   const originals = useRef({
     colsWatchlist: JSON.parse(localStorage.getItem("columns_watchlist") || JSON.stringify(DEFAULT_WATCHLIST_COLUMNS)),
     colsLevel2:    JSON.parse(localStorage.getItem("columns_level2")    || JSON.stringify(DEFAULT_LEVEL2_COLUMNS)),

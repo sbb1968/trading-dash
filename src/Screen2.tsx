@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { LiveLogProvider } from "./LiveLogContext";
 import { useMarketData } from "./useMarketData";
-import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
-import { AddWindowMenu, LabelWithShortcut, LayoutMenu } from "./Menubar";
+import { renderWindowContent, getWindowTitle, isChartWindow, Konfigurator, sameArrangement } from "./App";
+import { Menubar } from "./Menubar";
 import {
-  WindowConfig, WindowId, WINDOW_LABELS, Layout,
+  WindowConfig, WindowId, Layout,
   loadWorkspace2, saveWorkspace2, clampWindows, WORKSPACE2_KEY,
   loadLayouts2, saveLayouts2, saveCurrentAsLayout2, deleteLayout2,
   getActiveLayoutId2, setActiveLayoutId2,
@@ -26,6 +26,9 @@ export default function Screen2() {
   // Skærm 2's egen layout-liste (helt adskilt fra skærm 1).
   const [layouts2, setLayouts2] = useState<Layout[]>(() => loadLayouts2());
   const [activeLayoutId2, setActiveLayoutId2State] = useState<string>(() => getActiveLayoutId2());
+
+  // Samme view-model som skærm 1 (den delte Menubar styrer Konfigurator-visningen).
+  const [activeView, setActiveView] = useState<"scanners" | "watchlist" | "charting" | "konfigurator">("scanners");
 
   const { stocksArray } = useMarketData();
 
@@ -54,14 +57,7 @@ export default function Screen2() {
   // Hold valgt ticker i sync til skærm 1 (samme localStorage-nøgle)
   useEffect(() => { localStorage.setItem("selectedTicker", selectedTicker); }, [selectedTicker]);
 
-  // ALT+A = Auto-arrange (ALT+T haandteres af den delte AddWindowMenu)
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.altKey && e.key.toUpperCase() === "A") { e.preventDefault(); autoArrange(); }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [windows]);
+  // ALT+A (auto-arrange), ALT+T/V/L + Konfigurator haandteres nu af den delte Menubar.
 
   // Gem skærm 2's levende opsaetning (egen workspace, parallelt med skærm 1).
   const saveWindows = useCallback((newWindows: WindowConfig[]) => {
@@ -181,74 +177,56 @@ export default function Screen2() {
   };
 
   const activeWindowIds = windows.filter(w => !w.closed).map(w => w.id as WindowId);
+  // Ugemt-markering til layout-✓ (samme logik som skærm 1).
+  const activeLayout2 = layouts2.find(l => l.id === activeLayoutId2);
+  const layoutDirty2  = !activeLayout2 || !sameArrangement(windows, activeLayout2.windows);
 
   return (
     <div className="app" style={{ position: "relative" }}>
 
-      {/* Skærm 2 menubar — samme opsaetning/placeringer som skærm 1 */}
-      <div className="menubar" style={{ position: "relative", zIndex: 500 }}>
-
-        {/* Venstre: samme raekkefoelge som skærm 1 (Tilføj vindue · dropdown · Auto-arrange) */}
-        <AddWindowMenu onAddWindow={handleAddWindow} activeWindowIds={activeWindowIds} />
-
-        <LayoutMenu
-          layouts={layouts2}
-          activeLayoutId={activeLayoutId2}
-          onLoadLayout={handleLoadLayout2}
-          onSaveLayout={handleSaveLayout2}
-          onDeleteLayout={handleDeleteLayout2}
-          altKey="L"
-        />
-
-        <button
-          className="menu-btn"
-          onClick={autoArrange}
-          title="Arrangér alle vinduer automatisk (ALT+A)"
-        >
-          ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
-        </button>
-
-        {/* Hoejre: doere som skærm 1 (Docs/Hjælp) + skaerm-indikator og valgt ticker */}
-        <div className="menubar-right">
-          <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.5px" }}>SKÆRM 2</span>
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>· {selectedTicker}</span>
-          <span className="menubar-sep" />
-          <button className="menu-btn menu-btn-door" onClick={() => handleAddWindow("docs")} title="Åbn dokumentation">
-            📄 {WINDOW_LABELS["docs"]}
-          </button>
-          <button className="menu-btn menu-btn-door" onClick={() => handleAddWindow("assistent")} title="Åbn hjælp fra Claude">
-            💬 {WINDOW_LABELS["assistent"]}
-          </button>
-        </div>
-      </div>
+      {/* Nøjagtig samme menubar som skærm 1 — med skærm 2's egen state/handlers. */}
+      <Menubar
+        activeView={activeView} onViewChange={setActiveView}
+        layouts={layouts2} activeLayoutId={activeLayoutId2} layoutDirty={layoutDirty2}
+        onLoadLayout={handleLoadLayout2} onSaveLayout={handleSaveLayout2} onDeleteLayout={handleDeleteLayout2}
+        onAutoArrange={autoArrange}
+        onAddWindow={handleAddWindow}
+        activeWindowIds={activeWindowIds}
+      />
 
       {/* Desktop */}
       <LiveLogProvider>
         <div className="desktop-area" style={{ position: "absolute", top: 36, left: 0, right: 0, bottom: 0 }}>
-          {windows.filter(w => !w.closed).map(win => (
-            <FloatingWindow
-              key={win.id}
-              id={`s2_${win.id}`}
-              title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray)}
-              defaultState={win}
-              onClose={() => updateWindowState(win.id as WindowId, { closed: true })}
-              tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
-              onStateChange={(state) => updateWindowState(win.id as WindowId, state)}
-            >
-              {renderWindowContent(win.id as WindowId, { ...windowProps, onOpenDetail: () => {} })}
-            </FloatingWindow>
-          ))}
+          {activeView === "konfigurator" ? (
+            <Konfigurator onClose={() => setActiveView("scanners")} />
+          ) : (
+            <>
+              {windows.filter(w => !w.closed).map(win => (
+                <FloatingWindow
+                  key={win.id}
+                  id={`s2_${win.id}`}
+                  title={getWindowTitle(win.id as WindowId, selectedTicker, stocksArray)}
+                  defaultState={win}
+                  onClose={() => updateWindowState(win.id as WindowId, { closed: true })}
+                  tradingViewTicker={isChartWindow(win.id as WindowId) ? selectedTicker : undefined}
+                  onStateChange={(state) => updateWindowState(win.id as WindowId, state)}
+                >
+                  {renderWindowContent(win.id as WindowId, { ...windowProps, onOpenDetail: () => {} })}
+                </FloatingWindow>
+              ))}
 
-          {windows.filter(w => !w.closed).length === 0 && (
-            <div style={{
-              position: "absolute", top: "50%", left: "50%",
-              transform: "translate(-50%, -50%)",
-              textAlign: "center", color: "var(--text-muted)",
-            }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>🖥</div>
-              <div style={{ fontSize: 14, marginBottom: 8 }}>Skærm 2 er tom</div>
-              <div style={{ fontSize: 12 }}>Brug <strong style={{ color: "var(--text-secondary)" }}>+ Vindue</strong> ovenfor til at tilføje paneler</div>
-            </div>
+              {windows.filter(w => !w.closed).length === 0 && (
+                <div style={{
+                  position: "absolute", top: "50%", left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  textAlign: "center", color: "var(--text-muted)",
+                }}>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>🖥</div>
+                  <div style={{ fontSize: 14, marginBottom: 8 }}>Skærm 2 er tom</div>
+                  <div style={{ fontSize: 12 }}>Brug <strong style={{ color: "var(--text-secondary)" }}>+ Vindue</strong> ovenfor til at tilføje paneler</div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </LiveLogProvider>
