@@ -36,6 +36,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# Auto-indlaes backend/.env saa API-noegler virker uden manuel miljoe-opsaetning.
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).with_name(".env"))
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except (AttributeError, ValueError):

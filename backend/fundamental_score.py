@@ -368,6 +368,9 @@ def fetch_fundamentals(symbol: str, api_key: str) -> dict:
 if __name__ == "__main__":
     import argparse
     import os
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).with_name(".env"))  # auto-indlaes backend/.env (kun ved direkte koersel)
     ap = argparse.ArgumentParser(description="Fundamental lag-scoring (swing)")
     ap.add_argument("ticker")
     ap.add_argument("--price", type=float, required=True, help="aktuel pris (fra IBKR)")

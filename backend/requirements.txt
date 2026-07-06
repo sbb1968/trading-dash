@@ -52,8 +52,10 @@ websockets==16.0
 yarl==1.23.0
 yfinance==1.3.0
 
-# -- EFTER pip install -r requirements.txt, kør denne separat: --
-# tradingview-screener pinner pandas<3 men kører fint på vores pandas 3.
-# Installeres med --no-deps så pandas IKKE nedgraderes:
+# -- EFTER pip install -r requirements.txt, kï¿½r denne separat: --
+# tradingview-screener pinner pandas<3 men kï¿½rer fint pï¿½ vores pandas 3.
+# Installeres med --no-deps sï¿½ pandas IKKE nedgraderes:
 #   pip install --no-deps tradingview-screener==3.2.0
 reportlab
+matplotlib
+python-dotenv

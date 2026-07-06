@@ -476,6 +476,9 @@ def analyze_json(ticker: str, api_key: str, period: str = "1y",
 if __name__ == "__main__":
     import argparse
     import os
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).with_name(".env"))  # auto-indlaes backend/.env (kun ved direkte koersel)
     ap = argparse.ArgumentParser(description="Swing-egnethed (capstone)")
     ap.add_argument("ticker")
     ap.add_argument("--api-key", default=os.environ.get("FMP_API_KEY", ""))

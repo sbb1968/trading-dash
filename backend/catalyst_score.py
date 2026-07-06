@@ -336,6 +336,9 @@ def fetch_catalyst(symbol: str, api_key: str, price: Optional[float] = None,
 if __name__ == "__main__":
     import argparse
     import os
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).with_name(".env"))  # auto-indlaes backend/.env (kun ved direkte koersel)
     ap = argparse.ArgumentParser(description="Katalysator lag-scoring (swing)")
     ap.add_argument("ticker")
     ap.add_argument("--price", type=float, required=True)

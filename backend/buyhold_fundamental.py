@@ -739,6 +739,9 @@ def main() -> int:
     import argparse
     import os
     import sys
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).with_name(".env"))  # auto-indlaes backend/.env (kun ved direkte koersel)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):

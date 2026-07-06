@@ -55,6 +55,11 @@ if str(_BACKEND_DIR) not in sys.path:
 from finnhub_news import FINNHUB_BASE, _guess_sentiment  # noqa: E402
 from finnhub_news import FINNHUB_API_KEY as _FINNHUB_KEY_BUILTIN  # noqa: E402
 
+# Auto-indlaes backend/.env saa API-noegler virker uden manuel miljoe-opsaetning
+# (uafhaengigt af cwd). FOER modul-niveau os.environ.get-kald nedenfor.
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv(_BACKEND_DIR / ".env")
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except (AttributeError, ValueError):
