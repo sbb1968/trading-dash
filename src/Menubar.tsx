@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Layout, WindowId, WINDOW_LABELS } from "./layouts";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { usMarketClosure } from "./marketHours";
 
 type ActiveView = "scanners" | "watchlist" | "charting" | "konfigurator";
 
@@ -489,6 +490,28 @@ export function Menubar({
     "2": () => openScreen2(),
   };
 
+  // ── US-marked lukket-markering (Iben kender ikke US-helligdage) ──────────
+  // Tydelig hvis lukket I DAG; diskret dagen foer. Test-genveje: ALT+Y (i dag) og
+  // ALT+U (i morgen) toggler en forced visning uafhaengigt af faktisk dato.
+  const [, forceTick] = useState(0);
+  const [testClosure, setTestClosure] = useState<null | "today" | "tomorrow">(null);
+  useEffect(() => {
+    const id = setInterval(() => forceTick(t => t + 1), 5 * 60 * 1000);   // genberegn hver 5. min (over midnat)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toUpperCase() === "Y") { e.preventDefault(); setTestClosure(t => t === "today" ? null : "today"); }
+      if (e.altKey && e.key.toUpperCase() === "U") { e.preventDefault(); setTestClosure(t => t === "tomorrow" ? null : "tomorrow"); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { clearInterval(id); document.removeEventListener("keydown", onKey); };
+  }, []);
+  const closedToday    = usMarketClosure(0);
+  const closedTomorrow = usMarketClosure(1);
+  const showClosedToday    = testClosure === "today" || (testClosure === null && closedToday.closed);
+  const showClosedTomorrow = !showClosedToday &&
+    (testClosure === "tomorrow" || (testClosure === null && !closedToday.closed && closedTomorrow.closed));
+  const todayReason    = testClosure === "today" ? "TEST" : closedToday.reason;
+  const tomorrowReason = testClosure === "tomorrow" ? "TEST" : closedTomorrow.reason;
+
   return (
     <div className="menubar">
 
@@ -569,6 +592,20 @@ export function Menubar({
       <button className="menu-btn" onClick={onAutoArrange} title="Auto-arrange (ALT+A)">
         ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
       </button>
+
+      {/* ── US-marked lukket-markering (mellem de to grupper) ── */}
+      {showClosedToday && (
+        <div className="market-closed-today" style={{ marginLeft: "auto" }}
+             title="Det amerikanske aktiemarked er LUKKET i dag — ingen handel.">
+          🚫 US-MARKED LUKKET I DAG{todayReason && todayReason !== "weekend" ? ` — ${todayReason}` : ""}
+        </div>
+      )}
+      {showClosedTomorrow && (
+        <div className="market-closed-tomorrow" style={{ marginLeft: "auto" }}
+             title="Det amerikanske aktiemarked er lukket i morgen.">
+          US-marked lukket i morgen{tomorrowReason && tomorrowReason !== "weekend" ? ` (${tomorrowReason})` : ""}
+        </div>
+      )}
 
       {/* ── HOEJRE: platform & hjaelp (doere, ikke vinduer) ── */}
       <div className="menubar-right">

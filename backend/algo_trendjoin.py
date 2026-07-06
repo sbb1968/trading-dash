@@ -24,7 +24,7 @@ Placering: C:\\Projects\\trading_dash\\backend\\algo_trendjoin.py
 
 import asyncio
 import logging
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime, timedelta, timezone
 from typing import Optional
 
 import aiohttp
@@ -32,11 +32,12 @@ import pytz
 
 from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
 from ibkr_connect import IBKRConnection
+from ib_async import Stock
 from reconcile_idempotency import (
     RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 from strategies.base import Bar
 from trade_forensics import build_entry_snapshot, build_exit_snapshot
-from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE, _guess_sentiment
+from finnhub_news import _guess_sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -90,49 +91,77 @@ BAR_SIZE                 = "5 mins"
 
 
 # ═══════════════════════════════════════════════════════════════
-# Nyhedskatalysator — Finnhub company-news + keyword-sentiment
+# Nyhedskatalysator — IBKR historisk nyhed (Dow Jones/Briefing.com) + keyword-sentiment
 # ═══════════════════════════════════════════════════════════════
-async def check_positive_catalyst(
-    session: aiohttp.ClientSession, ticker: str
-) -> tuple[bool, str, float]:
-    """Har `ticker` en FRISK, POSITIV nyhedskatalysator i dag?
-
-    Henter Finnhub company-news (i dag + i går), kører keyword-sentiment på hver
-    overskrift (samme heuristik som News Room). Positiv katalysator = mindst én
-    'bullish' overskrift nyere end NEWS_MAX_AGE_HOURS OG netto bullish (flere
-    bullish end bearish blandt friske). Returnerer (har_katalysator, overskrift,
-    best_ts) — best_ts = epoch (UTC) for den valgte bullish overskrift, 0.0 hvis ingen.
-
-    Best-effort: enhver fejl/timeout → (False, "<årsag>", 0.0). De FØRSTE TO
-    returværdier er UÆNDREDE; kun best_ts (forensik) er tilføjet. Det er KERNEN i
-    strategien — ingen katalysator, ingen handel.
-    """
-    to_date = datetime.now().date()
-    from_date = to_date - timedelta(days=1)
-    url = f"{FINNHUB_BASE}/company-news"
-    params = {"symbol": ticker, "from": from_date.isoformat(),
-              "to": to_date.isoformat(), "token": FINNHUB_API_KEY}
+async def get_news_provider_codes(conn) -> str:
+    """'+'-samlet liste af nyheds-providere kontoen er berettiget til (til
+    reqHistoricalNews). Tom streng ved ingen/fejl."""
     try:
-        async with session.get(url, params=params,
-                               timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status != 200:
-                return False, f"finnhub HTTP {resp.status}", 0.0
-            items = await resp.json()
-    except asyncio.TimeoutError:
-        return False, "finnhub timeout", 0.0
+        provs = await conn.ib.reqNewsProvidersAsync()
+        return "+".join(p.code for p in provs)
+    except Exception:
+        return ""
+
+
+def _strip_news_prefix(h: str) -> str:
+    """IBKR-headlines har et metadata-praefiks '{A:..:L:en}' (+ evt. '* '). Fjern det."""
+    h = h or ""
+    i = h.find("}")
+    if i >= 0:
+        h = h[i + 1:]
+    return h.lstrip("* ").strip()
+
+
+def _news_ts_epoch(t: str) -> float:
+    """IBKR news-tid 'YYYY-MM-DD HH:MM:SS[.f]' (UTC) -> epoch. 0.0 ved fejl."""
+    try:
+        s = (t or "").strip().split(".")[0]
+        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+    except Exception:
+        return 0.0
+
+
+async def check_positive_catalyst(
+    conn, ticker: str, provider_codes: str
+) -> tuple[bool, str, float]:
+    """Har `ticker` en FRISK, POSITIV nyhedskatalysator i dag? Nu via IBKR
+    (reqHistoricalNews — Dow Jones/Briefing.com) i stedet for Finnhub: dybere micro-
+    cap-daekning + rene enkeltnavn-katalysatorer (8-K, halts, insider, partnerskaber),
+    over den forbindelse vi allerede har.
+
+    UAENDRET gate-semantik: mindst én 'bullish' overskrift nyere end NEWS_MAX_AGE_HOURS
+    OG netto bullish (flere bullish end bearish blandt friske). Returnerer
+    (har_katalysator, overskrift, best_ts). Best-effort: enhver fejl -> (False, ...).
+    """
+    if not provider_codes:
+        return False, "ingen nyheds-providere", 0.0
+    try:
+        c = Stock(ticker, "SMART", "USD")
+        await conn.ib.qualifyContractsAsync(c)
+        con_id = getattr(c, "conId", 0)
+        if not con_id:
+            return False, "ukendt conId", 0.0
     except Exception as e:
-        return False, f"finnhub fejl: {type(e).__name__}", 0.0
-    if not isinstance(items, list) or not items:
+        return False, f"qualify-fejl: {type(e).__name__}", 0.0
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=NEWS_MAX_AGE_HOURS + 4)   # lidt bredere; cutoff filtrerer praecist
+    fmt = "%Y-%m-%d %H:%M:%S.0"
+    try:
+        news = await conn.ib.reqHistoricalNewsAsync(
+            con_id, provider_codes, start.strftime(fmt), now.strftime(fmt), 50)
+    except Exception as e:
+        return False, f"ibkr-news-fejl: {type(e).__name__}", 0.0
+    if not news:
         return False, "ingen nyheder", 0.0
 
-    cutoff = datetime.now().timestamp() - NEWS_MAX_AGE_HOURS * 3600
-    bull, bear, best = 0, 0, ""
-    best_ts = 0.0
-    for it in items:
-        ts = it.get("datetime", 0) or 0
+    cutoff = now.timestamp() - NEWS_MAX_AGE_HOURS * 3600
+    bull, bear, best, best_ts = 0, 0, "", 0.0
+    for it in news:
+        ts = _news_ts_epoch(getattr(it, "time", ""))
         if ts < cutoff:
             continue
-        headline = (it.get("headline", "") or "").strip()
+        headline = _strip_news_prefix(getattr(it, "headline", ""))
         if not headline:
             continue
         sent = _guess_sentiment(headline)
@@ -230,11 +259,12 @@ class TrendJoinLive(BaseStrategy):
 
         # Test nyheds-API (kernen). Best-effort — advarer men blokerer ikke start.
         try:
-            async with aiohttp.ClientSession() as s:
-                has, detail, _ = await check_positive_catalyst(s, "NVDA")
-            checks.append(f"Finnhub-news svarer ({'katalysator' if has else 'ingen'} på NVDA)")
+            codes = await get_news_provider_codes(self.conn)
+            has, detail, _ = await check_positive_catalyst(self.conn, "NVDA", codes)
+            n_prov = len(codes.split("+")) if codes else 0
+            checks.append(f"IBKR-news svarer ({n_prov} providere · {'katalysator' if has else 'ingen'} på NVDA)")
         except Exception as e:
-            checks.append(f"⚠ Finnhub-news ikke verificeret: {type(e).__name__}")
+            checks.append(f"⚠ IBKR-news ikke verificeret: {type(e).__name__}")
 
         summary = " | ".join([f"✅ {c}" for c in checks])
         self._status("orb_ready", f"Pre-flight OK: {summary}")
@@ -456,7 +486,8 @@ class TrendJoinLive(BaseStrategy):
         max_change = max((c for _, _, c, _ in gappers), default=None)
         top_sym = gappers[0][0].upper() if gappers else None
 
-        async with aiohttp.ClientSession() as session:
+        provider_codes = await get_news_provider_codes(self.conn)
+        async with aiohttp.ClientSession() as session:   # vestigial: nyheder hentes via IBKR nu
             for sym, price, change, vol in gappers:
                 sym = sym.upper()
                 rec = {"sym": sym, "change": round(change, 2), "price": round(price, 2),
@@ -474,8 +505,8 @@ class TrendJoinLive(BaseStrategy):
                     rec["verdict"] = "tidl_afvist"; records.append(rec); continue
 
                 # ── KERNE: positiv nyhedskatalysator? ──
-                has_cat, detail, catalyst_ts = await check_positive_catalyst(session, sym)
-                await asyncio.sleep(1.1)   # Finnhub rate-limit
+                has_cat, detail, catalyst_ts = await check_positive_catalyst(self.conn, sym, provider_codes)
+                await asyncio.sleep(0.4)   # IBKR historisk-nyhed pacing
                 rec["detail"] = detail[:120]
                 if not has_cat:
                     self._vetted[sym] = False

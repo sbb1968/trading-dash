@@ -72,7 +72,7 @@ function Row({ label, value, dot, description }: {
   return (
     <div style={{ padding: "6px 0", borderBottom: "1px solid var(--border-subtle)" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", alignItems: "center" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)", display: "flex", alignItems: "center" }}>
           {dot && <Dot status={dot} />}
           {label}
         </span>
@@ -350,6 +350,7 @@ export function MarketOverview() {
           </div>
 
           {hasDetail ? (<>
+          <div className="mo-divider" />
           {/* ── Markedsindikatorer ── */}
           <div style={card()}>
             <div style={{ fontSize: fsh, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
@@ -417,6 +418,7 @@ export function MarketOverview() {
             />
           </div>
 
+          <div className="mo-divider" />
           {/* ── Small Cap Scanner ── */}
           <div style={card()}>
             <div style={{ fontSize: fsh, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>

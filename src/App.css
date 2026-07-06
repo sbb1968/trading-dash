@@ -151,6 +151,28 @@ button {
 .menubar-right { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .menubar-sep   { width: 1px; height: 18px; background: var(--border-subtle); margin: 0 8px 0 2px; }
 
+/* US-marked LUKKET i dag — meget tydelig (pulserende roed) */
+.market-closed-today {
+  display: inline-flex; align-items: center;
+  background: var(--bear); color: #fff;
+  font-weight: 800; font-size: 12.5px; letter-spacing: 0.4px;
+  padding: 4px 14px; border-radius: 5px; white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+  animation: marketClosedPulse 1.4s ease-in-out infinite;
+}
+@keyframes marketClosedPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { .market-closed-today { animation: none; } }
+/* US-marked lukket i morgen — diskret varsel */
+.market-closed-tomorrow {
+  display: inline-flex; align-items: center;
+  color: var(--neutral, #d99a00); font-weight: 600; font-size: 11.5px;
+  padding: 3px 10px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid var(--neutral, #d99a00);
+}
+
+/* Markedsoverblik — vandret skillelinje mellem de 3 informations-grupper */
+.mo-divider { height: 1px; background: var(--border-default); margin: 12px 0 10px; border: none; }
+
 .menu-item-wrapper {
   position: relative;
 }
