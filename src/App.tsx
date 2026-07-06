@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import { useMarketData } from "./useMarketData";
-import type { StockData } from "./useMarketData";
+import type { StockData, IbkrOrderResult } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
@@ -160,10 +160,11 @@ function ConnectionStatus({ status }: { status: string }) {
 // ── Watchlist Panel ───────────────────────────────────────────
 interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: number }; }
 
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder }: {
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
+  orderResult?: IbkrOrderResult | null;
 }) {
   // Mængde pr. ticker — default 100 (Ross Cameron standard)
   const [orderShares, setOrderShares] = useState<Record<string, string>>({});
@@ -184,6 +185,33 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const canTrade = mkt === "open" || mkt === "pre";
   // Ticker-farve: grøn=åbent · gul=pre-market · rød=after-hours/lukket.
   const tickerColor = mkt === "open" ? "var(--bull)" : mkt === "pre" ? "var(--neutral)" : "var(--bear)";
+
+  // Route Ibens ordre-resultater (fills) ind i den rette rækkes køb-tilstand:
+  // KØB akkumulerer beholdning + vægtet gennemsnits-købspris; SÆLG reducerer (lukker
+  // rækkens position når beholdning når 0). Gemmes i meta (localStorage) -> overlever
+  // genstart; Aktuel pris + urealiseret P/L beregnes derefter live fra feedet.
+  const processedRef = useRef<IbkrOrderResult | null>(null);
+  useEffect(() => {
+    const r = orderResult;
+    if (!r || r === processedRef.current) return;
+    processedRef.current = r;
+    if (!r.success) return;
+    const t = (r.ticker || "").toUpperCase();
+    const filled = Number(r.filled) || 0;
+    const avg = Number(r.avg_fill) || 0;
+    if (!t || filled <= 0) return;
+    setMeta(prev => {
+      const cur = prev[t]?.bought;
+      if (r.action === "BUY") {
+        const oldQty = cur?.qty ?? 0, oldAvg = cur?.avgPrice ?? 0;
+        const newQty = oldQty + filled;
+        const newAvg = newQty > 0 ? (oldQty * oldAvg + filled * avg) / newQty : avg;
+        return { ...prev, [t]: { ...prev[t], bought: { avgPrice: newAvg, qty: newQty } } };
+      }
+      const remaining = (cur?.qty ?? 0) - filled;   // SÆLG
+      return { ...prev, [t]: { ...prev[t], bought: remaining > 0 ? { avgPrice: cur?.avgPrice ?? avg, qty: remaining } : undefined } };
+    });
+  }, [orderResult]);
 
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
@@ -905,9 +933,10 @@ export function renderWindowContent(id: WindowId, props: {
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
   onOpenDetail: (kind: string, ticker: string) => void;
+  orderResult?: IbkrOrderResult | null;
 }) {
   switch(id) {
-    case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} />;
+    case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
     case "chart3min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="3 min" />;
@@ -1111,6 +1140,7 @@ function App() {
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onOpenDetail: openDetail,
+    orderResult: lastOrderResult,
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
       // Konfigurator-indstilling: spring bekræftelses-pop-up over og handl direkte.
       if (localStorage.getItem("skip_order_confirm") === "true") {
