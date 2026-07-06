@@ -3,10 +3,12 @@ import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { LiveLogProvider } from "./LiveLogContext";
 import { useMarketData } from "./useMarketData";
 import { renderWindowContent, getWindowTitle, isChartWindow } from "./App";
-import { AddWindowMenu, LabelWithShortcut } from "./Menubar";
+import { AddWindowMenu, LabelWithShortcut, LayoutMenu } from "./Menubar";
 import {
-  WindowConfig, WindowId, WINDOW_LABELS,
+  WindowConfig, WindowId, WINDOW_LABELS, Layout,
   loadWorkspace2, saveWorkspace2, clampWindows, WORKSPACE2_KEY,
+  loadLayouts2, saveLayouts2, saveCurrentAsLayout2, deleteLayout2,
+  getActiveLayoutId2, setActiveLayoutId2,
 } from "./layouts";
 
 // ── Screen2 komponent ─────────────────────────────────────────
@@ -20,6 +22,10 @@ export default function Screen2() {
   const [windows, setWindows] = useState<WindowConfig[]>(
     () => loadWorkspace2(window.innerWidth, window.innerHeight)
   );
+
+  // Skærm 2's egen layout-liste (helt adskilt fra skærm 1).
+  const [layouts2, setLayouts2] = useState<Layout[]>(() => loadLayouts2());
+  const [activeLayoutId2, setActiveLayoutId2State] = useState<string>(() => getActiveLayoutId2());
 
   const { stocksArray } = useMarketData();
 
@@ -133,6 +139,35 @@ export default function Screen2() {
     });
   }
 
+  // ── Layout: gem/hent/slet — KUN skærm 2 ───────────────────
+  function handleLoadLayout2(id: string) {
+    const layout = layouts2.find(l => l.id === id);
+    if (layout) {
+      const applied = clampWindows(layout.windows.map(w => ({ ...w })), window.innerWidth, window.innerHeight);
+      setWindows(applied);
+      saveWorkspace2(applied);
+    }
+    setActiveLayoutId2(id); setActiveLayoutId2State(id);
+  }
+
+  function handleSaveLayout2(name: string) {
+    if (name.startsWith("__overwrite__")) {
+      const id = name.replace("__overwrite__", "");
+      const updated = layouts2.map(l => l.id !== id ? l : { ...l, windows: windows.map(w => ({ ...w })) });
+      setLayouts2(updated); saveLayouts2(updated);
+      return;
+    }
+    const newLayout = saveCurrentAsLayout2(name, windows.map(w => ({ ...w })));
+    setLayouts2(loadLayouts2());
+    setActiveLayoutId2(newLayout.id); setActiveLayoutId2State(newLayout.id);
+  }
+
+  function handleDeleteLayout2(id: string) {
+    const updated = deleteLayout2(id);
+    setLayouts2(updated);
+    if (activeLayoutId2 === id) { setActiveLayoutId2(""); setActiveLayoutId2State(""); }
+  }
+
   // Samme props-form som skærm 1 (App.tsx). Order-confirm-modalen findes kun
   // paa skærm 1 -> onRequestOrder er en no-op her (vinduet virker stadig).
   const windowProps = {
@@ -169,6 +204,16 @@ export default function Screen2() {
         >
           ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
         </button>
+
+        {/* Layouts — KUN skærm 2's egen liste */}
+        <LayoutMenu
+          layouts={layouts2}
+          activeLayoutId={activeLayoutId2}
+          onLoadLayout={handleLoadLayout2}
+          onSaveLayout={handleSaveLayout2}
+          onDeleteLayout={handleDeleteLayout2}
+          altKey="L"
+        />
 
         {/* Dokumentation + Hjælp — direkte synlige knapper (nemt for Iben) */}
         <button className="menu-btn" onClick={() => handleAddWindow("docs")} title="Åbn dokumentation">

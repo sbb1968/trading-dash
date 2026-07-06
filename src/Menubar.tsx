@@ -190,6 +190,83 @@ function DropdownMenu({ label, children, isActive, altKey, itemShortcuts }: {
   );
 }
 
+// ── LayoutMenu — selvstaendig layout-dropdown (bruges paa skærm 2) ────────────
+// Samme liste + gem/opdater/slet som skærm 1's Vaerktoejer-menu, men som en egen
+// knap. Skærm 1 og skærm 2 giver hver deres layouts/handlers ind -> helt adskilt.
+export function LayoutMenu({
+  layouts, activeLayoutId, layoutDirty = false, onLoadLayout, onSaveLayout, onDeleteLayout,
+  altKey, label = "Layouts",
+}: {
+  layouts: Layout[];
+  activeLayoutId: string;
+  layoutDirty?: boolean;
+  onLoadLayout: (id: string) => void;
+  onSaveLayout: (name: string) => void;
+  onDeleteLayout: (id: string) => void;
+  altKey?: string;
+  label?: string;
+}) {
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [newLayoutName, setNewLayoutName]   = useState("");
+  function handleSave() {
+    if (!newLayoutName.trim()) return;
+    onSaveLayout(newLayoutName.trim());
+    setNewLayoutName("");
+    setShowSaveDialog(false);
+  }
+  return (
+    <DropdownMenu label={label} altKey={altKey}>
+      <div className="menu-dropdown-section-title">Layout</div>
+
+      {layouts.length === 0 && (
+        <div className="menu-dropdown-item" style={{ opacity: 0.6, cursor: "default" }}>Ingen gemte endnu</div>
+      )}
+      {layouts.map(layout => (
+        <div key={layout.id} className="menu-layout-row">
+          <div
+            className={`menu-dropdown-item menu-layout-name ${layout.id === activeLayoutId && !layoutDirty ? "menu-dropdown-item-active" : ""}`}
+            onClick={() => onLoadLayout(layout.id)}
+          >
+            {layout.id === activeLayoutId && !layoutDirty ? <span className="menu-check">✓</span> : <span className="menu-check-empty" />}
+            {layout.name}
+          </div>
+          {!layout.isDefault && (
+            <button className="menu-layout-delete" onClick={e => { e.stopPropagation(); onDeleteLayout(layout.id); }} title="Slet layout">✕</button>
+          )}
+        </div>
+      ))}
+
+      {activeLayoutId && (
+        <div className="menu-dropdown-item" onClick={() => onSaveLayout("__overwrite__" + activeLayoutId)}>
+          💾 Opdater aktuelt layout
+        </div>
+      )}
+      {!showSaveDialog && (
+        <div className="menu-dropdown-item" onClick={e => { e.stopPropagation(); setShowSaveDialog(true); }}>
+          💾 Gem som nyt layout...
+        </div>
+      )}
+      {showSaveDialog && (
+        <div className="menu-save-dialog" onClick={e => e.stopPropagation()}>
+          <input
+            className="menu-save-input"
+            type="text"
+            placeholder="Navn på layout..."
+            value={newLayoutName}
+            onChange={e => setNewLayoutName(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setShowSaveDialog(false); }}
+            autoFocus
+          />
+          <div className="menu-save-buttons">
+            <button className="menu-save-confirm" onClick={handleSave}>Gem</button>
+            <button className="menu-save-cancel" onClick={() => setShowSaveDialog(false)}>Annuller</button>
+          </div>
+        </div>
+      )}
+    </DropdownMenu>
+  );
+}
+
 // ── DropdownItem ──────────────────────────────────────────────
 function DropdownItem({ label, shortcut, active, isOpen, onClick }: {
   label: string;

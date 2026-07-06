@@ -289,8 +289,8 @@ export function setActiveLayoutId(id: string) {
 
 export function saveCurrentAsLayout(name: string, windows: WindowConfig[], W: number, H: number): Layout {
   const id = `custom_${Date.now()}`;
-  // Tag skærm 2's levende opsaetning med i det navngivne layout.
-  const newLayout: Layout = { id, name, windows, screen2Windows: loadWorkspace2(W, H), isDefault: false };
+  // Skærm 1-layout: gemmer KUN skærm 1's vinduer (skærm 2 har sin egen liste).
+  const newLayout: Layout = { id, name, windows, isDefault: false };
   const existing = loadLayouts(W, H);
   const updated  = [...existing, newLayout];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
@@ -301,4 +301,48 @@ export function deleteLayout(id: string, W: number, H: number): Layout[] {
   const layouts = loadLayouts(W, H).filter(l => l.id !== id);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts));
   return layouts;
+}
+
+// ── Skærm 2 layouts — HELT adskilt liste fra skærm 1 ─────────────────────────
+// Egen navngivet-liste (STORAGE_KEY_2), eget aktivt-layout og eget levende
+// workspace (WORKSPACE2_KEY). Ingen defaults — Iben bygger selv sine skærm 2-
+// layouts. Gem/hent paa skærm 2 roerer ALDRIG skærm 1 og omvendt. Et skærm 2-
+// layout gemmer sine vinduer i det samme `windows`-felt (ingen screen2Windows).
+const STORAGE_KEY_2 = "td_layouts_screen2";
+
+export function loadLayouts2(): Layout[] {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_2);
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLayouts2(layouts: Layout[]) {
+  localStorage.setItem(STORAGE_KEY_2, JSON.stringify(layouts));
+}
+
+export function saveCurrentAsLayout2(name: string, windows: WindowConfig[]): Layout {
+  const id = `s2_${Date.now()}`;
+  const newLayout: Layout = { id, name, windows, isDefault: false };
+  const updated = [...loadLayouts2(), newLayout];
+  saveLayouts2(updated);
+  return newLayout;
+}
+
+export function deleteLayout2(id: string): Layout[] {
+  const updated = loadLayouts2().filter(l => l.id !== id);
+  saveLayouts2(updated);
+  return updated;
+}
+
+export function getActiveLayoutId2(): string {
+  return localStorage.getItem("td_active_layout_screen2") || "";
+}
+
+export function setActiveLayoutId2(id: string) {
+  localStorage.setItem("td_active_layout_screen2", id);
 }
