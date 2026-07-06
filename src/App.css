@@ -141,6 +141,10 @@ button {
   border-bottom: 1px solid var(--border-default);
   box-shadow:    0 1px 3px rgba(0,0,0,0.18);
   flex-shrink:   0;
+  /* Egen stacking-context OVER desktop-area, saa dropdown-menuerne altid ligger
+     forrest — uanset hvor hoejt vinduernes z-index er vokset (getNextZ). */
+  position:      relative;
+  z-index:       100;
 }
 
 /* Hoejre-zone: platform-doere skubbet til hoejre */
@@ -396,6 +400,9 @@ button {
   position:   relative;
   overflow:   hidden;
   background: var(--bg-base);
+  /* Lav z-index spaerrer ALLE flydende vinduer inde i denne stacking-context,
+     saa deres (ubegraensede) z-index aldrig kan overhale menubaren/dropdowns. */
+  z-index:    1;
 }
 
 
