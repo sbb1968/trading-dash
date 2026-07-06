@@ -154,6 +154,8 @@ function ConnectionStatus({ status }: { status: string }) {
 }
 
 // ── Watchlist Panel ───────────────────────────────────────────
+interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: number }; }
+
 function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
@@ -161,191 +163,140 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
 }) {
   // Mængde pr. ticker — default 100 (Ross Cameron standard)
   const [orderShares, setOrderShares] = useState<Record<string, string>>({});
+  const [input, setInput] = useState("");
+  const [error, setError] = useState("");
 
-  function getShares(ticker: string): string {
-    return orderShares[ticker] ?? "100";
-  }
+  // Side-kort pr. ticker: frossen "Pris" ved tilføj + (næste trin) køb-tilstand fra
+  // Ibens konkrete ordre-fills (avgPrice/qty). Gemmes så det overlever genstart.
+  const [meta, setMeta] = useState<Record<string, WatchMeta>>(() => {
+    try { return JSON.parse(localStorage.getItem("watchlist_meta") || "{}"); } catch { return {}; }
+  });
+  useEffect(() => { localStorage.setItem("watchlist_meta", JSON.stringify(meta)); }, [meta]);
 
+  function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
-    // Tillad kun cifre (max 6 = op til 999.999)
-    const clean = value.replace(/\D/g, "").slice(0, 6);
-    setOrderShares(prev => ({ ...prev, [ticker]: clean }));
+    setOrderShares(prev => ({ ...prev, [ticker]: value.replace(/\D/g, "").slice(0, 6) }));
   }
 
   function handleOrder(action: "BUY" | "SELL", stock: any) {
     const shares = parseInt(getShares(stock.ticker), 10);
-    if (!shares || shares <= 0) {
-      alert(`Angiv en gyldig mængde for ${stock.ticker}`);
-      return;
-    }
+    if (!shares || shares <= 0) { alert(`Angiv en gyldig mængde for ${stock.ticker}`); return; }
     if (!stock.price || stock.price <= 0) {
-      alert(
-        `Ingen live pris for ${stock.ticker} — kan ikke sende ordre.\n\n` +
-        `Mulige årsager:\n` +
-        `• Markedet er lukket (priser opdateres når NYSE/NASDAQ åbner)\n` +
-        `• Tickeren findes ikke eller er forkert stavet\n` +
-        `• IBKR-feedet er ikke aktivt for denne aktie`
-      );
+      alert(`Ingen live pris for ${stock.ticker} — kan ikke sende ordre.\n\n` +
+        `• Markedet er lukket · • Tickeren findes ikke · • IBKR-feedet er ikke aktivt for aktien`);
       return;
     }
     onRequestOrder(action, stock.ticker, shares, stock.price);
   }
 
   async function openCompanySite(ticker: string) {
-    // Slaa firmaets hjemmeside op (backend -> yfinance) og aaben den eksternt.
-    // Falder tilbage paa en soegning hvis ingen website findes / backend nede.
     const fallback = `https://www.google.com/search?q=${encodeURIComponent(ticker + " stock company website")}`;
     try {
       const r = await fetch(`http://127.0.0.1:8000/company/website?ticker=${encodeURIComponent(ticker)}`);
       const d = await r.json();
       openUrl(d.website || fallback);
-    } catch {
-      openUrl(fallback);
-    }
+    } catch { openUrl(fallback); }
   }
 
-  const [input, setInput] = useState("");
-  const [error, setError] = useState("");
-  const [visibleCols, setVisibleCols] = useState<string[]>(() => {
-    const saved = localStorage.getItem("columns_watchlist");
-    return saved ? JSON.parse(saved) : DEFAULT_WATCHLIST_COLUMNS;
-  });
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === "columns_watchlist" && e.newValue) setVisibleCols(JSON.parse(e.newValue));
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  function handleAdd() {
+  async function handleAdd() {
     const t = input.trim().toUpperCase();
     if (!t) return;
     if (watchlist.includes(t)) { setError(`${t} er allerede på listen`); return; }
     onAddTicker(t); setInput(""); setError("");
-  }
-
-    // Vis alle watchlist-tickers, også dem uden live data
-    const watchedStocks = watchlist.map(ticker => {
-      const live = stocks.find(s => s.ticker === ticker);
-      return live ?? {
-        ticker,
-        price: 0,
-        change_percent: 0,
-        volume: 0,
-        float: "—",
-        rel_vol_daily: 0,
-        gap_percent: 0,
-      };
-    });
-
-  function renderCell(stock: any, colId: string) {
-    switch(colId) {
-      case "price":   return <td key={colId}>${stock.price.toFixed(2)}</td>;
-      case "change":  return <td key={colId} className={stock.change_percent >= 0 ? "positive" : "negative"}>{stock.change_percent >= 0 ? "+" : ""}{stock.change_percent.toFixed(2)}%</td>;
-      case "volume":  return <td key={colId}>{(stock.volume / 1000000).toFixed(1)}M</td>;
-      case "float":   return <td key={colId}>{stock.float}</td>;
-      case "relvol":  return <td key={colId}>{stock.rel_vol_daily}x</td>;
-      case "gap":     return <td key={colId} className={stock.gap_percent >= 0 ? "positive" : "negative"}>{stock.gap_percent >= 0 ? "+" : ""}{stock.gap_percent.toFixed(1)}%</td>;
-      default:        return <td key={colId}>—</td>;
+    // Frys "Pris" ved tilføj: hent sidste kurs fra backend; fallback til live-feed.
+    let addPrice: number | undefined;
+    try {
+      const r = await fetch(`http://127.0.0.1:8000/quote/${encodeURIComponent(t)}`);
+      const d = await r.json();
+      if (typeof d.price === "number" && d.price > 0) addPrice = d.price;
+    } catch { /* ignore */ }
+    if (addPrice == null) {
+      const live = stocks.find(s => s.ticker === t);
+      if (live && live.price > 0) addPrice = live.price;
     }
+    if (addPrice != null) setMeta(prev => ({ ...prev, [t]: { ...prev[t], addPrice } }));
   }
+
+  function removeRow(ticker: string) {
+    onRemoveTicker(ticker);
+    setMeta(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+  }
+
+  const watchedStocks = watchlist.map(ticker => {
+    const live = stocks.find(s => s.ticker === ticker);
+    return live ?? { ticker, price: 0 };
+  });
+
+  const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
+  const usd = (v: number) => `$${v.toFixed(2)}`;
 
   return (
     <div className="watchlist-container">
       <div className="watchlist-add">
         <input className="watchlist-input" type="text" placeholder="Tilføj ticker (tryk Enter)" value={input}
           onChange={e => { setInput(e.target.value.toUpperCase()); setError(""); }}
-          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} /> 
+          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
       <div className="watchlist-scroll">
         <table className="scanner-table">
           <thead>
             <tr>
-              <th>Symbol</th>
-              {visibleCols.map(colId => { const col = WATCHLIST_COLUMNS.find(c => c.id === colId); return <th key={colId}>{col?.label}</th>; })}
-              <th style={{ textAlign: "center", width: 60 }}>Stk</th>
+              <th style={{ textAlign: "left" }}>Ticker</th>
+              <th style={R}>Pris</th>
+              <th style={{ textAlign: "center", width: 56 }}>Stk</th>
               <th style={{ textAlign: "center", width: 130 }}>Handel</th>
+              <th style={R}>Købspris</th>
+              <th style={R}>Aktuel pris</th>
+              <th style={R}>Beholdning</th>
+              <th style={R}>Ur. P/L</th>
+              <th style={R}>Ur. P/L %</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {watchedStocks.length === 0 && <tr><td colSpan={visibleCols.length + 4} className="watchlist-empty">Ingen aktier endnu</td></tr>}
-            {watchedStocks.map(stock => (
-              <tr key={stock.ticker}
-                className={[stock.change_percent >= 0 ? "row-up" : "row-down", stock.ticker === selectedTicker ? "row-selected" : ""].join(" ")}
-                onClick={() => onSelectTicker(stock.ticker)}
-              >
-                <td className="sym-cell">
-                  <span
-                    onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
-                    title={`Åbn ${stock.ticker}'s hjemmeside i browser`}
-                    style={{ cursor: "pointer", textDecoration: "underline dotted" }}
-                  >
-                    {stock.ticker}
-                  </span>
-                </td>
-                {visibleCols.map(colId => renderCell(stock, colId))}
-                <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={getShares(stock.ticker)}
-                    onChange={e => setShares(stock.ticker, e.target.value)}
-                    onClick={e => e.stopPropagation()}
-                    style={{
-                      width: 50,
-                      background: "var(--bg-input)",
-                      border: "1px solid var(--border-default)",
-                      borderRadius: 3,
-                      color: "var(--text-primary)",
-                      fontSize: 12,
-                      padding: "3px 6px",
-                      textAlign: "right",
-                      fontFamily: "inherit",
-                      outline: "none",
-                    }}
-                  />
-                </td>
-                <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-                  <button
-                    onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
-                    title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                    style={{
-                      background: "var(--bull-muted)",
-                      border: "1px solid var(--bull)",
-                      color: "var(--bull)",
-                      borderRadius: 3,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: "3px 10px",
-                      marginRight: 4,
-                      cursor: "pointer",
-                    }}
-                  >
-                    KØB
-                  </button>
-                  <button
-                    onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
-                    title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                    style={{
-                      background: "var(--bear-muted)",
-                      border: "1px solid var(--bear)",
-                      color: "var(--bear)",
-                      borderRadius: 3,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: "3px 10px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    SÆLG
-                  </button>
-                </td>
-                <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); onRemoveTicker(stock.ticker); }}>✕</button></td>
-              </tr>
-            ))}
+            {watchedStocks.length === 0 && <tr><td colSpan={10} className="watchlist-empty">Ingen aktier endnu</td></tr>}
+            {watchedStocks.map(stock => {
+              const m = meta[stock.ticker] || {};
+              const b = m.bought;   // udfyldes i næste trin (ordre-sporing / fills)
+              const live = stock.price > 0 ? stock.price : null;
+              const aktuel = b ? live : null;   // Aktuel pris: kun efter køb
+              const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty : null;
+              const uplPct = (b && aktuel != null && b.avgPrice > 0) ? (aktuel - b.avgPrice) / b.avgPrice * 100 : null;
+              const plCls = (v: number | null) => v == null ? "" : v >= 0 ? "positive" : "negative";
+              return (
+                <tr key={stock.ticker}
+                  className={stock.ticker === selectedTicker ? "row-selected" : ""}
+                  onClick={() => onSelectTicker(stock.ticker)}>
+                  <td className="sym-cell">
+                    <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
+                      title={`Åbn ${stock.ticker}'s hjemmeside i browser`}
+                      style={{ cursor: "pointer", textDecoration: "underline dotted" }}>{stock.ticker}</span>
+                  </td>
+                  <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
+                  <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                    <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
+                      onChange={e => setShares(stock.ticker, e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ width: 50, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 6px", textAlign: "right", fontFamily: "inherit", outline: "none" }} />
+                  </td>
+                  <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                    <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
+                      title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                      style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4, cursor: "pointer" }}>KØB</button>
+                    <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
+                      title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                      style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>SÆLG</button>
+                  </td>
+                  <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>
+                  <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>
+                  <td style={R}>{b ? b.qty : "—"}</td>
+                  <td style={R} className={plCls(uplAmt)}>{uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>
+                  <td style={R} className={plCls(uplPct)}>{uplPct != null ? `${uplPct >= 0 ? "+" : ""}${uplPct.toFixed(2)}%` : "—"}</td>
+                  <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); removeRow(stock.ticker); }}>✕</button></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

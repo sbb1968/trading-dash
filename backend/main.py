@@ -3894,6 +3894,20 @@ def _best_snapshot_price(snap: dict):
     return None
 
 
+@app.get("/quote/{ticker}")
+async def quote(ticker: str):
+    """Sidste/aktuelle kurs for ÉN ticker (til Watchlist 'Pris ved tilføj'). Ingen auth —
+    kun en kurs. price=None hvis IBKR ikke er forbundet eller ingen kurs kan hentes."""
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not getattr(conn, "connected", False):
+        return {"ticker": ticker.upper(), "price": None, "connected": False}
+    try:
+        snap = await asyncio.wait_for(conn.get_snapshot(ticker.upper()), timeout=3.0)
+    except Exception:
+        snap = None
+    return {"ticker": ticker.upper(), "price": _best_snapshot_price(snap), "connected": True}
+
+
 @app.get("/account/snapshot", dependencies=[Depends(require_studio_auth)])
 async def account_snapshot(force_journal: bool = False):
     """
