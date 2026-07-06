@@ -194,6 +194,11 @@ export function MarketOverview() {
     conditions.score_label === "aktiv" ? "🟢" :
     conditions.score_label === "moderat" ? "🟡" : "🔴";
 
+  // Backenden kan svare med et DELVIST conditions-objekt (mangler vix/spy/iwm/scanner —
+  // fx staale/genstartende backend). Gardér de data-tunge sektioner saa vinduet ALDRIG
+  // crasher hele app'en paa et ufuldstaendigt svar.
+  const hasDetail = !!(conditions && conditions.vix && conditions.spy && conditions.iwm && conditions.scanner);
+
   const vixDot = (): "green" | "yellow" | "red" | "grey" => {
     if (!conditions || conditions.vix.value === 0) return "grey";
     if (conditions.vix.value < 15) return "red";
@@ -344,6 +349,7 @@ export function MarketOverview() {
             </div>
           </div>
 
+          {hasDetail ? (<>
           {/* ── Markedsindikatorer ── */}
           <div style={card()}>
             <div style={{ fontSize: fsh, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
@@ -457,6 +463,12 @@ export function MarketOverview() {
               </div>
             )}
           </div>
+          </>) : (
+            <div style={{ ...card(), textAlign: "center", color: "var(--text-secondary)", fontSize: fsh, padding: "18px", lineHeight: 1.5 }}>
+              ⏳ Markedsdata er ufuldstændig (VIX/SPY/IWM/scanner mangler i backendens svar).
+              Backenden svarer delvist — genstart backenden og klik <strong>↺ Opdater</strong>.
+            </div>
+          )}
 
           {/* ── Tidsstempel ── */}
           <div style={{ fontSize: 10, color: "var(--text-secondary)", textAlign: "center", lineHeight: 1.6 }}>

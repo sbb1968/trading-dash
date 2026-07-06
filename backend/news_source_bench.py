@@ -222,7 +222,9 @@ async def fetch_polygon(session, ticker, start, end) -> list[NewsRecord]:
 async def fetch_alpha_vantage(session, ticker, start, end) -> list[NewsRecord]:
     key = os.environ.get("ALPHAVANTAGE_API_KEY")
     params = {"function": "NEWS_SENTIMENT", "tickers": ticker, "apikey": key,
-              "time_from": start.strftime("%Y%m%dT%H%M"), "sort": "LATEST", "limit": 50}
+              "time_from": start.strftime("%Y%m%dT%H%M"),
+              "time_to": end.strftime("%Y%m%dT%H%M"),   # klem til vinduets slut (virker m. --asof)
+              "sort": "LATEST", "limit": 50}
     data = await _get_json(session, "https://www.alphavantage.co/query", params=params)
     # AV svarer 200 med {"Information": "..."} ved rate-limit — behandl som tomt + advar
     if isinstance(data, dict) and ("Information" in data or "Note" in data):
