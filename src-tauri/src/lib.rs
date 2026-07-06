@@ -28,6 +28,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![open_screen2])
+        .on_window_event(|window, event| {
+            // Naar HOVEDVINDUET (label "main") lukkes, afsluttes hele appen — saa
+            // skaerm 2 lukker med. Lukning af skaerm 2 alene lukker kun skaerm 2.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
