@@ -177,6 +177,11 @@ class IBKRLiveFeed:
             prev_price = self._last_prices.get(sym, price)
             self._last_prices[sym] = price
 
+            # Halt-status fra IBKR (tickType 49): 1 = halted, 2 = paused/volatilitet.
+            # NaN/-1 = ikke halted / ikke tilgængelig. Bruges af watchlistens halt-alarm.
+            halted_raw = getattr(ticker, "halted", None)
+            is_halted  = bool(_is_valid(halted_raw) and halted_raw >= 1)
+
             ticks.append({
                 "ticker":         sym,
                 "price":          round(price, 2),
@@ -194,6 +199,7 @@ class IBKRLiveFeed:
                 "high":           ticker.high if _is_valid(ticker.high) else None,
                 "low":            ticker.low  if _is_valid(ticker.low)  else None,
                 "open":           round(open_px, 2) if _is_valid(open_px) else None,
+                "halted":         is_halted,
                 "source":         "live",
             })
         return ticks

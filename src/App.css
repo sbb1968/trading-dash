@@ -659,6 +659,30 @@ button {
 .watchlist-remove:hover { color: var(--bear); }
 .watchlist-error        { color: var(--bear); padding: 3px 8px; font-size: 11px; }
 
+/* ── Halt-alarm: åben position stoppet på børsen ─────────────── */
+@keyframes haltPulse {
+  0%, 100% { background: var(--bear-muted); }
+  50%      { background: var(--bear); }
+}
+.watchlist-halt-banner {
+  margin: 2px 8px 4px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border: 1px solid var(--bear);
+  animation: haltPulse 0.9s ease-in-out infinite;
+}
+.watchlist-halt-banner b { color: #fff; }
+/* Pulserende rød række — vinder over hover/valgt via td-baggrund */
+.watchlist-scroll .scanner-table tbody tr.watchlist-halted td,
+.watchlist-scroll .scanner-table tbody tr.watchlist-halted:hover td {
+  animation: haltPulse 0.9s ease-in-out infinite;
+  color: #fff;
+}
+
 
 /* ── News Room ────────────────────────────────────────────── */
 .newsroom-toolbar {

@@ -20,6 +20,7 @@ export interface StockData {
   high?:          number;
   low?:           number;
   open?:          number;
+  halted?:        boolean;
   source?:        string;
 }
 

@@ -157,6 +157,33 @@ function ConnectionStatus({ status }: { status: string }) {
   return <div className={`status-item ${label.cls}`}>{label.text}</div>;
 }
 
+// ── Halt-alarm (syntetiseret, ingen asset-fil) ────────────────
+// Kraftig, insisterende tredobbelt bip via Web Audio — spilles når en ticker Iben
+// HOLDER pludselig halter. Ny AudioContext pr. kald (lukkes bagefter) så den ikke
+// samler ressourcer; resume() dækker Chromiums autoplay-gate (Iben har klikket i UI'et).
+function playHaltAlarm() {
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    ctx.resume?.();
+    const t0 = ctx.currentTime;
+    [0, 0.24, 0.48].forEach((dt, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = i === 1 ? 660 : 880;   // høj-lav-høj = alarm-agtigt
+      const t = t0 + dt;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.3, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.22);
+    });
+    setTimeout(() => { try { ctx.close(); } catch { /* ignore */ } }, 1000);
+  } catch { /* lyd er best-effort */ }
+}
+
 // ── Watchlist Panel ───────────────────────────────────────────
 interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: number }; }
 
@@ -233,6 +260,28 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  // ── Halt-alarm ────────────────────────────────────────────
+  // Overvåg om en ticker med ÅBEN position pludselig halter -> kraftig lyd + visuel
+  // markering. Kant-udløst (kun ved selve overgangen til halt) + gentag hver 20. sek.
+  // så længe en holdt position stadig er halted (i tilfælde af at Iben er trådt væk).
+  const haltedHeldRef = useRef<Set<string>>(new Set());   // holdt-og-halted sidste tjek
+  const haltedCurRef  = useRef<Set<string>>(new Set());   // holdt-og-halted lige nu (til interval)
+  useEffect(() => {
+    const cur = new Set<string>();
+    for (const s of stocks) {
+      if (s && s.halted && meta[s.ticker]?.bought) cur.add(s.ticker);
+    }
+    let fresh = false;
+    cur.forEach(t => { if (!haltedHeldRef.current.has(t)) fresh = true; });
+    haltedHeldRef.current = cur;
+    haltedCurRef.current  = cur;
+    if (fresh) playHaltAlarm();   // ny halt på en position Iben holder
+  }, [stocks, meta]);
+  useEffect(() => {
+    const id = setInterval(() => { if (haltedCurRef.current.size > 0) playHaltAlarm(); }, 20000);
+    return () => clearInterval(id);
+  }, []);
+
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
     setOrderShares(prev => ({ ...prev, [ticker]: value.replace(/\D/g, "").slice(0, 6) }));
@@ -305,6 +354,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     const live = stocks.find(s => s.ticker === ticker);
     return live ?? { ticker, price: 0 };
   });
+  // Tickers Iben HOLDER som lige nu er halted — til det tydelige top-banner.
+  const haltedHeldTickers = watchedStocks.filter(s => (s as any).halted && meta[s.ticker]?.bought).map(s => s.ticker);
 
   const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
   const usd = (v: number) => `$${v.toFixed(2)}`;
@@ -343,6 +394,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>
         Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde)
       </div>
+      {haltedHeldTickers.length > 0 && (
+        <div className="watchlist-halt-banner">
+          ⛔ HALT — din åbne position er STOPPET på børsen: <b>{haltedHeldTickers.join(", ")}</b>
+        </div>
+      )}
       <div className="watchlist-scroll">
         <table className="scanner-table">
           <thead>
@@ -370,16 +426,27 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty : null;
               const uplPct = (b && aktuel != null && b.avgPrice > 0) ? (aktuel - b.avgPrice) / b.avgPrice * 100 : null;
               const plCls = (v: number | null) => v == null ? "" : v >= 0 ? "positive" : "negative";
+              const halted = !!(stock as any).halted;
+              const isHaltedHeld = halted && !!b;   // holdt position + halt = fuld alarm
               return (
                 <tr key={stock.ticker}
-                  className={stock.ticker === selectedTicker ? "row-selected" : ""}
-                  style={selectedNum === i + 1 ? { outline: "1px solid var(--accent)", background: "var(--accent-bg)" } : undefined}
+                  className={`${stock.ticker === selectedTicker ? "row-selected" : ""}${isHaltedHeld ? " watchlist-halted" : ""}`}
+                  style={!isHaltedHeld && selectedNum === i + 1 ? { outline: "1px solid var(--accent)", background: "var(--accent-bg)" } : undefined}
                   onClick={() => onSelectTicker(stock.ticker)}>
                   <td style={{ textAlign: "center", color: selectedNum === i + 1 ? "var(--accent)" : "var(--text-muted)", fontWeight: 700 }}>{i + 1}</td>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
                       title={`${stock.ticker} — ${mkt === "open" ? "marked ÅBENT (kan handles)" : mkt === "pre" ? "PRE-MARKET (kan handles)" : mkt === "after" ? "AFTER-HOURS (handel ikke tilladt)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
                       style={{ cursor: "pointer", textDecoration: "underline dotted", color: tickerColor, fontWeight: 700 }}>{stock.ticker}</span>
+                    {halted && (
+                      <span title={isHaltedHeld
+                          ? "HALT: handlen i din åbne position er midlertidigt STOPPET på børsen"
+                          : "Handlen i denne aktie er midlertidigt STOPPET (halt) på børsen"}
+                        style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, letterSpacing: 0.3, color: "#fff",
+                                 background: isHaltedHeld ? "var(--bear)" : "var(--neutral)", borderRadius: 3, padding: "1px 5px", whiteSpace: "nowrap" }}>
+                        ⛔ HALT
+                      </span>
+                    )}
                   </td>
                   <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
