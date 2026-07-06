@@ -198,6 +198,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [selectedNum, setSelectedNum] = useState<number | null>(null);   // ALT+tal-valgt række
+  const [simHalt, setSimHalt] = useState<Set<string>>(() => new Set());  // ALT+H: simuleret halt (selv-test)
 
   // Side-kort pr. ticker: frossen "Pris" ved tilføj + (næste trin) køb-tilstand fra
   // Ibens konkrete ordre-fills (avgPrice/qty). Gemmes så det overlever genstart.
@@ -268,15 +269,18 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const haltedCurRef  = useRef<Set<string>>(new Set());   // holdt-og-halted lige nu (til interval)
   useEffect(() => {
     const cur = new Set<string>();
-    for (const s of stocks) {
-      if (s && s.halted && meta[s.ticker]?.bought) cur.add(s.ticker);
+    for (const t of watchlist) {
+      const live = stocks.find(s => s.ticker === t);
+      const isHalted = Boolean((live as any)?.halted) || simHalt.has(t);
+      const isHeld   = Boolean(meta[t]?.bought) || simHalt.has(t);   // ALT+H simulerer også "holdt"
+      if (isHalted && isHeld) cur.add(t);
     }
     let fresh = false;
     cur.forEach(t => { if (!haltedHeldRef.current.has(t)) fresh = true; });
     haltedHeldRef.current = cur;
     haltedCurRef.current  = cur;
-    if (fresh) playHaltAlarm();   // ny halt på en position Iben holder
-  }, [stocks, meta]);
+    if (fresh) playHaltAlarm();   // ny halt på en position Iben holder (eller ALT+H-test)
+  }, [stocks, meta, watchlist, simHalt]);
   useEffect(() => {
     const id = setInterval(() => { if (haltedCurRef.current.size > 0) playHaltAlarm(); }, 20000);
     return () => clearInterval(id);
@@ -355,7 +359,10 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     return live ?? { ticker, price: 0 };
   });
   // Tickers Iben HOLDER som lige nu er halted — til det tydelige top-banner.
-  const haltedHeldTickers = watchedStocks.filter(s => (s as any).halted && meta[s.ticker]?.bought).map(s => s.ticker);
+  const haltedHeldTickers = watchedStocks.filter(s => {
+    const t = s.ticker;
+    return (Boolean((s as any).halted) || simHalt.has(t)) && (Boolean(meta[t]?.bought) || simHalt.has(t));
+  }).map(s => s.ticker);
 
   const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
   const usd = (v: number) => `$${v.toFixed(2)}`;
@@ -364,6 +371,19 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   shortcutRef.current = (e: KeyboardEvent) => {
     const tgt = e.target as HTMLElement | null;
     const inField = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable);
+    // ALT+H: slå simuleret halt til/fra på den valgte række (selv-test af halt-alarmen).
+    if (e.altKey && (e.key === "h" || e.key === "H")) {
+      if (selectedNum == null) return;
+      const st = watchedStocks[selectedNum - 1];
+      if (!st) return;
+      e.preventDefault();
+      setSimHalt(prev => {
+        const n = new Set(prev);
+        if (n.has(st.ticker)) n.delete(st.ticker); else n.add(st.ticker);
+        return n;
+      });
+      return;
+    }
     if (e.altKey && e.key >= "1" && e.key <= "9") {
       const idx = parseInt(e.key, 10) - 1;
       if (idx < watchedStocks.length) {
@@ -392,7 +412,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       </div>
       {error && <div className="watchlist-error">{error}</div>}
       <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>
-        Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde)
+        Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde) · <b>ALT+H</b> test halt-alarm
       </div>
       {haltedHeldTickers.length > 0 && (
         <div className="watchlist-halt-banner">
@@ -426,8 +446,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty : null;
               const uplPct = (b && aktuel != null && b.avgPrice > 0) ? (aktuel - b.avgPrice) / b.avgPrice * 100 : null;
               const plCls = (v: number | null) => v == null ? "" : v >= 0 ? "positive" : "negative";
-              const halted = !!(stock as any).halted;
-              const isHaltedHeld = halted && !!b;   // holdt position + halt = fuld alarm
+              const halted = !!(stock as any).halted || simHalt.has(stock.ticker);
+              const isHaltedHeld = halted && (!!b || simHalt.has(stock.ticker));   // holdt position + halt = fuld alarm
               return (
                 <tr key={stock.ticker}
                   className={`${stock.ticker === selectedTicker ? "row-selected" : ""}${isHaltedHeld ? " watchlist-halted" : ""}`}
