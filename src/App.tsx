@@ -197,7 +197,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const [orderShares, setOrderShares] = useState<Record<string, string>>({});
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
-  const [selectedNum, setSelectedNum] = useState<number | null>(null);   // ALT+tal-valgt række
+  const [selectedNum, setSelectedNum] = useState<number | null>(1);      // markeret række (linje 1 fra start)
   const [simHalt, setSimHalt] = useState<Set<string>>(() => new Set());  // ALT+H: simuleret halt (selv-test)
 
   // Side-kort pr. ticker: frossen "Pris" ved tilføj + (næste trin) køb-tilstand fra
@@ -206,6 +206,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     try { return JSON.parse(localStorage.getItem("watchlist_meta") || "{}"); } catch { return {}; }
   });
   useEffect(() => { localStorage.setItem("watchlist_meta", JSON.stringify(meta)); }, [meta]);
+
+  // Hold den markerede række gyldig: tom liste -> ingen; ellers klem ned i området
+  // (linje 1 er default). Så er der altid netop én markeret linje når der er rækker.
+  useEffect(() => {
+    setSelectedNum(prev => {
+      if (watchlist.length === 0) return null;
+      if (prev == null) return 1;
+      return Math.min(prev, watchlist.length);
+    });
+  }, [watchlist.length]);
 
   // Markedsstatus (RTH) — styrer om KØB/SÆLG er muligt + farve pr. ticker.
   const [mkt, setMkt] = useState<"open" | "pre" | "after" | "closed">(getMarketStatus);
@@ -373,8 +383,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     const inField = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable);
     // ALT+H: slå simuleret halt til/fra på den valgte række (selv-test af halt-alarmen).
     if (e.altKey && (e.key === "h" || e.key === "H")) {
-      if (selectedNum == null) return;
-      const st = watchedStocks[selectedNum - 1];
+      const st = watchedStocks[(selectedNum ?? 1) - 1];
       if (!st) return;
       e.preventDefault();
       setSimHalt(prev => {
@@ -394,12 +403,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       return;
     }
     if (!inField && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
-      if (selectedNum == null) return;
-      const stock = watchedStocks[selectedNum - 1];
+      const stock = watchedStocks[(selectedNum ?? 1) - 1];
       if (!stock) return;
       e.preventDefault();
       handleOrder(e.key.toLowerCase() === "k" ? "BUY" : "SELL", stock);
-      setSelectedNum(null);
+      // markeringen bliver stående (persistent valg)
     }
   };
 
@@ -452,7 +460,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                 <tr key={stock.ticker}
                   className={`${stock.ticker === selectedTicker ? "row-selected" : ""}${isHaltedHeld ? " watchlist-halted" : ""}`}
                   style={!isHaltedHeld && selectedNum === i + 1 ? { outline: "1px solid var(--accent)", background: "var(--accent-bg)" } : undefined}
-                  onClick={() => onSelectTicker(stock.ticker)}>
+                  onClick={() => { onSelectTicker(stock.ticker); setSelectedNum(i + 1); }}>
                   <td style={{ textAlign: "center", color: selectedNum === i + 1 ? "var(--accent)" : "var(--text-muted)", fontWeight: 700 }}>{i + 1}</td>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
@@ -472,7 +480,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
                       onChange={e => setShares(stock.ticker, e.target.value)}
-                      onClick={e => e.stopPropagation()}
+                      onFocus={() => setSelectedNum(i + 1)}
+                      onClick={e => { e.stopPropagation(); setSelectedNum(i + 1); }}
                       style={{ width: 60, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 7px", textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
