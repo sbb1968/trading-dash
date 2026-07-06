@@ -170,6 +170,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const [orderShares, setOrderShares] = useState<Record<string, string>>({});
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
+  const [selectedNum, setSelectedNum] = useState<number | null>(null);   // ALT+tal-valgt række
 
   // Side-kort pr. ticker: frossen "Pris" ved tilføj + (næste trin) køb-tilstand fra
   // Ibens konkrete ordre-fills (avgPrice/qty). Gemmes så det overlever genstart.
@@ -221,6 +222,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       captureAddPrice(t);   // genfrys "Pris" som ved en ny tilføjelse
     }
   }, [orderResult]);
+
+  // Tastaturgenveje (hurtig handel): ALT+tal vælger rækken; K køber / S sælger den
+  // valgte række med dens Stk-mængde. Stabil listener; logikken holdes i en ref så den
+  // altid ser den nyeste liste + valg (opdateres lige før render nedenfor).
+  const shortcutRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => shortcutRef.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
   function setShares(ticker: string, value: string) {
@@ -279,6 +290,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   }
 
   function removeRow(ticker: string) {
+    const pos = meta[ticker]?.bought;
+    const confirmOn = localStorage.getItem("confirm_delete_open") !== "false";   // default: bekræft
+    if (pos && confirmOn &&
+        !window.confirm(`${ticker} har en ÅBEN position (${pos.qty} stk). Fjern linjen alligevel?\n\n` +
+          `Positionen LUKKES ikke — den følger i Ordre-vinduet.`)) {
+      return;
+    }
     onRemoveTicker(ticker);
     setMeta(prev => { const n = { ...prev }; delete n[ticker]; return n; });
   }
@@ -291,6 +309,29 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
   const usd = (v: number) => `$${v.toFixed(2)}`;
 
+  // Genveje: ALT+tal vælg række · K køb · S sælg (den valgte række, med dens Stk).
+  shortcutRef.current = (e: KeyboardEvent) => {
+    const tgt = e.target as HTMLElement | null;
+    const inField = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable);
+    if (e.altKey && e.key >= "1" && e.key <= "9") {
+      const idx = parseInt(e.key, 10) - 1;
+      if (idx < watchedStocks.length) {
+        e.preventDefault();
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        setSelectedNum(idx + 1);
+      }
+      return;
+    }
+    if (!inField && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
+      if (selectedNum == null) return;
+      const stock = watchedStocks[selectedNum - 1];
+      if (!stock) return;
+      e.preventDefault();
+      handleOrder(e.key.toLowerCase() === "k" ? "BUY" : "SELL", stock);
+      setSelectedNum(null);
+    }
+  };
+
   return (
     <div className="watchlist-container">
       <div className="watchlist-add">
@@ -299,10 +340,14 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
           onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
+      <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>
+        Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde)
+      </div>
       <div className="watchlist-scroll">
         <table className="scanner-table">
           <thead>
             <tr>
+              <th style={{ textAlign: "center", width: 28 }}>#</th>
               <th style={{ textAlign: "left" }}>Ticker</th>
               <th style={R}>Pris</th>
               <th style={{ textAlign: "center", width: 76 }}>Stk</th>
@@ -316,8 +361,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             </tr>
           </thead>
           <tbody>
-            {watchedStocks.length === 0 && <tr><td colSpan={10} className="watchlist-empty">Ingen aktier endnu</td></tr>}
-            {watchedStocks.map(stock => {
+            {watchedStocks.length === 0 && <tr><td colSpan={11} className="watchlist-empty">Ingen aktier endnu</td></tr>}
+            {watchedStocks.map((stock, i) => {
               const m = meta[stock.ticker] || {};
               const b = m.bought;   // udfyldes i næste trin (ordre-sporing / fills)
               const live = stock.price > 0 ? stock.price : null;
@@ -328,7 +373,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               return (
                 <tr key={stock.ticker}
                   className={stock.ticker === selectedTicker ? "row-selected" : ""}
+                  style={selectedNum === i + 1 ? { outline: "1px solid var(--accent)", background: "var(--accent-bg)" } : undefined}
                   onClick={() => onSelectTicker(stock.ticker)}>
+                  <td style={{ textAlign: "center", color: selectedNum === i + 1 ? "var(--accent)" : "var(--text-muted)", fontWeight: 700 }}>{i + 1}</td>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
                       title={`${stock.ticker} — ${mkt === "open" ? "marked ÅBENT (kan handles)" : mkt === "pre" ? "PRE-MARKET (kan handles)" : mkt === "after" ? "AFTER-HOURS (handel ikke tilladt)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
@@ -408,6 +455,9 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
   // Handels-indstilling: spring ordre-bekræftelse over (KØB/SÆLG handler direkte).
   const [skipConfirm, setSkipConfirm] = useState<boolean>(() => localStorage.getItem("skip_order_confirm") === "true");
   useEffect(() => { localStorage.setItem("skip_order_confirm", skipConfirm ? "true" : "false"); }, [skipConfirm]);
+  // Bekræft før en watchlist-linje med åben position fjernes (default: til).
+  const [confirmDelete, setConfirmDelete] = useState<boolean>(() => localStorage.getItem("confirm_delete_open") !== "false");
+  useEffect(() => { localStorage.setItem("confirm_delete_open", confirmDelete ? "true" : "false"); }, [confirmDelete]);
 
   // Anvend font-ændringer live
   useEffect(() => {
@@ -518,6 +568,10 @@ function Konfigurator({ onClose }: { onClose: () => void }) {
           <label className="konfigurator-col-item" style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input type="checkbox" checked={skipConfirm} onChange={e => setSkipConfirm(e.target.checked)} />
             <span>Spring ordre-bekræftelse over — KØB/SÆLG handler <b>direkte</b> uden pop-up</span>
+          </label>
+          <label className="konfigurator-col-item" style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 6 }}>
+            <input type="checkbox" checked={confirmDelete} onChange={e => setConfirmDelete(e.target.checked)} />
+            <span>Bekræft før en linje med <b>åben position</b> fjernes (krydset)</span>
           </label>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
             Watchlist-kolonnerne er nu en fast handels-opsætning (Ticker · Pris · Stk · KØB/SÆLG ·
