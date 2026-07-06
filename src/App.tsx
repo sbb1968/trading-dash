@@ -200,6 +200,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     const filled = Number(r.filled) || 0;
     const avg = Number(r.avg_fill) || 0;
     if (!t || filled <= 0) return;
+    let closed = false;
     setMeta(prev => {
       const cur = prev[t]?.bought;
       if (r.action === "BUY") {
@@ -208,9 +209,17 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
         const newAvg = newQty > 0 ? (oldQty * oldAvg + filled * avg) / newQty : avg;
         return { ...prev, [t]: { ...prev[t], bought: { avgPrice: newAvg, qty: newQty } } };
       }
-      const remaining = (cur?.qty ?? 0) - filled;   // SÆLG
-      return { ...prev, [t]: { ...prev[t], bought: remaining > 0 ? { avgPrice: cur?.avgPrice ?? avg, qty: remaining } : undefined } };
+      // SÆLG: reducér beholdning
+      const remaining = (cur?.qty ?? 0) - filled;
+      if (remaining > 0) return { ...prev, [t]: { ...prev[t], bought: { avgPrice: cur?.avgPrice ?? avg, qty: remaining } } };
+      // Position LUKKET -> nulstil hele rækken som en frisk tilføjelse (klar til ny handel).
+      closed = true;
+      return { ...prev, [t]: {} };
     });
+    if (closed) {
+      setOrderShares(prev => { const n = { ...prev }; delete n[t]; return n; });   // Stk -> default (100)
+      captureAddPrice(t);   // genfrys "Pris" som ved en ny tilføjelse
+    }
   }, [orderResult]);
 
   function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
@@ -245,12 +254,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     } catch { openUrl(fallback); }
   }
 
-  async function handleAdd() {
-    const t = input.trim().toUpperCase();
-    if (!t) return;
-    if (watchlist.includes(t)) { setError(`${t} er allerede på listen`); return; }
-    onAddTicker(t); setInput(""); setError("");
-    // Frys "Pris" ved tilføj: hent sidste kurs fra backend; fallback til live-feed.
+  // Frys "Pris" for en ticker: hent sidste kurs fra backend; fallback til live-feed.
+  // Bruges både ved tilføj OG når en position lukkes (rækken nulstilles som en ny).
+  async function captureAddPrice(t: string) {
     let addPrice: number | undefined;
     try {
       const r = await fetch(`http://127.0.0.1:8000/quote/${encodeURIComponent(t)}`);
@@ -262,6 +268,14 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       if (live && live.price > 0) addPrice = live.price;
     }
     if (addPrice != null) setMeta(prev => ({ ...prev, [t]: { ...prev[t], addPrice } }));
+  }
+
+  function handleAdd() {
+    const t = input.trim().toUpperCase();
+    if (!t) return;
+    if (watchlist.includes(t)) { setError(`${t} er allerede på listen`); return; }
+    onAddTicker(t); setInput(""); setError("");
+    captureAddPrice(t);   // frys "Pris" ved tilføj
   }
 
   function removeRow(ticker: string) {
