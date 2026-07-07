@@ -252,9 +252,14 @@ class IBKRConnection:
         except Exception:
             poss = self.ib.positions()
         return [{
-            "ticker":   p.contract.symbol,
-            "position": p.position,
-            "avg_cost": p.avgCost,
+            "ticker":     p.contract.symbol,
+            "position":   p.position,
+            "avg_cost":   p.avgCost,
+            # secType/multiplier bruges af snapshot-berigelsen til korrekt futures-P&L.
+            # For futures er avgCost NOTIONEL (pris * multiplikator); for aktier er
+            # multiplier "" -> behandles som 1.
+            "sec_type":   p.contract.secType,
+            "multiplier": p.contract.multiplier,
         } for p in (poss or []) if p.position != 0]
 
     async def get_positions_reliable(self) -> tuple[list, bool]:

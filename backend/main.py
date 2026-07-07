@@ -4006,9 +4006,14 @@ async def account_snapshot(force_journal: bool = False):
             cost = safe_float(p["avg_cost"])
             qty  = p["position"]
 
-            if price is not None and cost is not None and cost != 0:
-                pnl     = round((price - cost) * qty, 2)
-                pnl_pct = round((price - cost) / cost * 100, 2)
+            # Futures: avgCost er NOTIONEL (pris * multiplikator) -> konverter til
+            # pris/point og gang P&L med multiplikatoren. Aktier: mult=1 -> uændret.
+            mult = safe_float(p.get("multiplier")) or 1.0
+            entry_px = (cost / mult) if (cost is not None and mult) else cost
+
+            if price is not None and entry_px is not None and entry_px != 0:
+                pnl     = round((price - entry_px) * qty * mult, 2)
+                pnl_pct = round((price - entry_px) / entry_px * 100, 2)
             else:
                 pnl     = None
                 pnl_pct = None
@@ -4016,7 +4021,9 @@ async def account_snapshot(force_journal: bool = False):
             enriched.append({
                 "ticker":     p["ticker"],
                 "position":   qty,
-                "avg_cost":   cost,
+                "avg_cost":   entry_px,
+                "multiplier": mult,
+                "sec_type":   p.get("sec_type"),
                 "last_price": price,
                 "pnl":        pnl,
                 "pnl_pct":    pnl_pct,
@@ -4130,9 +4137,15 @@ async def account_dash_snapshot():
             cost = safe_float(p["avg_cost"])
             qty  = p["position"]
 
-            if price is not None and cost is not None and cost != 0:
-                pnl     = round((price - cost) * qty, 2)
-                pnl_pct = round((price - cost) / cost * 100, 2)
+            # Futures: IBKR's avgCost er NOTIONEL (pris * multiplikator). Konverter til
+            # pris/point så entry er sammenlignelig med last_price, og gang P&L med
+            # multiplikatoren. Aktier: multiplier "" -> 1.0 -> formlen er uændret.
+            mult = safe_float(p.get("multiplier")) or 1.0
+            entry_px = (cost / mult) if (cost is not None and mult) else cost
+
+            if price is not None and entry_px is not None and entry_px != 0:
+                pnl     = round((price - entry_px) * qty * mult, 2)
+                pnl_pct = round((price - entry_px) / entry_px * 100, 2)
             else:
                 pnl     = None
                 pnl_pct = None
@@ -4140,10 +4153,12 @@ async def account_dash_snapshot():
             enriched.append({
                 "ticker":        p["ticker"],
                 "position":      qty,
-                "avg_cost":      cost,
+                "avg_cost":      entry_px,          # pris/point (futures-korrekt), sammenlignelig m. last_price
+                "multiplier":    mult,
+                "sec_type":      p.get("sec_type"),
                 "last_price":    price,
                 "current_price": safe_float(price),
-                "market_value":  safe_float(price * qty) if price is not None else None,
+                "market_value":  safe_float(price * qty * mult) if price is not None else None,
                 "pnl":           pnl,
                 "pnl_pct":       pnl_pct,
             })
