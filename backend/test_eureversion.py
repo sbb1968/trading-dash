@@ -21,8 +21,14 @@ Stil: PASS/FAIL-print, raise SystemExit(1) ved fejl, ALLE TESTS BESTÅET til sid
 """
 
 import asyncio
+import sys
 import types
 from datetime import datetime, timedelta
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")   # så PASS/FAIL-pile (→) kan printes på Windows cp1252
+except (AttributeError, ValueError):
+    pass
 
 import pytz
 
@@ -72,6 +78,15 @@ class MockConn:
 
     def get_positions(self):
         return self._pos
+
+    async def get_positions_reliable(self):
+        # Reconcile bruger nu et reliable live-read; mock leverer altid feed_ok=True
+        # (samme data som get_positions) så alle eksisterende scenarier er uændrede.
+        return (self._pos, True)
+
+    async def get_open_orders(self):
+        # Dup-vagten i _reconcile_close læser denne. Default tom (ingen hvilende ordrer).
+        return []
 
     async def get_snapshot(self, sym):
         return {"last": 5000.0}

@@ -198,10 +198,15 @@ class BuyTheDipLive(BaseStrategy):
         except Exception as e:
             logger.error(f"[BuyTheDip] reconciliation: list_trades fejlede: {e}")
             return
-        try:
-            ibkr_positions = self.conn.get_positions()
-        except Exception as e:
-            logger.error(f"[BuyTheDip] reconciliation: kunne ikke hente IBKR-positioner: {e}")
+        # Reliable live-read: absence-baseret luk (net==0 -> fantom) må ALDRIG ske på et
+        # tomt/degraderet feed (kold cache lige efter connect -> ægte position ser "flad"
+        # ud -> forældreløsgøres). reliable=False -> spring hele reconcile over.
+        ibkr_positions, feed_ok = await self.conn.get_positions_reliable()
+        if not feed_ok:
+            logger.warning("[BuyTheDip] reconciliation: positions-feed upålideligt "
+                           "(tom/timeout ved opstart) — springer over for ikke at "
+                           "forældreløsgøre en ægte position")
+            self._status("started", "Reconciliation sprunget over — positions-feed upålideligt")
             return
         ibkr_by_ticker = {
             (p.get("ticker") or "").upper(): (p.get("position") or 0)

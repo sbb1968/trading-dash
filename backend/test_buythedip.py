@@ -22,9 +22,15 @@ import asyncio
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import types
 from datetime import datetime, timedelta
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")   # så PASS/FAIL-pile (→) kan printes på Windows cp1252
+except (AttributeError, ValueError):
+    pass
 
 import pytz
 
@@ -61,6 +67,15 @@ class MockConn:
 
     def get_positions(self):
         return self._pos
+
+    async def get_positions_reliable(self):
+        # Reconcile bruger nu et reliable live-read; mock leverer altid feed_ok=True
+        # (samme data som get_positions) så alle eksisterende scenarier er uændrede.
+        return (self._pos, True)
+
+    async def get_open_orders(self):
+        # Dup-vagten i _reconcile_close læser denne. Default tom (ingen hvilende ordrer).
+        return []
 
     def get_account_summary(self):
         return {"net_liquidation": 100000.0}

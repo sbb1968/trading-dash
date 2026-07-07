@@ -329,11 +329,16 @@ class Confluence2Live(BaseStrategy):
             logger.error(f"[Konfluens 2] reconciliation: list_trades fejlede: {e}")
             return
 
-        # IBKR's faktiske positioner pr. ticker (netto).
-        try:
-            ibkr_positions = self.conn.get_positions()
-        except Exception as e:
-            logger.error(f"[Konfluens 2] reconciliation: kunne ikke hente IBKR-positioner: {e}")
+        # IBKR's faktiske positioner pr. ticker (netto). Bruger et RELIABLE live-read:
+        # en absence-baseret luk (net==0 -> fantom) må ALDRIG ske på et tomt/degraderet
+        # feed, ellers ser en ægte position "flad" ud lige efter connect og bliver
+        # fejlagtigt forældreløsgjort. reliable=False -> spring hele reconcile over.
+        ibkr_positions, feed_ok = await self.conn.get_positions_reliable()
+        if not feed_ok:
+            logger.warning("[Konfluens 2] reconciliation: positions-feed upålideligt "
+                           "(tom/timeout ved opstart) — springer over for ikke at "
+                           "forældreløsgøre en ægte position")
+            self._status("started", "Reconciliation sprunget over — positions-feed upålideligt")
             return
         ibkr_by_ticker = {
             (p.get("ticker") or "").upper(): (p.get("position") or 0)

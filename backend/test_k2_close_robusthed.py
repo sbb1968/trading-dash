@@ -73,6 +73,11 @@ class MockConn:
     def get_positions(self):
         return self._positions
 
+    async def get_positions_reliable(self):
+        # Reconcile bruger nu et reliable live-read; mock leverer altid feed_ok=True
+        # (samme data som get_positions) så alle eksisterende scenarier er uændrede.
+        return (self.get_positions(), True)
+
     async def get_open_orders(self):
         # Dup-vagten i _reconcile_close læser denne. Default tom -> samme adfærd som før
         # dup-vagten fandtes (de eksisterende A/C/D-scenarier placerer ordrer uændret).
@@ -469,6 +474,9 @@ class PersistentConn:
         if self._stale is not None:
             return self._stale
         return [{"ticker": "COGT", "position": self.position}] if self.position else []
+
+    async def get_positions_reliable(self):
+        return (self.get_positions(), True)
 
     async def get_snapshot(self, ticker):
         return {"last": self._last}

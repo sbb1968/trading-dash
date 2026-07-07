@@ -257,6 +257,33 @@ class IBKRConnection:
             "avg_cost": p.avgCost,
         } for p in (poss or []) if p.position != 0]
 
+    async def get_positions_reliable(self) -> tuple[list, bool]:
+        """Som get_positions_live, men returnerer OGSAA en paalideligheds-flag OG falder
+        ALDRIG tilbage til den (muligvis kolde/fantom-holdende) cache.
+
+        Returnerer (positioner, reliable):
+          reliable=True  -> reqPositions naaede positionEnd; listen er autoritativ
+                            (tom liste = kontoen er FAKTISK flad).
+          reliable=False -> ikke forbundet, timeout eller fejl -> kalderen MAA IKKE
+                            tolke resultatet som 'fladt'.
+
+        Bruges af strategiernes opstarts-reconcile: en absence-baseret luk (fantom/
+        stale-journal-sync) maa KUN ske paa et reliable=True read. Ved reliable=False
+        springes reconcile over — saa en kold cache lige efter connect aldrig kan faa
+        en aegte position til at se 'lukket' ud og dermed forældreløsgøre den."""
+        if not self.connected:
+            return [], False
+        try:
+            poss = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=5)
+        except Exception:
+            return [], False   # timeout/fejl -> upaalideligt, IKKE cache-fallback
+        out = [{
+            "ticker":   p.contract.symbol,
+            "position": p.position,
+            "avg_cost": p.avgCost,
+        } for p in (poss or []) if p.position != 0]
+        return out, True
+
     async def get_open_orders(self) -> list:
         """Aktive (ikke-fyldte/ikke-annullerede) ordrer paa tvaers af ALLE klienter.
         Bruges af reconcile til at undgaa at laegge en DUPLIKAT luk-ordre oven paa en der

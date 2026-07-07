@@ -238,10 +238,17 @@ class EuropaReversionLive(BaseStrategy):
             self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
             return
 
-        try:
-            ibkr_positions = self.conn.get_positions()
-        except Exception as e:
-            logger.error(f"[Europa-reversion] reconciliation: kunne ikke hente positioner: {e}")
+        # Reliable live-read (ikke den kolde cache). KRITISK her: begge pas nedenfor
+        # (IBKR-løkken OG _reconcile_close_stale_journal_rows) er absence-baserede —
+        # en tom/degraderet positions-liste ved opstart ville ellers markere en ægte
+        # åben MES/M2K-journal-row som "forældet" og lukke den UDEN ordre → den ægte
+        # position bliver forældreløs (præcis MES-fejlen). reliable=False → spring ALT over.
+        ibkr_positions, feed_ok = await self.conn.get_positions_reliable()
+        if not feed_ok:
+            logger.warning("[Europa-reversion] reconciliation: positions-feed upålideligt "
+                           "(tom/timeout ved opstart) — springer over for ikke at "
+                           "forældreløsgøre en ægte position")
+            self._status("started", "Reconciliation sprunget over — positions-feed upålideligt")
             return
 
         # Guard 1: instrument-klasse — KUN vores futures-symboler.
