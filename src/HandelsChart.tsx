@@ -32,20 +32,31 @@ interface Trade {
 }
 
 const ALGOS = [
-  { source: "Konfluens 2",      label: "Konfluens 2",     color: "#2563eb" },
-  { source: "Europa-reversion", label: "EUREVERSION",     color: "#059669" },
-  { source: "BuyTheDip",        label: "BuyTheDip",       color: "#d97706" },
-  { source: "Trend Join Long",  label: "Trend Join Long", color: "#7c3aed" },
+  { source: "Konfluens 2",      label: "Konfluens 2" },
+  { source: "Europa-reversion", label: "EUREVERSION" },
+  { source: "BuyTheDip",        label: "BuyTheDip" },
+  { source: "Trend Join Long",  label: "Trend Join Long" },
 ];
-const COLOR_OF: Record<string, string> = Object.fromEntries(ALGOS.map(a => [a.source, a.color]));
+// PRÆCIS Studios pill-farver (index.html .pill-konfl2/.pill-rev/.pill-bd/.pill-tjl):
+// tekstfarve + kant + subtil fyld. Én sandhedskilde for strategi-farverne her.
+const STRAT_PILL: Record<string, { fg: string; border: string; bg: string }> = {
+  "Konfluens 2":      { fg: "#5eead4", border: "rgba(45,212,191,0.55)",  bg: "rgba(45,212,191,0.16)" },
+  "Europa-reversion": { fg: "#fde047", border: "rgba(250,204,21,0.55)",  bg: "rgba(250,204,21,0.16)" },
+  "BuyTheDip":        { fg: "#f9a8d4", border: "rgba(244,114,182,0.55)", bg: "rgba(244,114,182,0.16)" },
+  "Trend Join Long":  { fg: "#93c5fd", border: "rgba(96,165,250,0.55)",  bg: "rgba(96,165,250,0.16)" },
+};
+const _FALLBACK_PILL = { fg: "#8a94a6", border: "rgba(138,148,166,0.5)", bg: "rgba(138,148,166,0.15)" };
+const pillOf = (s: string) => STRAT_PILL[s] || _FALLBACK_PILL;
+const COLOR_OF: Record<string, string> = Object.fromEntries(
+  Object.entries(STRAT_PILL).map(([k, v]) => [k, v.fg]));
 
-// Strategi-pill — samme udtryk som de farvede pills andre steder (subtil fyld + kant).
+// Strategi-pill — præcis samme udtryk/farve som Studios pills.
 function SourcePill({ source }: { source: string }) {
-  const c = COLOR_OF[source] || "#8a94a6";
+  const p = pillOf(source);
   return (
     <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 11,
       fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
-      color: c, background: `${c}22`, border: `1px solid ${c}` }}>
+      color: p.fg, background: p.bg, border: `1px solid ${p.border}` }}>
       {source}
     </span>
   );
@@ -194,15 +205,17 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
             <input type="date" value={end} min={start} onChange={e => setEnd(e.target.value)} style={input} />
           </label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {ALGOS.map(a => (
-              <button key={a.source} onClick={() => toggle(a.source)}
-                style={{ cursor: "pointer", padding: "5px 9px", borderRadius: 14, fontSize: 11.5,
-                  fontWeight: 700, border: `1px solid ${a.color}`,
-                  background: active.has(a.source) ? a.color : "transparent",
-                  color: active.has(a.source) ? "#fff" : a.color }}>
-                {a.label}
-              </button>
-            ))}
+            {ALGOS.map(a => {
+              const p = pillOf(a.source); const on = active.has(a.source);
+              return (
+                <button key={a.source} onClick={() => toggle(a.source)}
+                  style={{ cursor: "pointer", padding: "5px 10px", borderRadius: 14, fontSize: 11.5,
+                    fontWeight: 700, border: `1px solid ${p.border}`, color: p.fg,
+                    background: on ? p.bg : "transparent", opacity: on ? 1 : 0.55 }}>
+                  {a.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
