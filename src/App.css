@@ -173,23 +173,23 @@ button {
 /* Markedsoverblik — vandret skillelinje mellem de 3 informations-grupper */
 .mo-divider { height: 1px; background: var(--border-default); margin: 12px 0 10px; border: none; }
 
-/* Kalender-knappen i ALLE date-inputs — tydelig + klart klikbar (naesten usynlig
-   i moerke temaer som standard). Lyst ikon (invert) + button-agtig baggrund. */
+/* Kalender-knappen i ALLE date-inputs — var naesten usynlig i moerke temaer.
+   FULDT hvidt ikon (invert 1) uden altid-paa-baggrund -> tydeligt paa moerk input;
+   hover giver accent-baggrund. */
 input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 1;
-  filter: invert(0.85);
+  filter: invert(1) brightness(1.15);
+  transform: scale(1.15);
   padding: 3px 5px;
   margin-left: 4px;
   border-radius: 4px;
-  background-color: var(--bg-overlay, rgba(255,255,255,0.10));
-  transition: background-color 0.12s ease, filter 0.12s ease;
+  transition: background-color 0.12s ease;
 }
 input[type="date"]::-webkit-calendar-picker-indicator:hover {
   background-color: var(--accent);
-  filter: invert(1);
 }
-/* Lyst tema (arctic): ikonet er allerede moerkt -> ingen invert */
+/* Lyst tema (arctic): moerkt ikon paa lys input -> ingen invert; hvidt paa hover. */
 body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator {
   filter: none;
 }
