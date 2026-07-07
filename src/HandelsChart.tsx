@@ -6,6 +6,12 @@ import { useEffect, useState, useCallback } from "react";
 // dev-mode-auth); trade-listen via JSON. Kræver TWS forbundet (bar-genhentning er et IBKR-kald).
 const API = "http://127.0.0.1:8000";
 
+interface Peer {
+  id: string; name: string; host: string | null; url: string | null;
+  enabled: boolean; is_self: boolean; selectable: boolean;
+}
+interface Machine { id: string; name: string; ok: boolean; n_trades: number; err?: string | null; }
+
 interface Trade {
   trade_id: string;
   symbol: string;
@@ -19,6 +25,10 @@ interface Trade {
   exit_reason?: string;
   current_stop?: number;
   current_target?: number;
+  // Sat af fleet-endpointet: hvilken maskine handlen hoerer til.
+  machine_id?: string;
+  machine_name?: string;
+  machine_url?: string | null;   // null = self (localhost); ellers ejer-maskinens URL
 }
 
 const ALGOS = [
@@ -53,25 +63,52 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
   const [before, setBefore] = useState(40);
   const [after, setAfter] = useState(40);
   const [imgLoading, setImgLoading] = useState(false);
+  // Maskin-vaelger (samme som Dagens Log) — fleet fan-out til de valgte maskiner.
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [selPeers, setSelPeers] = useState<Set<string>>(new Set());
+  const [peersErr, setPeersErr] = useState("");
+  const [machines, setMachines] = useState<Machine[]>([]);
+
+  // Hent maskin-listen ved aabning; forvaelg alle valgbare.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/fleet/peers`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const ps: Peer[] = data.peers || [];
+        if (!alive) return;
+        setPeers(ps);
+        setSelPeers(new Set(ps.filter(p => p.selectable).map(p => p.id)));
+      } catch (e: any) {
+        if (alive) setPeersErr(`Kunne ikke hente maskin-listen (:8000): ${e?.message || e}`);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr("");
     try {
       const srcs = [...active].join(",");
-      const url = `${API}/handels-chart/trades?start=${start}&end=${end}` +
-        (srcs ? `&sources=${encodeURIComponent(srcs)}` : "");
+      const peersParam = [...selPeers].join(",");
+      const url = `${API}/handels-chart/trades_fleet?start=${start}&end=${end}` +
+        (srcs ? `&sources=${encodeURIComponent(srcs)}` : "") +
+        `&peers=${encodeURIComponent(peersParam)}`;
       const r = await fetch(url);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setTrades(j.trades || []);
+      setMachines(j.machines || []);
     } catch (e: any) {
       setErr(e?.message || "Kunne ikke hente handler");
-      setTrades([]);
+      setTrades([]); setMachines([]);
     } finally {
       setLoading(false);
     }
-  }, [start, end, active]);
+  }, [start, end, active, selPeers]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (sel) setImgLoading(true); }, [sel, before, after]);
@@ -80,6 +117,13 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
     setActive(prev => {
       const next = new Set(prev);
       if (next.has(src)) next.delete(src); else next.add(src);
+      return next;
+    });
+  };
+  const togglePeer = (id: string) => {
+    setSelPeers(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
@@ -122,6 +166,32 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
             ))}
           </div>
         </div>
+
+        {/* Maskin-vælger (samme som Dagens Log) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Maskiner:</span>
+          {peersErr && <span style={{ fontSize: 11, color: "var(--bear)" }}>{peersErr}</span>}
+          {peers.map(pe => (
+            <label key={pe.id} title={pe.selectable ? undefined : "Ikke opsat endnu"}
+              style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5,
+                cursor: pe.selectable ? "pointer" : "not-allowed",
+                color: pe.selectable ? "var(--text-secondary)" : "var(--text-muted)",
+                opacity: pe.selectable ? 1 : 0.5 }}>
+              <input type="checkbox" disabled={!pe.selectable}
+                checked={selPeers.has(pe.id)} onChange={() => togglePeer(pe.id)} />
+              {pe.name}
+              {pe.is_self && <span style={{ color: "var(--text-muted)" }}> (denne maskine)</span>}
+              {!pe.selectable && <span style={{ color: "var(--text-muted)" }}> (ikke opsat)</span>}
+            </label>
+          ))}
+        </div>
+
+        {/* Status pr. maskine (kun hvis en fjern-maskine fejlede) */}
+        {machines.some(m => !m.ok) && (
+          <div style={{ fontSize: 11, color: "var(--bear)", marginTop: 5 }}>
+            {machines.filter(m => !m.ok).map(m => `${m.name}: kunne ikke nås`).join(" · ")}
+          </div>
+        )}
       </div>
 
       {/* Indhold: trade-liste (venstre) + chart (højre) */}
@@ -132,12 +202,13 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
           {err && <div style={{ padding: 16, color: "var(--bear)", fontSize: 15 }}>⚠ {err} — er backenden startet?</div>}
           {!loading && !err && trades.length === 0 &&
             <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.5 }}>
-              Ingen lukkede handler i intervallet for de valgte algoer.
+              Ingen lukkede handler i intervallet for de valgte algoer og maskiner.
             </div>}
           {trades.map(t => {
-            const isSel = sel?.trade_id === t.trade_id;
+            const key = `${t.machine_id || ""}-${t.trade_id}`;
+            const isSel = sel?.trade_id === t.trade_id && sel?.machine_id === t.machine_id;
             return (
-              <div key={t.trade_id} onClick={() => setSel(t)}
+              <div key={key} onClick={() => setSel(t)}
                 style={{ padding: "11px 14px", cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
                   background: isSel ? "var(--bg-elevated)" : "transparent",
                   borderLeft: `4px solid ${isSel ? (COLOR_OF[t.source] || "var(--accent)") : "transparent"}` }}>
@@ -152,8 +223,10 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                   <span style={{ color: COLOR_OF[t.source] || "var(--text-secondary)", fontWeight: 600 }}>{t.source}</span>
                   <span>{(t.side || "").toUpperCase()} · {t.exit_reason || "?"}</span>
                 </div>
-                <div style={{ fontSize: 13.5, color: "var(--text-secondary)", marginTop: 4 }}>
-                  {fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5,
+                  color: "var(--text-secondary)", marginTop: 4 }}>
+                  <span>{fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}</span>
+                  {t.machine_name && <span style={{ color: "var(--text-muted)" }}>🖥 {t.machine_name}</span>}
                 </div>
               </div>
             );
@@ -218,8 +291,8 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
               <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
                 <div style={{ height: "100%", width: "fit-content", margin: "0 auto" }}>
                   <img
-                    key={`${sel.trade_id}-${before}-${after}`}
-                    src={`${API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
+                    key={`${sel.machine_id || ""}-${sel.trade_id}-${before}-${after}`}
+                    src={`${sel.machine_url || API}/handels-chart/trade/${sel.trade_id}.png?bars_before=${before}&bars_after=${after}`}
                     alt={`Chart for ${sel.symbol}`}
                     onLoad={() => setImgLoading(false)}
                     onError={() => setImgLoading(false)}
@@ -230,7 +303,8 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 </div>
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 }}>
-                Hvis chartet ikke vises: tjek at TWS/Gateway er forbundet (bars genhentes live fra IBKR).
+                Chartet genskabes på {sel.machine_url ? `${sel.machine_name} (fjern-maskine)` : "denne maskine"} —
+                hvis det ikke vises: tjek at DEN maskines TWS/Gateway er forbundet (bars genhentes live fra IBKR).
                 Micro-caps ~6 mdr. tilbage i 1-min historik.
               </div>
             </>

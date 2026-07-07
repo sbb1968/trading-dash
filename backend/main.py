@@ -2346,6 +2346,51 @@ async def handelschart_trades(start: str | None = None, end: str | None = None,
     return {"trades": trades, "count": len(trades)}
 
 
+@app.get("/handels-chart/trades_fleet", dependencies=[Depends(require_studio_auth)])
+async def handelschart_trades_fleet(start: str | None = None, end: str | None = None,
+                                    sources: str | None = None, peers: str = Query("")):
+    """Lukkede handler fra de VALGTE maskiner (self lokalt, andre over Tailscale med
+    X-Internal-Key), flettet og maerket pr. handel med dens maskine (machine_id/name/url).
+    Chartet for en fjern-handel hentes af frontenden fra ejer-maskinens PNG-endpoint
+    (kraever DEN maskines TWS). Spejler dagenslog/report_fleet's fan-out."""
+    from urllib.parse import urlencode
+    want = [pid for pid in peers.split(",") if pid.strip()]
+    reg  = {p["id"]: p for p in load_peers()}
+    selected = [reg[pid] for pid in want if pid in reg and reg[pid].get("url")]
+    src_list = [s.strip() for s in sources.split(",") if s.strip()] if sources else None
+
+    async def fetch_one(p: dict) -> dict:
+        is_self = (p["id"] == identity.source_id)
+        try:
+            if is_self:
+                trades = await trade_chart.load_closed_trades(
+                    journal.db, start=start, end=end, sources=src_list)
+            else:
+                q = {k: v for k, v in (("start", start), ("end", end), ("sources", sources)) if v}
+                url = f'{p["url"]}/handels-chart/trades?{urlencode(q)}'
+                timeout = aiohttp.ClientTimeout(total=12)
+                async with aiohttp.ClientSession(timeout=timeout) as s:
+                    async with s.get(url, headers={"X-Internal-Key": identity.internal_key}) as r:
+                        r.raise_for_status()
+                        data = await r.json()
+                trades = data.get("trades", [])
+            for t in trades:
+                t["machine_id"]   = p["id"]
+                t["machine_name"] = p["name"]
+                t["machine_url"]  = None if is_self else p["url"]
+            return {"peer": p, "trades": trades, "ok": True}
+        except Exception as e:
+            return {"peer": p, "trades": [], "ok": False, "err": str(e)[:140]}
+
+    results = await asyncio.gather(*[fetch_one(p) for p in selected]) if selected else []
+    all_trades = [t for r in results for t in r["trades"]]
+    # Global sortering nyeste foerst (exit-tid, fallback entry-tid).
+    all_trades.sort(key=lambda t: (t.get("exit_time_utc") or t.get("entry_time_utc") or ""), reverse=True)
+    machines = [{"id": r["peer"]["id"], "name": r["peer"]["name"], "ok": r["ok"],
+                 "n_trades": len(r["trades"]), "err": r.get("err")} for r in results]
+    return {"trades": all_trades, "count": len(all_trades), "machines": machines}
+
+
 @app.get("/handels-chart/trade/{trade_id}.png")
 async def handelschart_trade_png(trade_id: str, bars_before: int = 40, bars_after: int = 40):
     """Server-genereret PNG for handlen — inline (ingen Content-Disposition, som /docs/file),
