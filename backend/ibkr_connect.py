@@ -242,6 +242,21 @@ class IBKRConnection:
             "avg_cost": p.avgCost,
         } for p in self.ib.positions()]
 
+    async def get_positions_live(self) -> list:
+        """Som get_positions, men LIVE. reqPositions' RETURVAERDI er de FAKTISKE aktuelle
+        positioner; ib.positions()-cachen kan beholde et FANTOM efter en reconnect (IBKR
+        udelader lukkede positioner -> cachen rydder dem ikke af sig selv). Filtrerer
+        desuden net-nul fra. Falder tilbage til cachen ved timeout/fejl."""
+        try:
+            poss = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=5)
+        except Exception:
+            poss = self.ib.positions()
+        return [{
+            "ticker":   p.contract.symbol,
+            "position": p.position,
+            "avg_cost": p.avgCost,
+        } for p in (poss or []) if p.position != 0]
+
     async def get_open_orders(self) -> list:
         """Aktive (ikke-fyldte/ikke-annullerede) ordrer paa tvaers af ALLE klienter.
         Bruges af reconcile til at undgaa at laegge en DUPLIKAT luk-ordre oven paa en der

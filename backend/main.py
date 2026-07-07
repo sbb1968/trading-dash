@@ -3949,7 +3949,7 @@ async def account_snapshot(force_journal: bool = False):
 
     try:
         summary   = conn.get_account_summary()
-        positions = conn.get_positions()
+        positions = await conn.get_positions_live()   # live -> undgaa forael det cache-fantom
 
         # Saniter NaN/Inf fra summary (IBKR returnerer dem en gang imellem)
         import math
@@ -4069,7 +4069,7 @@ async def account_dash_snapshot():
         import math
 
         summary   = conn.get_account_summary()
-        positions = conn.get_positions()
+        positions = await conn.get_positions_live()   # live -> undgaa forael det cache-fantom
 
         # Saniter NaN/Inf fra summary
         for k, v in summary.items():
