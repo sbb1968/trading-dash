@@ -3996,10 +3996,6 @@
                         <div class="filter-field filter-actions">
                             <button class="btn-primary" onclick="loadLogHistory()"
                                     style="padding:10px 16px;">Hent</button>
-                            <button class="btn-secondary" onclick="setOrbWindow()"
-                                    style="padding:10px 14px;" title="ORB-vindue (US-åbning 09:30-10:30 ET = 15:30-16:30 dansk)">ORB</button>
-                            <button class="btn-secondary" onclick="setFullDay()"
-                                    style="padding:10px 14px;" title="Hele handelsdagen">Hele dagen</button>
                         </div>
                     </div>
                 </div>
@@ -4044,19 +4040,6 @@
                 document.getElementById("log-stream").innerHTML =
                     `<div class="empty">Vælg tidsvindue og klik Hent</div>`;
             }
-        }
-
-        function setOrbWindow() {
-            // US-åbningsområde 09:30–10:30 ET = 15:30–16:30 dansk tid.
-            document.getElementById("log-from").value = "15:30";
-            document.getElementById("log-to").value   = "16:30";
-            loadLogHistory();
-        }
-
-        function setFullDay() {
-            document.getElementById("log-from").value = "00:00";
-            document.getElementById("log-to").value   = "23:59";
-            loadLogHistory();
         }
 
         async function loadLogHistory() {
