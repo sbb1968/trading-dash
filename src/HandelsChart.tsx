@@ -98,12 +98,17 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
         (srcs ? `&sources=${encodeURIComponent(srcs)}` : "") +
         `&peers=${encodeURIComponent(peersParam)}`;
       const r = await fetch(url);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        if (r.status === 404)
+          throw new Error("Backenden er forbundet, men kører gammel kode uden fleet-endpointet "
+            + "— genstart workstation-backenden (git pull + restart).");
+        throw new Error(`HTTP ${r.status} — er backenden startet?`);
+      }
       const j = await r.json();
       setTrades(j.trades || []);
       setMachines(j.machines || []);
     } catch (e: any) {
-      setErr(e?.message || "Kunne ikke hente handler");
+      setErr(e?.message || "Kunne ikke hente handler (netværksfejl — er backenden startet?)");
       setTrades([]); setMachines([]);
     } finally {
       setLoading(false);
@@ -199,7 +204,7 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
         {/* Trade-liste */}
         <div style={{ width: 460, borderRight: "1px solid var(--border-subtle)", overflow: "auto", flexShrink: 0 }}>
           {loading && <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 15 }}>Henter handler…</div>}
-          {err && <div style={{ padding: 16, color: "var(--bear)", fontSize: 15 }}>⚠ {err} — er backenden startet?</div>}
+          {err && <div style={{ padding: 16, color: "var(--bear)", fontSize: 15, lineHeight: 1.5 }}>⚠ {err}</div>}
           {!loading && !err && trades.length === 0 &&
             <div style={{ padding: 16, color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.5 }}>
               Ingen lukkede handler i intervallet for de valgte algoer og maskiner.
