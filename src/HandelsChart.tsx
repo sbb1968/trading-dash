@@ -39,6 +39,18 @@ const ALGOS = [
 ];
 const COLOR_OF: Record<string, string> = Object.fromEntries(ALGOS.map(a => [a.source, a.color]));
 
+// Strategi-pill — samme udtryk som de farvede pills andre steder (subtil fyld + kant).
+function SourcePill({ source }: { source: string }) {
+  const c = COLOR_OF[source] || "#8a94a6";
+  return (
+    <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 11,
+      fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+      color: c, background: `${c}22`, border: `1px solid ${c}` }}>
+      {source}
+    </span>
+  );
+}
+
 function isoDaysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -68,6 +80,7 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
   const [selPeers, setSelPeers] = useState<Set<string>>(new Set());
   const [peersErr, setPeersErr] = useState("");
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [names, setNames] = useState<Record<string, string>>({});   // ticker -> firmanavn
 
   // Hent maskin-listen ved aabning; forvaelg alle valgbare.
   useEffect(() => {
@@ -117,6 +130,27 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (sel) setImgLoading(true); }, [sel, before, after]);
+
+  // Firmanavne for de viste tickers (fra /ticker/info, cachet i state; fejl -> "").
+  useEffect(() => {
+    const missing = [...new Set(trades.map(t => t.symbol).filter(Boolean))].filter(s => !(s in names));
+    if (missing.length === 0) return;
+    let alive = true;
+    (async () => {
+      const res = await Promise.allSettled(missing.map(async sym => {
+        const r = await fetch(`${API}/ticker/info?ticker=${encodeURIComponent(sym)}`);
+        if (!r.ok) throw new Error();
+        return ((await r.json()).name || "") as string;
+      }));
+      if (!alive) return;
+      setNames(prev => {
+        const next = { ...prev };
+        res.forEach((r, i) => { next[missing[i]] = r.status === "fulfilled" ? r.value : ""; });
+        return next;
+      });
+    })();
+    return () => { alive = false; };
+  }, [trades]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (src: string) => {
     setActive(prev => {
@@ -217,15 +251,19 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 style={{ padding: "11px 14px", cursor: "pointer", borderBottom: "1px solid var(--border-subtle)",
                   background: isSel ? "var(--bg-elevated)" : "transparent",
                   borderLeft: `4px solid ${isSel ? (COLOR_OF[t.source] || "var(--accent)") : "transparent"}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span style={{ fontWeight: 800, fontSize: 18 }}>{t.symbol}</span>
-                  <span style={{ fontWeight: 800, fontSize: 16.5, color: pnlColor(t.pnl) }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ display: "flex", alignItems: "baseline", gap: 7, minWidth: 0 }}>
+                    <span style={{ fontWeight: 800, fontSize: 18 }}>{t.symbol}</span>
+                    {names[t.symbol] && <span style={{ fontSize: 12, color: "var(--text-muted)",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{names[t.symbol]}</span>}
+                  </span>
+                  <span style={{ fontWeight: 800, fontSize: 16.5, color: pnlColor(t.pnl), flexShrink: 0 }}>
                     {typeof t.pnl === "number" ? `${t.pnl >= 0 ? "+" : ""}$${t.pnl.toFixed(2)}` : "—"}
                   </span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14,
-                  color: "var(--text-secondary)", marginTop: 4 }}>
-                  <span style={{ color: COLOR_OF[t.source] || "var(--text-secondary)", fontWeight: 600 }}>{t.source}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                  fontSize: 14, color: "var(--text-secondary)", marginTop: 5 }}>
+                  <SourcePill source={t.source} />
                   <span>{(t.side || "").toUpperCase()} · {t.exit_reason || "?"}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5,
@@ -255,13 +293,15 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
             <>
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap",
                 marginBottom: 8 }}>
-                <span style={{ fontSize: 20, fontWeight: 800, cursor: onSelectTicker ? "pointer" : "default" }}
-                  onClick={() => onSelectTicker?.(sel.symbol)} title={onSelectTicker ? "Vælg ticker" : ""}>
-                  {sel.symbol}
+                <span style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, cursor: onSelectTicker ? "pointer" : "default" }}
+                    onClick={() => onSelectTicker?.(sel.symbol)} title={onSelectTicker ? "Vælg ticker" : ""}>
+                    {sel.symbol}
+                  </span>
+                  {names[sel.symbol] && <span style={{ fontSize: 14, color: "var(--text-muted)",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{names[sel.symbol]}</span>}
                 </span>
-                <span style={{ fontSize: 15, color: COLOR_OF[sel.source] || "var(--text-secondary)", fontWeight: 700 }}>
-                  {sel.source}
-                </span>
+                <SourcePill source={sel.source} />
                 <span style={{ fontSize: 15, color: pnlColor(sel.pnl), fontWeight: 800 }}>
                   P&amp;L {typeof sel.pnl === "number" ? `${sel.pnl >= 0 ? "+" : ""}$${sel.pnl.toFixed(2)}` : "—"}
                 </span>
