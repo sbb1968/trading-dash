@@ -2247,14 +2247,26 @@ DOCS_DIR = Path(__file__).parent / "docs"
 
 
 # Kategori-praefiks i filnavnet styrer sektionen i docs-vinduet. Filnavn-moenster:
-#   <kategori>_<NN>_<titel>.pdf   fx  swing_02_konfluens_v1_referenceguide.pdf
-# Kategorien stripper ud af titlen (sektions-overskriften baerer den i stedet).
-# Rækkefølge = trading-horisont (korteste først): Day (intradag) → Swing (dage/uger)
-# → Buy and Hold (lang sigt). Styrer sektions-rækkefølgen i BÅDE Studio og Trading
-# Dash (begge grupperer bare i den rækkefølge /docs/list leverer).
-_DOC_CATEGORIES = [("day", "Day Trading"), ("swing", "Swing Trading"), ("buyhold", "Buy and Hold")]
-_DOC_CAT_LABEL = dict(_DOC_CATEGORIES)
-_DOC_CAT_ORDER = {key: i for i, (key, _) in enumerate(_DOC_CATEGORIES)}
+#   <kategori>_<NN>_<titel>.pdf   fx  swing_02_konfluens_v1_referenceguide.pdf  eller
+#   k2_01_kort_fortalt.pdf. Kategorien stripper ud af titlen (sektions-overskriften
+#   baerer den). Hver kategori hoerer til en SUPER-GRUPPE ("Trading-former" /
+#   "Strategier") saa docs-visningen kan lave to niveauer.
+# Raekkefoelge: trading-former foerst efter horisont (Day -> Swing -> Buy and Hold),
+# derefter strategierne i samme orden som Studios Strategier-fane. Styrer BEGGE
+# visninger (Studio + Trading Dash grupperer i den orden /docs/list leverer).
+_DOC_CATEGORIES = [
+    # (praefiks, kategori-label, super-gruppe)
+    ("day",     "Day Trading",       "Trading-former"),
+    ("swing",   "Swing Trading",     "Trading-former"),
+    ("buyhold", "Buy and Hold",      "Trading-former"),
+    ("k2",      "Konfluens 2",       "Strategier"),
+    ("eurev",   "Europa-reversion",  "Strategier"),
+    ("btd",     "BuyTheDip",         "Strategier"),
+    ("tjl",     "Trend Join Long",   "Strategier"),
+]
+_DOC_CAT_LABEL = {k: lbl for k, lbl, _ in _DOC_CATEGORIES}
+_DOC_CAT_GROUP = {k: grp for k, _, grp in _DOC_CATEGORIES}
+_DOC_CAT_ORDER = {k: i for i, (k, _, _) in enumerate(_DOC_CATEGORIES)}
 
 
 @app.get("/docs/list")
@@ -2292,6 +2304,7 @@ async def docs_list():
         items.append({
             "name": p.name, "title": title,
             "category": _DOC_CAT_LABEL.get(cat_key, ""),
+            "group": _DOC_CAT_GROUP.get(cat_key, ""),
             "_catorder": _DOC_CAT_ORDER.get(cat_key, 99), "_order": order,
         })
     items.sort(key=lambda d: (d["_catorder"], d["_order"], d["name"].lower()))
