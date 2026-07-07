@@ -1678,10 +1678,10 @@
         const STRATEGY_META = {
             "Momentum ORB":     { docs: "momentum_orb", pill: "pill-orb" },
             "Konfluens":        { docs: "confluence",   pill: "pill-konfl" },
-            "Konfluens 2":      { docs: "confluence2",  pill: "pill-konfl2" },
-            "Europa-reversion": { docs: "europa_reversion", pill: "pill-rev" },
-            "BuyTheDip":        { docs: "buythedip",       pill: "pill-bd" },
-            "Trend Join Long":  { docs: "trend_join_long", pill: "pill-tjl" },
+            "Konfluens 2":      { docs: "confluence2",  pill: "pill-konfl2", pdf: "k2" },
+            "Europa-reversion": { docs: "europa_reversion", pill: "pill-rev", pdf: "eurev" },
+            "BuyTheDip":        { docs: "buythedip",       pill: "pill-bd",  pdf: "btd" },
+            "Trend Join Long":  { docs: "trend_join_long", pill: "pill-tjl", pdf: "tjl" },
         };
 
         // Skrinlagte strategier: bevares i STRATEGY_META så historiske
@@ -1776,28 +1776,36 @@
 
             const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-            // Grupper pr. kategori (bevarer serverens sortering).
-            const groups = [];
+            // To-niveau-gruppering (super-gruppe → kategori), bevarer serverens sortering.
+            const supers = [];
             for (const d of docs) {
-                const cat = d.category || "Øvrigt";
-                let g = groups.find(x => x.cat === cat);
-                if (!g) { g = { cat, items: [] }; groups.push(g); }
-                g.items.push(d);
+                const gName = d.group || "Øvrigt";
+                const cName = d.category || "Øvrigt";
+                let sg = supers.find(x => x.group === gName);
+                if (!sg) { sg = { group: gName, cats: [] }; supers.push(sg); }
+                let c = sg.cats.find(x => x.cat === cName);
+                if (!c) { c = { cat: cName, items: [] }; sg.cats.push(c); }
+                c.items.push(d);
             }
-            const sections = groups.map(g => `
-                <div class="card" style="margin-bottom:16px;">
-                    <div style="font-size:15px;font-weight:700;color:#7ec0ff;margin-bottom:12px;">${esc(g.cat)}</div>
-                    <div style="display:flex;flex-direction:column;gap:8px;">
-                        ${g.items.map(d => `
-                            <button class="doc-open" data-doc="${esc(d.name)}"
-                                    style="display:flex;align-items:center;gap:10px;text-align:left;
-                                           padding:10px 14px;background:#2a2a2a;color:#e0e0e0;
-                                           border:1px solid #3a3a3a;border-radius:6px;cursor:pointer;
-                                           font-size:14px;">
-                                <span style="font-size:16px;">📄</span> ${esc(d.title)}
-                            </button>`).join("")}
-                    </div>
-                </div>`).join("");
+            const docBtn = d => `
+                <button class="doc-open" data-doc="${esc(d.name)}"
+                        style="display:flex;align-items:center;gap:10px;text-align:left;
+                               padding:10px 14px;background:#2a2a2a;color:#e0e0e0;
+                               border:1px solid #3a3a3a;border-radius:6px;cursor:pointer;
+                               font-size:14px;">
+                    <span style="font-size:16px;">📄</span> ${esc(d.title)}
+                </button>`;
+            const sections = supers.map(sg => `
+                <div style="font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;
+                            color:#8aa0b4;margin:22px 0 10px;border-bottom:1px solid #333;padding-bottom:5px;">
+                    ${esc(sg.group)}</div>
+                ${sg.cats.map(c => `
+                    <div class="card" style="margin-bottom:14px;">
+                        <div style="font-size:15px;font-weight:700;color:#7ec0ff;margin-bottom:12px;">${esc(c.cat)}</div>
+                        <div style="display:flex;flex-direction:column;gap:8px;">
+                            ${c.items.map(docBtn).join("")}
+                        </div>
+                    </div>`).join("")}`).join("");
             shell(sections);
             content.querySelectorAll(".doc-open").forEach(b =>
                 b.addEventListener("click", () => openDocPdf(b.dataset.doc)));
@@ -3457,18 +3465,18 @@
                 const stopDisabled = !running ? "disabled" : "";
                 const nameJs = s.name.replace(/'/g, "\\'");
 
-                const docsButtons = meta.docs ? `
+                const docBtnStyle = "flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;"
+                    + "border:1px solid #4a9eff;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;";
+                // Åbner PDF'erne fra /docs (samme arkiv som Dokumentation-fanen), ekstern fane.
+                const docsButtons = meta.pdf ? `
                     <div style="display:flex;gap:12px;margin-top:12px;">
-                        <button onclick="showStrategyDocs('${meta.docs}', 'iben')"
-                                style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
-                                       border:1px solid #4a9eff;border-radius:6px;
-                                       font-size:13px;font-weight:600;cursor:pointer;">
+                        <button onclick="openDocPdf('${meta.pdf}_01_kort_fortalt.pdf')" style="${docBtnStyle}">
+                            📋 Kort fortalt
+                        </button>
+                        <button onclick="openDocPdf('${meta.pdf}_02_forklaring.pdf')" style="${docBtnStyle}">
                             📖 Forklaring
                         </button>
-                        <button onclick="showStrategyDocs('${meta.docs}', 'teknisk')"
-                                style="flex:1;padding:10px;background:#2a2a2a;color:#4a9eff;
-                                       border:1px solid #4a9eff;border-radius:6px;
-                                       font-size:13px;font-weight:600;cursor:pointer;">
+                        <button onclick="openDocPdf('${meta.pdf}_03_teknisk_reference.pdf')" style="${docBtnStyle}">
                             🔬 Teknisk reference
                         </button>
                     </div>
