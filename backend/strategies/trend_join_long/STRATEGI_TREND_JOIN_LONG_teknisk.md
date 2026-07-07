@@ -13,9 +13,11 @@ med tre bevidste forskelle: (1) 30-min gapper-**rescan** i loopet, (2)
 nyhedskatalysator-gate, (3) **flertrins-exit**.
 
 **Kildefiler:**
-- Live-wrapper: `algo_trendjoin.py`
+- Live-wrapper + nyheds-gate: `algo_trendjoin.py` (`get_news_provider_codes`,
+  `check_positive_catalyst` — IBKR `reqHistoricalNews`)
 - Regel-parametre: `rules.json` (Trend Join Long)
-- Nyheds-/sentiment-gate: `finnhub_news.py` (`_guess_sentiment`)
+- Keyword-sentiment på headline: `finnhub_news.py` (`_guess_sentiment`) — kun
+  klassificering af IBKR-overskriften, IKKE nyhedskilden
 
 ---
 
@@ -41,7 +43,7 @@ Alle betingelser skal være opfyldt (rules.json):
 | **D2** | Forrige luk > SMA(200) daglig | `SMA_LEN = 200` |
 | **I3** | RVOL ≥ `RVOL_MIN` over lookback | `RVOL_MIN = 2.0`, `RVOL_LOOKBACK = 14 d` |
 | — | Pris ≥ `MIN_PRICE_USD` | `$3.0` |
-| **Katalysator** | Frisk positiv nyhed i dag (Finnhub, `_guess_sentiment`) | `NEWS_MAX_AGE_HOURS = 20` |
+| **Katalysator** | Frisk positiv nyhed i dag via IBKR `reqHistoricalNews` (DJ/Briefing.com); netto bullish blandt friske headlines (keyword-`_guess_sentiment`) | `NEWS_MAX_AGE_HOURS = 20` |
 
 **Trigger:** entry når prisen laver **ny HOD over premarket-high** (join af fortsat
 momentum). Premarket-high låses ved `SESSION_START = 09:30 ET`.
@@ -109,12 +111,15 @@ Det globale dagstab deles med de øvrige strategier.
 
 ---
 
-## Status & kendt begrænsning
+## Status & nyhedskilde
 
 **Status: tidlig live paper-test (vej B).** Kernen — nyhedskatalysatoren — kan ikke
 valideres historisk og bevises derfor live.
 
-**Kendt begrænsning:** den nuværende gratis nyhedskilde (Finnhub) dækker ikke
-micro-cap-gappere tilstrækkeligt, så katalysator-gaten er indtil videre datasultet.
-En bedre nyhedskilde er en forudsætning før strategien kan vurderes reelt — og længe
-før rigtige penge kommer på tale.
+**Nyhedskilde:** Oprindeligt Finnhub (gratis), som var for tynd til micro-cap-gappere.
+**Løst** ved at flytte katalysator-gaten til **IBKR `reqHistoricalNews`** over den
+forbindelse strategien allerede har — Dow Jones/Briefing.com giver dybere micro-cap-
+dækning og rene enkeltnavn-katalysatorer (8-K, halts, insider, partnerskaber).
+Gate-semantikken er uændret: mindst én bullish headline nyere end `NEWS_MAX_AGE_HOURS`
+og netto bullish. Forudsætter at kontoen er berettiget til de relevante nyheds-providere
+(tjekkes i pre-flight via `reqNewsProviders`).

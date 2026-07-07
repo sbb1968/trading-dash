@@ -19,6 +19,11 @@ frisk positiv nyhed på den i dag. Et gap uden katalysator fader typisk i løbet
 — så det filtreres fra. Det er præcis den del man ikke kan efterprøve billigt på
 historiske data, og derfor testes strategien live på paper i stedet for i en backtest.
 
+Nyhederne hentes **direkte fra IBKR/TWS** (jeres eksisterende forbindelse) — de samme
+professionelle kilder som Dow Jones og Briefing.com, med rene enkeltnavn-katalysatorer
+(regnskaber, handelsstop, insider-køb, partnerskaber). Det giver en langt dybere
+dækning af de små micro-cap-gappere end en gratis nyhedskilde ville.
+
 ## Hvilke aktier kigger den på
 
 Dagens top-gappere, **re-scannet hvert 30. minut** gennem dagen (ikke bare ét scan ved
@@ -62,10 +67,10 @@ Trend Join Long er **ny og under live paper-test** (den såkaldte "vej B") — k
 nyhedskatalysatoren, kan ikke valideres historisk, så den skal bevises live.
 Strategien har **manuel start** og auto-starter aldrig af sig selv.
 
-Et vigtigt tidligt fund fra live-testen: den gratis nyhedsdækning strategien bruger nu
-rammer **ikke** de små micro-cap-gappere godt nok — så kernen er indtil videre
-datasultet. Der arbejdes på en bedre nyhedskilde. Indtil det er løst, er rigtige penge
-langt væk.
+Tidligt i live-testen viste en gratis nyhedskilde sig for tynd til micro-cap-gappere;
+det er nu **løst** ved at hente nyhederne direkte fra IBKR/TWS (Dow Jones/Briefing.com),
+som dækker de små navne langt bedre. Strategien skal stadig vise konsistente resultater
+på paper, før rigtige penge kommer på tale.
 
 ## Kort sagt
 
