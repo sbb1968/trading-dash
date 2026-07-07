@@ -367,7 +367,7 @@ async def startup():
         buythedip = BuyTheDipLive(strategy_manager.get_ibkr(), config=buythedip_config)
         strategy_manager.register(buythedip)
         buythedip._broadcast_fn = broadcast_algo_sync
-        print(f"[Server] BuyTheDip registreret — buy-the-dip, forbruger K2-univers")
+        print(f"[Server] BuyTheDip registreret — buy-the-dip, eget TV Intraday-Volatility-scan")
 
         # ── Registrér Trend Join Long (gap-and-go m. nyhedskatalysator, paper) ──
         # MANUEL start kun — IKKE i scheduleren (auto-starter aldrig). Long-only.

@@ -32,8 +32,8 @@ BAR_MINUTES = 15     # afledt af BAR_SIZE — bruges til "er baren færdig?"-tje
 # ── Instrumenter + sizing ─────────────────────────────────────
 INSTRUMENTS = ["MES", "M2K"]   # IKKE MNQ (mean-reverter ikke pålideligt — se SPEC)
 RISK_PCT    = 0.01             # 1% af konto-equity pr. handel
-# Kontrakt-multiplikatorer ($ pr. prispoint). VERIFICÉR mod IBKR ved første
-# live-kvalificering. MES og M2K er begge $5/point.
+# Kontrakt-multiplikatorer ($ pr. prispoint). MES og M2K er begge $5/point
+# (CME micro). MES bekræftet live: reqPositions-avgCost = pris × 5.
 MULTIPLIER = {
     "MES": 5.0,
     "M2K": 5.0,

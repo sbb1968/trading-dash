@@ -564,7 +564,7 @@ class TrendJoinLive(BaseStrategy):
                          f"📋 Puljen udvidet med {len(added)}: {', '.join(added)} "
                          f"(i alt {len(self.universe)})")
             await self.log_universe(self.universe, meta={
-                "added": added, "min_gap_pct": MIN_GAP_PCT, "source": "tv_top_gainers+finnhub"})
+                "added": added, "min_gap_pct": MIN_GAP_PCT, "source": "tv_top_gainers+ibkr_news"})
 
     async def _log_scan(self, records: list[dict], max_change: Optional[float],
                         top_sym: Optional[str], added: list[str]) -> None:
