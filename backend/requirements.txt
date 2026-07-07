@@ -59,3 +59,4 @@ yfinance==1.3.0
 reportlab
 matplotlib
 python-dotenv
+markdown            # kun til build_docs.py (strategi-MD -> PDF); ikke runtime
