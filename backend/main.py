@@ -124,8 +124,16 @@ strategy_clients: list[WebSocket] = []
 ibkr_conn      = None
 live_feed      = None
 live_feed_task = None
-ibkr_connected = False
+ibkr_connected = False   # sidst KENDTE status (opstart/strategi-start) — kan vaere forael det
 journal = Journal("trading_dash.db")
+
+
+def ibkr_live_connected() -> bool:
+    """LEVENDE IBKR-forbindelses-status. Den globale ibkr_connected sættes kun ved
+    opstart/strategi-start; selv-helende connect_ibkr-kald (analyze-endpoints) opdaterer
+    den ikke. Status-visning skal derfor laese den faktiske forbindelse her."""
+    c = strategy_manager.get_ibkr()
+    return bool(c is not None and c.connected)
 # ── Autonom drift: watchdog + scheduler ───────────────────────
 tws_watchdog: TWSWatchdog | None     = None
 algo_scheduler: AlgoScheduler | None = None
@@ -540,7 +548,7 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
     print(f"[Server] Klient forbundet — {len(connected_clients)} aktive")
 
-    await websocket.send_text(json.dumps({"type": "ibkr_status", "connected": ibkr_connected}))
+    await websocket.send_text(json.dumps({"type": "ibkr_status", "connected": ibkr_live_connected()}))
 
     try:
         while True:
@@ -3518,7 +3526,7 @@ async def health():
         "strategy_clients": len(strategy_clients),
         "algo_running":     any(s.status == StrategyStatus.RUNNING
                                 for s in strategy_manager._strategies.values()),
-        "ibkr_connected":   ibkr_connected,
+        "ibkr_connected":   ibkr_live_connected(),
         "threshold":        alert_engine.threshold,
         "journal_events":   await journal.count_events(),
         "time":             datetime.now().isoformat(),
@@ -3587,7 +3595,7 @@ async def status():
         },
 
         "ibkr": {
-            "connected": ibkr_connected,
+            "connected": ibkr_live_connected(),
         },
 
         "tws_watchdog": tws_watchdog.status_dict if tws_watchdog else {"running": False},
