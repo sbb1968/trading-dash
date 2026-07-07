@@ -1287,9 +1287,7 @@
         <button data-page="account">Konto</button>
         <button data-page="strategies">Strategier</button>
         <button data-page="analysis">Analyse</button>
-        <button data-page="dagsrapport">Dagsrapport</button>
         <button data-page="journal">Journal</button>
-        <button data-page="backtest">Backtest</button>
         <button data-page="log">Log</button>
     </nav>
 
@@ -1715,7 +1713,6 @@
             else if (page === "status") showAnalysis();
             else if (page === "account") showAccount();
             else if (page === "analysis") showStatus();
-            else if (page === "dagsrapport") renderDagsrapport();
             else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
             else if (page === "log") showLog();
@@ -1724,7 +1721,6 @@
 
         function showPlaceholder(page) {
             const labels = {
-                backtest: "Backtest",
                 log: "Event-log",
             };
             document.getElementById("content").innerHTML = `
