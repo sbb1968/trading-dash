@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 
 const API = "http://127.0.0.1:8000";
@@ -38,8 +38,11 @@ export function DagensLogWindow() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [peersErr, setPeersErr] = useState("");
 
-  const [from, setFrom]         = useState(today);
-  const [to, setTo]             = useState(today);
+  // UNCONTROLLED dato-inputs (ref + defaultValue): app'en re-renderer ~hvert sekund
+  // (live WS-ticks); et controlled value={from} ville kassere Ibens dato-valg midt i
+  // dato-vaelgeren. Med ref ejer DOM'en vaerdien og re-renders roerer den ikke.
+  const fromRef = useRef<HTMLInputElement>(null);
+  const toRef   = useRef<HTMLInputElement>(null);
   const [markdown, setMarkdown] = useState("");
   const [machines, setMachines] = useState<Machine[] | null>(null);
   const [period, setPeriod]     = useState<{ from: string; to: string } | null>(null);
@@ -77,6 +80,8 @@ export function DagensLogWindow() {
   async function run() {
     setLoading(true); setError(""); setCopied(false);
     try {
+      const from = fromRef.current?.value || today();
+      const to   = toRef.current?.value || today();
       const peersParam = encodeURIComponent([...selected].join(","));
       const r = await fetch(`${API}/dagenslog/report_fleet?from=${from}&to=${to}&peers=${peersParam}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -151,9 +156,9 @@ export function DagensLogWindow() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                     padding: "10px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
         <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Fra:</label>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp} />
+        <input type="date" ref={fromRef} defaultValue={today()} style={inp} />
         <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Til:</label>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp} />
+        <input type="date" ref={toRef} defaultValue={today()} style={inp} />
         <button onClick={run} disabled={loading || selected.size === 0}
           style={{ ...btn, opacity: (loading || selected.size === 0) ? 0.6 : 1 }}>
           {loading ? "Henter…" : "Kør dagens log"}
