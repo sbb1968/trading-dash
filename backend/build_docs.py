@@ -89,13 +89,49 @@ def convert(md_file: Path, out_pdf: Path, title: str | None = None) -> None:
     md_text = md_file.read_text(encoding="utf-8")
     title = title or _title_from_md(md_text, md_file.stem)
     html_to_pdf(md_to_html(md_text, title), out_pdf)
-    print(f"OK  {md_file.name}  ->  {out_pdf}")
+    print(f"OK  {md_file.name}  ->  {out_pdf.name}")
+
+
+# ── Strategi-docs manifest ──────────────────────────────────────
+# (strategi-mappe, docs-kategori-præfiks, [(md-version, NN, output-slug), ...]).
+# MD-kilde: strategies/<mappe>/STRATEGI_<MAPPE.upper()>_<version>.md
+# Output:   docs/<præfiks>_<NN>_<slug>.pdf  (titel afledes af slug i /docs/list)
+_STRATEGY_DOCS = [
+    ("confluence2", "k2", [
+        ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
+    ("europa_reversion", "eurev", [
+        ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
+    ("buythedip", "btd", [
+        ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
+    ("trend_join_long", "tjl", [
+        ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
+]
+_DOCS_OUT = HERE / "docs"
+
+
+def build_all() -> None:
+    n = 0
+    for sdir, prefix, versions in _STRATEGY_DOCS:
+        for version, nn, slug in versions:
+            md = HERE / "strategies" / sdir / f"STRATEGI_{sdir.upper()}_{version}.md"
+            if not md.is_file():
+                print(f"SPRING OVER (mangler): {md}")
+                continue
+            convert(md, _DOCS_OUT / f"{prefix}_{nn}_{slug}.pdf")
+            n += 1
+    print(f"\n{n} strategi-PDF'er bygget i {_DOCS_OUT}")
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Konverter Markdown til PDF (fælles skabelon)")
-    ap.add_argument("input", help="input .md")
-    ap.add_argument("output", help="output .pdf")
+    ap = argparse.ArgumentParser(description="Konverter strategi-Markdown til PDF (fælles skabelon)")
+    ap.add_argument("input", nargs="?", help="input .md (udelades ved --all)")
+    ap.add_argument("output", nargs="?", help="output .pdf (udelades ved --all)")
     ap.add_argument("--title", default=None, help="vist titel (default: første # H1)")
+    ap.add_argument("--all", action="store_true", help="byg ALLE strategi-docs fra manifestet")
     a = ap.parse_args()
-    convert(Path(a.input), Path(a.output), a.title)
+    if a.all:
+        build_all()
+    elif a.input and a.output:
+        convert(Path(a.input), Path(a.output), a.title)
+    else:
+        ap.error("angiv <input> <output>, eller brug --all")
