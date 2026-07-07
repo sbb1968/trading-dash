@@ -318,6 +318,20 @@
             opacity: 1;
         }
 
+        /* Danske dato-felter: synligt tekstfelt (dd-mm-aaaa) + kalender-knap der
+           aabner en SKJULT native picker. Native date-widgets viser browserens
+           locale (ofte amerikansk) og kan ikke tvinges til dansk — derfor dette. */
+        .dk-date-row { display: flex; align-items: center; gap: 4px; }
+        .dk-date-row input[type="text"] { flex: 1; min-width: 0; }
+        .dk-date-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; padding: 0; border: 0; }
+        .dk-cal-btn {
+            flex: 0 0 auto; cursor: pointer; font-size: 15px; line-height: 1;
+            padding: 6px 9px; border-radius: 5px; color: #f0f0f0;
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+            transition: background 0.12s, border-color 0.12s;
+        }
+        .dk-cal-btn:hover { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
+
         .filter-field input:focus,
         .filter-field select:focus {
             outline: none;
@@ -1563,6 +1577,28 @@
         };
         const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString("da-DK") : "—";
         const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("da-DK") : "—";
+        // Danske dato-felter: ISO <-> dd-mm-aaaa + aabning af skjult native picker.
+        function dkDate(iso) {
+            if (!iso) return "";
+            const p = String(iso).split("-");
+            return (p.length === 3) ? `${p[2]}-${p[1]}-${p[0]}` : "";
+        }
+        function parseDk(s) {
+            const m = (s || "").trim().match(/^(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{4})$/);
+            return m ? `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}` : "";
+        }
+        function openDatePicker(baseId) {
+            const di = document.getElementById(baseId);
+            const txt = document.getElementById(baseId + "-txt");
+            if (!di || !txt) return;
+            di.value = parseDk(txt.value) || di.value || "";
+            di.onchange = () => {
+                txt.value = dkDate(di.value);
+                if (typeof applyJournalFilters === "function") applyJournalFilters();
+            };
+            try { if (di.showPicker) { di.showPicker(); return; } } catch (e) { /* fallback */ }
+            di.focus(); di.click();
+        }
         // Handelstider: dansk lokaltid FØRST, ET i parentes — fx "11:15 (05:15 ET)".
         // Dansk beregnes fra UTC-ankeret (entry_time_utc er ISO med +00:00) og
         // timeZone pinnes til Europe/Copenhagen, så visningen er korrekt uanset
@@ -2522,12 +2558,20 @@
                 <div class="card journal-filterbar">
                     <div class="filter-grid">
                         <div class="filter-field">
-                            <label for="f-date-from">Fra dato</label>
-                            <input type="date" id="f-date-from" value="${f.date_from}">
+                            <label for="f-date-from-txt">Fra dato</label>
+                            <div class="dk-date-row">
+                                <input type="text" id="f-date-from-txt" placeholder="dd-mm-åååå" inputmode="numeric" value="${dkDate(f.date_from)}">
+                                <input type="date" id="f-date-from" class="dk-date-hidden" value="${f.date_from}">
+                                <button type="button" class="dk-cal-btn" onclick="openDatePicker('f-date-from')" title="Vælg dato">📅</button>
+                            </div>
                         </div>
                         <div class="filter-field">
-                            <label for="f-date-to">Til dato</label>
-                            <input type="date" id="f-date-to" value="${f.date_to}">
+                            <label for="f-date-to-txt">Til dato</label>
+                            <div class="dk-date-row">
+                                <input type="text" id="f-date-to-txt" placeholder="dd-mm-åååå" inputmode="numeric" value="${dkDate(f.date_to)}">
+                                <input type="date" id="f-date-to" class="dk-date-hidden" value="${f.date_to}">
+                                <button type="button" class="dk-cal-btn" onclick="openDatePicker('f-date-to')" title="Vælg dato">📅</button>
+                            </div>
                         </div>
                         <div class="filter-field">
                             <label for="f-source">Strategi</label>
@@ -2562,7 +2606,7 @@
             document.getElementById("f-reset").addEventListener("click", resetJournalFilters);
 
             // Enter-tasten i felter = anvend
-            ["f-date-from", "f-date-to", "f-symbol"].forEach(id => {
+            ["f-date-from-txt", "f-date-to-txt", "f-symbol"].forEach(id => {
                 document.getElementById(id).addEventListener("keypress", e => {
                     if (e.key === "Enter") applyJournalFilters();
                 });
@@ -2576,8 +2620,8 @@
 
         function applyJournalFilters() {
             journalFilters = {
-                date_from: document.getElementById("f-date-from").value,
-                date_to:   document.getElementById("f-date-to").value,
+                date_from: parseDk(document.getElementById("f-date-from-txt").value),
+                date_to:   parseDk(document.getElementById("f-date-to-txt").value),
                 source:    document.getElementById("f-source").value,
                 symbol:    document.getElementById("f-symbol").value.toUpperCase().trim(),
                 status:    document.getElementById("f-status").value,
