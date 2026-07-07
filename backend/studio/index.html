@@ -3964,13 +3964,14 @@
         }
 
         let logMode = "live";   // "live" eller "historik"
+        let logTruncated = false;   // true hvis historik-svar ramte limit
 
         function showLog() {
             logEntries = [];
             const todayISO = new Date().toISOString().substring(0, 10);
             document.getElementById("content").innerHTML = `
                 <div class="section-title">
-                    Live Log — ORB &amp; Konfluens
+                    Live Log
                     <span id="log-conn" style="margin-left:12px; font-size:13px; font-weight:500;"></span>
                 </div>
 
@@ -3981,6 +3982,8 @@
                         <button id="log-tab-hist" class="btn-secondary" onclick="setLogMode('historik')"
                                 style="padding:8px 16px; font-size:13px;">Historik</button>
                         <span style="flex:1;"></span>
+                        <button id="log-copy" class="btn-secondary" onclick="copyLogToClipboard(this)"
+                                style="padding:6px 14px; font-size:13px;">📋 Kopiér alt</button>
                         <button class="btn-secondary" onclick="clearLogView()"
                                 style="padding:6px 14px; font-size:13px;">Ryd visning</button>
                     </div>
@@ -3988,11 +3991,19 @@
                     <div id="log-hist-controls" style="display:none; margin-top:12px; gap:10px;
                                 align-items:end; flex-wrap:wrap;">
                         <div class="filter-field" style="min-width:150px;">
-                            <label for="log-date-txt">Dato</label>
+                            <label for="log-date-txt">Fra dato</label>
                             <div class="dk-date-row">
                                 <input type="text" id="log-date-txt" placeholder="dd-mm-åååå" inputmode="numeric" value="${dkDate(todayISO)}">
                                 <input type="date" id="log-date" class="dk-date-hidden" value="${todayISO}">
                                 <button type="button" class="dk-cal-btn" onclick="openDatePicker('log-date', loadLogHistory)" title="Vælg dato">📅</button>
+                            </div>
+                        </div>
+                        <div class="filter-field" style="min-width:150px;">
+                            <label for="log-date-to-txt">Til dato</label>
+                            <div class="dk-date-row">
+                                <input type="text" id="log-date-to-txt" placeholder="dd-mm-åååå" inputmode="numeric" value="${dkDate(todayISO)}">
+                                <input type="date" id="log-date-to" class="dk-date-hidden" value="${todayISO}">
+                                <button type="button" class="dk-cal-btn" onclick="openDatePicker('log-date-to', loadLogHistory)" title="Vælg dato">📅</button>
                             </div>
                         </div>
                         <div class="filter-field" style="min-width:90px;">
@@ -4025,7 +4036,7 @@
                 </div>
             `;
             // Enter i dato-/tidsfelterne = hent historik (som Journal-fanens felter)
-            ["log-date-txt", "log-from", "log-to"].forEach(id => {
+            ["log-date-txt", "log-date-to-txt", "log-from", "log-to"].forEach(id => {
                 document.getElementById(id).addEventListener("keypress", e => {
                     if (e.key === "Enter") loadLogHistory();
                 });
@@ -4061,10 +4072,13 @@
         }
 
         async function loadLogHistory() {
-            // Dato læses fra det danske tekstfelt (dd-mm-åååå); falder tilbage til
-            // det skjulte date-input hvis tekstfeltet er tomt/ugyldigt.
-            const date   = parseDk(document.getElementById("log-date-txt").value)
-                        || document.getElementById("log-date").value;
+            // Fra-/til-dato læses fra de danske tekstfelter (dd-mm-åååå); falder
+            // tilbage til det skjulte date-input hvis tekstfeltet er tomt/ugyldigt.
+            const date    = parseDk(document.getElementById("log-date-txt").value)
+                         || document.getElementById("log-date").value;
+            const dateTo  = parseDk(document.getElementById("log-date-to-txt").value)
+                         || document.getElementById("log-date-to").value
+                         || date;
             // Normalisér fra/til til HH:MM og skriv den pæne form tilbage i feltet.
             const fromEl = document.getElementById("log-from");
             const toEl   = document.getElementById("log-to");
@@ -4077,17 +4091,21 @@
 
             stream.innerHTML = `<div class="empty">Henter events...</div>`;
 
+            const HIST_LIMIT = 5000;   // rigeligt til et flerdags-vindue
             const params = new URLSearchParams();
-            params.set("tz", "dk");   // fortolk date + fra/til i dansk tid
-            if (date) params.set("date", date);
+            params.set("tz", "dk");   // fortolk datoer + fra/til i dansk tid
+            if (date)   params.set("date", date);
+            if (dateTo) params.set("date_to", dateTo);
             if (from) params.set("from_time", from);
             if (to)   params.set("to_time", to);
             if (source) params.set("source", source);
+            params.set("limit", HIST_LIMIT);
 
             try {
                 const res = await authFetch(`/journal/events?${params.toString()}`);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                logTruncated = (data.count || 0) >= HIST_LIMIT;
                 logEntries = (data.events || []).map(ev => {
                     // Tidsstempel i dansk lokaltid (fra UTC-anker); fallback til ts_local.
                     const t = _dkClockFromUtc(ev.ts_utc)
@@ -4107,6 +4125,12 @@
                     stream.innerHTML = `<div class="empty">Ingen events i dette vindue</div>`;
                 } else {
                     renderLogStream();
+                    if (logTruncated) {
+                        const note = document.createElement("div");
+                        note.style.cssText = "color:#fdba74; padding:4px 0; font-weight:600;";
+                        note.textContent = `⚠ Visning begrænset til ${HIST_LIMIT} events — indsnævr perioden for at se resten.`;
+                        stream.insertBefore(note, stream.firstChild);
+                    }
                 }
             } catch (e) {
                 stream.innerHTML = `<div class="error">Kunne ikke hente: ${e.message}</div>`;
@@ -4232,7 +4256,53 @@
 
         function clearLogView() {
             logEntries = [];
+            logTruncated = false;
             renderLogStream();
+        }
+
+        // Kort visuel kvittering på en knap (fx efter kopiering).
+        function flashBtn(btn, msg) {
+            if (!btn) return;
+            const orig = btn.dataset.orig || btn.textContent;
+            btn.dataset.orig = orig;
+            btn.textContent = msg;
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.textContent = btn.dataset.orig;
+                btn.disabled = false;
+            }, 1600);
+        }
+
+        // Kopiér hele den viste log (tid + tekst pr. linje) til clipboard som ren
+        // tekst, så den kan indsættes i fx Word og bladres igennem. CRLF-linjeskift
+        // så Word får korrekte afsnit. Falder tilbage til execCommand i ældre webview.
+        async function copyLogToClipboard(btn) {
+            if (!logEntries.length) { flashBtn(btn, "Intet at kopiere"); return; }
+            const header = `Trading Dash — Log (${logEntries.length} linjer)`;
+            const body = logEntries.map(e => `${e.time}\t${e.text}`).join("\r\n");
+            const text = `${header}\r\n${"=".repeat(header.length)}\r\n${body}\r\n`;
+            const ok = await copyTextToClipboard(text);
+            flashBtn(btn, ok ? `✓ Kopieret (${logEntries.length} linjer)` : "Kopiering fejlede");
+        }
+
+        async function copyTextToClipboard(text) {
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                }
+            } catch (e) { /* fald igennem til execCommand */ }
+            try {
+                const ta = document.createElement("textarea");
+                ta.value = text;
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = document.execCommand("copy");
+                document.body.removeChild(ta);
+                return ok;
+            } catch (e) { return false; }
         }
 
         // ─────────────────────────────────────────────────────

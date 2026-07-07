@@ -2672,9 +2672,10 @@ async def journal_open_positions(archive: str = None):
 
 @app.get("/journal/events")
 async def journal_events(
-    date:       str = None,        # "2026-05-20" — handelsdag i valgt tz (se tz)
-    from_time:  str = "00:00",     # "HH:MM" i valgt tz
-    to_time:    str = "23:59",     # "HH:MM" i valgt tz
+    date:       str = None,        # fra-dato "2026-05-20" i valgt tz (se tz)
+    date_to:    str = None,        # til-dato; None = samme som date (én dag)
+    from_time:  str = "00:00",     # "HH:MM" i valgt tz (på fra-dato)
+    to_time:    str = "23:59",     # "HH:MM" i valgt tz (på til-dato)
     source:     str = None,        # "Momentum ORB" / "Konfluens" — None = alle
     event_type: str = None,        # None = alle
     limit:      int = 1000,
@@ -2686,7 +2687,9 @@ async def journal_events(
     Log-fane (Historik-tilstand) til at se hvad algoritmerne lavede selv
     hvis man ikke fulgte med live.
 
-    date + from_time/to_time fortolkes i den valgte tidszone:
+    Vinduet er [date from_time, date_to to_time]. date_to udelades for et
+    enkelt-dags-vindue (default = date). date + tidspunkter fortolkes i den
+    valgte tidszone:
       tz="ET" (default) → America/New_York (bagudkompat.)
       tz="DK"           → Europe/Copenhagen (Studio's Log-fane bruger denne)
     Backenden oversætter til UTC-grænser så filteret rammer korrekt uanset
@@ -2702,6 +2705,8 @@ async def journal_events(
     # Hvis ingen dato angivet: brug dagens dato i den valgte tidszone
     if not date:
         date = datetime.now(WALL_TZ).strftime("%Y-%m-%d")
+    if not date_to:
+        date_to = date
 
     def window_to_utc(d: str, hhmm: str) -> str:
         """Lav 'YYYY-MM-DD' + 'HH:MM' i WALL_TZ om til en ISO UTC-streng."""
@@ -2713,7 +2718,7 @@ async def journal_events(
         return wall_dt.astimezone(pytz.utc).isoformat()
 
     from_utc = window_to_utc(date, from_time)
-    to_utc   = window_to_utc(date, to_time)
+    to_utc   = window_to_utc(date_to, to_time)
 
     async with _resolve_db(archive) as db:
         events = await journal.get_events(
@@ -2723,6 +2728,7 @@ async def journal_events(
         )
     return {
         "date":      date,
+        "date_to":   date_to,
         "tz":        str(tz).upper(),
         "from_time": from_time,
         "to_time":   to_time,
@@ -2730,6 +2736,7 @@ async def journal_events(
         "to_utc":    to_utc,
         "source":    source,
         "count":     len(events),
+        "limit":     limit,
         "events":    events,
     }
 
