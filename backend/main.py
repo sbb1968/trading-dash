@@ -2249,7 +2249,10 @@ DOCS_DIR = Path(__file__).parent / "docs"
 # Kategori-praefiks i filnavnet styrer sektionen i docs-vinduet. Filnavn-moenster:
 #   <kategori>_<NN>_<titel>.pdf   fx  swing_02_konfluens_v1_referenceguide.pdf
 # Kategorien stripper ud af titlen (sektions-overskriften baerer den i stedet).
-_DOC_CATEGORIES = [("swing", "Swing Trading"), ("day", "Day Trading"), ("buyhold", "Buy and Hold")]
+# Rækkefølge = trading-horisont (korteste først): Day (intradag) → Swing (dage/uger)
+# → Buy and Hold (lang sigt). Styrer sektions-rækkefølgen i BÅDE Studio og Trading
+# Dash (begge grupperer bare i den rækkefølge /docs/list leverer).
+_DOC_CATEGORIES = [("day", "Day Trading"), ("swing", "Swing Trading"), ("buyhold", "Buy and Hold")]
 _DOC_CAT_LABEL = dict(_DOC_CATEGORIES)
 _DOC_CAT_ORDER = {key: i for i, (key, _) in enumerate(_DOC_CATEGORIES)}
 
