@@ -2263,6 +2263,16 @@ async def docs_list():
     category}]} sorteret paa (kategori-raekkefoelge, NN-praefiks, filnavn)."""
     if not DOCS_DIR.is_dir():
         return {"docs": []}
+    # Valgfri titel-override: docs/titles.json ({filnavn: "Vist titel"}) vinder over den
+    # filnavn-afledte titel. Bruges når titlen skal indeholde tegn/versaler et filnavn
+    # ikke kan bære (fx pine-script-navne med mellemrum, "&", "[Long]"). Læses live.
+    titles_override = {}
+    _titles_file = DOCS_DIR / "titles.json"
+    if _titles_file.is_file():
+        try:
+            titles_override = json.loads(_titles_file.read_text(encoding="utf-8"))
+        except Exception:
+            titles_override = {}
     items = []
     for p in DOCS_DIR.glob("*.pdf"):
         stem = p.stem
@@ -2278,6 +2288,7 @@ async def docs_list():
             stem = stem.split("_", 1)[1]
         title = stem.replace("_", " ").replace("-", " ").strip()
         title = (title[:1].upper() + title[1:]) if title else p.name
+        title = titles_override.get(p.name, title)   # eksplicit titel vinder
         items.append({
             "name": p.name, "title": title,
             "category": _DOC_CAT_LABEL.get(cat_key, ""),
