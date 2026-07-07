@@ -16,7 +16,7 @@ interface Fin { year: number | string; revenue: number | null; net_income: numbe
 interface Company {
   ticker: string; name: string; exchange: string; industry: string; sector: string;
   country: string; currency: string; ipo: string;
-  market_cap_musd: number | null; shares_out_m: number | null;
+  market_cap_musd: number | null; shares_out_m: number | null; float_shares_m: number | null;
   employees: number | null; ceo: string; logo: string; website: string;
   description: string; desc_source: string; wiki_url: string; ok: boolean;
   earnings_date?: string; earnings_date_end?: string;
@@ -106,6 +106,10 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
     ["Næste earnings", earningsLabel(data.earnings_date, data.earnings_date_end)],
     ["Market cap", fmtCap(data.market_cap_musd)],
     ["Aktier udestående", fmtShares(data.shares_out_m)],
+    ["Float", data.float_shares_m != null
+      ? fmtShares(data.float_shares_m)
+        + (data.shares_out_m ? ` (${(data.float_shares_m / data.shares_out_m * 100).toFixed(0)}% af udestående)` : "")
+      : "—"],
     ["Medarbejdere", fmtNum(data.employees)],
     ["CEO", data.ceo || "—"],
   ] : [];
@@ -257,6 +261,8 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
           <div style={{ marginTop: 16, display: "flex", gap: 16, fontSize: 15 }}>
             {data.website && <span style={linkStyle} onClick={() => openUrl(data.website)}>🌐 Hjemmeside</span>}
             {data.wiki_url && <span style={linkStyle} onClick={() => openUrl(data.wiki_url)}>📖 Wikipedia</span>}
+            {data.ticker && <span style={linkStyle}
+              onClick={() => openUrl(`https://www.warriortrading.com/quote/${data.ticker}/`)}>⚔️ Warrior Trading</span>}
           </div>
 
           <div style={{ marginTop: 14, color: "var(--text-muted)", fontSize: 12.5 }}>

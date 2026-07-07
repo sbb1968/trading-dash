@@ -29,7 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
-SCHEMA = 6   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
+SCHEMA = 7   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -155,7 +155,7 @@ def _yf_bundle(sym: str) -> dict:
     """Ét yfinance-opslag: profil-felter + nøgletal + 4-års omsætning/overskud. Best-effort."""
     out = {"employees": None, "ceo": "", "summary": "", "sector": "", "industry": "",
            "website": "", "country": "", "earnings_date": "", "earnings_date_end": "",
-           "stats": {}, "financials": []}
+           "float_shares": None, "stats": {}, "financials": []}
     try:
         import yfinance as yf
         t = yf.Ticker(sym)
@@ -173,6 +173,7 @@ def _yf_bundle(sym: str) -> dict:
                summary=info.get("longBusinessSummary", "") or "",
                sector=info.get("sector", "") or "", industry=info.get("industry", "") or "",
                website=info.get("website", "") or "", country=info.get("country", "") or "")
+    out["float_shares"] = _num(info.get("floatShares"))   # rå antal frit omsættelige aktier
     out["stats"] = {
         "price":         _num(info.get("currentPrice") or info.get("regularMarketPrice")),
         "pe":            _num(info.get("trailingPE")),
@@ -274,6 +275,7 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
         "ipo":             prof.get("ipo", ""),
         "market_cap_musd": prof.get("marketCapitalization"),   # mio. USD
         "shares_out_m":    prof.get("shareOutstanding"),       # mio. aktier
+        "float_shares_m":  (yf.get("float_shares") / 1e6) if yf.get("float_shares") else None,  # mio. frit omsættelige (float)
         "employees":       yf.get("employees"),
         "ceo":             yf.get("ceo", ""),
         "earnings_date":   yf.get("earnings_date", ""),
