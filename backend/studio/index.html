@@ -766,6 +766,12 @@
             border: 1px solid rgba(45, 212, 191, 0.4);
         }
 
+        .pill-tjl {
+            background: rgba(96, 165, 250, 0.18);
+            color: #93c5fd;
+            border: 1px solid rgba(96, 165, 250, 0.4);
+        }
+
         .pill-manuel {
             background: rgba(251, 146, 60, 0.18);
             color: #fdba74;
@@ -1652,6 +1658,7 @@
             "Konfluens 2":      { docs: "confluence2",  pill: "pill-konfl2" },
             "Europa-reversion": { docs: "europa_reversion", pill: "pill-rev" },
             "BuyTheDip":        { docs: null,           pill: "pill-bd" },
+            "Trend Join Long":  { docs: null,           pill: "pill-tjl" },
         };
 
         // Skrinlagte strategier: bevares i STRATEGY_META så historiske
@@ -2083,6 +2090,8 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
+                if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2326,6 +2335,8 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
+                if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source || "—"}</span>`;
             };
@@ -2671,6 +2682,8 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
+                if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${source}</span>`;
             };
@@ -2908,6 +2921,8 @@
                 if (src === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (src === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (src === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (src === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
+                if (src === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
             };
