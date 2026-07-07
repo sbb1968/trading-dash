@@ -1295,6 +1295,7 @@
         <button data-page="analysis">Analyse</button>
         <button data-page="journal">Journal</button>
         <button data-page="log">Log</button>
+        <button data-page="docs">Dokumentation</button>
     </nav>
 
     <main>
@@ -1745,7 +1746,66 @@
             else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
             else if (page === "log") showLog();
+            else if (page === "docs") showDocs();
             else showPlaceholder(page);
+        }
+
+        // ── Dokumentation — samme /docs-arkiv som Trading Dash (one source of truth) ──
+        // Lister alle PDF'er grupperet pr. kategori (Swing/Day/Buy & Hold); klik åbner
+        // PDF'en i en ny fane via /docs/file/{name}. /docs/list er allerede sorteret
+        // pr. kategori + rækkefølge. Strategi-docs kommer til som egen gruppe senere.
+        async function showDocs() {
+            const content = document.getElementById("content");
+            const shell = inner => content.innerHTML =
+                `<div class="section-title">Dokumentation</div>${inner}`;
+            shell(`<div class="card"><div class="empty">Henter dokumenter...</div></div>`);
+
+            let docs = [];
+            try {
+                const res = await fetch("/docs/list");
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                docs = (await res.json()).docs || [];
+            } catch (e) {
+                shell(`<div class="card"><div class="error">Kunne ikke hente dokumenter: ${e.message}</div></div>`);
+                return;
+            }
+            if (!docs.length) {
+                shell(`<div class="card"><div class="empty">Ingen dokumenter fundet.</div></div>`);
+                return;
+            }
+
+            const esc = s => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+            // Grupper pr. kategori (bevarer serverens sortering).
+            const groups = [];
+            for (const d of docs) {
+                const cat = d.category || "Øvrigt";
+                let g = groups.find(x => x.cat === cat);
+                if (!g) { g = { cat, items: [] }; groups.push(g); }
+                g.items.push(d);
+            }
+            const sections = groups.map(g => `
+                <div class="card" style="margin-bottom:16px;">
+                    <div style="font-size:15px;font-weight:700;color:#7ec0ff;margin-bottom:12px;">${esc(g.cat)}</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                        ${g.items.map(d => `
+                            <button class="doc-open" data-doc="${esc(d.name)}"
+                                    style="display:flex;align-items:center;gap:10px;text-align:left;
+                                           padding:10px 14px;background:#2a2a2a;color:#e0e0e0;
+                                           border:1px solid #3a3a3a;border-radius:6px;cursor:pointer;
+                                           font-size:14px;">
+                                <span style="font-size:16px;">📄</span> ${esc(d.title)}
+                            </button>`).join("")}
+                    </div>
+                </div>`).join("");
+            shell(sections);
+            content.querySelectorAll(".doc-open").forEach(b =>
+                b.addEventListener("click", () => openDocPdf(b.dataset.doc)));
+        }
+
+        function openDocPdf(name) {
+            // Studio kører i en browser → åbn PDF'en i en ny fane (systemets PDF-visning).
+            window.open("/docs/file/" + encodeURIComponent(name), "_blank", "noopener");
         }
 
         function showPlaceholder(page) {
