@@ -2672,42 +2672,48 @@ async def journal_open_positions(archive: str = None):
 
 @app.get("/journal/events")
 async def journal_events(
-    date:       str = None,        # "2026-05-20" (ET-handelsdag) — påkrævet i praksis
-    from_time:  str = "00:00",     # "HH:MM" ET
-    to_time:    str = "23:59",     # "HH:MM" ET
+    date:       str = None,        # "2026-05-20" — handelsdag i valgt tz (se tz)
+    from_time:  str = "00:00",     # "HH:MM" i valgt tz
+    to_time:    str = "23:59",     # "HH:MM" i valgt tz
     source:     str = None,        # "Momentum ORB" / "Konfluens" — None = alle
     event_type: str = None,        # None = alle
     limit:      int = 1000,
     archive:    str = None,
+    tz:         str = "ET",        # "ET" (default, bagudkompat.) eller "DK"
 ):
     """
-    Hent gemte journal-events for et ET-tidsvindue. Bruges af Studio's
+    Hent gemte journal-events for et tidsvindue. Bruges af Studio's
     Log-fane (Historik-tilstand) til at se hvad algoritmerne lavede selv
     hvis man ikke fulgte med live.
 
-    date + from_time/to_time fortolkes i ET (America/New_York). Backenden
-    oversætter til UTC-grænser så filteret rammer korrekt uanset
+    date + from_time/to_time fortolkes i den valgte tidszone:
+      tz="ET" (default) → America/New_York (bagudkompat.)
+      tz="DK"           → Europe/Copenhagen (Studio's Log-fane bruger denne)
+    Backenden oversætter til UTC-grænser så filteret rammer korrekt uanset
     sommer/vintertid. Ingen auth — kun læsning af log-data (samme som
     /account/dash-snapshot).
     """
     import pytz
-    ET_TZ = pytz.timezone("America/New_York")
+    # Fortolknings-tidszone for date + from/to. Default ET (bevarer eksisterende
+    # kald); Studio sender tz=DK så Iben kan filtrere i danske klokkeslæt.
+    WALL_TZ = pytz.timezone("Europe/Copenhagen") if str(tz).upper() == "DK" \
+              else pytz.timezone("America/New_York")
 
-    # Hvis ingen dato angivet: brug dagens ET-dato
+    # Hvis ingen dato angivet: brug dagens dato i den valgte tidszone
     if not date:
-        date = datetime.now(ET_TZ).strftime("%Y-%m-%d")
+        date = datetime.now(WALL_TZ).strftime("%Y-%m-%d")
 
-    def et_window_to_utc(d: str, hhmm: str) -> str:
-        """Lav 'YYYY-MM-DD' + 'HH:MM' i ET om til en ISO UTC-streng."""
+    def window_to_utc(d: str, hhmm: str) -> str:
+        """Lav 'YYYY-MM-DD' + 'HH:MM' i WALL_TZ om til en ISO UTC-streng."""
         try:
             naive = datetime.strptime(f"{d} {hhmm}", "%Y-%m-%d %H:%M")
         except ValueError:
             naive = datetime.strptime(f"{d} 00:00", "%Y-%m-%d %H:%M")
-        et_dt = ET_TZ.localize(naive)
-        return et_dt.astimezone(pytz.utc).isoformat()
+        wall_dt = WALL_TZ.localize(naive)
+        return wall_dt.astimezone(pytz.utc).isoformat()
 
-    from_utc = et_window_to_utc(date, from_time)
-    to_utc   = et_window_to_utc(date, to_time)
+    from_utc = window_to_utc(date, from_time)
+    to_utc   = window_to_utc(date, to_time)
 
     async with _resolve_db(archive) as db:
         events = await journal.get_events(
@@ -2717,6 +2723,7 @@ async def journal_events(
         )
     return {
         "date":      date,
+        "tz":        str(tz).upper(),
         "from_time": from_time,
         "to_time":   to_time,
         "from_utc":  from_utc,

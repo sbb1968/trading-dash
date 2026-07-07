@@ -1591,14 +1591,15 @@
             const m = (s || "").trim().match(/^(\d{1,2})[-.\/](\d{1,2})[-.\/](\d{4})$/);
             return m ? `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}` : "";
         }
-        function openDatePicker(baseId) {
+        function openDatePicker(baseId, onPick) {
             const di = document.getElementById(baseId);
             const txt = document.getElementById(baseId + "-txt");
             if (!di || !txt) return;
             di.value = parseDk(txt.value) || di.value || "";
             di.onchange = () => {
                 txt.value = dkDate(di.value);
-                if (typeof applyJournalFilters === "function") applyJournalFilters();
+                if (typeof onPick === "function") onPick();
+                else if (typeof applyJournalFilters === "function") applyJournalFilters();
             };
             try { if (di.showPicker) { di.showPicker(); return; } } catch (e) { /* fallback */ }
             di.focus(); di.click();
@@ -1612,6 +1613,11 @@
                 { timeZone: "Europe/Copenhagen", hour: "2-digit", minute: "2-digit" })
             : null;
         const _etHHMM = etIso => etIso ? etIso.substring(11, 16) + " ET" : null;
+        // Fuldt klokkeslæt (HH:MM:SS) i dansk lokaltid fra UTC-anker — bruges i Log-historik.
+        const _dkClockFromUtc = utcIso => utcIso
+            ? new Date(utcIso).toLocaleTimeString("da-DK",
+                { timeZone: "Europe/Copenhagen", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+            : "";
         // Samlet celle: dansk primært + ET muted i parentes. Falder tilbage til
         // ET alene hvis UTC mangler, og til "—" hvis intet tidspunkt findes.
         const fmtTradeTime = (etIso, utcIso) => {
@@ -3965,17 +3971,21 @@
 
                     <div id="log-hist-controls" style="display:none; margin-top:12px; gap:10px;
                                 align-items:end; flex-wrap:wrap;">
-                        <div class="filter-field" style="min-width:140px;">
-                            <label>Dato (ET)</label>
-                            <input type="date" id="log-date" value="${todayISO}">
+                        <div class="filter-field" style="min-width:150px;">
+                            <label for="log-date-txt">Dato</label>
+                            <div class="dk-date-row">
+                                <input type="text" id="log-date-txt" placeholder="dd-mm-åååå" inputmode="numeric" value="${dkDate(todayISO)}">
+                                <input type="date" id="log-date" class="dk-date-hidden" value="${todayISO}">
+                                <button type="button" class="dk-cal-btn" onclick="openDatePicker('log-date', loadLogHistory)" title="Vælg dato">📅</button>
+                            </div>
                         </div>
                         <div class="filter-field" style="min-width:90px;">
-                            <label>Fra (ET)</label>
-                            <input type="time" id="log-from" value="09:30">
+                            <label>Fra (dansk)</label>
+                            <input type="time" id="log-from" value="00:00">
                         </div>
                         <div class="filter-field" style="min-width:90px;">
-                            <label>Til (ET)</label>
-                            <input type="time" id="log-to" value="10:30">
+                            <label>Til (dansk)</label>
+                            <input type="time" id="log-to" value="23:59">
                         </div>
                         <div class="filter-field" style="min-width:150px;">
                             <label>Strategi</label>
@@ -3987,7 +3997,7 @@
                             <button class="btn-primary" onclick="loadLogHistory()"
                                     style="padding:10px 16px;">Hent</button>
                             <button class="btn-secondary" onclick="setOrbWindow()"
-                                    style="padding:10px 14px;" title="ORB-vindue 09:30-10:30 ET">ORB</button>
+                                    style="padding:10px 14px;" title="ORB-vindue (US-åbning 09:30-10:30 ET = 15:30-16:30 dansk)">ORB</button>
                             <button class="btn-secondary" onclick="setFullDay()"
                                     style="padding:10px 14px;" title="Hele handelsdagen">Hele dagen</button>
                         </div>
@@ -4002,6 +4012,10 @@
                     </div>
                 </div>
             `;
+            // Enter i dato-feltet = hent historik (samme som Journal-fanens felter)
+            document.getElementById("log-date-txt").addEventListener("keypress", e => {
+                if (e.key === "Enter") loadLogHistory();
+            });
             setLogMode("live");
         }
 
@@ -4033,19 +4047,23 @@
         }
 
         function setOrbWindow() {
-            document.getElementById("log-from").value = "09:30";
-            document.getElementById("log-to").value   = "10:30";
-            loadLogHistory();
-        }
-
-        function setFullDay() {
-            document.getElementById("log-from").value = "08:00";
+            // US-åbningsområde 09:30–10:30 ET = 15:30–16:30 dansk tid.
+            document.getElementById("log-from").value = "15:30";
             document.getElementById("log-to").value   = "16:30";
             loadLogHistory();
         }
 
+        function setFullDay() {
+            document.getElementById("log-from").value = "00:00";
+            document.getElementById("log-to").value   = "23:59";
+            loadLogHistory();
+        }
+
         async function loadLogHistory() {
-            const date   = document.getElementById("log-date").value;
+            // Dato læses fra det danske tekstfelt (dd-mm-åååå); falder tilbage til
+            // det skjulte date-input hvis tekstfeltet er tomt/ugyldigt.
+            const date   = parseDk(document.getElementById("log-date-txt").value)
+                        || document.getElementById("log-date").value;
             const from   = document.getElementById("log-from").value;
             const to     = document.getElementById("log-to").value;
             const source = document.getElementById("log-source").value;
@@ -4054,6 +4072,7 @@
             stream.innerHTML = `<div class="empty">Henter events...</div>`;
 
             const params = new URLSearchParams();
+            params.set("tz", "dk");   // fortolk date + fra/til i dansk tid
             if (date) params.set("date", date);
             if (from) params.set("from_time", from);
             if (to)   params.set("to_time", to);
@@ -4064,8 +4083,9 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
                 logEntries = (data.events || []).map(ev => {
-                    // ts_local er ISO med tz — træk HH:MM:SS ud
-                    const t = ev.ts_local ? ev.ts_local.substring(11, 19) : "";
+                    // Tidsstempel i dansk lokaltid (fra UTC-anker); fallback til ts_local.
+                    const t = _dkClockFromUtc(ev.ts_utc)
+                            || (ev.ts_local ? ev.ts_local.substring(11, 19) : "");
                     const lvl = ev.payload?.level
                               || (ev.event_type === "strategy_stopped" ? "info" : "info");
                     const sym = ev.symbol ? ` ${ev.symbol}` : "";
