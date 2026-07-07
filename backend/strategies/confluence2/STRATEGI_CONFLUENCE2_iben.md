@@ -41,10 +41,16 @@ lukkekurs. Der åbnes ikke nye handler efter kl. 15:00 amerikansk tid.
 
 ## Hvornår sælger den
 
-Konfluens 2 kører i den validerede variant "impulse-low". Den sælger i to
-tilfælde: hvis prisen falder under bunden af den candle der udløste købet
-(det er strategiens stop — bevægelsen fejlede), eller ved dagens lukning kl.
-15:45 amerikansk tid, hvor alle positioner lukkes så intet bæres natten over.
+Konfluens 2 sælger i to tilfælde: hvis prisen falder ned til strategiens stop
+(bevægelsen fejlede), eller ved dagens lukning kl. 15:45 amerikansk tid, hvor
+alle positioner lukkes så intet bæres natten over.
+
+Stoppet lægges som udgangspunkt lige under bunden af den candle der udløste
+købet. Men hvis den bund ligger usædvanligt tæt på købskursen — så tæt at helt
+almindelige kursudsving ville ramme den med det samme — flyttes stoppet lidt
+længere væk, til en afstand der passer til hvor meget aktien normalt svinger.
+På den måde skrabes handlen ikke ud af ren støj før bevægelsen har fået lov at
+folde sig ud.
 
 Det betyder at strategien tager mange små, kontrollerede tab på de impulser der
 ikke fortsætter, og til gengæld lader de få vindere løbe gennem dagen. Det er

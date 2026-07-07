@@ -26,7 +26,7 @@ nyhedskatalysator-gate, (3) **flertrins-exit**.
 | Filter | Værdi |
 |---|---|
 | Pris | $3 – $500 (large caps gapper sjældent — vidt loft) |
-| Gennemsnitsvolumen | ≥ 500.000 |
+| Volumen (dagens) | > 500.000 |
 | Trend-bekræftelse | 1D + 1W + 1M ændring **alle** positive (`REQUIRE_ALL_GREEN`) |
 | Top-N | 25 |
 | Rescan-interval | 1800 s (30 min) — nyt pull i pipeline-loopet |
@@ -40,13 +40,15 @@ Alle betingelser skal være opfyldt (rules.json):
 | Kode | Betingelse | Parameter |
 |---|---|---|
 | **D3** | Gap ≥ `MIN_GAP_PCT` over forrige luk | `MIN_GAP_PCT = 3.0 %` |
+| **D1** | Pris > forrige dags high | — |
 | **D2** | Forrige luk > SMA(200) daglig | `SMA_LEN = 200` |
 | **I3** | RVOL ≥ `RVOL_MIN` over lookback | `RVOL_MIN = 2.0`, `RVOL_LOOKBACK = 14 d` |
 | — | Pris ≥ `MIN_PRICE_USD` | `$3.0` |
 | **Katalysator** | Frisk positiv nyhed i dag via IBKR `reqHistoricalNews` (DJ/Briefing.com); netto bullish blandt friske headlines (keyword-`_guess_sentiment`) | `NEWS_MAX_AGE_HOURS = 20` |
 
-**Trigger:** entry når prisen laver **ny HOD over premarket-high** (join af fortsat
-momentum). Premarket-high låses ved `SESSION_START = 09:30 ET`.
+**Trigger (I1 + I2):** entry når prisen bryder til **ny intradag-HOD** (I2) *og* ligger
+**over premarket-high** (I1) — join af fortsat momentum. Premarket-high låses ved
+`SESSION_START = 09:30 ET`. (D2 + katalysator er allerede vettet i watchlist-rescanet.)
 
 **Entry-vindue:** `ENTRY_EARLIEST = 10:05 ET` … `ENTRY_LATEST = 15:30 ET`. Ingen nye
 entries uden for vinduet. Bars: 5-min (`BAR_SIZE = "5 mins"`).
@@ -82,6 +84,7 @@ shares        = int( min( risk_budget / (entry − stop) , notional_cap / entry 
 | `NOTIONAL_PCT` | 10 % af porteføljen pr. position |
 | `RISK_BUDGET_FB` | $160 (~1 % af ~$16k) |
 | `NOTIONAL_CAP_FB` | $1.600 (~10 % af ~$16k) |
+| `max_open_positions` | 5 (rules.json `max_concurrent_positions`) — åbnes efter STØRSTE gap først |
 
 Det globale dagstab deles med de øvrige strategier.
 

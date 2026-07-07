@@ -29,7 +29,8 @@ dækning af de små micro-cap-gappere end en gratis nyhedskilde ville.
 Dagens top-gappere, **re-scannet hvert 30. minut** gennem dagen (ikke bare ét scan ved
 start): aktier fra 3 dollar og op, med mindst 500.000 i volumen, hvor både 1-dags,
 1-uges og 1-måneds ændring alle er positive (en optrend-bekræftelse der matcher
-join-tesen). De 25 øverste udgør puljen.
+join-tesen). De 25 øverste gappere er kandidaterne, som nyhedsfilteret og
+trend-tjekket derefter skærer ned til den endelige pulje.
 
 ## Hvornår køber den
 
@@ -59,7 +60,8 @@ Trend Join Long styrer ud i flere trin, så gevinst sikres undervejs:
 
 Sizingen er risiko-baseret på kontostørrelsen: højst **1 %** risiko per handel, og
 højst **10 %** af porteføljen i én position. Kan kontoværdien ikke aflæses, bruges
-faste fallback-beløb.
+faste fallback-beløb. Den holder højst **5** positioner åbne samtidig, og ved flere
+kandidater på én gang prioriteres den med det største gap.
 
 ## Hvad vi ved om den
 

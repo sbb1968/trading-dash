@@ -13,7 +13,7 @@ globale dagstab deles.
 
 **Kildefiler:**
 - Live-wrapper: `algo_buythedip.py`
-- Universe-screener (delt motor m. K2): `strategies/confluence/tv_scanner.py`
+- Universe-screener (delt motor m. K2): `strategies/shared/tv_scanner.py`
 - Validerings-reference: `june_correlation` (scan_trade-reglen)
 
 ---
@@ -68,6 +68,7 @@ shares = int( min( RISK_BUDGET_USD / risk_per_share ,
 | `RISK_BUDGET_USD` | $100 (risiko entry→stop pr. handel) |
 | `NOTIONAL_CAP_USD` | $1.000 (haleværn; værste observerede ~−$116) |
 | `max_open_positions` | 3 |
+| `max_loss_per_trade` | $150 |
 | `max_daily_loss` (globalt) | $300 — pauser strategien resten af dagen |
 
 Kræver `shares ≥ 1` og `risk_per_share > 0`, ellers droppes kandidaten. Risk-manageren
@@ -92,7 +93,11 @@ kan skalere sizing efter markedsforhold før ordren sendes.
 
 - **Konto:** DUO509856 (paper, delt konto). Navn/source = `"BuyTheDip"` overalt
   (orderRef, journal, events, Studio-meta).
-- **Start:** manuel (ikke i scheduleren — auto-starter aldrig).
+- **Start:** auto-start på algoserveren via scheduleren omkring US-åbning
+  (`BTD_START_ET = 09:22 ET`, genforsøg hvert loop-tick til `BTD_RETRY_UNTIL_ET = 09:42 ET`).
+  På workstation manuel start — instance-guarden (`instance_role != "algoserver"`) springer
+  auto-start over dér, så den delte konto (DUO509856) ikke dobbelt-startes. `start_strategy`
+  er idempotent (no-op hvis allerede RUNNING).
 - **Reconcile:** scoped ved opstart — rører kun egne `source="BuyTheDip"` journal-rows,
   aldrig blind-flatten (delt konto). Bruger et pålideligt live positions-read; ved
   degraderet/tomt feed springes reconcile over (undgår at forældreløsgøre en ægte

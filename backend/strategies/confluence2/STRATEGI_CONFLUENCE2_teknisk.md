@@ -9,8 +9,8 @@ Konfluens 1 og MomentumORB.
 - Regel/engines: `strategies/confluence2/strategy.py`
 - Parametre/varianter: `strategies/confluence2/config.py`
 - Live-wrapper: `algo_confluence2.py`
-- Indikatorer (genbrugt fra K1): `strategies/confluence/indicators.py`
-- Universe-screener: `strategies/confluence/tv_scanner.py`
+- Indikatorer (delt): `strategies/shared/indicators.py`
+- Universe-screener: `strategies/shared/tv_scanner.py`
 
 Alle indikatorer pre-computes over hele bar-serien i `build_session_context`,
 så **live == backtest**. Kun FÆRDIGE bars evalueres (caller leverer dem) — dette
@@ -58,12 +58,14 @@ udtrykkes som en 7-tegns "bricks"-streng `VBG EKRT`.
 
 ## Exit
 
-Fire arketyper er implementeret som valgbare varianter; **live-varianten er
-`A_impulse_low`** (`LIVE_VARIANT_KEY = "A_impulse_low"`).
+Arketyperne er implementeret som valgbare varianter; **live-varianten er
+`A_atrfloor_20`** (`LIVE_VARIANT_KEY = "A_atrfloor_20"`) — en `impulse_low`-exit
+med et ATR-gulv på stoppet.
 
 | Variant-nøgle | `exit_mode` | Logik |
 |---|---|---|
-| **A_impulse_low** (LIVE) | `impulse_low` | Exit når `bar.low ≤ trail_stop`. `trail_stop` starter = impuls-candlens low. `breakeven_r=None`, `catastrophe_stop=False` (impuls-low *er* stoppet). |
+| **A_atrfloor_20** (LIVE) | `impulse_low` | Som A_impulse_low, men stoppet gulves: den effektive stop = `min(impuls-low, entry − stop_atr_floor_mult × ATR)` med `stop_atr_floor_mult=2.0`. Gulvet udvider et for tæt stop, så normal støj ikke skraber os ud. Exit når `bar.low ≤` stoppet. `breakeven_r=None`, `catastrophe_stop=False`. |
+| A_impulse_low (ref.) | `impulse_low` | Exit når `bar.low ≤ trail_stop`. `trail_stop` starter = impuls-candlens low, intet ATR-gulv (`stop_atr_floor_mult=0.0`). `breakeven_r=None`, `catastrophe_stop=False` (impuls-low *er* stoppet). |
 | A_be1r | `impulse_low` | Som A, men flyt stop til entry når `high ≥ entry + 1.0×R`. |
 | A_confirm | `impulse_low` | Som A, men fyld kun pending entry hvis næste bars open ≥ impuls-close. |
 | B_trail_hl | `trail_hl` | Trailing higher-low (for stram på 1-min — kun reference). |
@@ -126,12 +128,18 @@ Volatility"-screener (`fetch_tv_intraday_volatility`):
 
 ## Valideringsstatus
 
-`A_impulse_low` valgt efter validering på:
-- **Maj 2026** (in-sample): portefølje profit-faktor **2,85 / 3,01**.
-- **April 2026** (out-of-sample): PF **1,83 / 1,69**.
+`A_atrfloor_20` valgt efter validering på anker-universet (`historical_universe`,
+april + maj 2026, 100% cache) ved 2¢ slippage. Slår tidligere live-variant
+`A_impulse_low` på portefølje-PF i BEGGE måneder:
+- **Maj 2026** (in-sample): PF **2,44 / 2,57** (vs A_impulse_low 2,37 / 2,36).
+- **April 2026** (out-of-sample): PF **2,07 / 1,84** (vs A_impulse_low 1,62 / 1,49).
 
-Begge med lav drawdown og robust på tværs af fifo/priority-signalvalg.
-Varianterne B/C/D overlevede ikke slippage + positions-loft og er kun reference.
+Højere win rate (44% / 38% vs 38% / 30%) og bedre maxDD. Udvidet ATR-gulv-sweep
+(0,5×→5,0×) bekræftede 2,0× som den robuste værdi, ikke en højere: forbi 2,0×
+kommer PF-gevinsten i stigende grad fra at bære positioner til sessionsluk, og
+aprils OOS-PF topper ~3,0× og falder ved 4,0× (uvalideret regime-risiko).
+`A_impulse_low`, B/C/D samt de øvrige `A_minR_*` / `A_atrfloor_*`-varianter
+bevares som dokumenterede backtest-referencer.
 
 **Status: paper trading.** Endnu ikke valideret live med en live scanner; begge
 testmåneder var gunstige for momentum. Rigtige penge overvejes først efter

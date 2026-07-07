@@ -60,9 +60,10 @@ BuyTheDip blev valideret på historiske data som K2's komplement — den ramte i
 samme tabsdage. Sizing-tallene (100 dollar risiko / 1.000 dollar notionel) er
 deploy-valg der finjusteres på paper, ikke tal fra backtesten (som var procent-baseret).
 
-Strategien kører **udelukkende paper trading** (Ibens konto) med **manuel start**, og
-skal vise sig konsistent over en længere periode før rigtige penge overhovedet
-overvejes.
+Strategien kører **udelukkende paper trading** (Ibens konto). På handelsserveren
+starter den **automatisk** kort før den amerikanske børsåbning; på Sørens egen maskine
+startes den manuelt. Den skal vise sig konsistent over en længere periode før rigtige
+penge overhovedet overvejes.
 
 ## Kort sagt
 
