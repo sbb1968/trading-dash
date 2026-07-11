@@ -621,10 +621,18 @@ class Confluence2Live(BaseStrategy):
         await self.log_universe(
             self.universe,
             meta = {
-                "raw_count": len(raw_tickers),
-                "price_min": UNIVERSE_PRICE_MIN,
-                "price_max": UNIVERSE_PRICE_MAX,
-                "source":    "tv_intraday_volatility",
+                "raw_count":  len(raw_tickers),
+                "price_min":  UNIVERSE_PRICE_MIN,
+                "price_max":  UNIVERSE_PRICE_MAX,
+                "source":     "tv_intraday_volatility",
+                # Del 1-instrumentering (rent tilføjende — påvirker ikke udvælgelsen):
+                "pool_size":  getattr(self, "_last_scan_pool_size", None),
+                "rows":       getattr(self, "_last_scan_rows", []),
+                "filters":    {
+                    "mkt_cap_min": UNIVERSE_MKT_CAP_MIN,
+                    "min_avg_vol": UNIVERSE_MIN_VOLUME,
+                    "atrp_1w_min": UNIVERSE_ATR_PCT_MIN,
+                },
             },
         )
 
@@ -716,8 +724,8 @@ class Confluence2Live(BaseStrategy):
         og matcher Sørens screener. Returnerer symboler sorteret efter seneste
         dagsændring (faldende). Tom liste hvis API fejler.
         """
-        from strategies.shared.tv_scanner import build_volatility_universe
-        return await build_volatility_universe(
+        from strategies.shared.tv_scanner import build_volatility_universe_rows
+        pool_size, rows = await build_volatility_universe_rows(
             top_n       = top_n,
             price_min   = UNIVERSE_PRICE_MIN,
             price_max   = UNIVERSE_PRICE_MAX,
@@ -729,6 +737,11 @@ class Confluence2Live(BaseStrategy):
             timeout     = 15.0,
             log_tag     = "Konfluens 2",
         )
+        # Del 1-instrumentering: gem seneste scans fulde rækker + puljestørrelse,
+        # så _prepare_universe kan logge dem i universe_selected (ingen adfærdsændring).
+        self._last_scan_pool_size = pool_size
+        self._last_scan_rows = rows
+        return [r["symbol"] for r in rows]
 
     async def _fetch_historical_1min_bars(
         self,

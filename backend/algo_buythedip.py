@@ -413,10 +413,18 @@ class BuyTheDipLive(BaseStrategy):
         await self.log_universe(
             self.universe,
             meta={
-                "raw_count": len(raw_tickers),
-                "price_min": UNIVERSE_PRICE_MIN,
-                "price_max": UNIVERSE_PRICE_MAX,
-                "source":    "tv_intraday_volatility",
+                "raw_count":  len(raw_tickers),
+                "price_min":  UNIVERSE_PRICE_MIN,
+                "price_max":  UNIVERSE_PRICE_MAX,
+                "source":     "tv_intraday_volatility",
+                # Del 1-instrumentering (rent tilføjende — påvirker ikke udvælgelsen):
+                "pool_size":  getattr(self, "_last_scan_pool_size", None),
+                "rows":       getattr(self, "_last_scan_rows", []),
+                "filters":    {
+                    "mkt_cap_min": UNIVERSE_MKT_CAP_MIN,
+                    "min_avg_vol": UNIVERSE_MIN_VOLUME,
+                    "atrp_1w_min": UNIVERSE_ATR_PCT_MIN,
+                },
             },
         )
 
@@ -427,8 +435,8 @@ class BuyTheDipLive(BaseStrategy):
         parametre. Returnerer symboler sorteret efter seneste dagsændring (faldende);
         tom liste hvis API'et fejler/timeout. Spejler K2's _scan_volatility_universe 1:1.
         """
-        from strategies.shared.tv_scanner import build_volatility_universe
-        return await build_volatility_universe(
+        from strategies.shared.tv_scanner import build_volatility_universe_rows
+        pool_size, rows = await build_volatility_universe_rows(
             top_n       = top_n,
             price_min   = UNIVERSE_PRICE_MIN,
             price_max   = UNIVERSE_PRICE_MAX,
@@ -440,6 +448,11 @@ class BuyTheDipLive(BaseStrategy):
             timeout     = SCAN_TIMEOUT_SEC,
             log_tag     = "BuyTheDip",
         )
+        # Del 1-instrumentering: gem seneste scans fulde rækker + puljestørrelse
+        # (spejler K2 — egne konstanter, samme instrumentering).
+        self._last_scan_pool_size = pool_size
+        self._last_scan_rows = rows
+        return [r["symbol"] for r in rows]
 
     # -------------------------------------------------------------
     # Trading-loop (to-fase: exits, så entries efter dip-dybde-prioritet)

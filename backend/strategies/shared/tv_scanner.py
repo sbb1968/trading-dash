@@ -177,7 +177,17 @@ VOL_ATR_PCT_MIN   = 5.0                # ATR(14) 1W > 5%
 VOL_TOP_N         = 25
 
 
-def fetch_tv_intraday_volatility(
+def _to_float(x) -> float:
+    """Robust float-coercion for screener-celler der kan være None/NaN/tekst."""
+    try:
+        if x is None:
+            return 0.0
+        return float(x)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _query_intraday_volatility(
     top_n:        int   = VOL_TOP_N,
     price_min:    float = VOL_PRICE_MIN,
     price_max:    float = VOL_PRICE_MAX,
@@ -186,39 +196,44 @@ def fetch_tv_intraday_volatility(
     min_avg_vol:  int   = VOL_MIN_AVG_VOL,
     atr_pct_min:  float = VOL_ATR_PCT_MIN,
     exchanges:    Optional[list[str]] = None,
-) -> list[tuple[str, float, float, int]]:
+) -> tuple[int, list[dict]]:
     """
-    Hent "Intraday Volatility"-universet fra TradingView screener API.
+    Kør "Intraday Volatility"-screener-queryen og returnér (pool_size, rows).
 
-    Returnerer liste af tuples: (symbol, price, change_pct, volume), sorteret
-    efter seneste dagsændring (change %) FALDENDE — samme rækkefølge som
-    kolonnen i Sørens screener.
+    pool_size = TradingViews TOTALE antal kandidater der matcher WHERE-filtrene
+    FØR `.limit(top_n)` — dvs. hvor stor puljen reelt er. get_scanner_data()
+    returnerer dette tal som første element (blev tidligere kasseret som `_`).
 
-    Filtre (alle server-side hos TradingView):
-      - US-aktier på NASDAQ/NYSE/AMEX/CBOE (AMEX dækker TV's "NYSE Arca")
-      - pris price_min ≤ close ≤ price_max
-      - market cap mkt_cap_min ≤ cap ≤ mkt_cap_max
-      - 30-dages gennemsnitsvolumen > min_avg_vol
-      - ATR(14) på 1-uges timeframe > atr_pct_min (%)
-      - type stock eller dr (depositary receipts/ADR'er er med, som i screeneren)
+    rows = liste af dicts, én pr. ticker, sorteret som screeneren (change DESC):
+        {symbol, price, change, volume, avg_vol_30d, market_cap, exchange,
+         atrp_1w, atrp_1d, rvol, volatility_d}
 
-    Tom liste hvis biblioteket mangler eller API'et fejler.
+    (0, []) hvis biblioteket mangler eller API'et fejler.
+
+    Del 1-instrumentering: SELECT er udvidet med ATRP|1D, relative_volume_10d_calc
+    og Volatility.D — men WHERE er UÆNDRET, så udvælgelsen er bit-for-bit den samme
+    som før. Vi måler kun; vi gater ikke (endnu).
     """
     try:
         from tradingview_screener import Query, col
     except ImportError:
         logger.error("tradingview-screener er ikke installeret. "
                      "Kør: pip install tradingview-screener")
-        return []
+        return 0, []
 
     exch = exchanges if exchanges is not None else VOL_EXCHANGES
 
     try:
-        _, df = (
+        pool_size, df = (
             Query()
             .select('name', 'close', 'change', 'volume',
                     'average_volume_30d_calc', 'market_cap_basic',
-                    'exchange', 'ATRP|1W')
+                    'exchange', 'ATRP|1W',
+                    'ATRP',                         # NY: dagligt ATR% (TV's default-
+                                                    # timeframe ER daglig → BARE 'ATRP';
+                                                    # 'ATRP|1D' verificeret → None)
+                    'relative_volume_10d_calc',     # NY: RVOL i dag
+                    'Volatility.D')                 # NY: dagens (high-low)/low i %
             .where(
                 col('close').between(price_min, price_max),
                 col('market_cap_basic').between(mkt_cap_min, mkt_cap_max),
@@ -233,12 +248,13 @@ def fetch_tv_intraday_volatility(
         )
     except Exception as e:
         logger.error(f"TV intraday-volatility query fejlede: {e}")
-        return []
+        return 0, []
 
+    pool_size = int(pool_size or 0)
     if df is None or df.empty:
-        return []
+        return pool_size, []
 
-    results = []
+    rows: list[dict] = []
     for _, row in df.iterrows():
         # 'ticker' er fx "NASDAQ:GLXY" — vi vil have kun "GLXY"
         ticker_full = row.get('ticker', '')
@@ -251,20 +267,109 @@ def fetch_tv_intraday_volatility(
             continue
 
         try:
-            price  = float(row.get('close', 0))
-            change = float(row.get('change', 0))
-            volume = int(row.get('volume', 0))
+            price  = float(row.get('close', 0) or 0)
+            change = float(row.get('change', 0) or 0)
+            volume = int(row.get('volume', 0) or 0)
         except (ValueError, TypeError):
             continue
 
-        results.append((symbol, price, change, volume))
+        rows.append({
+            "symbol":       symbol,
+            "price":        price,
+            "change":       change,
+            "volume":       volume,
+            "avg_vol_30d":  _to_float(row.get('average_volume_30d_calc')),
+            "market_cap":   _to_float(row.get('market_cap_basic')),
+            "exchange":     str(row.get('exchange') or ''),
+            "atrp_1w":      _to_float(row.get('ATRP|1W')),
+            "atrp_1d":      _to_float(row.get('ATRP')),   # daglig ATR% = bare 'ATRP'
+            "rvol":         _to_float(row.get('relative_volume_10d_calc')),
+            "volatility_d": _to_float(row.get('Volatility.D')),
+        })
 
-    logger.info(f"TV intraday-volatility returnerede {len(results)} kandidater "
+    logger.info(f"TV intraday-volatility: {len(rows)} af {pool_size} i puljen "
                 f"(pris ${price_min}-${price_max}, mkt-cap "
                 f"${mkt_cap_min/1e9:.0f}B-${mkt_cap_max/1e12:.0f}T, "
                 f"avg-vol >{min_avg_vol:,}, ATR-1W >{atr_pct_min}%): "
-                f"{', '.join(t[0] for t in results)}")
-    return results
+                f"{', '.join(r['symbol'] for r in rows)}")
+    return pool_size, rows
+
+
+def fetch_tv_intraday_volatility(
+    top_n:        int   = VOL_TOP_N,
+    price_min:    float = VOL_PRICE_MIN,
+    price_max:    float = VOL_PRICE_MAX,
+    mkt_cap_min:  float = VOL_MKT_CAP_MIN,
+    mkt_cap_max:  float = VOL_MKT_CAP_MAX,
+    min_avg_vol:  int   = VOL_MIN_AVG_VOL,
+    atr_pct_min:  float = VOL_ATR_PCT_MIN,
+    exchanges:    Optional[list[str]] = None,
+) -> list[dict]:
+    """
+    Hent "Intraday Volatility"-universet fra TradingView screener API.
+
+    Returnerer liste af dicts (én pr. ticker), sorteret efter dagsændring
+    (change %) FALDENDE — samme rækkefølge som kolonnen i Sørens screener.
+    Se _query_intraday_volatility for feltbeskrivelse. Tom liste ved fejl.
+
+    (Del 1 skiftede returtypen fra tuple til dict. De eneste kaldere var
+    build_volatility_universe* + standalone-verifikationen — alle opdateret.)
+    """
+    _pool, rows = _query_intraday_volatility(
+        top_n=top_n, price_min=price_min, price_max=price_max,
+        mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
+        min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min, exchanges=exchanges,
+    )
+    return rows
+
+
+async def build_volatility_universe_rows(
+    *,
+    top_n:        int,
+    price_min:    float,
+    price_max:    float,
+    mkt_cap_min:  float,
+    mkt_cap_max:  float,
+    min_avg_vol:  int,
+    atr_pct_min:  float,
+    exchanges:    Optional[list[str]] = None,
+    timeout:      float = 15.0,
+    log_tag:      str = "TV",
+) -> tuple[int, list[dict]]:
+    """
+    Delt async-wrapper om _query_intraday_volatility: kører den blokerende screener
+    i en executor med timeout + fejlhåndtering og returnerer (pool_size, rows) — den
+    fulde række pr. ticker (sorteret efter dagsændring faldende, som screeneren) plus
+    puljestørrelsen FØR limit.
+
+    Hoistet fra K2's og BuyTheDips ENS _scan_volatility_universe. Hver strategi kalder
+    med SINE EGNE filter-konstanter, så univers-uafhængigheden bevares — kun den
+    duplikerede wrapper er fælles. Del 1: kalderne logger rows+pool_size i
+    universe_selected-eventet (ingen adfærdsændring). (0, []) ved timeout/fejl
+    (kalderen falder så tilbage til retry/fallback).
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    try:
+        pool_size, rows = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: _query_intraday_volatility(
+                    top_n=top_n, price_min=price_min, price_max=price_max,
+                    mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
+                    min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min,
+                    exchanges=exchanges,
+                ),
+            ),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"[{log_tag}] TV-screener (volatility) timeout")
+        return 0, []
+    except Exception as e:
+        logger.error(f"[{log_tag}] TV-screener (volatility) fejl: {e}")
+        return 0, []
+    return pool_size, rows
 
 
 async def build_volatility_universe(
@@ -281,37 +386,16 @@ async def build_volatility_universe(
     log_tag:      str = "TV",
 ) -> list[str]:
     """
-    Delt async-wrapper om fetch_tv_intraday_volatility: kører den blokerende screener
-    i en executor med timeout + fejlhåndtering og returnerer KUN symbolerne (sorteret
-    efter dagsændring faldende, som screeneren).
-
-    Hoistet fra K2's og BuyTheDips ENS _scan_volatility_universe. Hver strategi kalder
-    med SINE EGNE filter-konstanter, så univers-uafhængigheden bevares — kun den
-    duplikerede wrapper er fælles. Tom liste ved timeout/fejl (kalderen falder så
-    tilbage til retry/fallback).
+    Bagudkompatibel wrapper: som build_volatility_universe_rows, men returnerer KUN
+    symbolerne (list[str]). Bevaret for kaldere der ikke behøver rows/pool_size.
     """
-    import asyncio
-    loop = asyncio.get_event_loop()
-    try:
-        results = await asyncio.wait_for(
-            loop.run_in_executor(
-                None,
-                lambda: fetch_tv_intraday_volatility(
-                    top_n=top_n, price_min=price_min, price_max=price_max,
-                    mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
-                    min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min,
-                    exchanges=exchanges,
-                ),
-            ),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
-        logger.error(f"[{log_tag}] TV-screener (volatility) timeout")
-        return []
-    except Exception as e:
-        logger.error(f"[{log_tag}] TV-screener (volatility) fejl: {e}")
-        return []
-    return [symbol for symbol, _, _, _ in results]
+    _pool, rows = await build_volatility_universe_rows(
+        top_n=top_n, price_min=price_min, price_max=price_max,
+        mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
+        min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min,
+        exchanges=exchanges, timeout=timeout, log_tag=log_tag,
+    )
+    return [r["symbol"] for r in rows]
 
 
 # ─────────────────────────────────────────────────────────────────

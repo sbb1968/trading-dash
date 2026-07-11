@@ -191,8 +191,24 @@ def _overview_md(rows, trades, strategy_filter, forensics):
         for ev in universe:
             d = p(ev)
             tickers = d.get("tickers", [])
-            out.append(f"- {t(ev['ts_local'])} · **{ev['source']}**: {len(tickers)} af {d.get('raw_count','?')} raa")
-            if tickers:
+            rows = d.get("rows") or []
+            pool = d.get("pool_size")
+            head = (f"{len(tickers)} af {pool} i puljen" if pool is not None
+                    else f"{len(tickers)} af {d.get('raw_count','?')} raa")
+            out.append(f"- {t(ev['ts_local'])} · **{ev['source']}**: {head}")
+            if rows:
+                # Del 1-instrumentering: vis bevægelses-metrikkerne pr. ticker, så vi
+                # kan se fordelingen af ATR-1D blandt navne der handler godt vs. dør i
+                # stoppet. Sorteret som universet (change DESC).
+                for r in rows:
+                    out.append(
+                        f"  - {str(r.get('symbol','?')):<6} ${r.get('price',0):>7.2f}"
+                        f"  chg {r.get('change',0):+.1f}%"
+                        f"  ATR-1D {r.get('atrp_1d',0):.1f}%"
+                        f"  ATR-1W {r.get('atrp_1w',0):.1f}%"
+                        f"  RVOL {r.get('rvol',0):.1f}"
+                    )
+            elif tickers:
                 out.append(f"  - {', '.join(tickers)}")
     else:
         out.append("_(ingen universe-events)_")
@@ -303,7 +319,10 @@ def _overview_md(rows, trades, strategy_filter, forensics):
             out.append(f"  - Entries: {d.get('entries',0)} · handler: {d.get('trades',0)}")
             peak = d.get("peak_score")
             if peak is not None:
-                out.append(f"  - Peak score: {peak}/6")
+                # Score = kontekst-hits over E/K/R/T → maks 4 (V/B/G er obligatoriske
+                # impuls-brikker og tæller ikke med). Bricks-strengen er 7 tegn, men
+                # skalaen er 4.
+                out.append(f"  - Peak score: {peak}/4")
             mbc = d.get("missing_by_condition")
             if mbc:
                 out.append("  - Pr. betingelse (antal bars hvor den manglede):")
