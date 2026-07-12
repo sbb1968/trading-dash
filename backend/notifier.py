@@ -25,6 +25,13 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+# ── MIDLERTIDIG KILL-SWITCH (2026-07-12) ───────────────────────
+# Sat False mens vi er i tvivl om vi overhovedet vil bruge ntfy til mobil-push.
+# Mens denne er False sender send() ALDRIG noget — ingen push når telefonen,
+# uanset hvilken wrapper der kalder, hvilken priority, eller ignore_quiet_hours.
+# Sæt tilbage til True for at genaktivere alle notifikationer i ét hug.
+NOTIFICATIONS_ENABLED = False
+
 # ── KONFIG — skift topic til noget unikt ───────────────────────
 NTFY_SERVER = "https://ntfy.sh"
 NTFY_TOPIC  = "fasteriben"     # ← skift dette til noget privat
@@ -68,6 +75,12 @@ async def send(
     dedup_key: hvis sat, sendes samme key max én gang per DEDUP_WINDOW_SEC.
     ignore_quiet_hours: overstyr 07-23-vinduet (kun til ægte kritiske beskeder).
     """
+    # MIDLERTIDIG kill-switch — ligger FØR alt andet, så INTET slipper igennem
+    # (heller ikke ignore_quiet_hours-beskeder). Se NOTIFICATIONS_ENABLED øverst.
+    if not NOTIFICATIONS_ENABLED:
+        logger.debug(f"[Notifier] Notifikationer deaktiveret (kill-switch) — dropper: {title}")
+        return False
+
     if not ignore_quiet_hours and _outside_send_window():
         logger.info(f"[Notifier] Uden for sende-vindue (07-23 dansk tid) — dropper: {title}")
         return False
