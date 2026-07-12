@@ -89,24 +89,34 @@ _SUFFIXES = [
 ]
 
 
-def _smart_shorten(name: str) -> str:
+def _smart_shorten(name: str, ticker: str = "") -> str:
     """
     Fjern juridiske suffixes så navnet bliver mere læseligt.
 
-    Loop'er fordi nogle navne har flere lag: "Microsoft Corporation Holdings".
-    Stopper når der ikke er flere ændringer at lave.
+    Strip ÉT suffix ad gangen, så vi kan stoppe FØR navnet kollapser til bare
+    tickeren: "MARA Holdings, Inc." må blive "MARA Holdings" — IKKE "MARA"
+    (det gav "gentagelse af tickeren"). "XP Inc." / "IREN Limited" beholdes
+    helt, fordi et strip ville efterlade præcis tickeren.
     """
     if not name:
         return ""
 
-    prev = ""
+    tk = (ticker or "").upper().strip()
     current = name.strip()
-    while prev != current:
-        prev = current
+    changed = True
+    while changed:
+        changed = False
         for suffix in _SUFFIXES:
-            current = re.sub(suffix, "", current, flags=re.IGNORECASE).strip()
+            stripped = re.sub(suffix, "", current, flags=re.IGNORECASE).strip()
+            if not stripped or stripped == current:
+                continue
+            if tk and stripped.upper() == tk:
+                continue   # dette strip ville efterlade bare tickeren → behold suffikset
+            current = stripped
+            changed = True
+            break
 
-    return current or name  # fall back til oprindelig hvis vi strippede alt
+    return current or name.strip()
 
 
 # ── Ikke-aktie-instrumenter (futures) ─────────────────────────
@@ -126,19 +136,65 @@ _INSTRUMENT_NAMES: dict[str, str] = {
 }
 
 
-# ── Hent fra Finnhub ──────────────────────────────────────────
+# ── Kilder (returnerer RÅ navne; forkortelse sker centralt i _resolve_name) ──
+#
+# Prioritet: TradingView (primær) → Finnhub → yfinance. TradingView er den vi
+# allerede har fri, uautentificeret adgang til (samme screener som universet),
+# den har rene firmanavne med korrekt kapitalisering (fx "CoStar", "TeraWulf")
+# og kan slå op uden per-ticker rate-limit — modsat Finnhubs gratis-tier der
+# gav de tilfældige huller. Finnhub/yfinance beholdes kun som dybe fallbacks.
+
+def _fetch_from_tradingview_blocking(ticker: str) -> str:
+    """Rå firmanavn fra TradingViews screener (`description`-feltet). "" hvis intet."""
+    try:
+        from tradingview_screener import Query, col
+        _, df = (
+            Query()
+            .select('name', 'description', 'type')
+            .where(col('name') == ticker)
+            .limit(10)
+            .get_scanner_data()
+        )
+    except Exception:
+        return ""
+    if df is None or df.empty:
+        return ""
+    fallback = ""
+    for _, row in df.iterrows():
+        if str(row.get('name', '')).upper() != ticker:
+            continue
+        desc = str(row.get('description') or '').strip()
+        if not desc:
+            continue
+        # Foretræk en almindelig aktie/dr/fond med præcist symbol-match; ellers
+        # tag første ikke-tomme beskrivelse (fx futures/andet).
+        if str(row.get('type') or '') in ('stock', 'dr', 'fund'):
+            return desc
+        fallback = fallback or desc
+    return fallback
+
+
+async def _fetch_from_tradingview(ticker: str) -> str:
+    """Async-wrapper: kør det blokerende TV-opslag i en executor m. timeout."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_from_tradingview_blocking, ticker),
+            timeout=10.0,
+        )
+    except Exception:
+        return ""
+
 
 async def _fetch_from_finnhub(ticker: str) -> tuple[str, bool]:
-    """Hent firma-navn fra Finnhub.
+    """Rå firma-navn fra Finnhub.
 
     Returnerer (navn, ok):
       ok=True  → Finnhub SVAREDE (HTTP 200 + gyldig JSON). Et tomt navn er så
-                 pålideligt ("Finnhub har ingen profil"), og må trygt caches "".
-      ok=False → TRANSIENT fejl (timeout, 429 opbrugt, non-200, netværk). Navnet
-                 er ukendt, IKKE bekræftet tomt → kalderen må IKKE cache "".
+                 pålideligt ("Finnhub har ingen profil").
+      ok=False → TRANSIENT fejl (timeout, 429 opbrugt, non-200, netværk).
 
-    429 (rate-limit) — den hyppigste årsag til de tilfældige tomme navne når
-    frontenden fyrer mange opslag på én gang — retries med kort backoff.
+    429 (rate-limit) retries med kort backoff.
     """
     url = f"{FINNHUB_BASE}/stock/profile2"
     params = {"symbol": ticker, "token": FINNHUB_API_KEY}
@@ -166,21 +222,19 @@ async def _fetch_from_finnhub(ticker: str) -> tuple[str, bool]:
 
         if not isinstance(data, dict) or not data:
             return "", True   # Finnhub svarede, men ingen profil → bekræftet tomt
-        return _smart_shorten((data.get("name") or "").strip()), True
+        return (data.get("name") or "").strip(), True
 
     return "", False   # opbrugte 429-retries → transient
 
 
 def _fetch_from_yfinance_blocking(ticker: str) -> str:
-    """Firma-navn fra yfinance (blokerende). Fallback når Finnhub ikke har navnet —
-    yfinance dækker en del navne Finnhubs gratis-tier mangler. "" hvis intet."""
+    """Rå firma-navn fra yfinance (blokerende). "" hvis intet."""
     try:
         import yfinance as yf
         info = yf.Ticker(ticker).info or {}
     except Exception:
         return ""
-    name = (info.get("shortName") or info.get("longName") or "").strip()
-    return _smart_shorten(name)
+    return (info.get("shortName") or info.get("longName") or "").strip()
 
 
 async def _fetch_from_yfinance(ticker: str) -> str:
@@ -196,33 +250,48 @@ async def _fetch_from_yfinance(ticker: str) -> str:
 
 
 async def _resolve_name(ticker: str) -> tuple[str, bool]:
-    """Slå navnet op på tværs af kilder. Returnerer (navn, confirmed):
-      confirmed=True  → mindst én kilde svarede → et tomt navn er pålideligt (cache "").
-      confirmed=False → kun transiente fejl → cache IKKE "" (prøv igen senere).
+    """Slå navnet op på tværs af kilder (TradingView → Finnhub → yfinance).
+    Returnerer (navn, confirmed):
+      confirmed=True  → mindst én kilde svarede → et tomt navn er pålideligt.
+      confirmed=False → kun transiente fejl → kalderen må IKKE cache "" endeligt.
+    Navnet forkortes centralt her (med ticker-bevidsthed, så det aldrig
+    kollapser til bare tickeren).
     """
     if ticker in _INSTRUMENT_NAMES:
         return _INSTRUMENT_NAMES[ticker], True
 
+    # 1) TradingView — primær.
+    tv = await _fetch_from_tradingview(ticker)
+    if tv:
+        return _smart_shorten(tv, ticker), True
+
+    # 2) Finnhub.
     name, ok = await _fetch_from_finnhub(ticker)
     if name:
-        return name, True
+        return _smart_shorten(name, ticker), True
 
-    # Finnhub gav intet navn (bekræftet tomt ELLER transient) — prøv yfinance.
+    # 3) yfinance.
     fb = await _fetch_from_yfinance(ticker)
     if fb:
-        return fb, True
+        return _smart_shorten(fb, ticker), True
 
-    # Stadig intet. "" er kun bekræftet hvis Finnhub faktisk svarede (ok=True).
+    # Intet navn. "" er kun 'bekræftet' hvis Finnhub faktisk svarede (ok=True).
     return "", ok
 
 
 # ── Public API ────────────────────────────────────────────────
 
-# Cachede tomme navne ("") vi allerede har genforsøgt i DENNE proces. Uden det ville
-# et bekræftet-tomt navn blive slået op ved hvert eneste kald. MED det får hvert tomt
-# navn præcis ét genforsøg pr. backend-kørsel — nok til at selv-heale forgiftede tomme
-# (fx HIMS/KHC der blev cachet "" pga. en gammel rate-limit) uden at spamme kilderne.
-_empty_retried: set[str] = set()
+# Svage cache-værdier vi allerede har genforsøgt i DENNE proces. Et "svagt" navn er
+# tomt ("") ELLER lig selve tickeren (fx gammel cache MARA→"MARA"). Uden dette sæt
+# ville hvert svagt navn blive slået op ved hvert kald. MED det får hvert svagt navn
+# præcis ét genforsøg pr. backend-kørsel — nok til at selv-heale forgiftede tomme
+# (HIMS/KHC) OG ticker-gentagelser (MARA/XP/IREN) uden at spamme kilderne.
+_reresolved: set[str] = set()
+
+
+def _is_good_name(ticker: str, val) -> bool:
+    """Et navn er 'godt' hvis det er ikke-tomt OG ikke bare er tickeren selv."""
+    return bool(val) and val.strip().upper() != ticker.upper()
 
 
 async def get_ticker_name(ticker: str) -> str:
@@ -230,10 +299,10 @@ async def get_ticker_name(ticker: str) -> str:
     Returnér det forkortede firmanavn for én ticker.
 
     Robust cache-semantik:
-      - Ikke-tomt navn i cache      → returnér det (permanent).
-      - Tomt navn i cache           → genforsøg ÉN gang pr. proces (selv-heal).
-      - Kilde bekræfter 'ingen navn' → cache "" (spammer ikke igen).
-      - KUN transiente fejl         → cache IKKE "" → næste kald prøver igen.
+      - Godt navn i cache (≠ ticker)  → returnér det.
+      - Svagt navn ("" eller = ticker) → genforsøg ÉN gang pr. proces (selv-heal).
+      - Kilde bekræfter 'intet bedre'  → cache resultatet (spammer ikke igen).
+      - KUN transiente fejl            → cache IKKE endeligt → næste kald prøver igen.
 
     Returnerer "" hvis navnet ikke kan findes — frontend viser så intet.
     """
@@ -244,34 +313,32 @@ async def get_ticker_name(ticker: str) -> str:
     _load_cache()
 
     cached = _cache.get(ticker)
-    if cached:                                    # ikke-tomt → stol på det
+    if _is_good_name(ticker, cached):
         return cached
-    if cached == "" and ticker in _empty_retried:  # tomt + allerede genforsøgt → stop
-        return ""
+    if ticker in _reresolved:          # svagt, men allerede genforsøgt denne proces
+        return cached or ""
 
     async with _lock:
         # Re-check efter lock — en anden coroutine kan have hentet imens.
         cached = _cache.get(ticker)
-        if cached:
+        if _is_good_name(ticker, cached):
             return cached
-        if cached == "" and ticker in _empty_retried:
-            return ""
+        if ticker in _reresolved:
+            return cached or ""
 
+        _reresolved.add(ticker)   # præcis ét genforsøg pr. proces uanset udfald
         name, confirmed = await _resolve_name(ticker)
-        if name:
+        if _is_good_name(ticker, name):
             _cache[ticker] = name
             _save_cache()
             return name
 
-        # Intet navn fundet.
-        if cached == "":
-            _empty_retried.add(ticker)   # var allerede tomt → markér genforsøgt
-        if confirmed:
-            _cache[ticker] = ""          # bekræftet 'ingen profil' → cache tomt
-            _empty_retried.add(ticker)
+        # Fandt intet bedre end det (svage) vi evt. havde. Cache kun et BEKRÆFTET
+        # resultat (en kilde svarede) — så en transient fejl ikke fryser et tomt navn.
+        if confirmed and cached is None:
+            _cache[ticker] = name or ""
             _save_cache()
-        # Ellers (transient, aldrig cachet): cache IKKE → næste kald prøver igen.
-        return ""
+        return cached or name or ""
 
 
 async def get_ticker_names(tickers: list[str]) -> dict[str, str]:
