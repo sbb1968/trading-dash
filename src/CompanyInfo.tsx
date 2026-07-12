@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTickerName } from "./useTickerName";
 
 // Firma-info (Google-knowledge-panel-stil). Følger den globale valgte ticker, men har
 // også et lokalt inputfelt så man kan slå en hvilken som helst ticker op direkte.
@@ -66,6 +67,9 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
   const [data, setData] = useState<Company | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  // Samme firmanavn-kilde som alle andre vinduer (TradingView / ticker-info), så headeren
+  // er nøjagtig ens med lister/watchlist. Falder tilbage til profilens navn hvis ukendt.
+  const unifiedName = useTickerName(active);
   const [noLogo, setNoLogo] = useState(false);
 
   // Synk med den globale valgte ticker (charts/Level 2 osv.)
@@ -166,7 +170,7 @@ export function CompanyInfo({ ticker }: { ticker: string }) {
                   background: "#fff", padding: 3, flexShrink: 0 }} />
             )}
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 21, fontWeight: 800 }}>{data.name}</div>
+              <div style={{ fontSize: 21, fontWeight: 800 }}>{(unifiedName && unifiedName !== "(ukendt)") ? unifiedName : data.name}</div>
               <div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
                 {data.ticker}{data.exchange ? ` · ${data.exchange}` : ""}
               </div>

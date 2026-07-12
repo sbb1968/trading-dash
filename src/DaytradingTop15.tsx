@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
-import { useTickerNames } from "./useTickerNames";
+import { useTickerNames } from "./useTickerName";
 
 const API_GET = "http://127.0.0.1:8000/daytrading/top15";
 const API_RUN = "http://127.0.0.1:8000/daytrading/top15/run";

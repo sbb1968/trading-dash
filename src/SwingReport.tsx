@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
+import { useTickerNames } from "./useTickerName";
 
 // Swing trading-scores — en LISTE af tickers man selv tilføjer. Hver ticker scores
 // via analyze-endpointet og vises som ÉN linje (samme layout som Swing trading Top-15)
@@ -66,6 +67,8 @@ function loadRows(): ScoreRow[] {
 export function SwingReport({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void }) {
   const [rows, setRows] = useState<ScoreRow[]>(loadRows);
+  // Korrekte firmanavne via samme kilde som alle andre vinduer (TradingView / ticker-info).
+  const names = useTickerNames(rows.map((r) => r.ticker));
   const [ticker, setTicker] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -160,8 +163,8 @@ export function SwingReport({ onSelectTicker, onOpenDetail }:
                     onClick={() => onSelectTicker?.(r.ticker)}
                     title="Dobbeltklik for detaljeret score">
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{r.ticker}</div>
-                    {r.company && (
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.company}</div>
+                    {(names[r.ticker] || r.company) && (
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{names[r.ticker] || r.company}</div>
                     )}
                   </td>
                   <td style={tdStyle}>{r.price != null ? `$${r.price.toFixed(2)}` : "—"}</td>

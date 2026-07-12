@@ -102,6 +102,42 @@ export function useTickerName(ticker: string | undefined | null): string {
 }
 
 /**
+ * Batch-variant: firmanavne for en LISTE af tickers. Deler præcis samme globale
+ * cache + kilde (/ticker/info) som useTickerName, så navne er NØJAGTIGT ens uanset
+ * hvilket vindue de vises i. Returnerer { TICKER: navn } — tom streng mens den
+ * henter eller hvis navnet ikke kan findes (kalderen vælger selv fallback).
+ * Bruges af liste-vinduer (top-15 osv.) der mapper rækker inline.
+ */
+export function useTickerNames(tickers: (string | undefined | null)[]): Record<string, string> {
+  const [, setTick] = useState(0);
+  const upper = [...new Set(tickers.filter(Boolean).map((t) => String(t).toUpperCase()))];
+  const key = [...upper].sort().join(",");
+
+  useEffect(() => {
+    const cb = () => setTick((x) => x + 1);
+    const cleanups: Array<() => void> = [];
+    for (const t of upper) {
+      let subs = subscribers.get(t);
+      if (!subs) {
+        subs = new Set();
+        subscribers.set(t, subs);
+      }
+      subs.add(cb);
+      cleanups.push(() => subs!.delete(cb));
+      if (!(t in globalCache)) fetchName(t);
+    }
+    return () => cleanups.forEach((fn) => fn());
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const out: Record<string, string> = {};
+  for (const t of upper) {
+    const n = globalCache[t];
+    out[t] = n && n !== "" ? n : ""; // "" mens den henter / ukendt → kalderen falder tilbage
+  }
+  return out;
+}
+
+/**
  * Hjælper til at formatere "TICKER · Firmanavn".
  * Hvis navnet endnu ikke er hentet returneres bare ticker'en.
  */
