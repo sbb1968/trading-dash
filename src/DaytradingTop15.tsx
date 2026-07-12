@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
+import { useTickerNames } from "./useTickerNames";
 
 const API_GET = "http://127.0.0.1:8000/daytrading/top15";
 const API_RUN = "http://127.0.0.1:8000/daytrading/top15/run";
@@ -108,6 +109,8 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
 export function DaytradingTop15({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void }) {
   const [data, setData] = useState<TopData | null>(null);
+  // Firmanavne via TradingView (daytrading-rækkerne har intet navn — kun symbol).
+  const names = useTickerNames((data?.rows || []).map((r) => String(r.symbol).toUpperCase()));
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [note, setNote] = useState("");
@@ -203,7 +206,7 @@ export function DaytradingTop15({ onSelectTicker, onOpenDetail }:
             <thead>
               <tr>
                 <Th title="#" left tip="Rangering efter Samlet score — 1 = den bedste opstilling lige nu." />
-                <Th title="Symbol" left tip="Aktiens ticker. Klik rækken for at sætte symbolet i de andre vinduer; dobbeltklik symbolet for den detaljerede score i eget vindue." />
+                <Th title="Symbol" sub="ticker · firmanavn" left tip="Aktiens ticker + firmanavn. Klik rækken for at sætte symbolet i de andre vinduer; dobbeltklik symbolet for den detaljerede score i eget vindue." />
                 <Th title="Pris" sub="sidste kurs" tip="Aktiens sidste kurs fra scoringen (USD)." />
                 <Th title="Samlet" sub="gated konfluens" tip="Den samlede day trading-konfluens (−100…+100): teknisk + forsyning + katalysator vægtet sammen og ganget med handelbarheds-gaten. Det ene tal du dømmer på." />
                 <Th title="Vurdering" sub="bånd" left tip="Ord-bånd for Samlet: ≥50 Stærk · ≥20 Medvind · >−20 Neutral · >−50 Svag · ellers Frarådes." />
@@ -221,9 +224,16 @@ export function DaytradingTop15({ onSelectTicker, onOpenDetail }:
                   style={{ borderTop: "1px solid var(--border-subtle)", cursor: onSelectTicker ? "pointer" : "default" }}
                   title={onSelectTicker ? "Sæt symbol i de andre vinduer" : undefined}>
                   <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", fontWeight: 700 }}>{r.rank}</td>
-                  <td style={{ ...tdStyle, textAlign: "left", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+                  <td style={{ ...tdStyle, textAlign: "left", maxWidth: 240, cursor: "pointer" }}
                     onDoubleClick={(e) => { e.stopPropagation(); onOpenDetail?.("daytrading", String(r.symbol).toUpperCase()); }}
-                    title="Dobbeltklik for detaljeret score">{r.symbol}</td>
+                    title="Dobbeltklik for detaljeret score">
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>{r.symbol}</div>
+                    {names[String(r.symbol).toUpperCase()] && (
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {names[String(r.symbol).toUpperCase()]}
+                      </div>
+                    )}
+                  </td>
                   <td style={tdStyle}>{r.price != null && r.price !== "" ? `$${plain(r.price, 2)}` : "—"}</td>
                   <td style={{ ...tdStyle, fontWeight: 800, fontSize: 15, color: scoreColor(r.final) }}>{num(r.final, 1)}</td>
                   <td style={{ ...tdStyle, textAlign: "left", color: bandColor(r.band), fontWeight: 600 }}>{bandLabel(r.band)}</td>

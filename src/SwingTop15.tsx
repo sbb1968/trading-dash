@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, CSSProperties } from "react";
+import { useTickerNames } from "./useTickerNames";
 
 const API_GET = "http://127.0.0.1:8000/swing/top15";
 const API_RUN = "http://127.0.0.1:8000/swing/top15/run";
@@ -98,6 +99,8 @@ function Th({ title, sub, tip, left = false }: { title: string; sub?: string; ti
 export function SwingTop15({ onSelectTicker, onOpenDetail }:
   { onSelectTicker?: (t: string) => void; onOpenDetail?: (kind: string, ticker: string) => void } = {}) {
   const [data, setData] = useState<TopData | null>(null);
+  // Korrekte firmanavne via TradingView (r.company er ofte bare tickeren).
+  const names = useTickerNames((data?.rows || []).map((r) => r.ticker));
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [note, setNote] = useState("");
@@ -217,9 +220,9 @@ export function SwingTop15({ onSelectTicker, onOpenDetail }:
                     onClick={() => onSelectTicker?.(r.ticker)}
                     title="Dobbeltklik for detaljeret score">
                     <div style={{ fontWeight: 800, fontSize: 14 }}>{r.ticker}</div>
-                    {r.company && (
+                    {(names[r.ticker] || r.company) && (
                       <div style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.company}
+                        {names[r.ticker] || r.company}
                       </div>
                     )}
                   </td>

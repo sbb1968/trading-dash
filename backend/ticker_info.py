@@ -103,6 +103,9 @@ def _smart_shorten(name: str, ticker: str = "") -> str:
 
     tk = (ticker or "").upper().strip()
     current = name.strip()
+    # Efterstillet "(The)" ("Goldman Sachs Group, Inc. (The)") flyttes/fjernes FØR
+    # suffiks-strip, ellers blokerer den for at ", Inc." kan fjernes.
+    current = re.sub(r"\s*\(the\)\s*$", "", current, flags=re.IGNORECASE).strip()
     changed = True
     while changed:
         changed = False
@@ -116,7 +119,14 @@ def _smart_shorten(name: str, ticker: str = "") -> str:
             changed = True
             break
 
-    return current or name.strip()
+    # Dinglende konjunktion efter suffiks-strip: "Eli Lilly and Company" → "Eli Lilly and"
+    # → "Eli Lilly". Kun hvis det ikke kollapser til tickeren.
+    trimmed = re.sub(r"\s+(and|&)\s*$", "", current, flags=re.IGNORECASE).strip()
+    if trimmed and not (tk and trimmed.upper() == tk):
+        current = trimmed
+
+    result = current or name.strip()
+    return name.strip() if (tk and result.upper() == tk) else result
 
 
 # ── Ikke-aktie-instrumenter (futures) ─────────────────────────
@@ -314,7 +324,9 @@ async def get_ticker_name(ticker: str) -> str:
 
     cached = _cache.get(ticker)
     if _is_good_name(ticker, cached):
-        return cached
+        # Kør den (evt. forbedrede) forkortelse igen på cache-hittet, så gamle
+        # skævheder ("... (The)", dinglende "and") self-healer uden gen-hentning.
+        return _smart_shorten(cached, ticker)
     if ticker in _reresolved:          # svagt, men allerede genforsøgt denne proces
         return cached or ""
 
@@ -322,7 +334,7 @@ async def get_ticker_name(ticker: str) -> str:
         # Re-check efter lock — en anden coroutine kan have hentet imens.
         cached = _cache.get(ticker)
         if _is_good_name(ticker, cached):
-            return cached
+            return _smart_shorten(cached, ticker)
         if ticker in _reresolved:
             return cached or ""
 
