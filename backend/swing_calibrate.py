@@ -374,8 +374,10 @@ def main():
         analyze(args.out)
         return
 
-    if not args.api_key:
-        print("FEJL: saet FMP_API_KEY (miljoe eller --api-key).")
+    # FMP er udfaset (død nøgle + 402 på gratis-tier). Kun det gamle --from-fmp kræver en
+    # nøgle; alt andet (--from-tv / --tickers / --sample) kører uden. Brug --from-tv.
+    if args.from_fmp and not args.api_key:
+        print("FEJL: --from-fmp kræver FMP_API_KEY — men FMP er udfaset; brug --from-tv i stedet.")
         sys.exit(1)
 
     if args.tickers:

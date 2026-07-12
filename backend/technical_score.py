@@ -47,8 +47,11 @@ def _band_score(value, bands, default):
     return float(default)
 
 
-# FMP's sektornavne -> SPDR sektor-ETF (til relativ styrke vs sektor).
+# Sektornavn -> SPDR sektor-ETF (til relativ styrke vs sektor). Nøglet på BÅDE
+# yfinance/FMP-taxonomien OG TradingViews mere granulære sektor-vokabular, så
+# sektor-RS virker uanset hvilken kilde sektoren kom fra (TV er nu primær).
 SECTOR_ETF = {
+    # yfinance / FMP (GICS-lite)
     "Technology": "XLK",
     "Healthcare": "XLV",
     "Financial Services": "XLF",
@@ -60,6 +63,25 @@ SECTOR_ETF = {
     "Real Estate": "XLRE",
     "Utilities": "XLU",
     "Communication Services": "XLC",
+    # TradingView (granulær taxonomi → nærmeste SPDR-sektor)
+    "Technology Services": "XLK",
+    "Electronic Technology": "XLK",
+    "Health Technology": "XLV",
+    "Health Services": "XLV",
+    "Finance": "XLF",
+    "Consumer Durables": "XLY",
+    "Consumer Services": "XLY",
+    "Retail Trade": "XLY",
+    "Consumer Non-Durables": "XLP",
+    "Energy Minerals": "XLE",
+    "Producer Manufacturing": "XLI",
+    "Industrial Services": "XLI",
+    "Commercial Services": "XLI",
+    "Transportation": "XLI",
+    "Distribution Services": "XLI",
+    "Process Industries": "XLB",
+    "Non-Energy Minerals": "XLB",
+    "Communications": "XLC",
 }
 
 

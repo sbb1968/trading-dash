@@ -53,6 +53,18 @@ class Level:
 
 # --- Dataindsamling ----------------------------------------------------------
 def fetch_data(ticker: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
+    # Daglige bars hentes fra IBKR via data_source.load_bars — SAMME kilde + disk-cache som
+    # resten af appen (TRADES-stænger med korrekte candlestick-kroppe; undgår yfinance'
+    # split/justerings-forskelle). yfinance bruges kun til intraday-intervaller (som
+    # load_bars ikke dækker) og som fallback hvis IBKR ikke svarer.
+    if interval in ("1d", "1day", "1 day"):
+        try:
+            import data_source
+            ib_df = data_source.load_bars(ticker)
+            if ib_df is not None and not ib_df.empty:
+                return ib_df.dropna()
+        except Exception:
+            pass
     if yf is None:
         raise RuntimeError("yfinance er ikke installeret. Koer: pip install yfinance")
     df = yf.download(ticker, period=period, interval=interval,

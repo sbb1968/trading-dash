@@ -29,7 +29,7 @@ from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
 
 CACHE_DIR = Path(__file__).parent / "company_cache"
 HTTP_TIMEOUT = 12
-SCHEMA = 7   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
+SCHEMA = 8   # bump når output-formen ændres -> gammel cache ignoreres (nye felter vises straks)
 UA = {"User-Agent": "TradingDash/1.0 (firma-info)"}
 
 # Selskabs-suffikser der hjælper Wikipedia-opslaget (prøver med og uden).
@@ -45,6 +45,54 @@ def _finnhub_profile(sym: str) -> dict:
         return r.json() or {} if r.status_code == 200 else {}
     except Exception:
         return {}
+
+
+def _tradingview_profile(sym: str) -> dict:
+    """Navn/sektor/industri/markedsværdi/pris/børs fra TradingViews screener — SAMME kilde
+    som resten af appen (univers, navne, fundamentals), så Firma-info-vinduet er konsistent.
+    Tom dict ved fejl. (Logo/website/IPO har TV ikke → de bliver på Finnhub; beskrivelse på
+    Wikipedia; regnskab/CEO/medarbejdere/earnings på yfinance.)"""
+    try:
+        from tradingview_screener import Query, col
+    except Exception:
+        return {}
+    try:
+        _, df = (Query()
+                 .select("name", "description", "sector", "industry",
+                         "market_cap_basic", "close", "exchange")
+                 .where(col("name") == sym).limit(5).get_scanner_data())
+    except Exception:
+        return {}
+    if df is None or df.empty:
+        return {}
+    row = None
+    for _, r in df.iterrows():
+        if str(r.get("name", "")).upper() == sym.upper():
+            row = r
+            break
+    if row is None:
+        return {}
+
+    def s(k):
+        v = row.get(k)
+        return str(v) if v not in (None, "") else ""
+
+    def fnum(k):
+        v = row.get(k)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    mc = fnum("market_cap_basic")
+    return {
+        "name":            s("description") or None,
+        "sector":          s("sector"),
+        "industry":        s("industry"),
+        "market_cap_musd": (mc / 1e6) if mc else None,   # mio. USD (som resten af out)
+        "price":           fnum("close"),
+        "exchange":        s("exchange"),
+    }
 
 
 def _wiki_intro(name: str, lang: str) -> dict:
@@ -246,7 +294,8 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
             pass
 
     prof = _finnhub_profile(sym)
-    name = prof.get("name") or sym
+    tv = _tradingview_profile(sym)                 # primær for navn/sektor/industri/mkt-cap/pris
+    name = tv.get("name") or prof.get("name") or sym
     yf = _yf_bundle(sym)
     wiki_da = _wiki_intro(name, "da")                               # dansk hvis artiklen findes
     wiki_en = {} if wiki_da.get("extract") else _wiki_intro(name, "en")
@@ -267,13 +316,14 @@ def get_company_info(ticker: str, force: bool = False) -> dict:
     out = {
         "ticker":          sym,
         "name":            name,
-        "exchange":        prof.get("exchange", ""),
-        "industry":        prof.get("finnhubIndustry") or yf.get("industry", ""),
-        "sector":          yf.get("sector", ""),
+        "exchange":        tv.get("exchange") or prof.get("exchange", ""),
+        "industry":        tv.get("industry") or prof.get("finnhubIndustry") or yf.get("industry", ""),
+        "sector":          tv.get("sector") or yf.get("sector", ""),
         "country":         prof.get("country") or yf.get("country", ""),
         "currency":        prof.get("currency", ""),
         "ipo":             prof.get("ipo", ""),
-        "market_cap_musd": prof.get("marketCapitalization"),   # mio. USD
+        "market_cap_musd": tv.get("market_cap_musd") if tv.get("market_cap_musd") is not None
+                           else prof.get("marketCapitalization"),   # mio. USD
         "shares_out_m":    prof.get("shareOutstanding"),       # mio. aktier
         "float_shares_m":  (yf.get("float_shares") / 1e6) if yf.get("float_shares") else None,  # mio. frit omsættelige (float)
         "employees":       yf.get("employees"),

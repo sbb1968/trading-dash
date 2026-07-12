@@ -293,14 +293,15 @@ def main() -> int:
 
     async def run():
         from ibkr_connect import IBKRConnection
+        # Kun sektoren skal bruges (til sektor-ETF). Slå den op via ét let TradingView-kald
+        # i stedet for en fuld regnskabs-pull (FMP er død + spild). SECTOR_ETF kender TV's
+        # sektor-vokabular. api_key ikke længere nødvendig.
         sector = None
-        if a.api_key:
-            try:
-                from buyhold_fundamental import fetch_buyhold_fundamentals
-                _f, meta = fetch_buyhold_fundamentals(a.ticker.upper(), a.api_key)
-                sector = meta.get("sector")
-            except Exception:
-                pass
+        try:
+            from buyhold_fundamental import _tradingview_buyhold_fields
+            _f, sector = _tradingview_buyhold_fields(a.ticker.upper())
+        except Exception:
+            pass
         conn = IBKRConnection(paper_trading=True)
         if not await conn.connect():
             print("❌ Kunne ikke forbinde til IBKR (TWS/Gateway oppe?).")

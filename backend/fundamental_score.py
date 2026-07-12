@@ -321,36 +321,105 @@ def fetch_fundamentals_finnhub(symbol: str) -> dict:
     return out
 
 
-_NAME_CACHE: dict = {}
+def fetch_fundamentals_tradingview(symbol: str) -> dict:
+    """PRIMÆR kilde: TradingViews screener (samme som univers/navne — gratis, ingen
+    rate-limit, ingen døde FMP-nøgler). Leverer præcis de felter swing scorer på, i samme
+    enheder (marginer/vækst i %). Tom dict hvis biblioteket mangler / API'et fejler /
+    tickeren ikke findes. `sector` er TV's vokabular ("Technology Services"…) — SECTOR_ETF
+    er udvidet til at kende BÅDE TV's og yfinance/FMP's sektor-navne, så det virker direkte."""
+    try:
+        from tradingview_screener import Query, col
+    except Exception:
+        return {}
+    cols = ['description', 'sector', 'market_cap_basic', 'close',
+            'net_margin', 'return_on_equity', 'debt_to_equity',
+            'earnings_per_share_diluted_ttm', 'price_earnings_ttm',
+            'free_cash_flow_margin_ttm',
+            'earnings_per_share_diluted_yoy_growth_ttm', 'total_revenue_yoy_growth_ttm']
+    try:
+        _, df = (Query().select('name', *cols)
+                 .where(col('name') == symbol).limit(5).get_scanner_data())
+    except Exception:
+        return {}
+    if df is None or df.empty:
+        return {}
+    row = None
+    for _, r in df.iterrows():
+        if str(r.get('name', '')).upper() == symbol.upper():
+            row = r
+            break
+    if row is None:
+        return {}
+
+    def num(key):
+        v = row.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    out: dict = {}
+
+    def put(dst, key):
+        v = num(key)
+        if v is not None:
+            out[dst] = v
+
+    put("net_margin", "net_margin")
+    put("roe", "return_on_equity")
+    put("debt_to_equity", "debt_to_equity")
+    put("eps_ttm", "earnings_per_share_diluted_ttm")
+    put("pe_ttm", "price_earnings_ttm")
+    put("fcf_margin", "free_cash_flow_margin_ttm")
+    put("eps_growth", "earnings_per_share_diluted_yoy_growth_ttm")
+    put("revenue_growth", "total_revenue_yoy_growth_ttm")
+    put("market_cap", "market_cap_basic")
+    name = row.get("description")
+    if name:
+        out["company_name"] = str(name)
+    sector = row.get("sector")
+    if sector:
+        out["sector"] = str(sector)
+    return out
 
 
-def _company_name_yf(symbol: str):
-    """Firmanavn via yfinance (FMP-profile er premium-laast paa vores plan). Cachet
-    i hukommelsen - navne aendrer sig ikke."""
+_META_CACHE: dict = {}
+
+
+def _yf_meta(symbol: str) -> dict:
+    """Firmanavn + sektor via yfinance (ét .info-opslag, cachet). Sektoren bruger yfinance/
+    GICS-taxonomien ("Technology", "Financial Services"…) der matcher SECTOR_ETF — modsat
+    TradingViews mere granulære sektor-felt. Navne/sektorer ændrer sig ikke → cache."""
     s = symbol.upper()
-    if s in _NAME_CACHE:
-        return _NAME_CACHE[s]
-    name = None
+    if s in _META_CACHE:
+        return _META_CACHE[s]
+    meta = {"name": None, "sector": None}
     try:
         import yfinance as yf
         info = yf.Ticker(s).info
-        name = info.get("longName") or info.get("shortName")
+        meta["name"] = info.get("longName") or info.get("shortName")
+        meta["sector"] = info.get("sector")
     except Exception:
-        name = None
-    _NAME_CACHE[s] = name
-    return name
+        pass
+    _META_CACHE[s] = meta
+    return meta
 
 
-def fetch_fundamentals(symbol: str, api_key: str) -> dict:
+def _company_name_yf(symbol: str):
+    """Firmanavn via yfinance (bevaret for eksterne kaldere, fx swing_top15). Deler cache
+    med _yf_meta."""
+    return _yf_meta(symbol)["name"]
+
+
+def fetch_fundamentals(symbol: str, api_key: str = "") -> dict:
     """
-    Kaede med felt-niveau fallback: FMP foerst (giver typisk sektor + noegletal),
-    dernaest Finnhub for de felter FMP IKKE leverede (fx naar FMP-kvoten er
-    opbrugt). Finnhub overskriver aldrig et felt FMP allerede gav.
+    Kæde med felt-niveau fallback: TradingView PRIMÆR (rig, gratis, konsistent med resten af
+    appen — univers/navne/buyhold bruger samme kilde), dernæst Finnhub for de felter TV IKKE
+    gav (sjældent). Sektor + firmanavn fra yfinance (ét cachet .info-opslag) — sektoren i den
+    taxonomi SECTOR_ETF forventer. FMP er udfaset (død nøgle + 402 på gratis-tier); api_key
+    ignoreres nu (bevaret i signaturen for kalder-kompatibilitet).
     """
-    try:
-        f = fetch_fundamentals_fmp(symbol, api_key) or {}
-    except Exception:
-        f = {}
+    f = fetch_fundamentals_tradingview(symbol) or {}
     needed = ("net_margin", "debt_to_equity", "roe", "eps_growth",
               "revenue_growth", "eps_ttm")
     if not all(k in f for k in needed):
@@ -361,7 +430,7 @@ def fetch_fundamentals(symbol: str, api_key: str) -> dict:
         for k, v in fh.items():
             f.setdefault(k, v)   # fyld kun huller
     if not f.get("company_name"):
-        f["company_name"] = _company_name_yf(symbol)   # FMP-profile er premium-laast
+        f["company_name"] = _company_name_yf(symbol)    # dyb fallback hvis TV mangler navn
     return f
 
 
