@@ -52,6 +52,18 @@ BTD_RETRY_UNTIL_ET = dtime(9, 42)
 TJL_START_ET       = dtime(9, 25)   # 15:25 dansk
 TJL_RETRY_UNTIL_ET = dtime(9, 45)
 
+# Daglige friske top-15-lister — KUN algoserveren (serverer til alle maskiner; workstations
+# proxy'er). To slots, fordi listerne har forskellig data-natur:
+#   - Swing + Buy&Hold bygger paa EOD/fundamental-data -> friske hver MORGEN (backend genstarter
+#     ~06:00 DK = 00:00 ET; reset_daily 00:05 ET). Start 00:15 ET saa TWS naar op efter genstart.
+#   - Daytrading er en INTRADAG movers-scan der kun finder gappers naar markedet er aktivt ->
+#     koeres taet paa US-aabning (09:00 ET = 15:00 DK), lige FOER K2 auto-start (09:20 ET), hvor
+#     pre-market-movers findes. Begge har strategi-startenes genforsoegs-moenster hvis TWS er sen.
+TOP15_EOD_START_ET        = dtime(0, 15)   # 06:15 dansk — swing + buyhold
+TOP15_EOD_RETRY_UNTIL_ET  = dtime(1, 30)   # 07:30 dansk — foer Europa-reversion-prep (01:50 ET)
+DAYTRADING_START_ET       = dtime(9,  0)   # 15:00 dansk — daytrading movers (pre-market)
+DAYTRADING_RETRY_UNTIL_ET = dtime(9, 18)   # foer K2 auto-start (09:20 ET)
+
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
 # 2026 NYSE-lukkede dage:
@@ -172,6 +184,8 @@ class AlgoScheduler:
         get_summary_fn:    Callable[[], dict],          # returnerer dagens stats
         tws_is_online_fn:  Callable[[], bool],
         reset_daily_fn:    Optional[Callable[[], Awaitable]] = None,
+        run_top15_eod_fn:  Optional[Callable[[], Awaitable]] = None,
+        run_daytrading_fn: Optional[Callable[[], Awaitable]] = None,
         instance_role:     str = "algoserver",
     ):
         self._start_algo     = start_algo_fn
@@ -179,6 +193,8 @@ class AlgoScheduler:
         self._get_summary    = get_summary_fn
         self._tws_is_online  = tws_is_online_fn
         self._reset_daily    = reset_daily_fn
+        self._run_top15_eod  = run_top15_eod_fn   # swing + buyhold (morgen)
+        self._run_daytrading = run_daytrading_fn  # daytrading movers (naer US-aaben)
         # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
         # På workstation skal pre_flight_check og reset_daily fortsat køre,
         # men strategien startes manuelt af brugeren via UI.
@@ -202,6 +218,10 @@ class AlgoScheduler:
             ScheduledJob("start_trendjoin", TJL_START_ET, self._job_start_trendjoin,
                          window_end_et=TJL_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
+            ScheduledJob("generate_top15_eod", TOP15_EOD_START_ET, self._job_generate_top15_eod,
+                         window_end_et=TOP15_EOD_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("generate_daytrading_top15", DAYTRADING_START_ET, self._job_generate_daytrading,
+                         window_end_et=DAYTRADING_RETRY_UNTIL_ET, retry_until_success=True),
         ]
 
     # ─────────────────────────────────────────────────────────
@@ -353,6 +373,37 @@ class AlgoScheduler:
         if self._reset_daily:
             await self._reset_daily()
             logger.info("[Scheduler] Daglige tællere nulstillet")
+
+    async def _run_top15_job(self, name: str, fn, retry_until: dtime) -> bool:
+        """Faelles motor for de daglige top-15-genereringer. KUN algoserveren danner+serverer
+        listerne (workstations proxy'er dertil). Returnerer True naar genereringen er sat i gang
+        (eller bevidst sprunget over paa en workstation), False naar TWS er nede og jobbet boer
+        genforsoeges — samme moenster som strategi-startene. Genereringerne koerer i baggrunden
+        (subprocesser + asyncio-task) og er idempotente (springer over hvis en allerede koerer)."""
+        if self._instance_role != "algoserver":
+            logger.info(f"[Scheduler] {name} sprunget over — instance_role="
+                        f"'{self._instance_role}' (kun algoserveren danner+serverer listerne)")
+            return True   # bevidst skip — markér færdig
+        if fn is None:
+            return True   # ingen callback wired -> ingen-op
+        if not self._tws_is_online():
+            logger.warning(
+                f"[Scheduler] Kan IKKE danne {name} endnu — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {retry_until.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info(f"[Scheduler] ▶ {name}")
+        await fn()
+        return True
+
+    async def _job_generate_top15_eod(self) -> bool:
+        """Swing + Buy&Hold hver morgen (EOD/fundamental-data — friske uanset markedstid)."""
+        return await self._run_top15_job(
+            "generate_top15_eod (swing+buyhold)", self._run_top15_eod, TOP15_EOD_RETRY_UNTIL_ET)
+
+    async def _job_generate_daytrading(self) -> bool:
+        """Daytrading movers taet paa US-aabning (intradag — kraever aktivt marked/pre-market)."""
+        return await self._run_top15_job(
+            "generate_daytrading_top15", self._run_daytrading, DAYTRADING_RETRY_UNTIL_ET)
 
     # ─────────────────────────────────────────────────────────
     # Status til /status endpoint

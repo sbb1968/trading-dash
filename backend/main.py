@@ -416,13 +416,34 @@ async def startup():
         """Nulstil alle daglige tællere ved midnat ET."""
         await strategy_manager.reset_for_new_day()
 
+    async def generate_top15_eod():
+        """Sæt swing + buyhold top-15 i gang (EOD/fundamental-baseret). Kaldes hver morgen af
+        scheduleren paa algoserveren. Hver /run er idempotent + starter en baggrunds-koersel."""
+        try:
+            r_sw = await swing_top15_run()
+            r_bh = await buyhold_top15_run()
+            logger.info(f"[Top15] morgen (EOD) sat i gang: swing={r_sw} buyhold={r_bh}")
+        except Exception as e:
+            logger.exception(f"[Top15] morgen-generering (swing/buyhold) fejlede: {e}")
+
+    async def generate_daytrading_top15():
+        """Sæt daytrading top-15 (intradag movers) i gang. Kaldes taet paa US-aabning af
+        scheduleren, hvor pre-market-movers findes."""
+        try:
+            r_dt = await daytrading_top15_run()
+            logger.info(f"[Top15] daytrading (pre-market) sat i gang: {r_dt}")
+        except Exception as e:
+            logger.exception(f"[Top15] daytrading-generering fejlede: {e}")
+
     algo_scheduler = AlgoScheduler(
-        start_algo_fn    = start_algo,
-        stop_algo_fn     = stop_algo,
-        get_summary_fn   = get_daily_summary,
-        tws_is_online_fn = tws_is_online,
-        reset_daily_fn   = reset_daily_counters,
-        instance_role    = identity.instance_role,
+        start_algo_fn     = start_algo,
+        stop_algo_fn      = stop_algo,
+        get_summary_fn    = get_daily_summary,
+        tws_is_online_fn  = tws_is_online,
+        reset_daily_fn    = reset_daily_counters,
+        run_top15_eod_fn  = generate_top15_eod,
+        run_daytrading_fn = generate_daytrading_top15,
+        instance_role     = identity.instance_role,
     )
     await algo_scheduler.start()
     print("[Server] Algo-scheduler startet — autonom dagsplan aktiv")
