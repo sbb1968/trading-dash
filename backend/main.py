@@ -2346,64 +2346,104 @@ async def handelschart_trades(start: str | None = None, end: str | None = None,
     return {"trades": trades, "count": len(trades)}
 
 
+async def _handelschart_trades_from_archives(start, end, src_list, want_ids):
+    """Algoserver-sti: læs Handels-chart-handler fra lokal journal + ALLE replikerede
+    arkiver (via _fleet_dbs), mærket pr. maskine og filtreret på de valgte maskiner.
+    INGEN live fan-out — data ligger allerede lokalt (replikeret), så en slukket
+    workstation kan ikke længere give 'kunne ikke nås'. machine_url=None: algoserveren
+    serverer selv PNG'en (den har TWS til at gen-tegne enhver handel)."""
+    reg = {p["id"]: p for p in load_peers()}
+    per_machine = []
+    async with _fleet_dbs() as dbs:
+        for src, db in dbs:
+            machine_id = identity.source_id if src == "__local__" else src
+            if want_ids and machine_id not in want_ids:
+                continue
+            name = reg.get(machine_id, {}).get("name", machine_id)
+            trades = await trade_chart.load_closed_trades(db, start=start, end=end, sources=src_list)
+            for t in trades:
+                t["machine_id"]   = machine_id
+                t["machine_name"] = name
+                t["machine_url"]  = None
+            per_machine.append((machine_id, name, trades))
+    all_trades = [t for _, _, ts in per_machine for t in ts]
+    all_trades.sort(key=lambda t: (t.get("exit_time_utc") or t.get("entry_time_utc") or ""), reverse=True)
+    machines = [{"id": mid, "name": nm, "ok": True, "n_trades": len(ts), "err": None}
+                for mid, nm, ts in per_machine]
+    return {"trades": all_trades, "count": len(all_trades), "machines": machines}
+
+
 @app.get("/handels-chart/trades_fleet", dependencies=[Depends(require_studio_auth)])
 async def handelschart_trades_fleet(start: str | None = None, end: str | None = None,
                                     sources: str | None = None, peers: str = Query("")):
-    """Lukkede handler fra de VALGTE maskiner (self lokalt, andre over Tailscale med
-    X-Internal-Key), flettet og maerket pr. handel med dens maskine (machine_id/name/url).
-    Chartet for en fjern-handel hentes af frontenden fra ejer-maskinens PNG-endpoint
-    (kraever DEN maskines TWS). Spejler dagenslog/report_fleet's fan-out."""
+    """Handels-chart hentes ALTID fra algoserveren, uanset hvilken maskine Trading Dash
+    kører på. Algoserveren har alle maskiners journaler replikeret + TWS til at gen-tegne
+    charts, så vi undgår live fan-out til (evt. slukkede) workstations. Maskin-valget
+    (`peers`) bruges som FILTER over de replikerede arkiver.
+
+      - På algoserveren: læs lokal journal + arkiver direkte (_fleet_dbs).
+      - På en workstation: proxy ÉT kald til algoserveren (altid oppe) og peg PNG'erne
+        derhen (machine_url = algoserverens URL)."""
     from urllib.parse import urlencode
-    want = [pid for pid in peers.split(",") if pid.strip()]
-    reg  = {p["id"]: p for p in load_peers()}
-    selected = [reg[pid] for pid in want if pid in reg and reg[pid].get("url")]
     src_list = [s.strip() for s in sources.split(",") if s.strip()] if sources else None
+    want_ids = {pid for pid in peers.split(",") if pid.strip()}
 
-    async def fetch_one(p: dict) -> dict:
-        is_self = (p["id"] == identity.source_id)
-        try:
-            if is_self:
-                trades = await trade_chart.load_closed_trades(
-                    journal.db, start=start, end=end, sources=src_list)
-            else:
-                q = {k: v for k, v in (("start", start), ("end", end), ("sources", sources)) if v}
-                url = f'{p["url"]}/handels-chart/trades?{urlencode(q)}'
-                timeout = aiohttp.ClientTimeout(total=12)
-                async with aiohttp.ClientSession(timeout=timeout) as s:
-                    async with s.get(url, headers={"X-Internal-Key": identity.internal_key}) as r:
-                        r.raise_for_status()
-                        data = await r.json()
-                trades = data.get("trades", [])
-            for t in trades:
-                t["machine_id"]   = p["id"]
-                t["machine_name"] = p["name"]
-                t["machine_url"]  = None if is_self else p["url"]
-            return {"peer": p, "trades": trades, "ok": True}
-        except Exception as e:
-            return {"peer": p, "trades": [], "ok": False, "err": str(e)[:140]}
+    if identity.instance_role == "algoserver":
+        return await _handelschart_trades_from_archives(start, end, src_list, want_ids)
 
-    results = await asyncio.gather(*[fetch_one(p) for p in selected]) if selected else []
-    all_trades = [t for r in results for t in r["trades"]]
-    # Global sortering nyeste foerst (exit-tid, fallback entry-tid).
-    all_trades.sort(key=lambda t: (t.get("exit_time_utc") or t.get("entry_time_utc") or ""), reverse=True)
-    machines = [{"id": r["peer"]["id"], "name": r["peer"]["name"], "ok": r["ok"],
-                 "n_trades": len(r["trades"]), "err": r.get("err")} for r in results]
-    return {"trades": all_trades, "count": len(all_trades), "machines": machines}
+    # Workstation → proxy til algoserveren (replication.target_url).
+    algo_url = (identity.replication_target_url or "").rstrip("/")
+    if not algo_url:
+        raise HTTPException(status_code=503,
+            detail="Ingen algoserver-URL konfigureret (replication.target_url i account.yaml)")
+    q = {k: v for k, v in (("start", start), ("end", end), ("sources", sources), ("peers", peers)) if v}
+    url = f"{algo_url}/handels-chart/trades_fleet?{urlencode(q)}"
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as s:
+            async with s.get(url, headers={"X-Internal-Key": identity.internal_key}) as r:
+                r.raise_for_status()
+                data = await r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503,
+            detail=f"Algoserveren kunne ikke nås ({algo_url}): {str(e)[:120]}")
+    # PNG'erne skal hentes fra algoserveren (den gen-tegner alle maskiners handler).
+    for t in data.get("trades", []):
+        t["machine_url"] = algo_url
+    return data
+
+
+async def _find_trade_db(trade_id: str):
+    """Async-generator: find den db (lokal journal ELLER et replikeret arkiv) der
+    indeholder trade_id, og yield (db) INDEN for _fleet_dbs-konteksten (så handles
+    ikke er lukket). Yielder intet hvis handlen ikke findes nogen steder.
+
+    Gør at algoserveren kan gen-tegne ENHVER maskines handel: handlen kan ligge i
+    en peer's replikerede arkiv, men bars genhentes altid via algoserverens egen TWS."""
+    async with _fleet_dbs() as dbs:
+        for _src, db in dbs:
+            trade = await trade_queries.get_trade_by_id(db, trade_id)
+            if trade:
+                yield db
+                return
 
 
 @app.get("/handels-chart/trade/{trade_id}.png")
 async def handelschart_trade_png(trade_id: str, bars_before: int = 40, bars_after: int = 40):
     """Server-genereret PNG for handlen — inline (ingen Content-Disposition, som /docs/file),
-    saa <img src> kan vise den direkte. Genhenter bars med algoens egne parametre."""
+    saa <img src> kan vise den direkte. Genhenter bars med algoens egne parametre via
+    DENNE maskines TWS (algoserveren) — handlen slaas op i lokal journal + arkiver."""
     conn = strategy_manager.get_ibkr()
     if conn is None or not getattr(conn, "connected", False):
         raise HTTPException(status_code=503,
                             detail="IBKR ikke forbundet (TWS/Gateway paa 7497?) — kan ikke genhente bars")
-    png = await trade_chart.build_trade_png(journal.db, conn, trade_id,
-                                            bars_before=bars_before, bars_after=bars_after)
-    if png is None:
-        raise HTTPException(status_code=404, detail="Handel ikke fundet eller ingen bars i vinduet")
-    return Response(content=png, media_type="image/png")
+    async for db in _find_trade_db(trade_id):
+        png = await trade_chart.build_trade_png(db, conn, trade_id,
+                                                bars_before=bars_before, bars_after=bars_after)
+        if png is None:
+            raise HTTPException(status_code=404, detail="Handel fundet, men ingen bars i vinduet")
+        return Response(content=png, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Handel ikke fundet")
 
 
 @app.get("/handels-chart/trade/{trade_id}/bars", dependencies=[Depends(require_studio_auth)])
@@ -2412,11 +2452,13 @@ async def handelschart_trade_bars(trade_id: str, bars_before: int = 40, bars_aft
     conn = strategy_manager.get_ibkr()
     if conn is None or not getattr(conn, "connected", False):
         raise HTTPException(status_code=503, detail="IBKR ikke forbundet (TWS/Gateway paa 7497?)")
-    data = await trade_chart.build_trade_bars_json(journal.db, conn, trade_id,
-                                                   bars_before=bars_before, bars_after=bars_after)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Handel ikke fundet eller ingen bars i vinduet")
-    return data
+    async for db in _find_trade_db(trade_id):
+        data = await trade_chart.build_trade_bars_json(db, conn, trade_id,
+                                                       bars_before=bars_before, bars_after=bars_after)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Handel fundet, men ingen bars i vinduet")
+        return data
+    raise HTTPException(status_code=404, detail="Handel ikke fundet")
 
 
 # ── Dagens log (markdown-rapport over et dato-interval, read-only) ───────────

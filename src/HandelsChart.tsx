@@ -361,9 +361,9 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 </div>
               </div>
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.4 }}>
-                Chartet genskabes på {sel.machine_url ? `${sel.machine_name} (fjern-maskine)` : "denne maskine"} —
-                hvis det ikke vises: tjek at DEN maskines TWS/Gateway er forbundet (bars genhentes live fra IBKR).
-                Micro-caps ~6 mdr. tilbage i 1-min historik.
+                Chartet gen-tegnes altid på <b>algoserveren</b> (den har alle maskiners handler + TWS),
+                uanset hvilken maskine du sidder ved. Vises det ikke: tjek at algoserverens TWS/Gateway er
+                forbundet (bars genhentes live fra IBKR). Micro-caps ~6 mdr. tilbage i 1-min historik.
               </div>
             </>
           )}
