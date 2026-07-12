@@ -479,60 +479,89 @@
         .modal-content {
             flex: 1;
             overflow-y: auto;
-            padding: 20px 24px;
+            padding: 20px 22px;
+            background: #171717;   /* lidt mørkere baggrund så kortene "løfter" sig */
         }
 
-        /* ── Trade-detail sektioner ─────────────────────────── */
+        /* ── Trade-detail sektioner (kort-bokse) ───────────────── */
         .trade-subheader {
             display: flex;
             align-items: center;
-            gap: 10px;
+            flex-wrap: wrap;
+            gap: 12px;
             font-size: 15px;
             color: #d0d0d0;
-            padding: 12px 0 20px;
-            border-bottom: 1px solid #3a3a3a;
-            margin-bottom: 20px;
+            padding: 13px 16px;
+            background: #212121;
+            border: 1px solid #383838;
+            border-radius: 10px;
+            margin-bottom: 16px;
         }
 
         .trade-subheader-divider {
-            color: #5a5a5a;
+            color: #565656;
         }
 
         .detail-section {
-            margin-bottom: 24px;
+            margin-bottom: 14px;
+            background: #212121;
+            border: 1px solid #383838;
+            border-radius: 10px;
+            padding: 13px 18px 5px;
         }
 
         .detail-section-title {
-            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #c5c5c5;
+            letter-spacing: 1.2px;
+            color: #7ab8f5;
             font-weight: 700;
-            margin-bottom: 10px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #3a3a3a;
+            margin-bottom: 8px;
+        }
+        .detail-section-title::before {
+            content: "";
+            width: 3px;
+            height: 12px;
+            border-radius: 2px;
+            background: #5ab0ff;
+            flex: 0 0 auto;
         }
 
         .detail-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px 24px;
+            gap: 0 26px;
         }
 
         .detail-row {
             display: flex;
             justify-content: space-between;
             align-items: baseline;
-            padding: 8px 0;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
+        .detail-row:last-child { border-bottom: none; }
 
         .detail-row-full {
             grid-column: 1 / -1;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+        }
+        .detail-row-full .detail-value {
+            text-align: left;
+            font-weight: 500;
+            line-height: 1.45;
+            white-space: normal;
+            word-break: break-word;
         }
 
         .detail-label {
-            color: #c5c5c5;
-            font-size: 14px;
+            color: #9a9a9a;
+            font-size: 13px;
             font-weight: 500;
         }
 
@@ -572,17 +601,26 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #3a3a3a;
+            margin-bottom: 8px;
         }
 
         .detail-section-title-text {
-            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #c5c5c5;
+            letter-spacing: 1.2px;
+            color: #7ab8f5;
             font-weight: 700;
+        }
+        .detail-section-title-text::before {
+            content: "";
+            width: 3px;
+            height: 12px;
+            border-radius: 2px;
+            background: #5ab0ff;
+            flex: 0 0 auto;
         }
 
         .notes-edit-btn {
