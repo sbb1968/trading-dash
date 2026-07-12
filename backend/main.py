@@ -2010,6 +2010,30 @@ _SWING_RUNLOG_PATH = os.path.join(_SWING_DIR, "swing_top15_run.log")
 _SWING_STALE_SEC = 4 * 3600   # laas aeldre end dette = staale (proces doede) -> ikke koerende
 
 
+async def _proxy_to_algoserver(method: str, path: str):
+    """Proxy et GET/POST-kald til algoserveren (identity.replication_target_url) med den
+    interne noegle. Bruges saa top-15-listerne ALTID dannes+serveres fra algoserveren,
+    uanset hvilken maskine Trading Dash koerer paa — praecis samme beslutning som
+    Handels-chart. Kaster 503 hvis algoserver-URL mangler eller ikke kan naaes."""
+    algo_url = (identity.replication_target_url or "").rstrip("/")
+    if not algo_url:
+        raise HTTPException(status_code=503,
+            detail="Ingen algoserver-URL konfigureret (replication.target_url i account.yaml)")
+    url = f"{algo_url}{path}"
+    headers = {"X-Internal-Key": identity.internal_key}
+    timeout = aiohttp.ClientTimeout(total=25)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as s:
+            call = s.get(url, headers=headers) if method == "GET" \
+                else s.post(url, headers=headers)
+            async with call as r:
+                r.raise_for_status()
+                return await r.json()
+    except Exception as e:
+        raise HTTPException(status_code=503,
+            detail=f"Algoserveren kunne ikke naaes ({url}): {str(e)[:120]}")
+
+
 def _swing_running():
     """(running: bool, started_utc: str|None). Laasefilen er kilden, med staale-backstop."""
     if not os.path.exists(_SWING_LOCK_PATH):
@@ -2027,7 +2051,10 @@ def _swing_running():
 
 @app.get("/swing/top15")
 async def swing_top15_get():
-    """Seneste top-15 (fra swing_top15_latest.json) + om en koersel er i gang."""
+    """Seneste top-15 (fra swing_top15_latest.json) + om en koersel er i gang.
+    Altid fra algoserveren: paa en workstation proxy'es kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("GET", "/swing/top15")
     data = {"generated_local": None, "generated_utc": None, "source": None, "count": 0, "rows": []}
     if os.path.exists(_SWING_LATEST_PATH):
         try:
@@ -2043,7 +2070,10 @@ async def swing_top15_get():
 
 @app.post("/swing/top15/run")
 async def swing_top15_run():
-    """Start en frisk top-15-koersel (IBKR) som baggrundsproces. Afvis hvis en allerede koerer."""
+    """Start en frisk top-15-koersel (IBKR) som baggrundsproces. Afvis hvis en allerede koerer.
+    Dannes altid paa algoserveren: paa en workstation proxy'es start-kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("POST", "/swing/top15/run")
     running, started = _swing_running()
     if running:
         return {"started": False, "already_running": True, "started_utc": started}
@@ -2091,7 +2121,10 @@ def _bh_top15_running():
 
 @app.get("/buyhold/top15")
 async def buyhold_top15_get():
-    """Seneste buy-and-hold top-15 (fra buyhold_top15_latest.json) + running/progress."""
+    """Seneste buy-and-hold top-15 (fra buyhold_top15_latest.json) + running/progress.
+    Altid fra algoserveren: paa en workstation proxy'es kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("GET", "/buyhold/top15")
     data = {"generated_local": None, "generated_utc": None, "source": None,
             "universe_size": 0, "scored_cached": 0, "count": 0, "rows": []}
     if os.path.exists(_BH_TOP15_LATEST):
@@ -2110,7 +2143,10 @@ async def buyhold_top15_get():
 @app.post("/buyhold/top15/run")
 async def buyhold_top15_run():
     """Start en frisk buy-and-hold top-15-koersel (subprocess). Afvis hvis en koerer.
-    Kraever FMP_API_KEY i backendens miljoe + (helst) IBKR oppe paa 7497."""
+    Kraever FMP_API_KEY i backendens miljoe + (helst) IBKR oppe paa 7497.
+    Dannes altid paa algoserveren: paa en workstation proxy'es start-kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("POST", "/buyhold/top15/run")
     if not os.environ.get("FMP_API_KEY", ""):
         return {"started": False, "error": "FMP_API_KEY ikke sat i backendens miljoe"}
     running, started, _ = _bh_top15_running()
@@ -2158,7 +2194,10 @@ def _daytrading_running():
 
 @app.get("/daytrading/top15")
 async def daytrading_top15_get():
-    """Seneste day trading top-15 (fra daytrading_top15_latest.json) + fremdrift/running."""
+    """Seneste day trading top-15 (fra daytrading_top15_latest.json) + fremdrift/running.
+    Altid fra algoserveren: paa en workstation proxy'es kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("GET", "/daytrading/top15")
     data = {"generated_local": None, "generated_utc": None, "source": None,
             "count": 0, "rows": [], "progress": None}
     if os.path.exists(_DAYTRADING_TOP15_JSON):
@@ -2175,7 +2214,10 @@ async def daytrading_top15_get():
 
 @app.post("/daytrading/top15/run")
 async def daytrading_top15_run():
-    """Start en frisk day trading-scan (in-process async paa delt ib). Afvis hvis en koerer."""
+    """Start en frisk day trading-scan (in-process async paa delt ib). Afvis hvis en koerer.
+    Dannes altid paa algoserveren: paa en workstation proxy'es start-kaldet dertil."""
+    if identity.instance_role != "algoserver":
+        return await _proxy_to_algoserver("POST", "/daytrading/top15/run")
     running, started = _daytrading_running()
     if running:
         return {"started": False, "already_running": True, "started_utc": started}
@@ -2187,6 +2229,55 @@ async def daytrading_top15_run():
     _daytrading_top15["started_utc"] = _datetime.datetime.now(_datetime.timezone.utc).isoformat()
     _daytrading_top15["task"] = asyncio.create_task(daytrading_scanner.run_scan(ib))
     return {"started": True, "already_running": False, "started_utc": _daytrading_top15["started_utc"]}
+
+
+# ── Top-15 ingest (engangs-migrering af en allerede-beregnet liste) ──────────
+# Naar top-15-listerne nu dannes+serveres fra algoserveren, kan en workstation der
+# ALLEREDE har brugt timer paa at beregne en liste skubbe resultatet hertil i stedet
+# for at faa algoserveren til at genberegne. Skriver atomisk til DENNE maskines serve-
+# fil (samme fil GET-endpointet laeser). Intern noegle kraeves.
+_TOP15_INGEST_FILES = {
+    "swing":      _SWING_LATEST_PATH,
+    "buyhold":    _BH_TOP15_LATEST,
+    "daytrading": _DAYTRADING_TOP15_JSON,
+}
+
+
+@app.post("/topX/upload")
+async def topX_upload(request: Request, kind: str = "", x_internal_key: str = Header(None)):
+    """Modtag en top-15 JSON (kind=swing|buyhold|daytrading) og skriv den atomisk til
+    serve-filen. Intern noegle kraeves. Validerer at body er et JSON-objekt med 'rows'."""
+    if not identity.internal_key or x_internal_key != identity.internal_key:
+        raise HTTPException(status_code=401, detail="Ugyldig intern noegle")
+    dest = _TOP15_INGEST_FILES.get(kind)
+    if dest is None:
+        raise HTTPException(status_code=400, detail=f"Ukendt kind: {kind!r} "
+                            f"(forventet: {', '.join(_TOP15_INGEST_FILES)})")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Tomt body")
+    try:
+        parsed = _json.loads(body)
+        if not isinstance(parsed, dict) or "rows" not in parsed:
+            raise ValueError("forventet et top-15 JSON-objekt med 'rows'")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ugyldig JSON: {str(e)[:120]}")
+    import tempfile
+    dest_dir = os.path.dirname(dest)
+    fd, tmp = tempfile.mkstemp(dir=dest_dir, suffix=".part")
+    tmp_path = tmp
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(body)
+        os.replace(tmp, dest)
+        tmp_path = None
+    finally:
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    return {"ok": True, "kind": kind, "bytes": len(body), "rows": len(parsed.get("rows", []))}
 
 
 # ── Live halt-scanner (movers-univers, halted-overvaagning paa delt ib) ──────
