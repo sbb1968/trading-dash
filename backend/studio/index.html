@@ -73,6 +73,31 @@
             background: rgba(255,255,255,0.03);
         }
 
+        /* Primære faner (Oversigt / Journal / Dokumentation) — neon grønne, så de
+           tydeligt adskiller sig fra de øvrige faner. */
+        nav button.nav-primary {
+            color: #39ff14;
+            font-weight: 700;
+            text-shadow: 0 0 7px rgba(57,255,20,0.45);
+        }
+        nav button.nav-primary:hover:not(.active) {
+            color: #7dff5c;
+            background: rgba(57,255,20,0.08);
+        }
+        nav button.nav-primary.active {
+            color: #39ff14;
+            border-bottom-color: #39ff14;
+        }
+        /* Tydelig lodret opdeling mellem de primære faner og de resterende. */
+        nav .nav-divider {
+            flex: 0 0 auto;
+            align-self: stretch;
+            width: 2px;
+            margin: 8px 18px;
+            background: linear-gradient(to bottom, transparent, #39ff14, transparent);
+            opacity: 0.65;
+        }
+
         main {
             flex: 1;
             padding: 32px;
@@ -1288,14 +1313,13 @@
     </header>
 
     <nav id="nav">
-        <button data-page="oversigt" class="active">Oversigt</button>
+        <button data-page="oversigt" class="nav-primary active">Oversigt</button>
+        <button data-page="journal" class="nav-primary">Journal</button>
+        <button data-page="docs" class="nav-primary">Dokumentation</button>
+        <span class="nav-divider" aria-hidden="true"></span>
         <button data-page="status">Status</button>
-        <button data-page="account">Konto</button>
-        <button data-page="strategies">Strategier</button>
         <button data-page="analysis">Analyse</button>
-        <button data-page="journal">Journal</button>
         <button data-page="log">Log</button>
-        <button data-page="docs">Dokumentation</button>
     </nav>
 
     <main>
@@ -1741,12 +1765,13 @@
             // Byttet om: Status-fanen viser fleet-boardet (alle maskiner),
             // Analyse-fanen viser denne maskines system-status.
             else if (page === "status") showAnalysis();
-            else if (page === "account") showAccount();
             else if (page === "analysis") showStatus();
-            else if (page === "strategies") showStrategies();
             else if (page === "journal") showJournal();
             else if (page === "log") showLog();
             else if (page === "docs") showDocs();
+            // 'account' (Konto) og 'strategies' (Strategier) er fjernet — falder til
+            // Oversigt hvis en gammel gemt tilstand stadig peger derhen.
+            else if (page === "account" || page === "strategies") showOversigt();
             else showPlaceholder(page);
         }
 
