@@ -500,6 +500,164 @@ def _band(score):
     return "Fraraades (langsigtet)"
 
 
+# ── Finnhub-fallback: noegletal naar FMP's regnskaber er 402-laaste/noeglen ugyldig ──
+def _finnhub_buyhold_fields(symbol: str) -> dict:
+    """Nøgletal fra Finnhub /stock/metric (gratis), mappet til buyhold's f-felter. Bruges
+    som fallback når FMP's regnskabs-endpoints er 402-låste (gratis-tier) eller nøglen er
+    ugyldig (401), så buy-and-hold får en DELVIS score i stedet for ingenting.
+
+    Enheder: Finnhub leverer marginer/vækst i %, som buyhold også forventer; yields udledes
+    som FRAKTION. Rene regnskabs-afledte felter (Owner Earnings, Altman Z, normaliseret
+    FCF/-conversion, growth-consistency, margin-trend) kan IKKE udledes uden rå regnskaber
+    og udelades — de tilhørende scorere ekskluderer dem pænt."""
+    import urllib.parse
+    import urllib.request
+    try:
+        from finnhub_news import FINNHUB_API_KEY, FINNHUB_BASE
+    except Exception:
+        return {}
+    q = urllib.parse.urlencode({"symbol": symbol, "metric": "all", "token": FINNHUB_API_KEY})
+    try:
+        with urllib.request.urlopen(f"{FINNHUB_BASE}/stock/metric?{q}", timeout=20) as r:
+            data = json.loads(r.read().decode())
+    except Exception:
+        return {}
+    m = data.get("metric") if isinstance(data, dict) else None
+    if not isinstance(m, dict):
+        return {}
+
+    def g(*keys):
+        for k in keys:
+            v = m.get(k)
+            if v is not None:
+                return v
+        return None
+
+    f: dict = {}
+
+    def put(dst, *keys):
+        v = g(*keys)
+        if v is not None:
+            f[dst] = v
+
+    # Marginer / afkast — Finnhub ER i %, buyhold forventer %
+    put("net_margin", "netProfitMarginTTM", "netProfitMarginAnnual")
+    put("gross_margin", "grossMarginTTM", "grossMarginAnnual")
+    put("roe", "roeTTM", "roeRfy")
+    put("roic", "roicTTM", "roiTTM")               # roicTTM ofte None → roiTTM som proxy
+    # Balance / soliditet
+    put("current_ratio", "currentRatioAnnual", "currentRatioQuarterly")
+    put("debt_to_equity", "totalDebt/totalEquityAnnual", "totalDebt/totalEquityQuarterly",
+        "longTermDebt/equityAnnual", "longTermDebt/equityQuarterly")
+    put("interest_coverage", "netInterestCoverageTTM", "netInterestCoverageAnnual")
+    # Multipler / EPS
+    put("pe_ttm", "peTTM", "peBasicExclExtraTTM")
+    put("eps_ttm", "epsTTM", "epsBasicExclExtraItemsTTM")
+    # Vækst (%)
+    put("eps_growth", "epsGrowthTTMYoy")
+    put("revenue_growth", "revenueGrowthTTMYoy")
+    put("rev_cagr5", "revenueGrowth5Y")
+    put("eps_cagr5", "epsGrowth5Y")
+    put("fcf_growth", "focfCagr5Y", "fcfCagr5Y")
+    # Udbytte — buyhold vil have FRAKTION; Finnhub giver %
+    dy = g("currentDividendYieldTTM", "dividendYieldIndicatedAnnual")
+    if dy is not None:
+        f["dividend_yield"] = dy / 100.0
+    po = g("payoutRatioTTM", "payoutRatioAnnual")
+    if po is not None:
+        f["payout"] = po / 100.0
+    # Yields (FRAKTION) udledt af per-share-multipler
+    pe = g("peTTM", "peBasicExclExtraTTM")
+    if pe:
+        f["earnings_yield"] = 1.0 / pe
+    pfcf = g("pfcfShareTTM", "pfcfShareAnnual")
+    if pfcf:
+        f["fcf_yield"] = 1.0 / pfcf
+    # FCF-margin (%) udledt: net_margin × (P/E ÷ P/FCF) — samme kæde som swing-scoringen
+    nm = f.get("net_margin")
+    if nm is not None and pe is not None and pfcf:
+        f["fcf_margin"] = nm * (pe / pfcf)
+    return f
+
+
+def _tradingview_buyhold_fields(symbol: str) -> tuple[dict, Optional[str]]:
+    """Nøgletal fra TradingViews screener (samme kilde som univers/navne — gratis, ingen
+    rate-limit). PRIMÆR fallback når FMP's regnskaber er 402-låste/nøglen ugyldig: dækker
+    ROIC, EV/EBITDA, marginer, gæld, multipler, EPS, TTM-vækst, udbytte, FCF-margin — langt
+    mere end Finnhub. 5-års CAGR + rentedækning har TV IKKE → fyldes fra Finnhub bagefter.
+
+    Returnerer (f-felter, sektor). Enheder: TV giver marginer/vækst i %, som buyhold også
+    forventer; yields udledes som FRAKTION; netdebt/EBITDA udledes af net_debt÷ebitda."""
+    try:
+        from tradingview_screener import Query, col
+    except Exception:
+        return {}, None
+    cols = ['close', 'return_on_equity', 'return_on_invested_capital', 'net_margin', 'gross_margin',
+            'current_ratio', 'debt_to_equity', 'price_earnings_ttm', 'enterprise_value_ebitda_ttm',
+            'earnings_per_share_diluted_ttm', 'earnings_per_share_diluted_yoy_growth_ttm',
+            'total_revenue_yoy_growth_ttm', 'free_cash_flow_margin_ttm', 'price_free_cash_flow_ttm',
+            'dividends_yield', 'dividend_payout_ratio_ttm', 'net_debt', 'ebitda', 'sector']
+    try:
+        _, df = (Query().select('name', *cols)
+                 .where(col('name') == symbol).limit(5).get_scanner_data())
+    except Exception:
+        return {}, None
+    if df is None or df.empty:
+        return {}, None
+    row = None
+    for _, r in df.iterrows():
+        if str(r.get('name', '')).upper() == symbol.upper():
+            row = r
+            break
+    if row is None:
+        return {}, None
+
+    def num(key):
+        v = row.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    f: dict = {}
+
+    def put(dst, key):
+        v = num(key)
+        if v is not None:
+            f[dst] = v
+
+    put("price", "close")
+    put("roe", "return_on_equity")
+    put("roic", "return_on_invested_capital")
+    put("net_margin", "net_margin")
+    put("gross_margin", "gross_margin")
+    put("current_ratio", "current_ratio")
+    put("debt_to_equity", "debt_to_equity")
+    put("pe_ttm", "price_earnings_ttm")
+    put("ev_ebitda", "enterprise_value_ebitda_ttm")
+    put("eps_ttm", "earnings_per_share_diluted_ttm")
+    put("eps_growth", "earnings_per_share_diluted_yoy_growth_ttm")
+    put("revenue_growth", "total_revenue_yoy_growth_ttm")
+    put("fcf_margin", "free_cash_flow_margin_ttm")
+    dy = num("dividends_yield")
+    if dy is not None:
+        f["dividend_yield"] = dy / 100.0          # TV giver % → buyhold vil have fraktion
+    po = num("dividend_payout_ratio_ttm")
+    if po is not None:
+        f["payout"] = po / 100.0
+    pe = num("price_earnings_ttm")
+    if pe:
+        f["earnings_yield"] = 1.0 / pe            # fraktion
+    pfcf = num("price_free_cash_flow_ttm")
+    if pfcf:
+        f["fcf_yield"] = 1.0 / pfcf               # fraktion (P/FCF invers)
+    nd, eb = num("net_debt"), num("ebitda")
+    if nd is not None and eb:
+        f["netdebt_ebitda"] = nd / eb             # <0 = nettokontant
+    sector = row.get("sector")
+    return f, (str(sector) if sector else None)
+
+
 # ── FMP-adapter: fylder f fra de AABNE raa regnskaber + udregner det laaste ──
 def fetch_buyhold_fundamentals(symbol: str, api_key: str):
     """Returnér (f, meta). f = scorer-input-dict; meta = sektor/Owner-Earnings-spaend/
@@ -688,6 +846,34 @@ def fetch_buyhold_fundamentals(symbol: str, api_key: str):
         or f.get("gross_margin") is not None
     )
     meta["statement_locked"] = statement_locked
+
+    # ── Fallback naar FMP's regnskaber ikke er tilgaengelige (402-laast paa gratis-tier
+    # eller ugyldig noegle -> 401): hent noegletal fra TradingView (primaer, rig daekning)
+    # + Finnhub (fylder de 5-aars-CAGR + rentedaekning TV mangler). Buy-and-hold faar saa en
+    # DELVIS score i stedet for ingenting. Rene regnskabs-afledte felter (Owner Earnings,
+    # Altman Z, normaliseret FCF-conversion, growth-consistency, margin-trend) kan ikke udledes
+    # uden raa regnskaber og udelades -> deres scorere ekskluderer dem paent.
+    if not meta["fundamental_available"]:
+        fb, tv_sector = _tradingview_buyhold_fields(symbol)
+        for k, v in _finnhub_buyhold_fields(symbol).items():
+            fb.setdefault(k, v)                       # fyld TV's huller (5y-CAGR, rentedaekning)
+        if fb:
+            # VIGTIGT: FMP-stien har allerede sat mange felter til None (fx f["pe_ttm"]=None),
+            # saa setdefault ville IKKE overskrive dem. Fyld derfor naar vaerdien er None.
+            for k, v in fb.items():
+                if f.get(k) is None:
+                    f[k] = v
+            if not meta.get("sector") and tv_sector:
+                meta["sector"] = tv_sector
+                meta["is_financial"] = is_financial(tv_sector)
+            if f.get("price") is not None:
+                meta.setdefault("market_cap", None)   # ukendt uden profil; yields bruger per-share
+            meta["source"] = "tradingview+finnhub"
+            meta["fundamental_partial"] = True
+            meta["errors"].append("FMP-regnskaber utilgaengelige -> TradingView+Finnhub-fallback (delvis)")
+            meta["fundamental_available"] = bool(
+                f.get("roe") is not None or f.get("net_margin") is not None
+                or f.get("roic") is not None or f.get("pe_ttm") is not None)
     return f, meta
 
 
