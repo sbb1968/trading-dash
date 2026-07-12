@@ -146,6 +146,10 @@ def make_algo(conn, journal, max_open=2):
     a.total_pnl = 0.0
     a.universe = list(INSTRUMENTS)
     a.config = StrategyConfig(max_open_positions=max_open, max_loss_per_trade=170.0)
+    # Sizing læser nu risiko/handel fra risk_config (konfigurerbar). I testen fastholder
+    # vi den til $170 (= det gamle per-trade-loft) så sizing-tallene er sammenlignelige,
+    # og max daily loss til $300.
+    a._resolve_risk = lambda key: 170.0 if key == "position_size" else 300.0
     a.stats = StrategyStats()
     a.status = StrategyStatus.RUNNING
     a._status = lambda *x, **k: None

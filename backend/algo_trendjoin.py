@@ -861,8 +861,10 @@ class TrendJoinLive(BaseStrategy):
             self._done_today.add(ticker)
             return
 
-        risk_budget = (self._nlv * RISK_PCT) if self._nlv > 0 else RISK_BUDGET_FB
-        notional_cap = (self._nlv * NOTIONAL_PCT) if self._nlv > 0 else NOTIONAL_CAP_FB
+        # Konfigurerbar risiko/handel (%) + notional-loft (%) (risk_config, pr. konto).
+        # Falder tilbage til FB-beløbene hvis NLV ikke kan læses (procent-basis mangler).
+        risk_budget = self._resolve_risk("position_size") or RISK_BUDGET_FB
+        notional_cap = self._resolve_risk("notional_cap") or NOTIONAL_CAP_FB
         shares = int(min(risk_budget / risk_per_share, notional_cap / entry))
         if shares < 1:
             self._done_today.add(ticker)

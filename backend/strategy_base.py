@@ -261,6 +261,27 @@ class BaseStrategy(ABC):
         else:
             self._broadcast_fn(msg)
 
+    def _resolve_risk(self, key: str) -> float:
+        """Effektiv risiko-grænse ($) for DENNE strategi + nøgle fra risk_config —
+        konfigurerbar pr. konto (Konfiguratoren). Procent slås mod LIVE Net Liquidation;
+        ellers beløbet. Erstatter de tidligere hardkodede tal (max_daily_loss/positions-
+        størrelse)."""
+        import risk_config
+        nlv = 0.0
+        try:
+            nlv = float((self.conn.get_account_summary() or {}).get("net_liquidation", 0) or 0)
+        except Exception:
+            nlv = 0.0
+        val = risk_config.effective(self.name, key, nlv)
+        if val > 0:
+            return val
+        # Ukendt strategi/nøgle i risk_config (fx test-strategi) → fald tilbage til den
+        # statiske StrategyConfig, så adfærden er uændret for alt der ikke er wired.
+        return float({
+            "max_daily_loss": getattr(self.config, "max_daily_loss", 0.0),
+            "position_size":  getattr(self.config, "max_position_size", 0.0),
+        }.get(key, 0.0) or 0.0)
+
     async def request_order(self, order: OrderRequest) -> bool:
         if self._risk_manager is None:
             logger.error(f"[{self.name}] Ingen RiskManager — ordre afvist")
@@ -274,8 +295,9 @@ class BaseStrategy(ABC):
             self.stats.orders_rejected += 1
             return False
 
-        if self.stats.pnl_today <= -self.config.max_daily_loss:
-            await self._log(f"Ordre afvist: Daglig tab-limit nået (${self.config.max_daily_loss})")
+        max_daily_loss = self._resolve_risk("max_daily_loss")
+        if self.stats.pnl_today <= -max_daily_loss:
+            await self._log(f"Ordre afvist: Daglig tab-limit nået (${max_daily_loss:,.0f})")
             self.status = StrategyStatus.PAUSED
             self.stats.orders_rejected += 1
             return False
@@ -397,10 +419,9 @@ class BaseStrategy(ABC):
                 payload    = {
                     "asset_class": self.asset_class,
                     "config":      {
-                        "max_loss_per_trade": self.config.max_loss_per_trade,
-                        "max_daily_loss":     self.config.max_daily_loss,
+                        "max_daily_loss":     self._resolve_risk("max_daily_loss"),
                         "max_open_positions": self.config.max_open_positions,
-                        "max_position_size":  self.config.max_position_size,
+                        "position_size":      self._resolve_risk("position_size"),
                     },
                 },
             )
@@ -487,10 +508,9 @@ class BaseStrategy(ABC):
                 "last_trade_time": self.stats.last_trade_time,
             },
             "config": {
-                "max_loss_per_trade": self.config.max_loss_per_trade,
-                "max_daily_loss":     self.config.max_daily_loss,
+                "max_daily_loss":     self._resolve_risk("max_daily_loss"),
                 "max_open_positions": self.config.max_open_positions,
-                "max_position_size":  self.config.max_position_size,
+                "position_size":      self._resolve_risk("position_size"),
                 "enabled":            self.config.enabled,
             },
             # Dagens univers (de udvalgte tickers). getattr med fallback fordi

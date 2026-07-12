@@ -757,29 +757,21 @@ class EuropaReversionLive(BaseStrategy):
         """
         mult = MULTIPLIER.get(sym, 5.0)
 
-        # Risiko-dollars = 1% af konto-equity; fallback til per-trade-grænsen
-        # hvis konto-equity ikke kan hentes.
-        account = self.conn.get_account_summary()
-        equity = account.get("net_liquidation", 0) or 0
-        risk_dollars = RISK_PCT * equity if equity > 0 else self.config.max_loss_per_trade
+        # Risiko-dollars = konfigurerbar risiko/handel (risk_config, pr. konto). Procent
+        # slås mod live NLV; ellers beløbet (default $20 for Ibens ~$1.500-konto).
+        risk_dollars = self._resolve_risk("position_size")
 
         stop_dist = rule.stop_distance(sd)           # (STOP_Z − ENTRY_Z) × std, i prispoint
         per_contract_risk = stop_dist * mult
         if per_contract_risk <= 0:
             return 0, stop_dist, per_contract_risk
 
-        by_risk = floor(risk_dollars / per_contract_risk)
-        by_cap  = floor(self.config.max_loss_per_trade / per_contract_risk)
-        contracts = min(by_risk, by_cap)
+        contracts = floor(risk_dollars / per_contract_risk)
 
         if contracts < 1:
-            # Sikkerhedsgulv: handl 1 kontrakt KUN hvis 1-kontrakts-risiko er
-            # inden for per-trade-grænsen; ellers spring over (ærligere end at
-            # overtrade en for lille konto).
-            if per_contract_risk <= self.config.max_loss_per_trade:
-                contracts = 1
-            else:
-                contracts = 0
+            # Sikkerhedsgulv: handl 1 kontrakt KUN hvis 1-kontrakts-risiko er inden for
+            # risiko/handel; ellers spring over (ærligere end at overtrade en lille konto).
+            contracts = 1 if per_contract_risk <= risk_dollars else 0
 
         return contracts, stop_dist, per_contract_risk
 
@@ -796,7 +788,7 @@ class EuropaReversionLive(BaseStrategy):
             await self._log(
                 f"⏭ {sym}: springer {side}-entry over — stop-afstand for stor til "
                 f"kontoen (1-kontrakts-risiko ${per_contract_risk:,.0f} > "
-                f"per-trade-grænse ${self.config.max_loss_per_trade:,.0f})", level="warning")
+                f"risiko/handel ${self._resolve_risk('position_size'):,.0f})", level="warning")
             return
 
         action = "BUY" if side == "long" else "SELL"

@@ -23,7 +23,7 @@ class StrategyManager:
     """
 
     def __init__(self, risk_config: Optional[RiskConfig] = None):
-        self.risk_manager = RiskManager(risk_config or RiskConfig(daily_loss_limit=300.0))
+        self.risk_manager = RiskManager(risk_config or RiskConfig())
         self._strategies: dict[str, BaseStrategy] = {}
         self._broadcast_fn: Optional[Callable] = None
 
@@ -142,8 +142,6 @@ class StrategyManager:
             return False, f"Strategi '{strategy_name}' kører allerede"
         if self.risk_manager._emergency_active:
             return False, "Nødstop er aktivt — deaktiver det først"
-        if self.risk_manager._daily_limit_hit:
-            return False, "Daglig tab-grænse er nået for i dag"
 
         # ── Sørg for en LEVENDE IBKR-forbindelse før start ──────────
         # Dette er det fælles punkt ALLE start-veje går igennem:

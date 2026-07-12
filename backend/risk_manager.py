@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RiskConfig:
-    daily_loss_limit:        float = 300.0     # $300 kombineret daglig grænse (konto)
-    # PER-STRATEGI grænser — hver strategi opfører sig som om den var alene:
+    # PER-STRATEGI grænser — hver strategi opfører sig som om den var alene. Det
+    # GLOBALE daglige tabsloft er FJERNET (2026-07-12): hver strategi har sin egen
+    # konfigurerbare max daily loss (risk_config.py, håndhævet i request_order).
     max_positions_per_strategy: int   = 3      # Max åbne positioner pr. strategi
     max_exposure_per_strategy:  float = 20000.0  # Max $ i markedet pr. strategi
     # KONTO-BAGSTOPPER — højt sat, så normal drift aldrig rammer det; fanger
@@ -23,13 +24,6 @@ class RiskConfig:
     max_total_positions:     int   = 50        # Samlet positionsloft (bagstopper)
     nlv_emergency_threshold: float = 5000.0    # Nødstop hvis NLV falder hertil
     block_duplicate_tickers: bool  = False     # Strategier MÅ dele samme ticker
-    # GLOBAL daglig tab-mur: summerer ALLE strategiers P&L mod ét loft og standser
-    # hele kontoen. DEAKTIVERET under udvikling (2026-06-11) — vi vil have
-    # per-strategi-grænserne (StrategyConfig.max_daily_loss, håndhævet i
-    # BaseStrategy.request_order) isolere strategierne, så den enes tab aldrig
-    # spærrer den anden. Sæt True igen FØR rigtige penge, og vælg da et passende
-    # daily_loss_limit som ren konto-bagstopper.
-    global_daily_limit_enabled: bool = False
 
 
 @dataclass
@@ -72,7 +66,6 @@ class RiskManager:
         self._rejection_log: list[RejectionRecord] = []
 
         self._current_nlv:      float = 0.0
-        self._daily_limit_hit:  bool  = False
         self._emergency_active: bool  = False
 
         self._emergency_stop_fn = None
@@ -101,17 +94,8 @@ class RiskManager:
         if self._emergency_active:
             return False, "Nødstop er aktivt — alle ordrer blokeret"
 
-        # GLOBAL daglig tab-mur — kun aktiv hvis eksplicit slået til. Deaktiveret
-        # under udvikling, så fx reversions tab ikke spærrer K2. Per-strategi-
-        # grænsen håndhæves uafhængigt i BaseStrategy.request_order.
-        if self.config.global_daily_limit_enabled:
-            if self._daily_limit_hit:
-                return False, f"Daglig tab-grænse nået (${self.config.daily_loss_limit})"
-
-            if self._total_pnl_today <= -self.config.daily_loss_limit:
-                self._daily_limit_hit = True
-                await self._trigger_daily_limit_stop()
-                return False, f"Daglig tab-grænse overskredet: ${self._total_pnl_today:.2f}"
+        # (Globalt dagligt tabsloft FJERNET — hver strategi håndhæver sin egen
+        # konfigurerbare max daily loss i BaseStrategy.request_order.)
 
         estimated_value = order.quantity * (order.limit_price or 10.0)
         strat = order.strategy_name
@@ -186,12 +170,6 @@ class RiskManager:
 
         await self._broadcast_risk_update()
 
-        if (self.config.global_daily_limit_enabled
-                and self._total_pnl_today <= -self.config.daily_loss_limit
-                and not self._daily_limit_hit):
-            self._daily_limit_hit = True
-            await self._trigger_daily_limit_stop()
-
     def release_exposure(self, strategy_name: str, ticker: str, estimated_value: float) -> None:
         key = (strategy_name, ticker)
         if key in self._open_positions:
@@ -244,28 +222,6 @@ class RiskManager:
         if self._emergency_stop_fn:
             await self._emergency_stop_fn(reason)
 
-    async def _trigger_daily_limit_stop(self) -> None:
-        logger.warning(f"Daglig tab-grænse nået: ${self._total_pnl_today:.2f}")
-
-        if self._journal:
-            await self._journal.log_event(
-                source     = "risk_manager",
-                event_type = "daily_limit_reached",
-                payload    = {
-                    "total_pnl": round(self._total_pnl_today, 2),
-                    "limit":     self.config.daily_loss_limit,
-                },
-            )
-
-        await self._broadcast({
-            "type":      "daily_limit_reached",
-            "total_pnl": round(self._total_pnl_today, 2),
-            "limit":     self.config.daily_loss_limit,
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-        })
-        if self._emergency_stop_fn:
-            await self._emergency_stop_fn("Daglig tab-grænse nået")
-
     # -----------------------------------------------------------------------
     # Reset
     # -----------------------------------------------------------------------
@@ -276,7 +232,6 @@ class RiskManager:
         self._open_positions.clear()
         self._exposure_by_strategy.clear()
         self._total_exposure   = 0.0
-        self._daily_limit_hit  = False
         logger.info("RiskManager: Daglige tællere nulstillet")
 
     def reset_emergency(self) -> None:
@@ -290,9 +245,7 @@ class RiskManager:
     def get_status_dict(self) -> dict:
         return {
             "type":               "risk_status",
-            "daily_loss_limit":   self.config.daily_loss_limit,
             "total_pnl_today":    round(self._total_pnl_today, 2),
-            "daily_limit_hit":    self._daily_limit_hit,
             "emergency_active":   self._emergency_active,
             "total_exposure":     round(self._total_exposure, 2),
             "max_total_exposure": self.config.max_total_exposure,

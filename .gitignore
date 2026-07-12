@@ -159,3 +159,4 @@ backend/buyhold_fmp_cache/
 !backend/news_bench_output/
 backend/news_bench_output/*
 !backend/news_bench_output/.gitkeep
+backend/risk_config.json

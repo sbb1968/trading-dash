@@ -1048,7 +1048,8 @@ class Confluence2Live(BaseStrategy):
             return
 
         # ── Sizing ────────────────────────────────────────────
-        capital_per_trade = getattr(self.config, "max_position_size", 2500.0)
+        # Positionsstørrelse = konfigurerbar kapital/handel (risk_config, pr. konto).
+        capital_per_trade = self._resolve_risk("position_size")
         capital  = capital_per_trade * self._position_size_pct
         shares   = int(capital / signal.entry_price)
         if shares <= 0:

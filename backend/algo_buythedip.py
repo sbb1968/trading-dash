@@ -631,7 +631,10 @@ class BuyTheDipLive(BaseStrategy):
             self._done_today.add(ticker)
             self._dip_state.pop(ticker, None)
             return
-        shares = int(min(RISK_BUDGET_USD / risk_per_share, NOTIONAL_CAP_USD / entry))
+        # Konfigurerbar risiko/handel + notional-loft (risk_config, pr. konto).
+        risk_budget  = self._resolve_risk("position_size") or RISK_BUDGET_USD
+        notional_cap = self._resolve_risk("notional_cap") or NOTIONAL_CAP_USD
+        shares = int(min(risk_budget / risk_per_share, notional_cap / entry))
         if shares < 1:
             self._done_today.add(ticker)
             self._dip_state.pop(ticker, None)

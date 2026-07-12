@@ -118,7 +118,7 @@ current_prices:   dict[str, float] = {}
 
 algo_clients: list[WebSocket] = []
 
-strategy_manager = StrategyManager(risk_config=RiskConfig(daily_loss_limit=300.0))
+strategy_manager = StrategyManager(risk_config=RiskConfig())
 strategy_clients: list[WebSocket] = []
 
 ibkr_conn      = None
@@ -4436,6 +4436,105 @@ async def get_ticker_info(ticker: str):
     from ticker_info import get_ticker_name
     name = await get_ticker_name(ticker)
     return {"ticker": ticker.upper(), "name": name}
+
+
+# ── Risikostyring: konfigurerbare grænser pr. strategi (Konfigurator) ────────
+def _risk_nlv() -> float:
+    """Live Net Liquidation for den handlende konto (til %-basis). 0 hvis ukendt."""
+    try:
+        conn = strategy_manager.get_ibkr()
+        if conn and getattr(conn, "connected", False):
+            return float((conn.get_account_summary() or {}).get("net_liquidation", 0) or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
+async def _risk_config_host():
+    """URL på MIN kontos algoserver (proxy-mål for config), eller None = lokal.
+    - Er jeg selv algoserver → None (jeg er host).
+    - Workstation hvis replication_target er SAMME konto → dens URL.
+    - Ellers → None (fx Søren, hvis replication_target er Ibens fælles-datastore, IKKE
+      hans egen algoserver — så gemmes hans config lokalt på hans workstation)."""
+    if identity.instance_role == "algoserver":
+        return None
+    target = (identity.replication_target_url or "").rstrip("/")
+    if not target:
+        return None
+    my_account = identity.source_id.rsplit("_", 1)[0]
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+            async with s.get(f"{target}/fleet/peers",
+                             headers={"X-Internal-Key": identity.internal_key}) as r:
+                if r.status != 200:
+                    return None
+                data = await r.json()
+        target_account = (data.get("self_id") or "").rsplit("_", 1)[0]
+        return target if (target_account and target_account == my_account) else None
+    except Exception:
+        return None
+
+
+@app.get("/risk-config", dependencies=[Depends(require_studio_auth)])
+async def risk_config_get():
+    """Konfigurerbare risiko-grænser pr. strategi. Læses fra MIN kontos handlende maskine:
+    algoserver → lokal fil; workstation m. egen algoserver → proxy dertil."""
+    host = await _risk_config_host()
+    if host:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                async with s.get(f"{host}/risk-config",
+                                 headers={"X-Internal-Key": identity.internal_key}) as r:
+                    r.raise_for_status()
+                    return await r.json()
+        except Exception as e:
+            raise HTTPException(status_code=503,
+                detail=f"Kunne ikke hente risiko-config fra algoserveren: {str(e)[:120]}")
+    import risk_config
+    return risk_config.for_api(_risk_nlv())
+
+
+@app.post("/risk-config", dependencies=[Depends(require_studio_auth)])
+async def risk_config_set(request: Request):
+    """Gem konfigurerbare risiko-grænser. Skriver til MIN kontos handlende maskine.
+    Body: {strategi: {nøgle: {pct, amount}}}. Tomme felter → None (brug beløb/default)."""
+    body = await request.json()
+    host = await _risk_config_host()
+    if host:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                async with s.post(f"{host}/risk-config",
+                                  headers={"X-Internal-Key": identity.internal_key},
+                                  json=body) as r:
+                    r.raise_for_status()
+                    return await r.json()
+        except Exception as e:
+            raise HTTPException(status_code=503,
+                detail=f"Kunne ikke gemme risiko-config på algoserveren: {str(e)[:120]}")
+    import risk_config
+
+    def _norm(x):
+        if x is None or x == "":
+            return None
+        try:
+            f = float(x)
+            return f if f >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    clean: dict = {}
+    for strat, keys in (body or {}).items():
+        if strat not in risk_config.SCHEMA or not isinstance(keys, dict):
+            continue
+        valid = {row["key"] for row in risk_config.SCHEMA[strat]}
+        clean[strat] = {}
+        for k, v in keys.items():
+            if k not in valid or not isinstance(v, dict):
+                continue
+            clean[strat][k] = {"pct": _norm(v.get("pct")), "amount": _norm(v.get("amount"))}
+    risk_config.save(clean)
+    return {"ok": True, "config": risk_config.for_api(_risk_nlv())}
+
 
 @app.get("/studio")
 async def studio_index():
