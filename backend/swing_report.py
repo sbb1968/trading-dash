@@ -237,13 +237,22 @@ def format_final_report(ticker: str, c: dict) -> str:
 
 
 # === Orkestrering ===========================================================
-# Datakilde: 'ibkr' (default) laeser OHLCV fra bars_daily-cachen; 'yfinance'
-# er valgfri fallback. Scoring-motorerne er uaendrede uanset kilde.
+# IBKR er primaerkilden. Har IBKR ingen historik for tickeren (fx manglende
+# markedsdata-tilladelse), faldes AUTOMATISK tilbage til yfinance, saa ENHVER
+# ticker kan scores. Utilstraekkelige data slaar igennem i scoren — de vaelter
+# ikke laengere opslaget.
 def _ohlcv(ticker: str, source: str, period: str):
+    import technical_score as tech
     if source == "ibkr":
         import data_source
-        return data_source.load_bars(ticker)
-    import technical_score as tech
+        df = data_source.load_bars(ticker)
+        if df is not None and not df.empty:
+            return df
+        try:                                   # IBKR tom -> yfinance-fallback
+            fb = tech._yf_ohlcv(ticker, period or "2y")
+        except Exception:
+            fb = None
+        return fb
     return tech._yf_ohlcv(ticker, period)
 
 
