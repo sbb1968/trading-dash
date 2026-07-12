@@ -566,6 +566,46 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
   const [confirmDelete, setConfirmDelete] = useState<boolean>(() => localStorage.getItem("confirm_delete_open") !== "false");
   useEffect(() => { localStorage.setItem("confirm_delete_open", confirmDelete ? "true" : "false"); }, [confirmDelete]);
 
+  // ── Risikostyring: konfigurerbare grænser pr. strategi (backend /risk-config) ──
+  const RISK_API = "http://127.0.0.1:8000";
+  const [risk, setRisk] = useState<any | null>(null);
+  const [riskDirty, setRiskDirty] = useState(false);
+  const [riskErr, setRiskErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch(`${RISK_API}/risk-config`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        if (alive) setRisk(d);
+      } catch (e: any) {
+        if (alive) setRiskErr(`Kunne ikke hente risiko-config: ${e?.message || e}`);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  function setRiskField(strat: string, key: string, field: "pct" | "amount", value: string) {
+    setRisk((prev: any) => {
+      if (!prev) return prev;
+      const next = { ...prev, strategies: { ...prev.strategies } };
+      next.strategies[strat] = prev.strategies[strat].map((row: any) =>
+        row.key === key ? { ...row, [field]: value === "" ? null : value } : row);
+      return next;
+    });
+    setRiskDirty(true);
+  }
+  // Live effektiv-værdi mens man redigerer: procent (af NLV) vinder hvis udfyldt.
+  function riskEffective(row: any): number {
+    const nlv = Number(risk?.nlv) || 0;
+    const p = row.pct === "" || row.pct == null ? null : Number(row.pct);
+    const a = row.amount === "" || row.amount == null ? null : Number(row.amount);
+    if (p != null && p > 0 && nlv > 0) return p / 100 * nlv;
+    if (a != null) return a;
+    return Number(row.effective) || 0;
+  }
+
   // Anvend font-ændringer live
   useEffect(() => {
     FONT_WINDOW_TYPES.forEach(({ id }) => {
@@ -594,6 +634,24 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
       localStorage.setItem(getFontKey(id, "header"),  String(header));
       localStorage.setItem(getFontKey(id, "content"), String(content));
     });
+    onClose();
+  }
+
+  async function handleSave() {
+    // Gem risiko-config på backenden (font/kolonner er allerede gemt løbende).
+    if (riskDirty && risk?.strategies) {
+      const body: any = {};
+      for (const [strat, rows] of Object.entries(risk.strategies)) {
+        body[strat] = {};
+        for (const row of rows as any[]) body[strat][row.key] = { pct: row.pct, amount: row.amount };
+      }
+      try {
+        const r = await fetch(`${RISK_API}/risk-config`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        if (!r.ok) { setRiskErr(`Kunne ikke gemme risiko-config: ${(await r.text()).slice(0, 140)}`); return; }
+      } catch (e: any) { setRiskErr(`Kunne ikke gemme risiko-config: ${e?.message || e}`); return; }
+    }
     onClose();
   }
 
@@ -641,7 +699,7 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
         <span className="konfigurator-title">⚙ Konfigurator</span>
         <div style={{ display: "flex", gap: "8px" }}>
           <button className="konfigurator-cancel" onClick={handleCancel}>✕ Annuller</button>
-          <button className="konfigurator-close" onClick={onClose}>✓ Gem & Luk</button>
+          <button className="konfigurator-close" onClick={handleSave}>✓ Gem & Luk</button>
         </div>
       </div>
       <div className="konfigurator-body" style={{ overflowX: "auto" }}>
@@ -685,6 +743,53 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
             Købspris · Aktuel pris · Beholdning · Ur. P/L) og konfigureres ikke længere her.
           </div>
         </div>
+
+        {/* ── Risikostyring: grænser pr. strategi ── */}
+        <div className="konfigurator-divider" />
+        <div className="konfigurator-panel">
+          <div className="konfigurator-panel-title">Risikostyring — grænser pr. strategi</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
+            For hver strategi: udfyld enten en <b>procentsats</b> (af kontoens egenkapital — har
+            første prioritet) eller et <b>beløb ($)</b>. Tom procent → beløbet bruges.{" "}
+            {risk?.nlv ? <>Egenkapital nu: <b>${Number(risk.nlv).toLocaleString("da-DK")}</b>.</> : null}{" "}
+            Det globale daglige max er fjernet — hver strategi har sin egen grænse.
+          </div>
+          {riskErr && <div style={{ color: "var(--bear)", fontSize: 12, marginBottom: 8 }}>{riskErr}</div>}
+          {!risk ? (
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Henter…</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 12 }}>
+              {Object.entries(risk.strategies).map(([strat, rows]) => (
+                <div key={strat} style={{ background: "var(--bg-base)", borderRadius: 4, padding: "10px 14px", border: "1px solid var(--border-subtle)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>{strat}</div>
+                  {(rows as any[]).map(row => (
+                    <div key={row.key} style={{ marginBottom: 9 }}>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 3 }}>{row.label}</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                          <input type="number" min="0" step="0.1" placeholder="%" value={row.pct ?? ""}
+                            onChange={e => setRiskField(strat, row.key, "pct", e.target.value)}
+                            style={{ width: 62, background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "4px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }} />
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>%</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>$</span>
+                          <input type="number" min="0" step="1" placeholder="beløb" value={row.amount ?? ""}
+                            onChange={e => setRiskField(strat, row.key, "amount", e.target.value)}
+                            style={{ width: 76, background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "4px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }} />
+                        </div>
+                        <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>
+                          = ${Number(riskEffective(row)).toLocaleString("da-DK", { maximumFractionDigits: 0 })} nu
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="konfigurator-divider" />
         <ColSection title="Level 2 — Kolonner"           columns={LEVEL2_COLUMNS}    selected={colsLevel2}    setSelected={setColsLevel2} />
         <div className="konfigurator-divider" />
