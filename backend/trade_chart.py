@@ -144,6 +144,48 @@ def _duration_str(seconds: float) -> str:
     return f"{math.ceil(secs / 86400) + 1} D"
 
 
+def _trim_to_window(df: pd.DataFrame, entry_dt_utc: datetime, exit_dt_utc: datetime,
+                    bars_before: int, bars_after: int) -> pd.DataFrame:
+    """Skaer en ET-indekseret OHLCV-DataFrame til [entry-bar - before, exit-bar + after]
+    ved INDEKS (robust mod overnight-gaps). Delt af re-fetch og snapshot-stien."""
+    if df.empty:
+        return df
+    entry_et = entry_dt_utc.astimezone(ET)
+    exit_et = exit_dt_utc.astimezone(ET)
+    entry_idx = df.index.get_indexer([entry_et], method="nearest")[0]
+    exit_idx = df.index.get_indexer([exit_et], method="nearest")[0]
+    lo = max(0, entry_idx - bars_before)
+    hi = min(len(df), exit_idx + bars_after + 1)
+    return df.iloc[lo:hi]
+
+
+def bars_from_snapshot(trade: dict) -> pd.DataFrame:
+    """Byg OHLCV-DataFrame fra det oejebliksbillede algoen gemte ved close
+    (payload['chart_bars'] = [ts_iso, o, h, l, c, v]).
+
+    Dette er GROUND TRUTH — de faerdige bars algoen faktisk evaluerede — og
+    kraever INGEN gen-hentning fra IBKR: immun over for historik-revisioner,
+    sletning af udloebne futures og kontrakt-roll. Tom DataFrame hvis intet
+    snapshot findes (aeldre handler foer snapshot-logningen -> kalderen
+    falder tilbage til re-fetch)."""
+    payload = trade.get("payload") or {}
+    raw = payload.get("chart_bars") or []
+    rows = []
+    for item in raw:
+        try:
+            ts = _bar_ts_to_et(item[0])        # tz-aware ET
+            if ts is None:
+                continue
+            rows.append({"dt_et": ts, "Open": float(item[1]), "High": float(item[2]),
+                         "Low": float(item[3]), "Close": float(item[4]),
+                         "Volume": float(item[5]) if len(item) > 5 else 0.0})
+        except Exception:
+            continue
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).set_index("dt_et").sort_index()
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Bar-genhentning — PRAECIS algoens parametre + endDateTime ved exit
 # ═══════════════════════════════════════════════════════════════════
@@ -202,15 +244,8 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
         return pd.DataFrame()
 
     df = pd.DataFrame(rows).set_index("dt_et").sort_index()
-
     # Find entry-/exit-bar ved naermeste indeks, og skaer til vinduet.
-    entry_et = entry_dt_utc.astimezone(ET)
-    exit_et = exit_dt_utc.astimezone(ET)
-    entry_idx = df.index.get_indexer([entry_et], method="nearest")[0]
-    exit_idx = df.index.get_indexer([exit_et], method="nearest")[0]
-    lo = max(0, entry_idx - bars_before)
-    hi = min(len(df), exit_idx + bars_after + 1)
-    return df.iloc[lo:hi]
+    return _trim_to_window(df, entry_dt_utc, exit_dt_utc, bars_before, bars_after)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -220,7 +255,7 @@ def _nearest_pos(index, target_et) -> int:
     return int(index.get_indexer([target_et], method="nearest")[0])
 
 
-def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
+def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch") -> bytes:
     """Tegn candlestick-chart for handlen og returnér PNG-bytes.
 
     - PRAECIS GROEN pil (^) ved (entry-bar, entry_price)
@@ -228,6 +263,9 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
     - markeret holde-interval mellem entry og exit
     - stop/target-linjer hvor de findes
     - tidsakse i DANSK tid (CET/CEST); ET noteres i titlen
+
+    provenance: "snapshot" = de bars algoen faktisk evaluerede (ground truth) /
+    "refetch" = gen-hentet fra IBKR-historik (rekonstrueret) — vises i undertitlen.
     """
     symbol = trade.get("symbol", "?")
     source = trade.get("source", "?")
@@ -352,6 +390,10 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
     pnl_s = f"${pnl:+,.2f}" if isinstance(pnl, (int, float)) else "?"
     dato = entry_et.strftime("%Y-%m-%d")
     p = params_for(source)
+    if provenance == "snapshot":
+        kilde, kilde_col = "øjebliksbillede (præcis)", "#2e7d32"
+    else:
+        kilde, kilde_col = "rekonstrueret", "#c62828"
     fig.suptitle(
         f"{symbol} · {source} · {side} · P&L {pnl_s} · {exit_reason} · {dato}",
         fontsize=17, fontweight="bold", y=0.98)
@@ -361,6 +403,9 @@ def render_trade_png(df: pd.DataFrame, trade: dict) -> bytes:
         f"exit {exit_et.strftime('%H:%M')} ET / {exit_et.astimezone(DK).strftime('%H:%M')} DK  ·  "
         f"x-akse i dansk tid",
         fontsize=12, color="#555", pad=10)
+    # KILDE-badge (oeverst til hoejre): saa vi ALDRIG forveksler ground truth med rekonstruktion.
+    ax.text(0.995, 1.015, f"KILDE: {kilde}", transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=11, fontweight="bold", color=kilde_col)
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
@@ -382,11 +427,19 @@ async def build_trade_png(db, conn, trade_id: str,
     exit_dt = _parse_iso_utc(trade.get("exit_time_utc"))
     if not (entry_dt and exit_dt and trade.get("symbol")):
         return None
-    df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
-                                entry_dt, exit_dt, bars_before, bars_after)
+    # Snapshot-first: hvis algoen gemte de bars den faktisk evaluerede, tegner vi
+    # PRAECIS dem (ground truth). Ellers falder vi tilbage til gen-hentning.
+    df = bars_from_snapshot(trade)
+    provenance = "snapshot"
+    if df.empty:
+        df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
+                                    entry_dt, exit_dt, bars_before, bars_after)
+        provenance = "refetch"
+    else:
+        df = _trim_to_window(df, entry_dt, exit_dt, bars_before, bars_after)
     if df.empty:
         return None
-    return render_trade_png(df, trade)
+    return render_trade_png(df, trade, provenance=provenance)
 
 
 async def build_trade_bars_json(db, conn, trade_id: str,
@@ -399,8 +452,15 @@ async def build_trade_bars_json(db, conn, trade_id: str,
     exit_dt = _parse_iso_utc(trade.get("exit_time_utc"))
     if not (entry_dt and exit_dt and trade.get("symbol")):
         return None
-    df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
-                                entry_dt, exit_dt, bars_before, bars_after)
+    # Snapshot-first (som PNG-stien): ground-truth bars naar de findes.
+    df = bars_from_snapshot(trade)
+    provenance = "snapshot"
+    if df.empty:
+        df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
+                                    entry_dt, exit_dt, bars_before, bars_after)
+        provenance = "refetch"
+    else:
+        df = _trim_to_window(df, entry_dt, exit_dt, bars_before, bars_after)
     if df.empty:
         return None
     bars = [{
@@ -419,5 +479,6 @@ async def build_trade_bars_json(db, conn, trade_id: str,
                    "lower_band": (trade.get("payload") or {}).get("lower_band")},
         "meta": {"symbol": trade.get("symbol"), "source": trade.get("source"),
                  "side": trade.get("side"), "pnl": trade.get("pnl"),
-                 "exit_reason": trade.get("exit_reason")},
+                 "exit_reason": trade.get("exit_reason"),
+                 "provenance": provenance},   # "snapshot"=praecis / "refetch"=rekonstrueret
     }

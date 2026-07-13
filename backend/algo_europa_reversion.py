@@ -95,6 +95,29 @@ class Bar:
     volume:    float
 
 
+def _bars_to_chart_payload(bars: list) -> list:
+    """Kompakt OHLCV-oejebliksbillede til Handels-charten: [ts_iso, o, h, l, c, v].
+
+    Gemmer de FAERDIGE bars algoen faktisk evaluerede (self._bar_history) i
+    close-payloadet, saa charten kan vise PRAECIS den situation der gjaldt ved
+    entry/exit — uafhaengigt af IBKR-historik (revisioner, sletning af udloebne
+    futures) og kontrakt-roll. Ground truth, aldrig gen-hentet.
+
+    Bounded til de sidste ~160 bars (rigeligt: warmup + session) saa payloadet
+    ikke vokser ubegraenset. Fejl-sikker: springer ubrugelige bars over.
+    """
+    out = []
+    for b in (bars or [])[-160:]:
+        try:
+            out.append([b.timestamp.isoformat(),
+                        round(float(b.open), 4), round(float(b.high), 4),
+                        round(float(b.low), 4),  round(float(b.close), 4),
+                        float(b.volume or 0)])
+        except Exception:
+            continue
+    return out
+
+
 class EuropaReversionLive(BaseStrategy):
     """
     Live-wrapper for Europa-reversion. Følger BaseStrategy-interfacet så
@@ -1045,6 +1068,15 @@ class EuropaReversionLive(BaseStrategy):
         mfe = self._mfe.pop(sym, None)
         mae = self._mae.pop(sym, None)
 
+        # OHLCV-oejebliksbillede: de bars algoen faktisk evaluerede gennem exit.
+        # Gemmes i close-payloadet saa Handels-charten viser PRAECIS situationen
+        # ved entry/exit (ingen gen-hentning). FAIL-SAFE — maa aldrig vaelte luk.
+        try:
+            chart_bars = _bars_to_chart_payload(self._bar_history.get(sym, []))
+        except Exception as e:
+            logger.warning(f"[Europa-reversion] chart_bars-snapshot fejlede for {sym}: {e}")
+            chart_bars = []
+
         # Trades-tabel
         trade_id = pos.get("trade_id")
         if trade_id and self._journal:
@@ -1060,6 +1092,7 @@ class EuropaReversionLive(BaseStrategy):
                     "contracts":               contracts,
                     "max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
                     "max_adverse_excursion":   round(mae, 4) if mae is not None else None,
+                    "chart_bars":              chart_bars,
                 },
             )
 
