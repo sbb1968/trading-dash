@@ -36,7 +36,8 @@ from ib_async import Stock
 from reconcile_idempotency import (
     RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 from strategies.base import Bar
-from trade_forensics import build_entry_snapshot, build_exit_snapshot
+from trade_forensics import (build_entry_snapshot, build_exit_snapshot,
+                             bars_to_chart_payload, append_stop_point)
 from finnhub_news import _guess_sentiment
 
 logger = logging.getLogger(__name__)
@@ -919,10 +920,16 @@ class TrendJoinLive(BaseStrategy):
                          "sma200": round(ctx.get("sma200", 0), 4),
                          "R": round(R, 4), "catalyst": str(ctx.get("catalyst", ""))[:200]})
 
+        # Stop/target-trajektorie (TrendJoin trailer: BE @1R + 5m swing-low -> step-linje).
+        stop_traj: list = []
+        _tj_target = round(entry + PARTIAL_R * R, 4)
+        append_stop_point(stop_traj, entry_time, stop, _tj_target)
+
         self._positions[ticker] = {
             "side": "long", "entry": entry, "shares_total": shares, "shares_rem": shares,
             "stop": stop, "R": R, "partial_done": False, "be_done": False,
-            "entry_time": entry_time, "trade_id": trade_id, "gap_pct": ctx.get("gap_pct", 0)}
+            "entry_time": entry_time, "trade_id": trade_id, "gap_pct": ctx.get("gap_pct", 0),
+            "target": _tj_target, "stop_traj": stop_traj}
         self.stats.open_positions = len(self._positions)
         self._done_today.add(ticker)
         self._mfe[ticker] = entry
@@ -986,12 +993,14 @@ class TrendJoinLive(BaseStrategy):
         if not pos["be_done"] and bar.high >= entry + BE_R * R:
             pos["stop"] = max(pos["stop"], entry)
             pos["be_done"] = True
+            append_stop_point(pos.get("stop_traj", []), bar.timestamp, pos["stop"], pos.get("target"))
             await self._log(f"🟰 {ticker}: breakeven nået (+{BE_R}R) — stop flyttet til ${pos['stop']:.2f}")
         # Trail til 5m swing-low(2,2) EFTER breakeven
         if pos["be_done"]:
             sl = _swing_low_2_2(self._bar_history.get(ticker, []))
             if sl is not None and sl > pos["stop"]:
                 pos["stop"] = sl
+                append_stop_point(pos.get("stop_traj", []), bar.timestamp, pos["stop"], pos.get("target"))
                 await self._log(f"⤴ {ticker}: trail-stop hævet til swing-low ${sl:.2f}")
 
     async def _close(self, ticker: str, price: float, reason: str,
@@ -1069,6 +1078,12 @@ class TrendJoinLive(BaseStrategy):
         self.trades.append(trade)
         mfe = self._mfe.pop(ticker, None)
         mae = self._mae.pop(ticker, None)
+        # OHLCV-oejebliksbillede + stop-trajektorie (ground truth til Handels-charten). FAIL-SAFE.
+        try:
+            chart_bars = bars_to_chart_payload(self._bar_history.get(ticker, []))
+        except Exception as e:
+            logger.warning(f"[TrendJoin] chart_bars-snapshot fejlede for {ticker}: {e}")
+            chart_bars = []
         if pos.get("trade_id") and self._journal:
             await self._journal.log_trade_close(
                 trade_id=pos["trade_id"], exit_price=price, exit_time=exit_time,
@@ -1076,7 +1091,9 @@ class TrendJoinLive(BaseStrategy):
                 payload={"max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
                          "max_adverse_excursion": round(mae, 4) if mae is not None else None,
                          "gap_pct": round(pos.get("gap_pct", 0), 4),
-                         "partial_taken": pos.get("partial_done", False)})
+                         "partial_taken": pos.get("partial_done", False),
+                         "chart_bars": chart_bars,
+                         "stop_trajectory": pos.get("stop_traj", [])})
         try:
             snap = build_exit_snapshot(
                 ticker=ticker, entry_price=entry, exit_price=price,

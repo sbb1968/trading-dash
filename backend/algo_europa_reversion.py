@@ -42,7 +42,8 @@ from reconcile_idempotency import (
 # Delt forensik-opsamling — samme modul K2 bruger. De generiske builders beregner
 # indikatorerne (RSI/MACD/BB/VWAP/EMA) via compute_all og samler tape/depth,
 # strategi-agnostisk. EUREVERSION lægger sin egen bånd/z-blok oveni.
-from trade_forensics import build_entry_snapshot, build_exit_snapshot
+from trade_forensics import (build_entry_snapshot, build_exit_snapshot,
+                             bars_to_chart_payload, append_stop_point)
 
 # Strategi-logik + parametre bor i pakken (delt sandhedskilde med backtesten
 # eureversion_backtest.py, så live og backtest aldrig divergerer). Wrapperen
@@ -93,29 +94,6 @@ class Bar:
     low:       float
     close:     float
     volume:    float
-
-
-def _bars_to_chart_payload(bars: list) -> list:
-    """Kompakt OHLCV-oejebliksbillede til Handels-charten: [ts_iso, o, h, l, c, v].
-
-    Gemmer de FAERDIGE bars algoen faktisk evaluerede (self._bar_history) i
-    close-payloadet, saa charten kan vise PRAECIS den situation der gjaldt ved
-    entry/exit — uafhaengigt af IBKR-historik (revisioner, sletning af udloebne
-    futures) og kontrakt-roll. Ground truth, aldrig gen-hentet.
-
-    Bounded til de sidste ~160 bars (rigeligt: warmup + session) saa payloadet
-    ikke vokser ubegraenset. Fejl-sikker: springer ubrugelige bars over.
-    """
-    out = []
-    for b in (bars or [])[-160:]:
-        try:
-            out.append([b.timestamp.isoformat(),
-                        round(float(b.open), 4), round(float(b.high), 4),
-                        round(float(b.low), 4),  round(float(b.close), 4),
-                        float(b.volume or 0)])
-        except Exception:
-            continue
-    return out
 
 
 class EuropaReversionLive(BaseStrategy):
@@ -850,6 +828,11 @@ class EuropaReversionLive(BaseStrategy):
         stop_price = entry_price - stop_dist if side == "long" else entry_price + stop_dist
         reserved   = contracts * 10.0   # spejler RiskManager's estimated_value for MKT
 
+        # Stop/target-trajektorie (Europa: fast z-stop, ingen trailing -> ét punkt = flad
+        # step-linje). Fanges uniformt med de andre algoer; tegnes i Handels-charten.
+        stop_traj: list = []
+        append_stop_point(stop_traj, entry_time, stop_price, None)
+
         self._positions[sym] = {
             "side":        side,
             "entry_price": entry_price,
@@ -861,6 +844,7 @@ class EuropaReversionLive(BaseStrategy):
             "reserved":    reserved,
             "init_margin": init_margin,
             "trade_id":    None,
+            "stop_traj":   stop_traj,
         }
         self.stats.open_positions = len(self._positions)
 
@@ -1068,14 +1052,16 @@ class EuropaReversionLive(BaseStrategy):
         mfe = self._mfe.pop(sym, None)
         mae = self._mae.pop(sym, None)
 
-        # OHLCV-oejebliksbillede: de bars algoen faktisk evaluerede gennem exit.
-        # Gemmes i close-payloadet saa Handels-charten viser PRAECIS situationen
-        # ved entry/exit (ingen gen-hentning). FAIL-SAFE — maa aldrig vaelte luk.
+        # OHLCV-oejebliksbillede + stop-trajektorie: de bars algoen faktisk evaluerede
+        # gennem exit + hvordan stoppet flyttede sig. Gemmes i close-payloadet saa
+        # Handels-charten viser PRAECIS situationen ved entry/exit (ingen gen-hentning).
+        # FAIL-SAFE — maa aldrig vaelte luk.
         try:
-            chart_bars = _bars_to_chart_payload(self._bar_history.get(sym, []))
+            chart_bars = bars_to_chart_payload(self._bar_history.get(sym, []))
         except Exception as e:
             logger.warning(f"[Europa-reversion] chart_bars-snapshot fejlede for {sym}: {e}")
             chart_bars = []
+        stop_traj = pos.get("stop_traj", [])
 
         # Trades-tabel
         trade_id = pos.get("trade_id")
@@ -1093,6 +1079,7 @@ class EuropaReversionLive(BaseStrategy):
                     "max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
                     "max_adverse_excursion":   round(mae, 4) if mae is not None else None,
                     "chart_bars":              chart_bars,
+                    "stop_trajectory":         stop_traj,
                 },
             )
 

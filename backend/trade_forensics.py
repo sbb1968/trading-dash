@@ -53,6 +53,49 @@ def _bars_to_dicts(bars) -> list[dict]:
     return out
 
 
+def bars_to_chart_payload(bars, cap: int = 160) -> list:
+    """Kompakt OHLCV-oejebliksbillede til Handels-charten: [ts_iso, o, h, l, c, v].
+
+    Delt af alle fire algoer. Gemmer de FAERDIGE bars algoen faktisk evaluerede
+    (self._bar_history) i close-payloadet, saa charten kan vise PRAECIS den situation
+    der gjaldt ved entry/exit — uafhaengigt af IBKR-historik (revisioner, sletning af
+    udloebne futures) og kontrakt-roll. Ground truth, aldrig gen-hentet.
+
+    Bounded til de sidste `cap` bars saa payloadet ikke vokser ubegraenset.
+    Fejl-sikker: springer ubrugelige bars over (maa aldrig kaste — kaldes ved close).
+    """
+    out: list = []
+    for b in (bars or [])[-cap:]:
+        try:
+            out.append([b.timestamp.isoformat(),
+                        round(float(b.open), 4), round(float(b.high), 4),
+                        round(float(b.low), 4),  round(float(b.close), 4),
+                        float(b.volume or 0)])
+        except Exception:
+            continue
+    return out
+
+
+def append_stop_point(traj: list, ts, stop=None, target=None) -> None:
+    """Tilfoej [ts_iso, stop, target] til stop/target-trajektorien HVIS den aendrede sig.
+
+    Bruges til at tegne stop/target som en STEP-linje i Handels-charten (et trailing stop
+    er ikke én flad linje — det flytter sig). Dedup'er uaendrede punkter saa listen forbliver
+    lille. Fejl-sikker: maa ALDRIG kaste (kaldes i algoernes hot path).
+    """
+    try:
+        s = round(float(stop), 4) if isinstance(stop, (int, float)) else None
+        t = round(float(target), 4) if isinstance(target, (int, float)) else None
+        tstr = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        if traj:
+            _, ls, lt = traj[-1]
+            if ls == s and lt == t:
+                return   # uaendret — dedup
+        traj.append([tstr, s, t])
+    except Exception:
+        pass
+
+
 def _safe_round(v, digits=4):
     """Returnér None hvis v er None/NaN/Inf, ellers round(v, digits)."""
     if v is None:

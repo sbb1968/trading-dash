@@ -317,6 +317,35 @@ def _resolve_bands(df: pd.DataFrame, trade: dict, entry_pos: int):
     return None, None, None, False
 
 
+def _step_series(traj, idx, value_i: int, entry_pos: int, exit_pos: int):
+    """Byg (xs, ys) til en steps-post-linje fra stop_trajectory ([ts_iso, stop, target]).
+
+    value_i=1 -> stop, value_i=2 -> target. Hvert punkt placeres paa den bar det gjaldt fra
+    (gulv-snap), og sidste vaerdi forlaenges til exit-baren saa linjen spaender hele holdet.
+    Et trailing stop bliver dermed en TRAPPE (som det faktisk var), ikke én flad linje.
+    None hvis trajektorien er tom / mangler den vaerdi (kalderen tegner flad fallback).
+    """
+    pts = []
+    for item in (traj or []):
+        try:
+            ts = _bar_ts_to_et(item[0])
+            v = item[value_i] if len(item) > value_i else None
+            if ts is None or not isinstance(v, (int, float)):
+                continue
+            pts.append((_bar_pos(idx, ts), float(v)))
+        except Exception:
+            continue
+    if not pts:
+        return None
+    pts.sort(key=lambda p: p[0])
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    if xs[-1] < exit_pos:      # forlaeng sidste niveau til exit-baren
+        xs.append(exit_pos)
+        ys.append(ys[-1])
+    return xs, ys
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Rendering — candlestick + PRAECISE entry/exit-markoerer (linje + prik + prisskilt)
 # ═══════════════════════════════════════════════════════════════════
@@ -380,13 +409,31 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     ax.axvspan(entry_pos, exit_pos, color="#90caf9", alpha=0.12, zorder=1,
                label="holde-interval")
 
-    # ── Stop / target-linjer hvor de findes (labels ind fra hoejre — ellers kolliderer
-    #    de med det nye exit-prisskilt paa hoejre akse) ──
-    if isinstance(stop, (int, float)) and stop:
+    # ── Stop / target som STEP-linje (labels ind fra hoejre — ellers kolliderer de med
+    #    exit-prisskiltet). Har handlen en stop_trajectory (nye handler), tegnes trappen
+    #    som stoppet faktisk flyttede sig; ellers flad linje paa slutvaerdien (gamle handler).
+    traj = (trade.get("payload") or {}).get("stop_trajectory") or []
+    stop_steps = _step_series(traj, df.index, 1, entry_pos, exit_pos)
+    tgt_steps  = _step_series(traj, df.index, 2, entry_pos, exit_pos)
+
+    if stop_steps:
+        xs, ys = stop_steps
+        ax.step(xs, ys, where="post", color="#d32f2f", linestyle="--", linewidth=1.4,
+                alpha=0.85, zorder=4)
+        ax.text(x_hi - 0.4, ys[-1], f"stop {ys[-1]:.2f} ", color="#d32f2f", va="bottom",
+                ha="right", fontsize=12, zorder=5)
+    elif isinstance(stop, (int, float)) and stop:
         ax.axhline(stop, color="#d32f2f", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
         ax.text(x_hi - 0.4, stop, f"stop {stop:.2f} ", color="#d32f2f", va="bottom",
                 ha="right", fontsize=12, zorder=5)
-    if isinstance(target, (int, float)) and target:
+
+    if tgt_steps:
+        xs, ys = tgt_steps
+        ax.step(xs, ys, where="post", color="#2e7d32", linestyle="--", linewidth=1.4,
+                alpha=0.85, zorder=4)
+        ax.text(x_hi - 0.4, ys[-1], f"target {ys[-1]:.2f} ", color="#2e7d32", va="bottom",
+                ha="right", fontsize=12, zorder=5)
+    elif isinstance(target, (int, float)) and target:
         ax.axhline(target, color="#2e7d32", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
         ax.text(x_hi - 0.4, target, f"target {target:.2f} ", color="#2e7d32", va="bottom",
                 ha="right", fontsize=12, zorder=5)
@@ -540,6 +587,7 @@ async def build_trade_bars_json(db, conn, trade_id: str,
         "exit":  {"time": int(exit_dt.timestamp()),  "price": trade.get("exit_price")},
         "levels": {"stop": trade.get("current_stop"), "target": trade.get("current_target"),
                    "mean": band_mean, "upper_band": band_upper, "lower_band": band_lower},
+        "stop_trajectory": (trade.get("payload") or {}).get("stop_trajectory") or [],
         "bands_recomputed": bands_recomputed,
         "meta": {"symbol": trade.get("symbol"), "source": trade.get("source"),
                  "side": trade.get("side"), "pnl": trade.get("pnl"),

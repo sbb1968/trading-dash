@@ -73,6 +73,8 @@ from tape_buffer import TapeBuffer
 from trade_forensics import (
     build_confluence_entry_snapshot,
     build_confluence_exit_snapshot,
+    bars_to_chart_payload,
+    append_stop_point,
 )
 
 logger = logging.getLogger(__name__)
@@ -969,6 +971,11 @@ class Confluence2Live(BaseStrategy):
             # Sync live state til trades-tabel. K2's aktive stop er trail_stop
             # (= impulse_low når der ikke trailes); stage afledes af om trailen
             # er løftet over impuls-low.
+            # Fang trail-stoppet pr. bar (dedup) -> step-linje i Handels-charten.
+            append_stop_point(position.metadata.setdefault("stop_traj", []),
+                              new_bar.timestamp, position.state.trail_stop,
+                              position.state.target_price)
+
             trade_id = position.metadata.get("trade_id")
             if trade_id and self._journal:
                 state = position.state
@@ -1103,6 +1110,10 @@ class Confluence2Live(BaseStrategy):
         # (None for live-variant A_impulse_low).
         stop_level = position.state.impulse_low
         target     = position.state.target_price
+
+        # Stop/target-trajektorie (K2 trailer trail_stop -> step-linje i Handels-charten).
+        position.metadata["stop_traj"] = []
+        append_stop_point(position.metadata["stop_traj"], signal.entry_time, stop_level, target)
 
         self._position_data[signal.ticker] = {
             "ticker":       signal.ticker,
@@ -1275,6 +1286,12 @@ class Confluence2Live(BaseStrategy):
         self.trades.append(trade)
 
         # ── Trades-tabel: luk trade-row ──────────────────────────
+        # OHLCV-oejebliksbillede + stop-trajektorie (ground truth til Handels-charten). FAIL-SAFE.
+        try:
+            chart_bars = bars_to_chart_payload(self._bar_history.get(ticker, []))
+        except Exception as e:
+            logger.warning(f"[Konfluens 2] chart_bars-snapshot fejlede for {ticker}: {e}")
+            chart_bars = []
         trade_id = position.metadata.get("trade_id")
         if trade_id and self._journal:
             await self._journal.log_trade_close(
@@ -1286,6 +1303,8 @@ class Confluence2Live(BaseStrategy):
                 payload     = {
                     "max_favorable_excursion": self._mfe.get(ticker),
                     "max_adverse_excursion":   self._mae.get(ticker),
+                    "chart_bars":              chart_bars,
+                    "stop_trajectory":         position.metadata.get("stop_traj", []),
                 },
             )
 

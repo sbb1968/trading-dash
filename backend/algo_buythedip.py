@@ -35,7 +35,8 @@ from ibkr_connect import IBKRConnection
 from reconcile_idempotency import (
     RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
 from strategies.base import Bar
-from trade_forensics import build_entry_snapshot, build_exit_snapshot
+from trade_forensics import (build_entry_snapshot, build_exit_snapshot,
+                             bars_to_chart_payload, append_stop_point)
 
 logger = logging.getLogger(__name__)
 
@@ -678,11 +679,16 @@ class BuyTheDipLive(BaseStrategy):
                          "dip_low": round(stop, 4),
                          "risk_per_share": round(risk_per_share, 4)})
 
+        # Stop/target-trajektorie (BuyTheDip: fast stop/target -> ét punkt = flad step-linje).
+        stop_traj: list = []
+        append_stop_point(stop_traj, entry_time, stop, target)
+
         self._positions[ticker] = {
             "side": "long", "entry_price": entry, "shares": shares,
             "stop": stop, "target": target, "entry_time": entry_time,
             "trade_id": trade_id, "dip_depth": setup["dip_depth"],
             "ref_high": setup["ref_high"], "dip_low": stop,
+            "stop_traj": stop_traj,
         }
         self.stats.open_positions = len(self._positions)
         self._done_today.add(ticker)
@@ -784,13 +790,21 @@ class BuyTheDipLive(BaseStrategy):
 
         mfe = self._mfe.pop(ticker, None)
         mae = self._mae.pop(ticker, None)
+        # OHLCV-oejebliksbillede + stop-trajektorie (ground truth til Handels-charten). FAIL-SAFE.
+        try:
+            chart_bars = bars_to_chart_payload(self._bar_history.get(ticker, []))
+        except Exception as e:
+            logger.warning(f"[BuyTheDip] chart_bars-snapshot fejlede for {ticker}: {e}")
+            chart_bars = []
         if pos.get("trade_id") and self._journal:
             await self._journal.log_trade_close(
                 trade_id=pos["trade_id"], exit_price=price, exit_time=exit_time,
                 exit_reason=reason, pnl=pnl,
                 payload={"max_favorable_excursion": round(mfe, 4) if mfe is not None else None,
                          "max_adverse_excursion":   round(mae, 4) if mae is not None else None,
-                         "dip_depth": round(pos.get("dip_depth", 0), 4)})
+                         "dip_depth": round(pos.get("dip_depth", 0), 4),
+                         "chart_bars": chart_bars,
+                         "stop_trajectory": pos.get("stop_traj", [])})
 
         try:
             snap = build_exit_snapshot(
