@@ -152,9 +152,11 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
                            bars_before: int = 40, bars_after: int = 40) -> pd.DataFrame:
     """Genhent bars for handels-vinduet med algoens egne bar-parametre.
 
-    Kvalificerer kontrakten SOM algoen (conn._resolve_contract — samme helper
-    get_historical_bars bruger), og kalder reqHistoricalDataAsync DIREKTE saa vi kan
-    saette endDateTime (get_historical_bars hardkoder ""=nu, ubrugeligt for historik).
+    Kvalificerer kontrakten pr. HANDELSDATOEN (conn.resolve_contract_asof) saa
+    futures-candles matcher den kontrakt-maaned handlen faktisk laa paa (ikke
+    dagens front-maaned efter en roll), og kalder reqHistoricalDataAsync DIREKTE
+    saa vi kan saette endDateTime (get_historical_bars hardkoder ""=nu, ubrugeligt
+    for historik).
 
     Henter et rundhaandet vindue der ender lidt efter exit, parser til en ET-indekseret
     OHLCV-DataFrame, og skaerer til [entry-bar - bars_before, exit-bar + bars_after] ved
@@ -170,7 +172,11 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
     duration = _duration_str((end_dt - span_start).total_seconds())
 
     try:
-        contract = await conn._resolve_contract(symbol)
+        # Futures roller: en handel fra fx 16. juni laa paa juni-kontrakten, men
+        # dagens front-maaned er september (anden pris-serie). resolve_contract_asof
+        # kvalificerer den kontrakt der var front-maaned PAA handelsdatoen, saa
+        # candlesticks matcher entry/exit-priserne. Aktier: uaendret.
+        contract = await conn.resolve_contract_asof(symbol, entry_dt_utc)
         raw = await conn.ib.reqHistoricalDataAsync(
             contract,
             endDateTime    = end_dt,           # tz-aware UTC — ib_async formaterer

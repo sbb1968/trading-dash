@@ -217,6 +217,72 @@ class IBKRConnection:
         )
         return contract
 
+    async def qualify_future_asof(self, symbol: str, asof):
+        """Kvalificer den front-maaned-Future der var AKTIV paa en given dato.
+
+        Til historik-gen-hentning af (evt. udloebne) futures-handler: en handel
+        fra 16. juni laa paa juni-kontrakten, men den er droppet fra IBKRs
+        aktive kontrakt-liste efter udloeb (19. juni), saa qualify_future ville
+        i stedet give dagens front-maaned (september) — en anden pris-serie
+        (roll-gap). Vi proever derfor de EKSPLICITTE kvartalsmaaneder
+        (mar/jun/sep/dec) fra og med handelsdatoens kvartal og kvalificerer
+        HVER med includeExpired=True, og vaelger den foerste med lastTradeDate
+        >= handelsdatoen (= den kontrakt der var front-maaned da handlen skete).
+
+        Cacher IKKE (dato-specifik). Returnerer None hvis intet kan kvalificeres
+        (kalderen falder tilbage til dagens front-maaned).
+        """
+        if not self.connected:
+            return None
+        from ib_async import Future
+        asof_str = asof.strftime("%Y%m%d")
+        q_month  = ((asof.month - 1) // 3) * 3 + 3       # kvartalet der indeholder handelsmaaneden
+        q_floor  = asof.year * 100 + q_month
+        cands = []
+        for yy in (asof.year, asof.year + 1):
+            for mm in (3, 6, 9, 12):
+                ym = yy * 100 + mm
+                if ym >= q_floor:
+                    cands.append(ym)
+        cands = sorted(set(cands))[:5]                   # handelsdatoens kvartal + fire frem
+        exchange = FUTURES_EXCHANGE.get(symbol, "CME")
+        for ym in cands:
+            try:
+                base = Future(symbol=symbol, exchange=exchange, currency="USD",
+                              lastTradeDateOrContractMonth=str(ym), includeExpired=True)
+                details = await asyncio.wait_for(
+                    self.ib.reqContractDetailsAsync(base), timeout=15.0)
+            except Exception as e:
+                logger.warning(f"qualify_future_asof({symbol},{ym}): {e}")
+                continue
+            for cd in (details or []):
+                c = cd.contract
+                exp = (c.lastTradeDateOrContractMonth or "").strip()
+                if len(exp) == 6:
+                    exp = exp + "31"
+                if len(exp) >= 8 and exp[:8] >= asof_str:
+                    c.includeExpired = True              # saa reqHistoricalData accepterer udloebet kontrakt
+                    logger.info(
+                        f"qualify_future_asof({symbol}, {asof_str}) -> "
+                        f"{c.lastTradeDateOrContractMonth} "
+                        f"(localSymbol={c.localSymbol}, conId={c.conId})")
+                    return c
+        logger.warning(f"qualify_future_asof({symbol}, {asof_str}): ingen kontrakt matchede")
+        return None
+
+    async def resolve_contract_asof(self, ticker: str, asof):
+        """Som _resolve_contract, men for futures kvalificeres den kontrakt der
+        var front-maaned paa 'asof'-datoen (til historik-gen-hentning af
+        handler). Aktier er dato-uafhaengige og gaar via den normale sti."""
+        if is_future_symbol(ticker):
+            fut = await self.qualify_future_asof(ticker, asof)
+            if fut is None:
+                fut = await self.qualify_future(ticker)   # fallback: dagens front-maaned
+            if fut is None:
+                raise ValueError(f"Kunne ikke kvalificere futures-kontrakt for {ticker}")
+            return fut
+        return await self._resolve_contract(ticker)
+
     # ── Konto ─────────────────────────────────────────────────
     def get_account_summary(self) -> dict:
         """Henter konto-oversigt fra cached data."""
