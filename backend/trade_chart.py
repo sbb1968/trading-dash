@@ -10,8 +10,7 @@ samme kontrakt-kvalificering). Saa chartet ER pr. definition algoens kontekst �
 eksternt TradingView/TWS-approksimat (loeser IBRX-klassen af tvivl).
 
 Vinduet: bars_before (default 40) FOER entry · selve handlen · bars_after (default 40)
-EFTER exit. Markoerer: PRAECIS groen pil ved entry, PRAECIS roed pil ved exit. Plus
-stop/target-linjer hvor de findes, og et markeret holde-interval.
+EFTER exit. Plus stop/target-linjer hvor de findes, og et markeret holde-interval.
 
 Rent visnings-/diagnoselag: roerer IKKE handelsstien. Read-only mod journalen + IBKR-
 bar-genhentning. Koeres paa en WORKSTATION med TWS forbundet (bars er konto-uafhaengige).
@@ -20,6 +19,18 @@ FIDELITY-KERNEN — BAR_PARAMS_BY_SOURCE er verificeret mod hver algos faktiske
 reqHistoricalData-kald (algo_buythedip/_confluence2/_trendjoin/_europa_reversion +
 strategy_base._fetch_bars + ibkr_connect.get_historical_bars). Aendr KUN efter ny
 verifikation mod algoen — mismatch her = IBRX-problemet igen.
+
+PROVENANCE — snapshot-first: naar algoen gemte de bars den faktisk evaluerede i
+close-payloadet (chart_bars), tegnes PRAECIS dem (ground truth, immun mod IBKR-revision/
+sletning/roll). Ellers gen-hentes bars (rekonstruktion). KILDE-badge viser hvilken.
+
+PRAECISION (fase 1):
+  - Markoerer snapper til den bar fillet SKETE i (gulv paa bar-start), ikke naermeste bar.
+  - formatDate=2 (epoch UTC) — chartet afhaenger ikke af TWS' tidszone-indstilling.
+  - Entry: groen linje fra venstre y-akse -> prik paa entry-baren + prisskilt paa aksen.
+    Exit:  magenta linje fra hoejre y-akse -> prik paa exit-baren + prisskilt paa aksen.
+    y = eksakt fill-pris; afstand til candlen = slippage.
+  - Baand: én kilde (_resolve_bands) for PNG og JSON; genberegnede baand maerkes "(genb.)".
 """
 from __future__ import annotations
 
@@ -51,6 +62,10 @@ logger = logging.getLogger(__name__)
 
 ET = pytz.timezone("America/New_York")
 DK = pytz.timezone("Europe/Copenhagen")
+
+# ── Markoer-farver (entry/exit). Én sandhedskilde. ──
+ENTRY_GREEN  = "#00b050"   # tydelig groen — entry-linje, prik, prisskilt
+EXIT_MAGENTA = "#e6007e"   # magenta      — exit-linje, prik, prisskilt
 
 
 # ── FIDELITY-KERNEN: bar-parametre pr. journal-source (= algoens self.name) ──
@@ -121,19 +136,34 @@ def _parse_iso_utc(s: Optional[str]) -> Optional[datetime]:
 
 
 def _bar_ts_to_et(raw_dt) -> Optional[datetime]:
-    """Spejler strategy_base._parse_bar's tz-haandtering: naive bars lokaliseres til ET,
-    tz-aware konverteres til ET (IBKR intraday-bars i TWS-tidszonen)."""
+    """Bar-timestamp -> tz-aware ET.
+
+    Med formatDate=2 leverer IBKR entydige timestamps (epoch-sekunder eller tz-aware
+    UTC-datetimes, afhaengigt af ib_async-version). Begge konverteres direkte. Snapshot-
+    stien leverer ISO-strenge (tz-aware ET) — de gaar gennem fromisoformat-grenen. Naive
+    datetimes BOER ikke forekomme laengere; sker det, lokaliserer vi til ET som foer, men
+    logger en advarsel — for saa afhaenger chartet af TWS' tidszone-indstilling.
+    """
     if raw_dt is None:
         return None
+    if isinstance(raw_dt, (int, float)):
+        return datetime.fromtimestamp(float(raw_dt), tz=timezone.utc).astimezone(ET)
     if isinstance(raw_dt, str):
         try:
             raw_dt = datetime.fromisoformat(raw_dt)
         except ValueError:
-            return None
+            try:
+                return datetime.fromtimestamp(float(raw_dt), tz=timezone.utc).astimezone(ET)
+            except ValueError:
+                return None
     if not isinstance(raw_dt, datetime):
         # date (daglige bars) — ikke relevant for intraday-chart
         return None
-    return ET.localize(raw_dt) if raw_dt.tzinfo is None else raw_dt.astimezone(ET)
+    if raw_dt.tzinfo is None:
+        logger.warning("[trade_chart] naiv bar-timestamp trods formatDate=2 — lokaliseres "
+                       "til ET. Verificér TWS' tidszone-indstilling.")
+        return ET.localize(raw_dt)
+    return raw_dt.astimezone(ET)
 
 
 def _duration_str(seconds: float) -> str:
@@ -144,16 +174,27 @@ def _duration_str(seconds: float) -> str:
     return f"{math.ceil(secs / 86400) + 1} D"
 
 
+def _bar_pos(index, target_et: datetime) -> int:
+    """Position paa den bar der INDEHOLDER target_et.
+
+    IBKR-bar-timestamps er barens START-tid. Baren der indeholder et fill er derfor den
+    SIDSTE bar hvis start <= fill-tid — IKKE den naermeste. (Naermeste snappede et fill
+    kl. 15:40:50 til 15:41-baren: en bar der ikke var begyndt da vi fyldte. Paa 15-min
+    bars kunne fejlen vaere 7,5 min = forkert candle.)
+    """
+    pos = int(index.searchsorted(target_et, side="right")) - 1
+    return max(0, min(pos, len(index) - 1))
+
+
 def _trim_to_window(df: pd.DataFrame, entry_dt_utc: datetime, exit_dt_utc: datetime,
                     bars_before: int, bars_after: int) -> pd.DataFrame:
     """Skaer en ET-indekseret OHLCV-DataFrame til [entry-bar - before, exit-bar + after]
-    ved INDEKS (robust mod overnight-gaps). Delt af re-fetch og snapshot-stien."""
+    ved INDEKS (robust mod overnight-gaps). Delt af re-fetch og snapshot-stien. Bruger
+    gulv-snap (_bar_pos) saa vinduet centreres om den bar fillet SKETE i."""
     if df.empty:
         return df
-    entry_et = entry_dt_utc.astimezone(ET)
-    exit_et = exit_dt_utc.astimezone(ET)
-    entry_idx = df.index.get_indexer([entry_et], method="nearest")[0]
-    exit_idx = df.index.get_indexer([exit_et], method="nearest")[0]
+    entry_idx = _bar_pos(df.index, entry_dt_utc.astimezone(ET))
+    exit_idx = _bar_pos(df.index, exit_dt_utc.astimezone(ET))
     lo = max(0, entry_idx - bars_before)
     hi = min(len(df), exit_idx + bars_after + 1)
     return df.iloc[lo:hi]
@@ -226,7 +267,7 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
             barSizeSetting = p["bar_size"],
             whatToShow     = p["what_to_show"],
             useRTH         = p["use_rth"],
-            formatDate     = 1,
+            formatDate     = 2,          # epoch UTC — uafhaengigt af TWS' tidszone
         )
     except Exception as e:
         logger.error(f"[trade_chart] bar-genhentning fejlede {symbol}/{source}: {e}")
@@ -244,22 +285,46 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
         return pd.DataFrame()
 
     df = pd.DataFrame(rows).set_index("dt_et").sort_index()
-    # Find entry-/exit-bar ved naermeste indeks, og skaer til vinduet.
+    # Find entry-/exit-bar (baren fillet SKETE i), og skaer til vinduet.
     return _trim_to_window(df, entry_dt_utc, exit_dt_utc, bars_before, bars_after)
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Rendering — candlestick + PRAECIS groen entry-pil / roed exit-pil
+# Baand — én sandhedskilde for PNG og JSON
 # ═══════════════════════════════════════════════════════════════════
-def _nearest_pos(index, target_et) -> int:
-    return int(index.get_indexer([target_et], method="nearest")[0])
+def _resolve_bands(df: pd.DataFrame, trade: dict, entry_pos: int):
+    """(mean, upper, lower, recomputed) — payload-baand hvis de findes, ellers genberegnet
+    for Europa-reversion med rule.py's formel (population-std over de LOOKBACK closes der
+    slutter paa signal-baren = baren FOER fill). Én sandhedskilde for baade PNG og JSON.
+
+    NB: genberegning er en APPROKSIMATION. Nye handler logger baandene i payload ved entry
+    (ground truth); for dem returneres recomputed=False.
+    """
+    payload = trade.get("payload") or {}
+    mean = payload.get("mean")
+    upper = payload.get("upper_band")
+    lower = payload.get("lower_band")
+    if mean is not None:
+        return mean, upper, lower, False
+
+    if trade.get("source") == "Europa-reversion" and entry_pos >= EUREV_LOOKBACK:
+        window = [float(c) for c in df["Close"].iloc[entry_pos - EUREV_LOOKBACK:entry_pos]]
+        if len(window) >= 2:
+            ma = sum(window) / len(window)
+            sd = pstdev(window)
+            if sd > 0:
+                return ma, ma + EUREV_ENTRY_Z * sd, ma - EUREV_ENTRY_Z * sd, True
+    return None, None, None, False
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Rendering — candlestick + PRAECISE entry/exit-markoerer (linje + prik + prisskilt)
+# ═══════════════════════════════════════════════════════════════════
 def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch") -> bytes:
     """Tegn candlestick-chart for handlen og returnér PNG-bytes.
 
-    - PRAECIS GROEN pil (^) ved (entry-bar, entry_price)
-    - PRAECIS ROED pil (v) ved (exit-bar, exit_price)
+    - Entry: GROEN linje fra venstre y-akse -> prik paa entry-baren + prisskilt paa aksen
+    - Exit:  MAGENTA linje fra hoejre y-akse -> prik paa exit-baren + prisskilt paa aksen
     - markeret holde-interval mellem entry og exit
     - stop/target-linjer hvor de findes
     - tidsakse i DANSK tid (CET/CEST); ET noteres i titlen
@@ -276,12 +341,6 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     exit_price = trade.get("exit_price")
     stop = trade.get("current_stop")
     target = trade.get("current_target")
-    # Europa-reversion gemmer mean/upper_band/lower_band i payload ved entry — de
-    # tegnes som 3 vandrette linjer (midter + ydre bånd) saa man ser revert-geometrien.
-    payload = trade.get("payload") or {}
-    band_mean = payload.get("mean")
-    band_upper = payload.get("upper_band")
-    band_lower = payload.get("lower_band")
 
     entry_et = (_parse_iso_utc(trade.get("entry_time_utc")) or df.index[0].astimezone(timezone.utc)).astimezone(ET)
     exit_et = (_parse_iso_utc(trade.get("exit_time_utc")) or df.index[-1].astimezone(timezone.utc)).astimezone(ET)
@@ -290,8 +349,11 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     idx_dk = [ts.astimezone(DK) for ts in df.index]
     n = len(df)
     x = list(range(n))
-    entry_pos = _nearest_pos(df.index, entry_et)
-    exit_pos = _nearest_pos(df.index, exit_et)
+    entry_pos = _bar_pos(df.index, entry_et)
+    exit_pos = _bar_pos(df.index, exit_et)
+
+    # Faste x-graenser: markoer-linjerne skal ramme akserne PRAECIS.
+    x_lo, x_hi = -0.5, n - 0.5
 
     # Bredden skaleres efter antal bars -> KONSTANT candle-bredde uanset handelsvarighed.
     # (En 5-timers hold blev "gnidret" naar ~400 1-min bars blev presset ind paa samme
@@ -301,6 +363,7 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     fig, (ax, axv) = plt.subplots(
         2, 1, figsize=(width_in, 9), sharex=True,
         gridspec_kw={"height_ratios": [4, 1], "hspace": 0.06})
+    ax.set_xlim(x_lo, x_hi)
 
     # ── Candlesticks (ren matplotlib — ingen ekstra dep) ──
     width = 0.6
@@ -317,33 +380,19 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     ax.axvspan(entry_pos, exit_pos, color="#90caf9", alpha=0.12, zorder=1,
                label="holde-interval")
 
-    # ── Stop / target-linjer hvor de findes ──
+    # ── Stop / target-linjer hvor de findes (labels ind fra hoejre — ellers kolliderer
+    #    de med det nye exit-prisskilt paa hoejre akse) ──
     if isinstance(stop, (int, float)) and stop:
         ax.axhline(stop, color="#d32f2f", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
-        ax.text(n - 0.5, stop, f" stop {stop:.2f}", color="#d32f2f", va="center",
-                ha="left", fontsize=12)
+        ax.text(x_hi - 0.4, stop, f"stop {stop:.2f} ", color="#d32f2f", va="bottom",
+                ha="right", fontsize=12, zorder=5)
     if isinstance(target, (int, float)) and target:
         ax.axhline(target, color="#2e7d32", linestyle="--", linewidth=1.2, alpha=0.8, zorder=4)
-        ax.text(n - 0.5, target, f" target {target:.2f}", color="#2e7d32", va="center",
-                ha="left", fontsize=12)
+        ax.text(x_hi - 0.4, target, f"target {target:.2f} ", color="#2e7d32", va="bottom",
+                ha="right", fontsize=12, zorder=5)
 
-    # Aeldre EUREVERSION-handler (foer baand-logningen) mangler payload-baand -> genberegn
-    # fra bars'ene med PRAECIS rule.py's formel: population-std (pstdev) + mean over de
-    # LOOKBACK closes der slutter paa signal-baren (baren foer fill = entry_pos-1). Saa faar
-    # ALLE EUREVERSION-handler baand, ikke kun de nyeste.
-    bands_recomputed = False
-    if band_mean is None and source == "Europa-reversion" and entry_pos >= EUREV_LOOKBACK:
-        window = [float(c) for c in df["Close"].iloc[entry_pos - EUREV_LOOKBACK:entry_pos]]
-        if len(window) >= 2:
-            ma = sum(window) / len(window)
-            sd = pstdev(window)
-            if sd > 0:
-                band_mean = ma
-                band_upper = ma + EUREV_ENTRY_Z * sd
-                band_lower = ma - EUREV_ENTRY_Z * sd
-                bands_recomputed = True
-
-    # ── Europa-reversion: midter- + ydre bånd (entry ved ydre, exit mod midten) ──
+    # ── Europa-reversion: midter- + ydre bånd (én kilde: _resolve_bands; PNG == JSON) ──
+    band_mean, band_upper, band_lower, bands_recomputed = _resolve_bands(df, trade, entry_pos)
     _bbox = dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.0)
     _gb = " (genb.)" if bands_recomputed else ""
     if isinstance(band_mean, (int, float)):
@@ -352,26 +401,39 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
                 ha="left", fontsize=11, bbox=_bbox, zorder=5)
     if isinstance(band_upper, (int, float)):
         ax.axhline(band_upper, color="#6a1b9a", linestyle="--", linewidth=1.2, alpha=0.75, zorder=4)
-        ax.text(0.4, band_upper, f"øvre bånd {band_upper:.2f}", color="#6a1b9a", va="bottom",
+        ax.text(0.4, band_upper, f"øvre bånd {band_upper:.2f}{_gb}", color="#6a1b9a", va="bottom",
                 ha="left", fontsize=11, bbox=_bbox, zorder=5)
     if isinstance(band_lower, (int, float)):
         ax.axhline(band_lower, color="#6a1b9a", linestyle="--", linewidth=1.2, alpha=0.75, zorder=4)
-        ax.text(0.4, band_lower, f"nedre bånd {band_lower:.2f}", color="#6a1b9a", va="bottom",
+        ax.text(0.4, band_lower, f"nedre bånd {band_lower:.2f}{_gb}", color="#6a1b9a", va="bottom",
                 ha="left", fontsize=11, bbox=_bbox, zorder=5)
 
-    # ── PRAECIS groen entry-pil + roed exit-pil (paa eksakt fill-pris) ──
+    # ── Entry/exit-markoerer: vandret linje fra aksen ind til den PRAECISE candle ──
+    # Entry: GROEN linje fra VENSTRE y-akse -> prik paa entry-baren. Prisskilt paa aksen.
+    # Exit:  MAGENTA linje fra HOEJRE y-akse -> prik paa exit-baren. Prisskilt paa aksen.
+    # y = den EKSAKTE fill-pris. Ligger prikken uden for candlens krop/veger er det
+    # SLIPPAGE — ikke en tegnefejl. Det skal kunne ses.
     if isinstance(entry_price, (int, float)):
-        ax.annotate("", xy=(entry_pos, entry_price),
-                    xytext=(entry_pos, entry_price - (df["High"].max() - df["Low"].min()) * 0.07),
-                    arrowprops=dict(arrowstyle="-|>", color="#00c853", lw=2.4), zorder=6)
-        ax.scatter([entry_pos], [entry_price], marker="^", s=170, color="#00c853",
-                   edgecolors="black", linewidths=0.6, zorder=7, label=f"entry {entry_price:.2f}")
+        ax.plot([x_lo, entry_pos], [entry_price, entry_price],
+                color=ENTRY_GREEN, linewidth=2.4, solid_capstyle="butt", zorder=6,
+                label=f"entry {entry_price:.2f}")
+        ax.plot([entry_pos], [entry_price], marker="o", markersize=9, linestyle="none",
+                markerfacecolor=ENTRY_GREEN, markeredgecolor="black", markeredgewidth=0.7,
+                zorder=8)
+        ax.text(x_lo, entry_price, f" {entry_price:.2f} ", color="white", fontsize=11.5,
+                fontweight="bold", va="center", ha="right", zorder=9, clip_on=False,
+                bbox=dict(facecolor=ENTRY_GREEN, edgecolor="none", pad=2.0))
+
     if isinstance(exit_price, (int, float)):
-        ax.annotate("", xy=(exit_pos, exit_price),
-                    xytext=(exit_pos, exit_price + (df["High"].max() - df["Low"].min()) * 0.07),
-                    arrowprops=dict(arrowstyle="-|>", color="#d50000", lw=2.4), zorder=6)
-        ax.scatter([exit_pos], [exit_price], marker="v", s=170, color="#d50000",
-                   edgecolors="black", linewidths=0.6, zorder=7, label=f"exit {exit_price:.2f}")
+        ax.plot([exit_pos, x_hi], [exit_price, exit_price],
+                color=EXIT_MAGENTA, linewidth=2.4, solid_capstyle="butt", zorder=6,
+                label=f"exit {exit_price:.2f}")
+        ax.plot([exit_pos], [exit_price], marker="o", markersize=9, linestyle="none",
+                markerfacecolor=EXIT_MAGENTA, markeredgecolor="black", markeredgewidth=0.7,
+                zorder=8)
+        ax.text(x_hi, exit_price, f" {exit_price:.2f} ", color="white", fontsize=11.5,
+                fontweight="bold", va="center", ha="left", zorder=9, clip_on=False,
+                bbox=dict(facecolor=EXIT_MAGENTA, edgecolor="none", pad=2.0))
 
     # ── Akser / labels (dansk tid) ──
     n_ticks = max(8, int(width_in * 1.2))   # flere ticks paa brede (scrollende) charts
@@ -469,14 +531,16 @@ async def build_trade_bars_json(db, conn, trade_id: str,
         "low": round(df["Low"].iloc[i], 4), "close": round(df["Close"].iloc[i], 4),
         "volume": int(df["Volume"].iloc[i]),
     } for i, ts in enumerate(df.index)]
+    # Baand fra SAMME kilde som PNG (_resolve_bands) — gulv-snappet entry-bar.
+    entry_pos = _bar_pos(df.index, entry_dt.astimezone(ET))
+    band_mean, band_upper, band_lower, bands_recomputed = _resolve_bands(df, trade, entry_pos)
     return {
         "bars": bars,
         "entry": {"time": int(entry_dt.timestamp()), "price": trade.get("entry_price")},
         "exit":  {"time": int(exit_dt.timestamp()),  "price": trade.get("exit_price")},
         "levels": {"stop": trade.get("current_stop"), "target": trade.get("current_target"),
-                   "mean": (trade.get("payload") or {}).get("mean"),
-                   "upper_band": (trade.get("payload") or {}).get("upper_band"),
-                   "lower_band": (trade.get("payload") or {}).get("lower_band")},
+                   "mean": band_mean, "upper_band": band_upper, "lower_band": band_lower},
+        "bands_recomputed": bands_recomputed,
         "meta": {"symbol": trade.get("symbol"), "source": trade.get("source"),
                  "side": trade.get("side"), "pnl": trade.get("pnl"),
                  "exit_reason": trade.get("exit_reason"),
