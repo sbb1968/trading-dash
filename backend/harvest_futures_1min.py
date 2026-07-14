@@ -66,6 +66,9 @@ HARVEST_DIR   = Path("data_harvest")
 # CME-micro-boerser (samme kilde som ibkr_connect.FUTURES_EXCHANGE)
 EXCHANGE = {"MES": "CME", "M2K": "CME"}
 QUARTERLY_MONTHS = (3, 6, 9, 12)       # mar/jun/sep/dec
+FRONT_MONTH_MAX_DAYS = 95              # en kontrakt er front-maaned ~ét kvartal foer udloeb;
+                                       # datoer laengere foer dens udloeb hoerer til en TIDLIGERE
+                                       # kontrakt (og pulles IKKE som back-month herfra)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -233,7 +236,12 @@ async def quarterly_contracts(ib, symbol: str, start: datecls, end: datecls, emi
 def build_segments(start: datecls, end: datecls, contracts):
     """Del [start, end] i sammenhaengende segmenter pr. front-maaned-kontrakt.
 
-    En dato D hoerer til kontrakten med den NAERMESTE expiry >= D (front-maaned den dag).
+    En dato D hoerer til kontrakten med den NAERMESTE expiry >= D (front-maaned den dag) —
+    MEN kun hvis D ligger inden for kontraktens front-maaned-vindue (<= FRONT_MONTH_MAX_DAYS
+    foer dens udloeb). Ellers ville en dato hvis egentlige front-maaned-kontrakt er SLETTET
+    hos IBKR (fx alt i 2023, hvor kun sep-2024-kontrakten stadig findes) blive tildelt en
+    fjern kontrakt og hive dens TOMME back-month-data (volumen ~0) i stedet for reel front-
+    maaned-likviditet. Saadanne datoer bliver i stedet et aabent hul (findes ikke).
     Returnerer liste af (ym, contract, seg_start, seg_end).
     """
     if not contracts:
@@ -241,7 +249,7 @@ def build_segments(start: datecls, end: datecls, contracts):
 
     def contract_for(d: datecls):
         for exp, ym, c in contracts:      # sorteret stigende
-            if exp >= d:
+            if exp >= d and (exp - d).days <= FRONT_MONTH_MAX_DAYS:
                 return ym, c
         return None
 
@@ -361,6 +369,12 @@ async def harvest_symbol(ib, symbol, start, end, args, reconnect_cb, emit):
     for ym, c, s0, s1 in segs:
         emit(f"     {ym}  ({c.localSymbol}, conId={c.conId}, udloeb {c.lastTradeDateOrContractMonth})"
              f"  ->  {s0} .. {s1}")
+    # AERLIG frontier-note: bad om data foer den aeldste tilgaengelige kontrakts front-maaned?
+    earliest = segs[0][2]
+    if earliest > start:
+        emit(f"   ℹ️ IBKR har ingen front-maaned-data foer {earliest} for {symbol} "
+             f"(aeldre kontrakter er slettet). {start} .. {earliest - timedelta(days=1)} "
+             f"findes ikke og springes over — IKKE en fejl.")
 
     out_dir = Path(args.out)
     all_done = True
@@ -455,9 +469,10 @@ async def main_async(args) -> int:
         ib.disconnect()
 
     if all_complete and not interrupted:
-        emit("  ✅ FAERDIG — alle segmenter fuldt hentet ned til start (intet mangler).")
+        emit("  ✅ FAERDIG — alle TILGAENGELIGE segmenter fuldt hentet. (Er der en ℹ️-frontier-"
+             "note ovenfor, findes aeldre data ikke hos IBKR — det er ikke en mangel.)")
         return 0
-    emit("  ⚠ IKKE alt blev hentet (afbrudt/fejl/tomme dage). Delvise CSV'er er gemt —"
+    emit("  ⚠ IKKE alt blev hentet (afbrudt/fejl). Delvise CSV'er er gemt —"
          " koer igen for at genoptage (resumerbar pr. fil).")
     return 0
 
