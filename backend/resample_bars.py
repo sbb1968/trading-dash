@@ -46,12 +46,17 @@ def load_1min(path: Path) -> pd.DataFrame:
     need = {"timestamp", "open", "high", "low", "close", "volume"}
     if not need.issubset(df.columns):
         raise ValueError(f"{path.name}: mangler kolonner {need - set(df.columns)}")
-    ts = pd.to_datetime(df["timestamp"], utc=False)
-    # tz-aware -> konvertér til ET; naive -> lokalisér til ET (haandterer DST korrekt).
-    if getattr(ts.dt, "tz", None) is None:
-        ts = ts.dt.tz_localize(TZ)
+    # DST-sikker parsing: en fil der spaender et DST-skift (fx 8. marts 2026) har BLANDEDE
+    # offsets (-05:00 EST foer, -04:00 EDT efter). utc=True parser ENTYDIGT til UTC (haandterer
+    # blandede offsets), hvorefter tz_convert saetter EST/EDT korrekt pr. timestamp. Naive
+    # timestamps (uden offset) lokaliseres til ET.
+    s = df["timestamp"].astype(str)
+    sample = s.iloc[0] if len(s) else ""
+    has_tz = sample.endswith("Z") or ("+" in sample) or ("-" in sample[11:])
+    if has_tz:
+        ts = pd.to_datetime(s, utc=True).dt.tz_convert(TZ)
     else:
-        ts = ts.dt.tz_convert(TZ)
+        ts = pd.to_datetime(s).dt.tz_localize(TZ, ambiguous=True, nonexistent="shift_forward")
     df = df.drop(columns=["timestamp"]).set_index(ts).sort_index()
     df.index.name = "timestamp"
     for c in ("open", "high", "low", "close"):
@@ -176,6 +181,31 @@ def selftest() -> int:
     agg10 = resample_ohlcv(df, 10)
     assert [t.strftime("%H:%M") for t in agg10.index] == ["09:30", "09:40"], list(agg10.index)
     print("  [10-min] buckets 09:30 + 09:40 (ren anker)  OK")
+
+    # DST: en fil der krydser 8. marts 2026 har BLANDEDE offsets (-05:00 EST / -04:00 EDT).
+    # load_1min skal parse dem uden at fejle og give korrekt ET.
+    import os, tempfile
+    csv_rows = [
+        "timestamp,open,high,low,close,volume",
+        "2026-03-06T10:00:00-05:00,100,101,99,100.5,10",    # EST (foer skift)
+        "2026-03-06T10:01:00-05:00,100.5,101,99,100.6,12",
+        "2026-03-09T10:00:00-04:00,110,111,109,110.5,20",   # EDT (efter skift)
+        "2026-03-09T10:01:00-04:00,110.5,111,109,110.6,22",
+    ]
+    with tempfile.NamedTemporaryFile("w", suffix="_1min.csv", delete=False, newline="") as fh:
+        fh.write("\n".join(csv_rows)); tmp = fh.name
+    try:
+        d2 = load_1min(Path(tmp))
+        assert len(d2) == 4, len(d2)
+        assert str(d2.index.tz) in ("America/New_York",), str(d2.index.tz)
+        # begge dage viser 10:00 ET trods forskellige UTC-offsets
+        assert [t.strftime("%m-%d %H:%M") for t in d2.index] == \
+               ["03-06 10:00", "03-06 10:01", "03-09 10:00", "03-09 10:01"], list(d2.index)
+        a5 = resample_ohlcv(d2, 5)
+        assert len(a5) == 2, len(a5)     # to separate dage -> to buckets
+    finally:
+        os.unlink(tmp)
+    print("  [DST] blandede offsets -05:00/-04:00 parses -> ET korrekt  OK")
 
     print("\nSELFTEST BESTAAET")
     return 0
