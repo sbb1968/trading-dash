@@ -158,7 +158,7 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
     trades: list[Trade] = []
     pos = None                    # (entry, entry_ts, entry_i)
     armed = False; mode = "mean"; bars_since = 0; pending_first = False
-    red_streak = 0
+    red_streak = 0; peak = 0.0                            # peak = hoejeste close siden entry (trailing)
     prev_valid_close = None; prev_valid_above = False   # til mean-down-cross-detektion
     prev_valid_below_lb = False                          # til nedre-baand-kryds-detektion
 
@@ -171,7 +171,13 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
         # ── I POSITION: exit-haandtering ──
         if pos is not None:
             exit_now, reason = False, ""
-            if valid and mi is not None:
+            if cfg.trail_sigma > 0:                       # TRAILING STOP: exit ved close <= peak - K·σ
+                if valid and mi is not None:
+                    if b.c > peak:
+                        peak = b.c
+                    if b.c <= peak - cfg.trail_sigma * s[i]:
+                        exit_now, reason = True, "trail"
+            elif valid and mi is not None:                # original: 2-roed / big-red
                 is_red = b.c < b.o
                 if cfg.big_red and is_red and (b.o - b.c) > cfg.exit_sigma * s[i]:
                     exit_now, reason = True, "big_red"
@@ -205,7 +211,7 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
         entered = False
         if cfg.lb_immediate and lb_cross:
             pos = (b.c, b.ts, i)             # KOEB LONG straks paa nedre-baand-krydset
-            armed = False; pending_first = False; red_streak = 0
+            armed = False; pending_first = False; red_streak = 0; peak = b.c
             entered = True
 
         if not entered:
@@ -226,7 +232,7 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
                     body_above = (b.o > ref) and (b.c > ref)
                     if pending_first and body_above:
                         pos = (b.c, b.ts, i)     # KOEB LONG paa candle 2's close (mean-bekraeftelse)
-                        armed = False; pending_first = False; red_streak = 0
+                        armed = False; pending_first = False; red_streak = 0; peak = b.c
                     else:
                         pending_first = close_above
 
@@ -274,6 +280,8 @@ def main() -> int:
     ap.add_argument("--lb-immediate", action="store_true",
                     help="nedre-baand-kryds = OEJEBLIKKELIG entry (ingen bekraeftelse)")
     ap.add_argument("--no-big-red", action="store_true", help="slaa ½σ big-red-exit fra")
+    ap.add_argument("--trail-sigma", type=float, default=0.0,
+                    help="trailing stop: exit ved close <= peak - K·σ (0 = brug 2-roed/big-red)")
     ap.add_argument("--trades-csv", default=None, help="skriv alle handler til CSV")
     a = ap.parse_args()
     a.big_red = not a.no_big_red
@@ -292,7 +300,10 @@ def main() -> int:
     print("=" * 82)
     print("  EUmomentum — LONG-only backtest (MES/M2K)")
     lb_txt = "nedre-baand=OEJEBLIKKELIG entry" if a.lb_immediate else "nedre-baand=bekraeftelse"
-    exit_txt = "2-roed" + ("/krop>%sσ" % a.exit_sigma if a.big_red else " (big-red FRA)") + "/tvangsluk"
+    if a.trail_sigma > 0:
+        exit_txt = f"TRAILING peak-{a.trail_sigma}σ / tvangsluk"
+    else:
+        exit_txt = "2-roed" + ("/krop>%sσ" % a.exit_sigma if a.big_red else " (big-red FRA)") + "/tvangsluk"
     print(f"  Baand: mean=SMA({a.lookback}) ±{a.band_z}σ · mean-bekraeft<= {a.confirm_window} bars · "
           f"{lb_txt} · exit {exit_txt} · RVOL<{a.rvol_min} ignoreres ({','.join(sorted(RVOL_FILTER))})")
     print(f"  Periode: {start} .. {end}   cost {a.cost_bp}bp   sweep {tfs} min")
