@@ -199,7 +199,11 @@ async def quarterly_contracts(ib, symbol: str, start: datecls, end: datecls, emi
     y = start.year
     while y <= end.year + 1:
         for m in QUARTERLY_MONTHS:
-            cand.append((y, m))
+            # Kun kvartaler der kan vaere front-maaned for en dato i [start, end]:
+            # udloeb (~den 20.) >= start OG maaneds-start <= end + ~100 dage. Undgaar at
+            # probe endnu-ikke-noterede kontrakter (fx dec 2027) -> ingen Error 200-stoej.
+            if datecls(y, m, 20) >= start and datecls(y, m, 1) <= end + timedelta(days=100):
+                cand.append((y, m))
         y += 1
     out = []
     seen = set()
@@ -276,7 +280,7 @@ async def pull_segment(ib, contract, seg_start: datecls, seg_end: datecls, what,
     existing_oldest = min(by_ts) if by_ts else None
     if existing_oldest is not None and existing_oldest <= floor_utc:
         emit(f"   [{symbol} {ym}] allerede hentet ned til segment-start — springer over.")
-        return
+        return True
     if existing_oldest is not None:
         # Genoptag fra frontlinjen (aeldste eksisterende bar).
         end_dt = existing_oldest - timedelta(seconds=1)
@@ -288,6 +292,7 @@ async def pull_segment(ib, contract, seg_start: datecls, seg_end: datecls, what,
 
     n_exp = len(expected_trading_days(seg_start, seg_end))
     total_chunks = (seg_end - seg_start).days // max(1, chunk_days) + 4
+    reached_bottom = False
     for ci in range(total_chunks):
         bars = None
         for attempt in range(3):
@@ -309,7 +314,8 @@ async def pull_segment(ib, contract, seg_start: datecls, seg_end: datecls, what,
                     await asyncio.sleep(3); continue
                 emit(f"   reqHistoricalData fejl: {e}"); bars = None
         if not bars:
-            emit(f"   chunk {ci + 1}: tom -> bunden naaet for {contract.localSymbol}."); break
+            emit(f"   chunk {ci + 1}: tom -> bunden naaet for {contract.localSymbol}.")
+            reached_bottom = True; break
 
         chunk_oldest = None
         added = 0
@@ -327,14 +333,16 @@ async def pull_segment(ib, contract, seg_start: datecls, seg_end: datecls, what,
                 chunk_oldest = dt_utc
         write_cb(by_ts)
         if chunk_oldest is None:
-            emit(f"   chunk {ci + 1}: kun bars foer segment-start -> stopper."); break
+            emit(f"   chunk {ci + 1}: kun bars foer segment-start -> stopper.")
+            reached_bottom = True; break
         n_have = len([d for d in covered_days(by_ts) if seg_start <= d <= seg_end])
         emit(f"   chunk {ci + 1}: +{added} nye bars · frontlinje {chunk_oldest.astimezone(ET):%Y-%m-%d %H:%M} ET"
              f" · dag-daekning {n_have}/{n_exp} · total {len(by_ts)} bars")
         if chunk_oldest <= floor_utc or len(bars) < 5:
-            break
+            reached_bottom = True; break
         end_str = (chunk_oldest - timedelta(seconds=1)).strftime("%Y%m%d %H:%M:%S") + " UTC"
         await asyncio.sleep(SLEEP_BETWEEN)
+    return reached_bottom
 
 
 async def harvest_symbol(ib, symbol, start, end, args, reconnect_cb, emit):
@@ -344,17 +352,18 @@ async def harvest_symbol(ib, symbol, start, end, args, reconnect_cb, emit):
     contracts = await quarterly_contracts(ib, symbol, start, end, emit)
     if not contracts:
         emit(f"   FEJL: ingen kvartals-kontrakter kunne kvalificeres for {symbol}.")
-        return
+        return False
     segs = build_segments(start, end, contracts)
     if not segs:
         emit(f"   FEJL: ingen kontrakt daekker intervallet for {symbol}.")
-        return
+        return False
     emit("   Kontrakt-opdeling (front-maaned pr. dato):")
     for ym, c, s0, s1 in segs:
         emit(f"     {ym}  ({c.localSymbol}, conId={c.conId}, udloeb {c.lastTradeDateOrContractMonth})"
              f"  ->  {s0} .. {s1}")
 
     out_dir = Path(args.out)
+    all_done = True
     for ym, contract, s0, s1 in segs:
         path = out_path(out_dir, symbol, ym)
         by_ts = load_existing(path)
@@ -369,9 +378,10 @@ async def harvest_symbol(ib, symbol, start, end, args, reconnect_cb, emit):
             write_csv(_p, d)
 
         try:
-            await pull_segment(ib, contract, s0, s1, args.what, args.bar_size,
-                               args.chunk_days, by_ts, emit, write_cb, reconnect_cb,
-                               symbol=symbol, ym=ym)
+            done = await pull_segment(ib, contract, s0, s1, args.what, args.bar_size,
+                                      args.chunk_days, by_ts, emit, write_cb, reconnect_cb,
+                                      symbol=symbol, ym=ym)
+            all_done = all_done and bool(done)
         except ConnectionError:
             raise
         if by_ts:
@@ -384,6 +394,8 @@ async def harvest_symbol(ib, symbol, start, end, args, reconnect_cb, emit):
             log_coverage(emit, symbol, ym, by_ts, s0, s1)   # slut-status: hentet vs mangler
         else:
             emit(f"   (ingen bars for {symbol} {ym})")
+            all_done = False
+    return all_done
 
 
 async def main_async(args) -> int:
@@ -422,21 +434,31 @@ async def main_async(args) -> int:
     async def do_reconnect():
         return await reconnect(ib, args.host, args.port, args.client_id, emit)
 
+    all_complete = True
+    interrupted = False
     try:
         for symbol in symbols:
             if not ib.isConnected() and not await do_reconnect():
-                emit("  TWS varigt nede. Stopper rent (delvise CSV'er er gemt)."); break
+                emit("  TWS varigt nede. Stopper rent (delvise CSV'er er gemt).")
+                interrupted = True; break
             try:
-                await harvest_symbol(ib, symbol, start, end, args, do_reconnect, emit)
+                done = await harvest_symbol(ib, symbol, start, end, args, do_reconnect, emit)
+                all_complete = all_complete and bool(done)
             except ConnectionError:
                 emit("  TWS-forbindelse tabt under hoest. Alt hentet indtil nu er gemt — koer igen.")
-                break
+                interrupted = True; break
             except Exception as e:
                 emit(f"   FEJL ved {symbol}: {type(e).__name__}: {e}")
+                all_complete = False
             emit("")
     finally:
         ib.disconnect()
-    emit("  Faerdig. Bunden ikke naaet? Koer igen — resumerbar pr. fil.")
+
+    if all_complete and not interrupted:
+        emit("  ✅ FAERDIG — alle segmenter fuldt hentet ned til start (intet mangler).")
+        return 0
+    emit("  ⚠ IKKE alt blev hentet (afbrudt/fejl/tomme dage). Delvise CSV'er er gemt —"
+         " koer igen for at genoptage (resumerbar pr. fil).")
     return 0
 
 
