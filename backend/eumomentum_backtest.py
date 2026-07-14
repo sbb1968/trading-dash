@@ -159,7 +159,8 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
     pos = None                    # (entry, entry_ts, entry_i)
     armed = False; mode = "mean"; bars_since = 0; pending_first = False
     red_streak = 0
-    prev_valid_close = None; prev_valid_above = False   # til down-cross-detektion
+    prev_valid_close = None; prev_valid_above = False   # til mean-down-cross-detektion
+    prev_valid_below_lb = False                          # til nedre-baand-kryds-detektion
 
     for i in range(n):
         b = bars[i]
@@ -172,8 +173,7 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
             exit_now, reason = False, ""
             if valid and mi is not None:
                 is_red = b.c < b.o
-                body = b.o - b.c
-                if is_red and body > cfg.exit_sigma * s[i]:
+                if cfg.big_red and is_red and (b.o - b.c) > cfg.exit_sigma * s[i]:
                     exit_now, reason = True, "big_red"
                 elif is_red:
                     red_streak += 1
@@ -190,36 +190,47 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
 
         # ── FLAT: entry-tilstandsmaskine ──
         if mi is None:                    # ingen baand (efter pause / warmup) -> nulstil kontekst
-            armed = False; pending_first = False; prev_valid_close = None
+            armed = False; pending_first = False
+            prev_valid_close = None; prev_valid_below_lb = False
             continue
         if not valid:                     # ignorér candlen fuldstaendigt
             continue
         if gap_after:                     # sidste bar foer pause: intet at armere/bekraefte over gap
             armed = False; pending_first = False
-            prev_valid_close = b.c; prev_valid_above = (b.c >= mi)
+            prev_valid_close = b.c; prev_valid_above = (b.c >= mi); prev_valid_below_lb = (b.c < lo[i])
             continue
 
-        if not armed:
-            # down-cross: forrige VALIDE candle laa >= sit mean, denne lukker < mean
-            if prev_valid_close is not None and prev_valid_above and b.c < mi:
-                armed = True; mode = "mean"; bars_since = 0; pending_first = False
-        else:
-            bars_since += 1
-            if bars_since > cfg.confirm_window:
-                armed = False; pending_first = False
-            else:
-                if b.c < lo[i]:
-                    mode = "lower_band"          # dybere dyk -> reference = nedre baand
-                ref = mi if mode == "mean" else lo[i]
-                close_above = b.c > ref
-                body_above = (b.o > ref) and (b.c > ref)
-                if pending_first and body_above:
-                    pos = (b.c, b.ts, i)         # KOEB LONG paa candle 2's close
-                    armed = False; pending_first = False; red_streak = 0
-                else:
-                    pending_first = close_above  # candle 1 = lukker over reference
+        # Nedre-baand-kryds: OEJEBLIKKELIG entry hvis lb_immediate (ingen bekraeftelse).
+        lb_cross = (prev_valid_close is not None) and (not prev_valid_below_lb) and (b.c < lo[i])
+        entered = False
+        if cfg.lb_immediate and lb_cross:
+            pos = (b.c, b.ts, i)             # KOEB LONG straks paa nedre-baand-krydset
+            armed = False; pending_first = False; red_streak = 0
+            entered = True
 
-        prev_valid_close = b.c; prev_valid_above = (b.c >= mi)
+        if not entered:
+            if not armed:
+                # mean-down-cross: forrige VALIDE candle laa >= sit mean, denne lukker < mean
+                if prev_valid_close is not None and prev_valid_above and b.c < mi:
+                    armed = True; mode = "mean"; bars_since = 0; pending_first = False
+            else:
+                bars_since += 1
+                if bars_since > cfg.confirm_window:
+                    armed = False; pending_first = False
+                else:
+                    # original reference-skift til nedre baand gaelder KUN naar lb ikke er umiddelbar
+                    if (not cfg.lb_immediate) and b.c < lo[i]:
+                        mode = "lower_band"
+                    ref = mi if (cfg.lb_immediate or mode == "mean") else lo[i]
+                    close_above = b.c > ref
+                    body_above = (b.o > ref) and (b.c > ref)
+                    if pending_first and body_above:
+                        pos = (b.c, b.ts, i)     # KOEB LONG paa candle 2's close (mean-bekraeftelse)
+                        armed = False; pending_first = False; red_streak = 0
+                    else:
+                        pending_first = close_above
+
+        prev_valid_close = b.c; prev_valid_above = (b.c >= mi); prev_valid_below_lb = (b.c < lo[i])
 
     return trades
 
@@ -260,8 +271,12 @@ def main() -> int:
     ap.add_argument("--confirm-window", type=int, default=CONFIRM_WINDOW)
     ap.add_argument("--exit-sigma", type=float, default=EXIT_SIGMA)
     ap.add_argument("--cost-bp", type=float, default=COST_BP)
+    ap.add_argument("--lb-immediate", action="store_true",
+                    help="nedre-baand-kryds = OEJEBLIKKELIG entry (ingen bekraeftelse)")
+    ap.add_argument("--no-big-red", action="store_true", help="slaa ½σ big-red-exit fra")
     ap.add_argument("--trades-csv", default=None, help="skriv alle handler til CSV")
     a = ap.parse_args()
+    a.big_red = not a.no_big_red
     a.lookback = a.lookback; a.confirm_window = a.confirm_window
     a.band_z = a.band_z; a.rvol_min = a.rvol_min; a.rvol_warmup = a.rvol_warmup
     a.exit_sigma = a.exit_sigma
@@ -276,8 +291,10 @@ def main() -> int:
 
     print("=" * 82)
     print("  EUmomentum — LONG-only backtest (MES/M2K)")
-    print(f"  Baand: mean=SMA({a.lookback}) ±{a.band_z}σ · bekraeft<= {a.confirm_window} bars · "
-          f"exit 2-roed / krop>{a.exit_sigma}σ / tvangsluk · RVOL<{a.rvol_min} ignoreres ({','.join(sorted(RVOL_FILTER))})")
+    lb_txt = "nedre-baand=OEJEBLIKKELIG entry" if a.lb_immediate else "nedre-baand=bekraeftelse"
+    exit_txt = "2-roed" + ("/krop>%sσ" % a.exit_sigma if a.big_red else " (big-red FRA)") + "/tvangsluk"
+    print(f"  Baand: mean=SMA({a.lookback}) ±{a.band_z}σ · mean-bekraeft<= {a.confirm_window} bars · "
+          f"{lb_txt} · exit {exit_txt} · RVOL<{a.rvol_min} ignoreres ({','.join(sorted(RVOL_FILTER))})")
     print(f"  Periode: {start} .. {end}   cost {a.cost_bp}bp   sweep {tfs} min")
     print("=" * 82)
 
