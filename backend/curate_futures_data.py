@@ -131,10 +131,39 @@ def run(args) -> int:
         total_kept += len(trimmed)
         total_dropped += dropped
 
+    # Kontinuerlige (stitched) serier pr. symbol pr. tidsramme — til studier der vil have
+    # ÉN serie (fx eumomentum_separability). RAW-stitched: roll-gap i pris ved hver overgang.
+    if args.stitch_out:
+        stitch_dir = Path(args.stitch_out)
+        stitch_continuous(out_dir, stitch_dir, symbols, [1] + minutes)
+        print(f"\n  Stitched kontinuerlige serier i {stitch_dir}")
+
     print("\n" + "=" * 78)
     print(f"  FAERDIG. Rent datasaet i {out_dir}")
     print(f"  Beholdt {total_kept} 1-min bars · droppede {total_dropped} back-month-junk-bars.")
     return 0
+
+
+def stitch_continuous(clean_dir: Path, stitch_dir: Path, symbols, tfs) -> None:
+    """Saml per-kontrakt-filerne til ÉN kontinuerlig serie pr. symbol pr. tidsramme.
+
+    RAW-stitched (IKKE back-adjusted): der er et roll-gap i pris ved hver kontrakt-overgang.
+    Til intradag-studier (z pr. session, contiguity-guarded) er det uproblematisk; til en
+    kontinuerlig fler-dags-serie skal man backadjuste. Filnavn: {SYMBOL}_{tf}min.csv.
+    """
+    stitch_dir.mkdir(parents=True, exist_ok=True)
+    for sym in symbols:
+        for tf in sorted(set(tfs)):
+            parts = sorted(clean_dir.glob(f"{sym}_20*_{tf}min.csv"))
+            if not parts:
+                continue
+            df = pd.concat([pd.read_csv(p) for p in parts], ignore_index=True)
+            k = pd.to_datetime(df["timestamp"], utc=True)
+            df = (df.assign(_k=k).sort_values("_k")
+                    .drop_duplicates("timestamp").drop(columns="_k"))
+            out = stitch_dir / f"{sym}_{tf}min.csv"
+            df.to_csv(out, index=False)
+            print(f"     stitched {out.name}: {len(df)} bars ({len(parts)} kontrakter)")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -170,6 +199,8 @@ def main() -> int:
     ap.add_argument("--out", dest="out_dir", default=str(DEFAULT_OUT), help="underfolder til rent data")
     ap.add_argument("--minutes", default="3,5,10,15", help="tidsrammer (default 3,5,10,15)")
     ap.add_argument("--symbols", default=None, help="default MES,M2K")
+    ap.add_argument("--stitch-out", dest="stitch_out", default="data_harvest/mes_m2k_stitched",
+                    help="mappe til kontinuerlige (stitched) serier; tom string for at springe over")
     ap.add_argument("--selftest", action="store_true", help="test trim-logikken uden filer")
     args = ap.parse_args()
     if args.selftest:
