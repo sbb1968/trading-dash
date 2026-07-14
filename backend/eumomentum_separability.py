@@ -583,11 +583,11 @@ def main() -> int:
              "F5_persistence", "F6_hour_et", "F7_confluence", "F8_abs_gap_bp"]
     with (out_dir / "events.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["inst", "ts", "z", "side", "close", "label", "tie_break",
+        w.writerow(["inst", "ts", "z", "side", "close", "exit_close", "label", "tie_break",
                     "mfe_usd", "mae_usd"] + fkeys)
         for r in all_rows:
             w.writerow([r["inst"], r["ts"].isoformat(), f"{r['z']:.3f}", r["side"],
-                        r["close"], r["label"], int(r["tie_break"]),
+                        r["close"], r["exit_close"], r["label"], int(r["tie_break"]),
                         f"{r['mfe_usd']:.1f}", f"{r['mae_usd']:.1f}"]
                        + [r["f"][k] for k in fkeys])
     print(f"\nFiler: {out_dir/'summary.txt'} + {out_dir/'events.csv'}")
