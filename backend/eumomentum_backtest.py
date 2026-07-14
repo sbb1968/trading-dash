@@ -79,6 +79,9 @@ class Trade:
     exit: float
     reason: str
     bars_held: int
+    entry_type: str = "?"      # "lb" (nedre-baand) | "mean" (mean-bekraeftelse)
+    dip_sig: float = 0.0       # (mean - entry)/σ ved entry (>0 = koebt UNDER mean)
+    slope_sig: float = 0.0     # (mean[i]-mean[i-12])/σ ved entry (trend-kontekst)
 
     def net_pct(self, cost_bp: float) -> float:
         if self.entry <= 0:
@@ -190,7 +193,8 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
             if not exit_now and gap_after:               # tvangsluk foer pause (uanset RVOL)
                 exit_now, reason = True, "force_close"
             if exit_now:
-                trades.append(Trade(inst, pos[1], b.ts, pos[0], b.c, reason, i - pos[2]))
+                trades.append(Trade(inst, pos[1], b.ts, pos[0], b.c, reason, i - pos[2],
+                                    pos[3], pos[4], pos[5]))
                 pos = None; red_streak = 0
             continue
 
@@ -210,11 +214,13 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
         lb_cross = (prev_valid_close is not None) and (not prev_valid_below_lb) and (b.c < lo[i])
         entered = False
         if cfg.lb_immediate and lb_cross:
-            pos = (b.c, b.ts, i)             # KOEB LONG straks paa nedre-baand-krydset
+            _dip = (mi - b.c) / s[i] if s[i] > 0 else 0.0
+            _slp = (mi - m[i - 12]) / s[i] if (i >= 12 and m[i - 12] is not None and s[i] > 0) else 0.0
+            pos = (b.c, b.ts, i, "lb", _dip, _slp)   # KOEB LONG straks paa nedre-baand-krydset
             armed = False; pending_first = False; red_streak = 0; peak = b.c
             entered = True
 
-        if not entered:
+        if not entered and not cfg.lb_only:      # lb_only: kun nedre-baand-entries (dybe dyk)
             if not armed:
                 # mean-down-cross: forrige VALIDE candle laa >= sit mean, denne lukker < mean
                 if prev_valid_close is not None and prev_valid_above and b.c < mi:
@@ -231,7 +237,9 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
                     close_above = b.c > ref
                     body_above = (b.o > ref) and (b.c > ref)
                     if pending_first and body_above:
-                        pos = (b.c, b.ts, i)     # KOEB LONG paa candle 2's close (mean-bekraeftelse)
+                        _dip = (mi - b.c) / s[i] if s[i] > 0 else 0.0
+                        _slp = (mi - m[i - 12]) / s[i] if (i >= 12 and m[i - 12] is not None and s[i] > 0) else 0.0
+                        pos = (b.c, b.ts, i, "mean", _dip, _slp)   # mean-bekraeftelse
                         armed = False; pending_first = False; red_streak = 0; peak = b.c
                     else:
                         pending_first = close_above
@@ -282,9 +290,13 @@ def main() -> int:
     ap.add_argument("--no-big-red", action="store_true", help="slaa ½σ big-red-exit fra")
     ap.add_argument("--trail-sigma", type=float, default=0.0,
                     help="trailing stop: exit ved close <= peak - K·σ (0 = brug 2-roed/big-red)")
+    ap.add_argument("--lb-only", action="store_true",
+                    help="KUN nedre-baand-entries (dybe dyk); dropper mean-bekraeftelses-stien")
     ap.add_argument("--trades-csv", default=None, help="skriv alle handler til CSV")
     a = ap.parse_args()
     a.big_red = not a.no_big_red
+    if a.lb_only:
+        a.lb_immediate = True   # lb_only kraever den umiddelbare nedre-baand-entry
     a.lookback = a.lookback; a.confirm_window = a.confirm_window
     a.band_z = a.band_z; a.rvol_min = a.rvol_min; a.rvol_warmup = a.rvol_warmup
     a.exit_sigma = a.exit_sigma
@@ -337,10 +349,11 @@ def main() -> int:
         with open(a.trades_csv, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["tf_min", "inst", "entry_ts", "exit_ts", "entry", "exit", "reason",
-                        "bars_held", "net_pct_2bp"])
+                        "bars_held", "entry_type", "dip_sig", "slope_sig", "net_pct"])
             for tf, t in all_trades_csv:
                 w.writerow([tf, t.inst, t.entry_ts.isoformat(), t.exit_ts.isoformat(),
-                            t.entry, t.exit, t.reason, t.bars_held, round(t.net_pct(a.cost_bp), 4)])
+                            t.entry, t.exit, t.reason, t.bars_held, t.entry_type,
+                            round(t.dip_sig, 3), round(t.slope_sig, 3), round(t.net_pct(a.cost_bp), 4)])
         print(f"\n  Skrev {len(all_trades_csv)} handler -> {a.trades_csv}")
     return 0
 
