@@ -114,6 +114,7 @@ _DOCS_OUT = HERE / "docs"
 # Titel/kategori afledes af output-navnet i /docs/list (praefiks -> kategori, NN -> raekkefoelge).
 _STANDALONE_DOCS = [
     ("docs_src/regime_fingeraftryk.md", "regime_01_forstaa_dit_marked.pdf"),
+    ("docs_src/market_cipher_b.md", "cipher_01_hvad_viser_den.pdf"),
 ]
 
 
