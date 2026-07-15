@@ -384,6 +384,23 @@ async def startup():
         trendjoin._broadcast_fn = broadcast_algo_sync
         print(f"[Server] Trend Join Long registreret — gap-and-go m. nyhedsfilter, MANUEL start")
 
+        # ── Registrér Relativ Styrke (tvaersnitlig RS, spor D, long-only, paper) ──
+        # MANUEL start kun — IKKE i scheduleren (auto-starter aldrig). Long-only, saa raa
+        # P&L indeholder markeds-/small-cap-beta; edgen er SELECTION ALPHA (top-K minus
+        # universe-snit), maalt i relstyrke_shadow_eval.py. Instans-guard: algoserveren.
+        from algo_relstyrke import RelStyrkeLive
+
+        relstyrke_config = StrategyConfig(
+            max_loss_per_trade  = 200.0,
+            max_daily_loss      = 300.0,
+            max_open_positions  = 3,       # TOP_K
+            max_position_size   = 1000.0,  # = PER_NAME_NOTIONAL_CAP_USD (sizer notional-baseret)
+        )
+        relstyrke = RelStyrkeLive(strategy_manager.get_ibkr(), config=relstyrke_config)
+        strategy_manager.register(relstyrke)
+        relstyrke._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] Relativ Styrke registreret — tvaersnitlig RS (spor D), MANUEL start")
+
     asyncio.create_task(start_ibkr_feed())
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
