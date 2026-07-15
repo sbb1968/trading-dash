@@ -161,3 +161,7 @@ backend/news_bench_output/*
 !backend/news_bench_output/.gitkeep
 backend/risk_config.json
 backend/regime_fingerprint_output/
+
+# Halt-resumption harvest (spor B, fase 1) — genererbar observations-data
+# (matcher ikke backend/*_output/-reglen ovenfor, saa eksplicit linje kraeves)
+backend/halt_harvest/
