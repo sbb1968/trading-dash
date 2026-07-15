@@ -49,6 +49,11 @@ DEFAULTS: dict[str, dict[str, dict]] = {
         "position_size":  {"pct": 1.0,  "amount": None},    # risiko/handel (1 % af NLV)
         "notional_cap":   {"pct": 10.0, "amount": None},    # notional-loft (10 % af NLV)
     },
+    "Relativ Styrke": {
+        "max_daily_loss": {"pct": None, "amount": 300.0},
+        "position_size":  {"pct": 3.0,  "amount": None},    # samlet strategi-notional (3 % af NLV, deles paa 3)
+        "notional_cap":   {"pct": None, "amount": 1000.0},  # notional-loft pr. navn ($)
+    },
 }
 
 # UI-metadata: rækkefølge + danske labels + enhed pr. nøgle (bruges af Konfiguratoren).
@@ -70,6 +75,11 @@ SCHEMA: dict[str, list[dict]] = {
         {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
         {"key": "position_size",  "label": "Positionsstørrelse (risiko/handel)",  "hint": "risk"},
         {"key": "notional_cap",   "label": "Notional-loft",     "hint": "notional"},
+    ],
+    "Relativ Styrke": [
+        {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
+        {"key": "position_size",  "label": "Positionsstørrelse (samlet notional, % af NLV)", "hint": "capital"},
+        {"key": "notional_cap",   "label": "Notional-loft (pr. navn)", "hint": "notional"},
     ],
 }
 

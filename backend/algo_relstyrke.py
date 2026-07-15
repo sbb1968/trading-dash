@@ -192,8 +192,11 @@ class RelStyrkeLive(BaseStrategy):
             logger.error(f"[RelStyrke] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) — springer over")
             self._status("started", "Reconciliation timeout — fortsaetter til handel")
 
-        # Udled dagens strategi-notional = 3% af NLV (fallback hvis NLV ukendt).
-        self._strategy_notional = (NOTIONAL_PCT * self._nlv) if self._nlv > 0 else STRATEGY_NOTIONAL_FB
+        # Udled dagens strategi-notional (konfigurerbart via Konfiguratoren: position_size,
+        # default 3% af NLV). Fald tilbage til NOTIONAL_PCT*NLV / fast beloeb hvis uoploest.
+        self._strategy_notional = self._resolve_risk("position_size")
+        if self._strategy_notional <= 0:
+            self._strategy_notional = (NOTIONAL_PCT * self._nlv) if self._nlv > 0 else STRATEGY_NOTIONAL_FB
         self._status("started",
                      f"Strategi-notional: ${self._strategy_notional:,.0f} "
                      f"({'3% af NLV' if self._nlv > 0 else 'fallback (NLV ukendt)'}) "
