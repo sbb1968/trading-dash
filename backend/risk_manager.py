@@ -22,7 +22,12 @@ class RiskConfig:
     # kun en strategi der er løbet løbsk:
     max_total_exposure:      float = 200000.0  # Samlet loft på tværs (bagstopper)
     max_total_positions:     int   = 50        # Samlet positionsloft (bagstopper)
-    nlv_emergency_threshold: float = 5000.0    # Nødstop hvis NLV falder hertil
+    # NLV-nødstop: 0 = DEAKTIVERET. Slået fra 2026-07-15 (Søren): Ibens paper-konto er
+    # bevidst sat lavt (~$1.478) så den afspejler de beløb hun skal live-handle med — så
+    # længe vi kører PAPER er der intet behov for et NLV-nødstop, og $5.000-tærsklen
+    # trippede fejlagtigt. Checket (update_nlv) er `nlv < threshold`, så 0 udløser aldrig.
+    # ⚠ SÆT til et passende niveau FØR live-drift med rigtige penge.
+    nlv_emergency_threshold: float = 0.0
     block_duplicate_tickers: bool  = False     # Strategier MÅ dele samme ticker
 
 
