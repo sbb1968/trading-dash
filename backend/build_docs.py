@@ -110,6 +110,12 @@ _STRATEGY_DOCS = [
 ]
 _DOCS_OUT = HERE / "docs"
 
+# Stand-alone docs (ikke strategi-bundet): (md-sti relativt til backend/, output-pdf-navn).
+# Titel/kategori afledes af output-navnet i /docs/list (praefiks -> kategori, NN -> raekkefoelge).
+_STANDALONE_DOCS = [
+    ("docs_src/regime_fingeraftryk.md", "regime_01_forstaa_dit_marked.pdf"),
+]
+
 
 def build_all() -> None:
     n = 0
@@ -121,7 +127,14 @@ def build_all() -> None:
                 continue
             convert(md, _DOCS_OUT / f"{prefix}_{nn}_{slug}.pdf")
             n += 1
-    print(f"\n{n} strategi-PDF'er bygget i {_DOCS_OUT}")
+    for md_rel, out_pdf in _STANDALONE_DOCS:
+        md = HERE / md_rel
+        if not md.is_file():
+            print(f"SPRING OVER (mangler): {md}")
+            continue
+        convert(md, _DOCS_OUT / out_pdf)
+        n += 1
+    print(f"\n{n} PDF'er bygget i {_DOCS_OUT}")
 
 
 if __name__ == "__main__":
