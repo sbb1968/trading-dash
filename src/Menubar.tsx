@@ -51,6 +51,7 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
     { id: "level2",         shortcut: "L" },
     { id: "timesales",      shortcut: "M" },
     { id: "marketoverview", shortcut: "R" },
+    { id: "regimefingerprint", shortcut: "N" },   // Regime-fingeraftryk (ugentligt)
     { id: "sektorniche",    shortcut: "K" },   // Sektorer & nicher
     { id: "firmainfo",      shortcut: "F" },   // Firma-info for valgt ticker
   ]},

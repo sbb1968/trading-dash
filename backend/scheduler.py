@@ -64,6 +64,12 @@ TOP15_EOD_RETRY_UNTIL_ET  = dtime(1, 30)   # 07:30 dansk — foer Europa-reversi
 DAYTRADING_START_ET       = dtime(9,  0)   # 15:00 dansk — daytrading movers (pre-market)
 DAYTRADING_RETRY_UNTIL_ET = dtime(9, 18)   # foer K2 auto-start (09:20 ET)
 
+# Ugentligt regime-fingeraftryk (KUN algoserveren). Rent OFFLINE paa cache -> ingen TWS-afhaengighed.
+# Koerer efter reset_daily (00:05 ET) og top15_eod (00:15 ET) saa de ikke overlapper. Kun ugens
+# foerste handelsdag (run_on=is_first_trading_day_of_week).
+REGIME_START_ET       = dtime(0, 30)   # 06:30 dansk, mandag morgen
+REGIME_RETRY_UNTIL_ET = dtime(3, 0)    # transient fejl (fx fil-laas) genforsoeges til 03:00 ET
+
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
 # 2026 NYSE-lukkede dage:
@@ -111,6 +117,20 @@ def next_trading_day(after: date_cls) -> date_cls:
     return d
 
 
+def is_first_trading_day_of_week(d: date_cls) -> bool:
+    """True hvis d er ugens FOERSTE handelsdag (normalt mandag; ruller til tirsdag hvis
+    mandag er en US-helligdag). Bruges til ugentlige jobs."""
+    if not is_trading_day(d):
+        return False
+    monday = d - timedelta(days=d.weekday())      # ISO-ugens mandag
+    cur = monday
+    while cur < d:
+        if is_trading_day(cur):
+            return False                          # en tidligere handelsdag i ugen findes
+        cur += timedelta(days=1)
+    return True
+
+
 def now_et() -> datetime:
     return datetime.now(ET)
 
@@ -121,7 +141,8 @@ def now_et() -> datetime:
 
 class ScheduledJob:
     def __init__(self, name: str, et_time: dtime, action: Callable[[], Awaitable],
-                 window_end_et: Optional[dtime] = None, retry_until_success: bool = False):
+                 window_end_et: Optional[dtime] = None, retry_until_success: bool = False,
+                 run_on: Optional[Callable[[date_cls], bool]] = None):
         self.name        = name
         self.et_time     = et_time
         self.action      = action
@@ -130,12 +151,16 @@ class ScheduledJob:
         # auto-start hvor TWS kan være nede præcis ved start-tidspunktet.
         self.window_end_et       = window_end_et
         self.retry_until_success = retry_until_success
+        # Valgfrit ekstra dag-filter (fx ugentlige jobs: is_first_trading_day_of_week).
+        self.run_on              = run_on
         self.last_run_on: Optional[date_cls] = None
 
     def should_run_now(self, now: datetime) -> bool:
         """True hvis vi er forbi job-tiden i dag og endnu ikke har kørt det.
         For genforsøgs-jobs: kørbart i [et_time, window_end_et) indtil success."""
         if not is_trading_day(now.date()):
+            return False
+        if self.run_on is not None and not self.run_on(now.date()):
             return False
         if self.last_run_on == now.date():
             return False
@@ -186,6 +211,7 @@ class AlgoScheduler:
         reset_daily_fn:    Optional[Callable[[], Awaitable]] = None,
         run_top15_eod_fn:  Optional[Callable[[], Awaitable]] = None,
         run_daytrading_fn: Optional[Callable[[], Awaitable]] = None,
+        run_regime_fn:     Optional[Callable[[], Awaitable[bool]]] = None,
         instance_role:     str = "algoserver",
     ):
         self._start_algo     = start_algo_fn
@@ -195,6 +221,7 @@ class AlgoScheduler:
         self._reset_daily    = reset_daily_fn
         self._run_top15_eod  = run_top15_eod_fn   # swing + buyhold (morgen)
         self._run_daytrading = run_daytrading_fn  # daytrading movers (naer US-aaben)
+        self._run_regime     = run_regime_fn      # ugentligt regime-fingeraftryk (offline)
         # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
         # På workstation skal pre_flight_check og reset_daily fortsat køre,
         # men strategien startes manuelt af brugeren via UI.
@@ -222,6 +249,9 @@ class AlgoScheduler:
                          window_end_et=TOP15_EOD_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("generate_daytrading_top15", DAYTRADING_START_ET, self._job_generate_daytrading,
                          window_end_et=DAYTRADING_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("generate_regime_fingerprint", REGIME_START_ET, self._job_generate_regime_fingerprint,
+                         window_end_et=REGIME_RETRY_UNTIL_ET, retry_until_success=True,
+                         run_on=is_first_trading_day_of_week),
         ]
 
     # ─────────────────────────────────────────────────────────
@@ -404,6 +434,24 @@ class AlgoScheduler:
         """Daytrading movers taet paa US-aabning (intradag — kraever aktivt marked/pre-market)."""
         return await self._run_top15_job(
             "generate_daytrading_top15", self._run_daytrading, DAYTRADING_RETRY_UNTIL_ET)
+
+    async def _job_generate_regime_fingerprint(self) -> bool:
+        """Ugentligt regime-fingeraftryk. KUN algoserveren (serverer til alle maskiner, som
+        top15). Rent offline -> ingen TWS-afhaengighed. Returnerer True naar faerdig for i dag
+        (koert eller bevidst sprunget over paa workstation), False ved transient fejl (genforsoeg
+        i vinduet)."""
+        if self._instance_role != "algoserver":
+            logger.info("[Scheduler] generate_regime_fingerprint sprunget over — ikke algoserver")
+            return True
+        if self._run_regime is None:
+            logger.warning("[Scheduler] Ingen run_regime_fn injiceret — springer over")
+            return True
+        ok = await self._run_regime()      # main.py: subprocess med timeout, returnerer bool
+        if ok:
+            logger.info("[Scheduler] Regime-fingeraftryk genereret")
+        else:
+            logger.warning("[Scheduler] Regime-fingeraftryk fejlede — genforsoeger i vinduet")
+        return ok
 
     # ─────────────────────────────────────────────────────────
     # Status til /status endpoint

@@ -17,6 +17,7 @@ import {
 import { LiveAlgo } from "./LiveAlgo";
 import { LiveLogProvider } from "./LiveLogContext";
 import { MarketOverview } from "./MarketOverview";
+import { RegimeFingerprint } from "./RegimeFingerprint";
 import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
 import { SwingReport } from "./SwingReport";
@@ -53,6 +54,7 @@ const FONT_WINDOW_TYPES = [
   { id: "paper",     label: "Paper Trading" },
   { id: "livealgo",  label: "Live Algo" },
   { id: "marketoverview", label: "Markedsoverblik" },
+  { id: "regimefingerprint", label: "Regime-fingeraftryk" },
   { id: "account",   label: "Konto" },
 ];
 
@@ -82,6 +84,7 @@ function getWindowType(id: WindowId): string {
   if (id === "level2")       return "level2";
   if (id === "timesales")    return "timesales";
   if (id === "marketoverview") return "marketoverview";
+  if (id === "regimefingerprint") return "regimefingerprint";
   if (id === "account") return "account";
   return "scanner";
 }
@@ -1232,6 +1235,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "timesales":   return <TimeSalesPanel ticker={props.selectedTicker} />;
     case "livealgo":    return <LiveAlgo />;
     case "marketoverview": return <MarketOverview />;
+    case "regimefingerprint": return <RegimeFingerprint />;
     case "account": return <AccountPanel onSelectTicker={props.onSelectTicker} />;
     case "orders":  return <OrdersWindow />;
     case "swing":   return <SwingReport onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;

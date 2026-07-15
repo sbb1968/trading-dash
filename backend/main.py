@@ -435,6 +435,31 @@ async def startup():
         except Exception as e:
             logger.exception(f"[Top15] daytrading-generering fejlede: {e}")
 
+    async def run_regime_fingerprint() -> bool:
+        """Koer regime_fingerprint.py offline i backend-mappen (ugentligt, algoserveren).
+        Returnerer True ved rc==0. Best-effort: al fejl fanges og rapporteres, propagerer aldrig."""
+        import sys
+        from pathlib import Path
+        backend_dir = Path(__file__).parent
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "regime_fingerprint.py",
+                cwd=str(backend_dir),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)  # 10 min loft
+            if proc.returncode != 0:
+                await notifier.alert_backend_error(
+                    f"regime_fingerprint rc={proc.returncode}: {out.decode(errors='replace')[-500:]}")
+                return False
+            return True
+        except asyncio.TimeoutError:
+            await notifier.alert_backend_error("regime_fingerprint timeout (>600s)")
+            return False
+        except Exception as e:
+            await notifier.alert_backend_error(f"regime_fingerprint fejl: {e}")
+            return False
+
     algo_scheduler = AlgoScheduler(
         start_algo_fn     = start_algo,
         stop_algo_fn      = stop_algo,
@@ -443,6 +468,7 @@ async def startup():
         reset_daily_fn    = reset_daily_counters,
         run_top15_eod_fn  = generate_top15_eod,
         run_daytrading_fn = generate_daytrading_top15,
+        run_regime_fn     = run_regime_fingerprint,
         instance_role     = identity.instance_role,
     )
     await algo_scheduler.start()
@@ -3697,6 +3723,34 @@ async def websocket_level2(websocket: WebSocket, ticker: str):
             ib.cancelMktDepth(contract, isSmartDepth=True)
         except Exception:
             pass
+
+# ── /regime-fingerprint/latest ────────────────────────────────
+@app.get("/regime-fingerprint/latest", dependencies=[Depends(require_studio_auth)])
+async def regime_fingerprint_latest():
+    """Seneste regime-fingeraftryk: parset JSON + raa summary-tekst (til copy-knappen).
+    Rent fil-read (ingen IBKR/TWS). Manglende mappe/filer -> status 'none'."""
+    from pathlib import Path
+    import json, glob, os
+    try:
+        out_dir = Path(__file__).parent / "regime_fingerprint_output"
+        jsons = sorted(glob.glob(str(out_dir / "fingerprint_*.json")), key=os.path.getmtime)
+        if not jsons:
+            return {"status": "none"}
+        latest = jsons[-1]
+        with open(latest, encoding="utf-8") as f:
+            data = json.load(f)
+        summary_path = out_dir / "summary.txt"
+        summary = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+        return {
+            "status": "ok",
+            "generated_file": os.path.basename(latest),
+            "generated_at": datetime.fromtimestamp(os.path.getmtime(latest)).isoformat(),
+            "fingerprint": data,      # hele det parsede JSON (vinduet render'er udvalgte felter)
+            "summary_text": summary,  # raa summary.txt -> copy-knappen
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 
 # ── /market-conditions ────────────────────────────────────────
 @app.get("/market-conditions", dependencies=[Depends(require_studio_auth)])
