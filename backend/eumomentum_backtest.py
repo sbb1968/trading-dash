@@ -211,9 +211,10 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
             continue
 
         # Nedre-baand-kryds: OEJEBLIKKELIG entry hvis lb_immediate (ingen bekraeftelse).
+        hour_ok = (not cfg.entry_hours_set) or (b.ts.astimezone(ET).hour in cfg.entry_hours_set)
         lb_cross = (prev_valid_close is not None) and (not prev_valid_below_lb) and (b.c < lo[i])
         entered = False
-        if cfg.lb_immediate and lb_cross:
+        if cfg.lb_immediate and lb_cross and hour_ok:
             _dip = (mi - b.c) / s[i] if s[i] > 0 else 0.0
             _slp = (mi - m[i - 12]) / s[i] if (i >= 12 and m[i - 12] is not None and s[i] > 0) else 0.0
             pos = (b.c, b.ts, i, "lb", _dip, _slp)   # KOEB LONG straks paa nedre-baand-krydset
@@ -236,7 +237,7 @@ def run_backtest(inst: str, bars: list[Bar], tf_sec: int, cfg) -> list[Trade]:
                     ref = mi if (cfg.lb_immediate or mode == "mean") else lo[i]
                     close_above = b.c > ref
                     body_above = (b.o > ref) and (b.c > ref)
-                    if pending_first and body_above:
+                    if pending_first and body_above and hour_ok:
                         _dip = (mi - b.c) / s[i] if s[i] > 0 else 0.0
                         _slp = (mi - m[i - 12]) / s[i] if (i >= 12 and m[i - 12] is not None and s[i] > 0) else 0.0
                         pos = (b.c, b.ts, i, "mean", _dip, _slp)   # mean-bekraeftelse
@@ -292,11 +293,14 @@ def main() -> int:
                     help="trailing stop: exit ved close <= peak - K·σ (0 = brug 2-roed/big-red)")
     ap.add_argument("--lb-only", action="store_true",
                     help="KUN nedre-baand-entries (dybe dyk); dropper mean-bekraeftelses-stien")
+    ap.add_argument("--entry-hours", default="",
+                    help="kommasepareret ET-timer hvor entries tillades (fx 2,3,4); tom = alle")
     ap.add_argument("--trades-csv", default=None, help="skriv alle handler til CSV")
     a = ap.parse_args()
     a.big_red = not a.no_big_red
     if a.lb_only:
         a.lb_immediate = True   # lb_only kraever den umiddelbare nedre-baand-entry
+    a.entry_hours_set = set(int(x) for x in a.entry_hours.split(",") if x.strip() != "")
     a.lookback = a.lookback; a.confirm_window = a.confirm_window
     a.band_z = a.band_z; a.rvol_min = a.rvol_min; a.rvol_warmup = a.rvol_warmup
     a.exit_sigma = a.exit_sigma

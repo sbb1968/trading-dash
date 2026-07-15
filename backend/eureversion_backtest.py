@@ -153,8 +153,10 @@ def last_in_session(bars, i, session):
     return False
 
 
-def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol):
-    """Returnér liste af Trade. Intraday: tvangsluk ved sessions-slut."""
+def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol, entry_hours=None):
+    """Returnér liste af Trade. Intraday: tvangsluk ved sessions-slut.
+    entry_hours: valgfri maengde af ET-timer hvor entries tillades (default None = hele
+    sessionen; additivt, aendrer ikke standard-adfaerd)."""
     trades = []
     pos = None  # dict: side, entry, entry_ts, entry_i
     n = len(bars)
@@ -175,7 +177,8 @@ def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol):
                                     bar.close, reason, i - pos["entry_i"]))
                 pos = None
         # ── ny entry (kun hvis flad) ──
-        if pos is None and session_of(bar.ts.hour) == session:
+        if pos is None and session_of(bar.ts.hour) == session \
+                and (entry_hours is None or bar.ts.hour in entry_hours):
             if (min_vol is None or bar.volume >= min_vol) and contiguous(bars, i, lookback):
                 z = zscore(bars, i, lookback)
                 if z is not None and not last_in_session(bars, i, session):
