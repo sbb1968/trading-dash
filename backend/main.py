@@ -3787,12 +3787,27 @@ async def regime_fingerprint_latest():
             data = json.load(f)
         summary_path = out_dir / "summary.txt"
         summary = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
+        # Menneskeligt briefing (ren praesentation) + akkumuleret historik (skift over tid).
+        briefing_path = out_dir / "regime_briefing.txt"
+        briefing = briefing_path.read_text(encoding="utf-8") if briefing_path.exists() else ""
+        history = []
+        hist_path = out_dir / "regime_history.csv"
+        if hist_path.exists():
+            import csv as _csv
+            try:
+                with hist_path.open(newline="", encoding="utf-8") as hf:
+                    history = list(_csv.DictReader(hf))
+            except Exception:
+                history = []
         return {
             "status": "ok",
             "generated_file": os.path.basename(latest),
             "generated_at": datetime.fromtimestamp(os.path.getmtime(latest)).isoformat(),
+            "regime_label": data.get("regime_label", ""),   # kort etiket (til meta-strategi/UI)
             "fingerprint": data,      # hele det parsede JSON (vinduet render'er udvalgte felter)
-            "summary_text": summary,  # raa summary.txt -> copy-knappen
+            "briefing_text": briefing,  # menneskelig oversaettelse -> vises som standard
+            "summary_text": summary,  # raa summary.txt -> copy-knappen / teknisk visning
+            "history": history,       # regime_history.csv rows -> trend over uger
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}

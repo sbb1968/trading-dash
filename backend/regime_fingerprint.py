@@ -614,6 +614,200 @@ def verdict(recent, spread15):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Menneskeligt regime-briefing (ren praesentation af de samme tal — INGEN ny maaling)
+# ═══════════════════════════════════════════════════════════════════
+def _primary_regime(block) -> str:
+    """Kort regime-etiket for ETT vindue (samme taerskler som verdict). Prioriteret:
+    stock-picking > momentum > mean-reversion > blandet. Bruges til skift-detektion + historik."""
+    if not isinstance(block, dict):
+        return "ukendt"
+    sc = block.get("smallcap", {})
+    ft, ac = sc.get("m1_gap_follow_through_rate"), sc.get("m2_intraday_autocorr_5min")
+    disp, morn = sc.get("m5_name_dispersion_pct"), sc.get("m4_hod_morning_dominated")
+    persist = [fm.get("m7_daily_autocorr") for fm in block.get("futures", {}).values()
+               if fm.get("m7_daily_autocorr") is not None]
+    mp = st.mean(persist) if persist else None
+    if disp is not None and mp is not None and disp > 3.0 and mp < 0.05:
+        return "Stock-picking (relativ vaerdi)"
+    if ft is not None and ac is not None and ft > 0.55 and ac > 0.05 and morn:
+        return "Momentum-fortsaettelse"
+    if ft is not None and ac is not None and ac < -0.05 and ft < 0.45:
+        return "Intraday mean-reversion"
+    return "Blandet / uklart"
+
+
+def _mean_persist(block):
+    p = [fm.get("m7_daily_autocorr") for fm in block.get("futures", {}).values()
+         if fm.get("m7_daily_autocorr") is not None] if isinstance(block, dict) else []
+    return st.mean(p) if p else None
+
+
+def _band(x, hi, lo, labels):
+    if x is None:
+        return "ukendt"
+    return labels[0] if x >= hi else (labels[2] if x < lo else labels[1])
+
+
+def _dir(new, old, eps):
+    if new is None or old is None:
+        return "ukendt", ""
+    d = new - old
+    if abs(d) < eps:
+        return "uaendret", ""
+    return ("stigende" if d > 0 else "faldende"), f" ({old:+.2f} -> {new:+.2f})"
+
+
+HISTORY_FIELDS = ["run_date", "span_end", "regime", "dispersion_pct", "follow_through",
+                  "intraday_autocorr", "hod_morning", "index_trend_persist",
+                  "es_rty_vr5_15min", "es_rty_halflife_bars_15min"]
+
+
+def _persist_regime_history(out_dir, run_date, result, label):
+    """Upsert dagens regime-fingeraftryk til en AKKUMULERENDE CSV, saa skift over uger bliver
+    synligt (og en fremtidig meta-strategi kan laese trenden). Idempotent pr. run_date."""
+    rec = result["windows"].get("recent", {})
+    sc = rec.get("smallcap", {}) if isinstance(rec, dict) else {}
+    rm = (result.get("intraday_spread_MES_M2K") or {}).get("recent", {})
+    row = {
+        "run_date": run_date,
+        "span_end": (rec.get("span") or ["", ""])[1] if isinstance(rec, dict) else "",
+        "regime": label,
+        "dispersion_pct": sc.get("m5_name_dispersion_pct"),
+        "follow_through": sc.get("m1_gap_follow_through_rate"),
+        "intraday_autocorr": sc.get("m2_intraday_autocorr_5min"),
+        "hod_morning": int(bool(sc.get("m4_hod_morning_dominated"))),
+        "index_trend_persist": _r(_mean_persist(rec)) if isinstance(rec, dict) else None,
+        "es_rty_vr5_15min": rm.get("VR5"),
+        "es_rty_halflife_bars_15min": rm.get("half_life_bars"),
+    }
+    path = out_dir / "regime_history.csv"
+    rows = []
+    if path.exists():
+        try:
+            with path.open(newline="", encoding="utf-8") as f:
+                rows = [r for r in csv.DictReader(f) if r.get("run_date") != run_date]
+        except Exception:
+            rows = []
+    rows.append({k: ("" if row.get(k) is None else row.get(k)) for k in HISTORY_FIELDS})
+    rows.sort(key=lambda r: str(r.get("run_date")))
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=HISTORY_FIELDS)
+        w.writeheader()
+        w.writerows(rows)
+    return rows
+
+
+def build_briefing(result, run_date, label, history_rows):
+    """Menneskelig oversaettelse af fingeraftrykket: hvad markedet goer, hvilken strategifamilie
+    det favoriserer, og OM regimet har skiftet (nu vs sidste maaned + historik). Beskrivende."""
+    L = []
+    def e(s=""):
+        L.append(s)
+
+    rec = result["windows"].get("recent", {})
+    pri = result["windows"].get("prior", {})
+    sc = rec.get("smallcap", {}) if isinstance(rec, dict) else {}
+    span = (rec.get("span") if isinstance(rec, dict) else None) or ["?", "?"]
+
+    ft = sc.get("m1_gap_follow_through_rate")
+    ac = sc.get("m2_intraday_autocorr_5min")
+    disp = sc.get("m5_name_dispersion_pct")
+    morn = sc.get("m4_hod_morning_dominated")
+    green = sc.get("m5_breadth_pct_green")
+    mp = _mean_persist(rec)
+
+    e("=" * 84)
+    e(f"  REGIME-BRIEFING (menneskelig oversaettelse)   —   koersel {run_date}")
+    e("  Beskrivende. Ingen handler, ingen edge-paastand. Bygger paa summary.txt' tal.")
+    e("=" * 84)
+    e("")
+    e(f"NUVAERENDE REGIME:  {label}")
+    if label.startswith("Stock-picking"):
+        e("  Et stock-picker-marked: de RIGTIGE navne loeber, de forkerte goer ikke, og der er")
+        e("  et bredt spaend imellem — men indekset som helhed har ingen paalidelig retning.")
+        e("  Fordelen ligger i at VAELGE MELLEM navne, ikke i at ride markedet.")
+    elif label.startswith("Momentum"):
+        e("  Momentum-marked: det der er staerkt fortsaetter, morgenretningen holder, og")
+        e("  bevaegelsen er koncentreret tidligt paa dagen.")
+    elif label.startswith("Intraday mean"):
+        e("  Mean-reversion-marked: bevaegelser overdriver og traekkes tilbage inden for dagen")
+        e("  (choppy), og morgenretningen vender oftere end den holder.")
+    else:
+        e("  Blandet billede — ingen enkelt familie dominerer tydeligt lige nu.")
+    e("")
+
+    e(f"HVAD MARKEDET GOER LIGE NU  (seneste ~30 handelsdage: {span[0]} .. {span[1]})")
+    dband = _band(disp, 3.8, 3.0, ("stor", "moderat", "lille"))
+    e(f"  - Spredning mellem aktier : {dband.upper():8} ({disp}% dagligt) — hvor uafhaengigt navnene bevaeger sig")
+    if mp is not None:
+        trend = "ingen paalidelig retning" if mp < 0.05 else "en vis trend"
+        e(f"  - Retning i indekset      : {trend} (trend-persistens {mp:+.2f}; ~0 = ingen)")
+    if ft is not None:
+        hold = "HOLDER (foelger igennem)" if ft > 0.55 else ("VENDER (fader)" if ft < 0.45 else "blandet")
+        e(f"  - Morgenretningen         : {hold} — sker paa {ft*100:.0f}% af gap-dagene")
+    if morn is not None:
+        e(f"  - Hvornaar paa dagen      : {'mest i de foerste 30-60 min' if morn else 'spredt ud over dagen'}")
+    if ac is not None:
+        chop = "trendende" if ac > 0.05 else ("choppy (mean-rev)" if ac < -0.05 else "hverken/eller")
+        e(f"  - Inden for dagen         : {chop} (5-min autokorr {ac:+.3f})")
+    if green is not None:
+        e(f"  - Bredde                  : {green:.0f}% af navnene groenne paa en dag")
+    e("")
+
+    e("HVILKEN STRATEGI-FAMILIE PASSER TIL DETTE REGIME:")
+    fam = {
+        "Stock-picking (relativ vaerdi)": "-> Relativ Styrke (tvaersnitlig rangering, spor D)",
+        "Momentum-fortsaettelse":         "-> Konfluens 2 / Trend Join Long (momentum-breakout)",
+        "Intraday mean-reversion":        "-> BuyTheDip (koeber dykket)",
+        "Blandet / uklart":               "-> ingen klar favorit; koer bredt eller afvent",
+    }
+    e(f"  {fam.get(label, '-> (ingen mapping)')}")
+    for fl in result.get("verdict", []):
+        if fl.startswith("SPOR A") or fl.startswith("SPOR C"):
+            continue
+        e(f"    (fingeraftryk-flag: {fl})")
+    e("")
+
+    e("SKIFTER REGIMET?  (nu vs sidste maaned)")
+    prev_label = _primary_regime(pri)
+    pspan = (pri.get("span") if isinstance(pri, dict) else None) or ["?", "?"]
+    e(f"  Sidste maaned ({pspan[0]}..{pspan[1]}): {prev_label}")
+    e(f"  Nu           ({span[0]}..{span[1]}): {label}")
+    if prev_label == label:
+        e(f"  -> Regimet er STABILT — samme familie som sidste maaned.")
+    else:
+        e(f"  -> REGIMET HAR SKIFTET: fra \"{prev_label}\" til \"{label}\".")
+    psc = pri.get("smallcap", {}) if isinstance(pri, dict) else {}
+    for lbl, key, eps in (("Spredning     ", "m5_name_dispersion_pct", 0.3),
+                          ("Morgen-follow ", "m1_gap_follow_through_rate", 0.05),
+                          ("Intraday chop ", "m2_intraday_autocorr_5min", 0.02)):
+        d, detail = _dir(sc.get(key), psc.get(key), eps)
+        e(f"    - {lbl}: {d}{detail}")
+    d, detail = _dir(mp, _mean_persist(pri), 0.03)
+    e(f"    - Index-trend  : {d}{detail}")
+    e("")
+
+    if history_rows and len(history_rows) >= 2:
+        e("HISTORIK (seneste koersler — laes skift over tid):")
+        e(f"  {'dato':>11}  {'regime':<28}{'disp%':>7}{'follow':>8}{'idx-tr':>8}{'morgen':>8}")
+        for r in history_rows[-8:]:
+            def g(k):
+                v = r.get(k, "")
+                return v if v not in (None, "") else "-"
+            morn_s = "ja" if str(r.get("hod_morning")) == "1" else "nej"
+            e(f"  {str(g('run_date')):>11}  {str(g('regime'))[:28]:<28}"
+              f"{str(g('dispersion_pct')):>7}{str(g('follow_through')):>8}"
+              f"{str(g('index_trend_persist')):>8}{morn_s:>8}")
+        e("  (naar 'regime'-kolonnen skifter vaerdi mellem raekker, har markedet skiftet karakter.)")
+    else:
+        e("HISTORIK: kun én koersel endnu — skift over tid bliver synligt naar fingeraftrykket")
+        e("  har koert et par uger (det koerer automatisk hver mandag paa algoserveren).")
+    e("")
+    e("=" * 84)
+    return L
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════
 def main():
@@ -698,10 +892,17 @@ def main():
     flags = verdict(rec, spread15) if isinstance(rec, dict) and "futures" in rec else []
     result["verdict"] = flags
 
+    # ── Menneskeligt briefing + akkumuleret historik (praesentation af samme tal) ──
+    label = _primary_regime(rec) if isinstance(rec, dict) and "smallcap" in rec else "ukendt"
+    result["regime_label"] = label
+    history_rows = _persist_regime_history(OUT_DIR, run_date, result, label)
+    briefing = build_briefing(result, run_date, label, history_rows)
+    (OUT_DIR / "regime_briefing.txt").write_text("\n".join(briefing), encoding="utf-8")
+
     # ── Skriv output ──
     (OUT_DIR / f"fingerprint_{run_date}.json").write_text(json.dumps(result, indent=1), encoding="utf-8")
     _write_summary(result, run_date, windows)
-    print(f"Skrev {OUT_DIR/('fingerprint_'+run_date+'.json')} + {OUT_DIR/'summary.txt'}")
+    print(f"Skrev {OUT_DIR/('fingerprint_'+run_date+'.json')} + {OUT_DIR/'summary.txt'} + regime_briefing.txt")
     print("\nVERDIKT (recent):")
     print("  " + ("\n  ".join(flags) if flags else "INGEN ny familie klart favoriseret (tving ikke en beslutning)."))
     return 0
