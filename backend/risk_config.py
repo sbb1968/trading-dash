@@ -11,8 +11,9 @@ LAGRING: lokal fil (risk_config.json) på DENNE maskine. Da hver maskine kører 
 værdier, Sørens workstation sine egne, og de blandes aldrig. Strategierne (der kører
 på den handlende maskine) læser den lokale fil LIVE ved hver handel.
 
-DEFAULTS = de værdier der gælder i koden i dag (nye tal for K2 + Europa efter Ibens
-~$1.500-konto; uændret for BuyTheDip + Trend Join Long). Tom config-fil → DEFAULTS.
+DEFAULTS = de værdier der gælder i koden i dag. Alle fem strategier er tunet til Ibens
+lille paper-konto (2026-07-15): max dagligt tab $25, positionsstørrelse $250. Tom
+config-fil → DEFAULTS. (Bruger-overrides i risk_config.json vinder stadig lokalt.)
 """
 from __future__ import annotations
 
@@ -37,21 +38,21 @@ DEFAULTS: dict[str, dict[str, dict]] = {
     },
     "Europa-reversion": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
-        "position_size":  {"pct": None, "amount": 20.0},    # risiko/handel ($) — futures
+        "position_size":  {"pct": None, "amount": 250.0},   # risiko/handel ($) — futures
     },
     "BuyTheDip": {
-        "max_daily_loss": {"pct": None, "amount": 300.0},
-        "position_size":  {"pct": None, "amount": 100.0},   # risiko/handel ($)
+        "max_daily_loss": {"pct": None, "amount": 25.0},
+        "position_size":  {"pct": None, "amount": 250.0},   # risiko/handel ($)
         "notional_cap":   {"pct": None, "amount": 1000.0},  # notional-loft ($)
     },
     "Trend Join Long": {
-        "max_daily_loss": {"pct": None, "amount": 300.0},
-        "position_size":  {"pct": 1.0,  "amount": None},    # risiko/handel (1 % af NLV)
+        "max_daily_loss": {"pct": None, "amount": 25.0},
+        "position_size":  {"pct": None, "amount": 250.0},   # risiko/handel ($)
         "notional_cap":   {"pct": 10.0, "amount": None},    # notional-loft (10 % af NLV)
     },
     "Relativ Styrke": {
-        "max_daily_loss": {"pct": None, "amount": 300.0},
-        "position_size":  {"pct": 3.0,  "amount": None},    # samlet strategi-notional (3 % af NLV, deles paa 3)
+        "max_daily_loss": {"pct": None, "amount": 25.0},
+        "position_size":  {"pct": None, "amount": 250.0},   # samlet strategi-notional ($, deles paa 3)
         "notional_cap":   {"pct": None, "amount": 1000.0},  # notional-loft pr. navn ($)
     },
 }
@@ -78,7 +79,7 @@ SCHEMA: dict[str, list[dict]] = {
     ],
     "Relativ Styrke": [
         {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
-        {"key": "position_size",  "label": "Positionsstørrelse (samlet notional, % af NLV)", "hint": "capital"},
+        {"key": "position_size",  "label": "Positionsstørrelse (samlet notional)", "hint": "capital"},
         {"key": "notional_cap",   "label": "Notional-loft (pr. navn)", "hint": "notional"},
     ],
 }
