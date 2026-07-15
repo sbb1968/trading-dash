@@ -115,6 +115,7 @@ _DOCS_OUT = HERE / "docs"
 _STANDALONE_DOCS = [
     ("docs_src/regime_fingeraftryk.md", "regime_01_forstaa_dit_marked.pdf"),
     ("docs_src/market_cipher_b.md", "cipher_01_hvad_viser_den.pdf"),
+    ("docs_src/market_cipher_b_teknisk.md", "cipher_03_teknisk_gennemgang.pdf"),
 ]
 
 # Stand-alone HTML-docs (selvstaendige sider med egen styling/SVG — IKKE MD-skabelonen).
