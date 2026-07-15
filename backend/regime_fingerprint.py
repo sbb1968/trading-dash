@@ -895,6 +895,7 @@ def main():
     # ── Menneskeligt briefing + akkumuleret historik (praesentation af samme tal) ──
     label = _primary_regime(rec) if isinstance(rec, dict) and "smallcap" in rec else "ukendt"
     result["regime_label"] = label
+    result["prior_regime_label"] = _primary_regime(result["windows"].get("prior", {}))
     history_rows = _persist_regime_history(OUT_DIR, run_date, result, label)
     briefing = build_briefing(result, run_date, label, history_rows)
     (OUT_DIR / "regime_briefing.txt").write_text("\n".join(briefing), encoding="utf-8")
