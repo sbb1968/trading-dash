@@ -36,6 +36,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 import argparse
+import csv
 import json
 import sqlite3
 import statistics
@@ -248,8 +249,37 @@ def summarize_day(day, uni, sel, results, cents, emit):
             "n_univ": len(traded), "n_topk": len(topk_names)}
 
 
+def _persist_alpha_log(out_dir, day, day_aggs, cents, emit):
+    """Upsert dagens realiserede selection-alpha til en AKKUMULERENDE CSV (en raekke pr. snapshot)
+    saa vi kan trende Route B-beviset over mange sessioner. Idempotent: erstatter evt. raekker for
+    samme dag (saa en genkoersel ikke dobbelt-tegner). Sorteret paa (dag, snapshot)."""
+    path = out_dir / "alpha_log.csv"
+    header = ["day", "snap", "alpha", "topk_ret", "univ_ret", "hit", "n_univ", "n_topk", "cost_cents"]
+    rows = []
+    if path.exists():
+        try:
+            with path.open(newline="", encoding="utf-8") as f:
+                rows = [r for r in csv.DictReader(f) if r.get("day") != str(day)]
+        except Exception as e:
+            emit(f"  (advarsel: kunne ikke laese eksisterende alpha_log.csv: {e})")
+    for i, a in enumerate(day_aggs):
+        rows.append({"day": str(day), "snap": str(i), "alpha": f"{a['alpha']:.6f}",
+                     "topk_ret": f"{a['topk_ret']:.6f}", "univ_ret": f"{a['univ_ret']:.6f}",
+                     "hit": str(int(a['hit'])), "n_univ": str(a['n_univ']),
+                     "n_topk": str(a['n_topk']), "cost_cents": str(cents)})
+    rows.sort(key=lambda r: (str(r["day"]), int(r["snap"])))
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        w.writerows(rows)
+    pos = sum(1 for r in rows if float(r["alpha"]) > 0)
+    emit(f"\n  Akkumuleret: {path.name} ({len(rows)} dags-raekker; {pos} m. positiv alpha) "
+         f"-> analyserbar Route B-tidsserie.")
+
+
 async def run_full(db, source, day, args, emit):
     from ib_async import IB
+    out_dir = Path.cwd() / "relstyrke_shadow_eval_output"
     snaps = read_snapshots(db, source, day)
     emit(f"\n  Dag {day}: {len(snaps)} shadow-snapshot(s)")
     if not snaps:
@@ -312,6 +342,7 @@ async def run_full(db, source, day, args, emit):
         for a in day_aggs:
             emit(f"   {a['day']}  alpha {a['alpha']:+.3f}%  (top-{a['n_topk']} {a['topk_ret']:+.3f}% "
                  f"vs univ {a['univ_ret']:+.3f}%, n={a['n_univ']})  {'HIT' if a['hit'] else 'miss'}")
+        _persist_alpha_log(out_dir, day, day_aggs, args.cost_cents, emit)
 
     emit("\n  FORUDREGISTRERET LAESNING (spor D): spor D er leve-testbart KUN hvis selection alpha")
     emit("  (top-K minus universe-snit) er POSITIV netto @>=1c OG hit-rate > 0.50 — i BAADE in-")
@@ -442,6 +473,9 @@ def main():
             emit("\n  Afbrudt.")
 
     (out_dir / "summary.txt").write_text("\n".join(lines), encoding="utf-8")
+    # Dateret kopi ved en fuld (efter-luk) eval, saa hver sessions detaljer bevares til analyse.
+    if not a.verify and not a.selftest:
+        (out_dir / f"summary_{day}.txt").write_text("\n".join(lines), encoding="utf-8")
     emit(f"\n  Fil: {out_dir / 'summary.txt'}")
     return 0
 

@@ -477,6 +477,33 @@ async def startup():
             await notifier.alert_backend_error(f"regime_fingerprint fejl: {e}")
             return False
 
+    async def run_relstyrke_shadow_eval() -> bool:
+        """Koer relstyrke_shadow_eval.py efter US-luk (algoserveren). Maaler dagens realiserede
+        selection alpha for Relativ Styrke og AKKUMULERER det (alpha_log.csv + dateret summary).
+        Egen client-id 49 -> ingen konflikt m. backend (client 1). Returnerer True ved rc==0.
+        Best-effort: al fejl fanges og rapporteres, propagerer aldrig."""
+        import sys
+        from pathlib import Path
+        backend_dir = Path(__file__).parent
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "relstyrke_shadow_eval.py",
+                cwd=str(backend_dir),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)  # 10 min loft
+            if proc.returncode != 0:
+                await notifier.alert_backend_error(
+                    f"relstyrke_shadow_eval rc={proc.returncode}: {out.decode(errors='replace')[-500:]}")
+                return False
+            return True
+        except asyncio.TimeoutError:
+            await notifier.alert_backend_error("relstyrke_shadow_eval timeout (>600s)")
+            return False
+        except Exception as e:
+            await notifier.alert_backend_error(f"relstyrke_shadow_eval fejl: {e}")
+            return False
+
     algo_scheduler = AlgoScheduler(
         start_algo_fn     = start_algo,
         stop_algo_fn      = stop_algo,
@@ -486,6 +513,7 @@ async def startup():
         run_top15_eod_fn  = generate_top15_eod,
         run_daytrading_fn = generate_daytrading_top15,
         run_regime_fn     = run_regime_fingerprint,
+        run_relstyrke_eval_fn = run_relstyrke_shadow_eval,
         instance_role     = identity.instance_role,
     )
     await algo_scheduler.start()

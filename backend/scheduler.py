@@ -70,6 +70,21 @@ DAYTRADING_RETRY_UNTIL_ET = dtime(9, 18)   # foer K2 auto-start (09:20 ET)
 REGIME_START_ET       = dtime(0, 30)   # 06:30 dansk, mandag morgen
 REGIME_RETRY_UNTIL_ET = dtime(3, 0)    # transient fejl (fx fil-laas) genforsoeges til 03:00 ET
 
+# Auto-start af Relativ Styrke (spor D, KUN algoserveren — instance-guard som K2/BTD/TJL).
+# Forskudt EFTER de tre andre US-starter (K2 09:20, BTD 09:22, TJL 09:25) saa pre-flight/scan
+# ikke rammer TWS samtidig (pacing). Strategien tager EEN beslutning ved 09:46 ET (naar 09:45-
+# baren er komplet — bar-paritet), saa den skal blot vaere armet + have forud-hentet universet
+# inden da; retry-vinduet slutter 09:44 (2 min margin til pre-flight foer beslutningen fyrer).
+RELSTYRKE_START_ET       = dtime(9, 28)   # 15:28 dansk
+RELSTYRKE_RETRY_UNTIL_ET = dtime(9, 44)   # foer beslutningen fyrer (09:46 ET)
+
+# Efter-luk shadow-eval af Relativ Styrke (KUN algoserveren). Maaler dagens realiserede
+# selection alpha (Route B-beviset) og AKKUMULERER det. Koerer 16:05 ET (=22:05 dansk), efter
+# US-luk (16:00) saa dagens event + bars er tilgaengelige. Kraever TWS (historik-pull, egen
+# client-id 49 -> ingen konflikt m. backend client 1); gate paa tws_is_online + genforsoeg.
+RELSTYRKE_EVAL_START_ET       = dtime(16, 5)   # 22:05 dansk
+RELSTYRKE_EVAL_RETRY_UNTIL_ET = dtime(18, 0)   # transient TWS-nede genforsoeges til 18:00 ET
+
 # ── US helligdage hvor markedet er lukket (NYSE) ──────────────
 # Statisk liste — opdateres manuelt en gang om året.
 # 2026 NYSE-lukkede dage:
@@ -212,6 +227,7 @@ class AlgoScheduler:
         run_top15_eod_fn:  Optional[Callable[[], Awaitable]] = None,
         run_daytrading_fn: Optional[Callable[[], Awaitable]] = None,
         run_regime_fn:     Optional[Callable[[], Awaitable[bool]]] = None,
+        run_relstyrke_eval_fn: Optional[Callable[[], Awaitable[bool]]] = None,
         instance_role:     str = "algoserver",
     ):
         self._start_algo     = start_algo_fn
@@ -222,6 +238,7 @@ class AlgoScheduler:
         self._run_top15_eod  = run_top15_eod_fn   # swing + buyhold (morgen)
         self._run_daytrading = run_daytrading_fn  # daytrading movers (naer US-aaben)
         self._run_regime     = run_regime_fn      # ugentligt regime-fingeraftryk (offline)
+        self._run_relstyrke_eval = run_relstyrke_eval_fn  # efter-luk shadow-eval (Route B-bevis)
         # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
         # På workstation skal pre_flight_check og reset_daily fortsat køre,
         # men strategien startes manuelt af brugeren via UI.
@@ -244,6 +261,10 @@ class AlgoScheduler:
                          window_end_et=BTD_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("start_trendjoin", TJL_START_ET, self._job_start_trendjoin,
                          window_end_et=TJL_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("start_relstyrke", RELSTYRKE_START_ET, self._job_start_relstyrke,
+                         window_end_et=RELSTYRKE_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("relstyrke_shadow_eval", RELSTYRKE_EVAL_START_ET, self._job_relstyrke_eval,
+                         window_end_et=RELSTYRKE_EVAL_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
             ScheduledJob("generate_top15_eod", TOP15_EOD_START_ET, self._job_generate_top15_eod,
                          window_end_et=TOP15_EOD_RETRY_UNTIL_ET, retry_until_success=True),
@@ -267,7 +288,9 @@ class AlgoScheduler:
         auto = (f"Europa-reversion @ {EUREV_START_ET.strftime('%H:%M')}, "
                 f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')}, "
                 f"BuyTheDip @ {BTD_START_ET.strftime('%H:%M')}, "
-                f"Trend Join Long @ {TJL_START_ET.strftime('%H:%M')} ET (alle m. genforsøg)"
+                f"Trend Join Long @ {TJL_START_ET.strftime('%H:%M')}, "
+                f"Relativ Styrke @ {RELSTYRKE_START_ET.strftime('%H:%M')} ET (alle m. genforsøg); "
+                f"relstyrke_shadow_eval @ {RELSTYRKE_EVAL_START_ET.strftime('%H:%M')} ET"
                 if self._instance_role == "algoserver" else "ingen (manuel start)")
         logger.info(
             f"[Scheduler] Startet ({self._instance_role}) — reset_daily aktiv, "
@@ -298,7 +321,7 @@ class AlgoScheduler:
         + Konfluens 2 09:20 ET). I dag hvis et af tidspunkterne endnu ikke er passeret og det er
         en handelsdag; ellers første tidspunkt på næste handelsdag."""
         now = now_et()
-        start_times = sorted([EUREV_START_ET, K2_START_ET, BTD_START_ET, TJL_START_ET])
+        start_times = sorted([EUREV_START_ET, K2_START_ET, BTD_START_ET, TJL_START_ET, RELSTYRKE_START_ET])
 
         if is_trading_day(now.date()):
             for st in start_times:
@@ -397,6 +420,49 @@ class AlgoScheduler:
         logger.info("[Scheduler] Auto-starter Trend Join Long")
         await self._start_algo("Trend Join Long")
         return True
+
+    async def _job_start_relstyrke(self) -> bool:
+        """Auto-start Relativ Styrke (spor D) forskudt efter de tre andre US-starter. KUN paa
+        algoserveren (instance-guard som K2/BTD/TJL). Workstation springer over — ellers ville
+        BAADE algoserver og workstation koere strategien paa den DELTE konto (DUO509856) ->
+        dobbelte ordrer. start_strategy er idempotent (no-op hvis RUNNING). Strategien tager
+        foerst sin ene beslutning 09:46 ET, saa den skal blot vaere armet inden da."""
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_relstyrke sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); startes manuelt paa workstation")
+            return True   # bevidst skip — markér færdig, ingen genforsøg/spam
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte Relativ Styrke — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {RELSTYRKE_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info("[Scheduler] Auto-starter Relativ Styrke")
+        await self._start_algo("Relativ Styrke")
+        return True
+
+    async def _job_relstyrke_eval(self) -> bool:
+        """Efter-luk shadow-eval af Relativ Styrke (Route B-beviset), akkumuleret. KUN algoserveren
+        (serverer/gemmer resultatet). Kraever TWS (historik-pull) -> gate paa tws_is_online +
+        genforsøg i vinduet. Returnerer True naar faerdig for i dag (koert eller bevidst sprunget
+        over paa workstation), False ved transient fejl/TWS-nede (genforsøg)."""
+        if self._instance_role != "algoserver":
+            logger.info("[Scheduler] relstyrke_shadow_eval sprunget over — ikke algoserver")
+            return True
+        if self._run_relstyrke_eval is None:
+            logger.warning("[Scheduler] Ingen run_relstyrke_eval_fn injiceret — springer over")
+            return True
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE koere relstyrke_shadow_eval — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {RELSTYRKE_EVAL_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False
+        ok = await self._run_relstyrke_eval()   # main.py: subprocess med timeout, returnerer bool
+        if ok:
+            logger.info("[Scheduler] Relativ Styrke shadow-eval koert (selection alpha akkumuleret)")
+        else:
+            logger.warning("[Scheduler] relstyrke_shadow_eval fejlede — genforsøger i vinduet")
+        return ok
 
     async def _job_reset_daily(self):
         """Nulstil RiskManager-tællere ved midnat ET."""
