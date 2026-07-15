@@ -64,8 +64,7 @@ SCORE             = "early_rs"     # (pris_ved_T - open_0930) / open_0930
 
 # ── Sizing ─────────────────────────────────────────────────────
 STRATEGY_NOTIONAL_USD     = None     # udledes = NOTIONAL_PCT * NLV ved on_start
-NOTIONAL_PCT              = 0.03     # 3% af NLV fordeles paa K=3 (~1% pr. navn)
-PER_NAME_NOTIONAL_CAP_USD = 1000.0   # hale-vaern pr. navn
+NOTIONAL_PCT              = 0.03     # 3% af NLV fordeles paa K=3 (~1% pr. navn) — fallback-default
 STRATEGY_NOTIONAL_FB      = 500.0    # fallback hvis NLV ikke kan laeses (~3% af ~$16k)
 
 # ── Univers: scannerens live-univers (genbruger TrendJoins TV-gainer-helper) ──
@@ -200,7 +199,7 @@ class RelStyrkeLive(BaseStrategy):
         self._status("started",
                      f"Strategi-notional: ${self._strategy_notional:,.0f} "
                      f"({'3% af NLV' if self._nlv > 0 else 'fallback (NLV ukendt)'}) "
-                     f"→ ~${self._strategy_notional / TOP_K:,.0f} pr. navn (cap ${PER_NAME_NOTIONAL_CAP_USD:,.0f})")
+                     f"→ ~${self._strategy_notional / TOP_K:,.0f} pr. navn")
 
         # Nulstil dagens state + diagnostik.
         self._positions.clear(); self._done_today.clear()
@@ -623,9 +622,9 @@ class RelStyrkeLive(BaseStrategy):
         if entry <= 0:
             self._done_today.add(ticker)
             return
-        # Equal weight: strategi-notional / K, med per-navn-loft som hale-vaern.
-        notional_cap = self._resolve_risk("notional_cap") or PER_NAME_NOTIONAL_CAP_USD
-        per_name = min(self._strategy_notional / TOP_K, notional_cap)
+        # Equal weight: strategi-notional / K. Intet separat notional-loft — position_size
+        # styrer den faktiske position (pr-navn = position_size/TOP_K er selv-begraenset).
+        per_name = self._strategy_notional / TOP_K
         shares = int(per_name / entry)
         if shares < 1:
             self._done_today.add(ticker)

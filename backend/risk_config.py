@@ -53,7 +53,8 @@ DEFAULTS: dict[str, dict[str, dict]] = {
     "Relativ Styrke": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
         "position_size":  {"pct": None, "amount": 250.0},   # samlet strategi-notional ($, deles paa 3)
-        "notional_cap":   {"pct": None, "amount": 1000.0},  # notional-loft pr. navn ($)
+        # notional_cap fjernet 2026-07-15: overfloedigt — position_size styrer den faktiske
+        # position (equal-weight long, ingen stop), saa pr-navn = position_size/3 er selv-begraenset.
     },
 }
 
@@ -80,7 +81,6 @@ SCHEMA: dict[str, list[dict]] = {
     "Relativ Styrke": [
         {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
         {"key": "position_size",  "label": "Positionsstørrelse (samlet notional)", "hint": "capital"},
-        {"key": "notional_cap",   "label": "Notional-loft (pr. navn)", "hint": "notional"},
     ],
 }
 
