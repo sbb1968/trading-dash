@@ -1,0 +1,201 @@
+<title>Market Cipher B — anatomi</title>
+<style>
+  :root{
+    --ground:#090b11; --panel:#0d1019; --panel-edge:#1b2130;
+    --ink:#e8ebf2; --muted:#98a1b6; --faint:#5c6579;
+    --wt1:#4a9bec; --wt1-fill:rgba(74,155,236,.42);
+    --wt2:#6d7bff; --wt2-fill:rgba(46,33,120,.72);
+    --vwap:rgba(255,255,255,.62);
+    --mfg:#22d07a; --mfr:#ff4d55;
+    --buy:#00e676; --sell:#ff5252; --gold:#f2a600;
+    --zero:rgba(255,255,255,.26); --grid:rgba(255,255,255,.10);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#11151f 0%,var(--ground) 60%);
+       color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased;padding:34px 20px 60px}
+  .wrap{max-width:1020px;margin:0 auto}
+  .eyebrow{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--gold);
+           font-weight:600;margin:0 0 8px}
+  h1{font-size:clamp(24px,3.4vw,34px);line-height:1.08;margin:0 0 8px;font-weight:700;
+     letter-spacing:-.01em;text-wrap:balance}
+  .sub{color:var(--muted);font-size:15px;line-height:1.5;margin:0 0 22px;max-width:64ch}
+  .figure{background:linear-gradient(180deg,#0e121c,#0a0d14);border:1px solid var(--panel-edge);
+          border-radius:14px;padding:10px 8px 4px;overflow-x:auto;
+          box-shadow:0 20px 50px -24px rgba(0,0,0,.8)}
+  svg{display:block;width:100%;height:auto;min-width:760px}
+  .foot{color:var(--faint);font-size:12.5px;line-height:1.55;margin:16px 4px 0;max-width:70ch}
+  .foot b{color:var(--muted);font-weight:600}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  @media print{
+    html,body{background:#090b11 !important}
+    body{padding:20px 26px;background:#090b11}
+    .wrap{max-width:none}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    @page{size:292mm 352mm;margin:0}
+  }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Indikator-guide · lynhurtig aflæsning</p>
+  <h1>Market Cipher B — anatomi</h1>
+  <p class="sub">En tro gengivelse af oscillator-panelet, med en pil fra hvert element ned til
+     hvad det betyder. Det er et <b style="color:var(--ink)">timing- og konfluens-værktøj</b>:
+     det viser <em>hvornår</em> momentum vender, ikke hvad du skal købe.</p>
+
+  <div class="figure">
+    <svg id="fig" viewBox="0 0 1000 900" role="img"
+         aria-label="Annoteret gengivelse af Market Cipher B oscillator-panelet"></svg>
+  </div>
+
+  <p class="foot"><b>Sådan læses den — konfluens.</b> Størst tillid når flere ting peger samme vej:
+     grøn cirkel i oversolgt + bullish divergens + grøn pengestrøm = stærk long-timing (modsat for
+     short). Ét signal alene er svagt. Ingen indikator er sikker — prikkerne er information, ikke
+     ordrer.</p>
+</div>
+
+<script>
+const NS="http://www.w3.org/2000/svg";
+const fig=document.getElementById("fig");
+const C=getComputedStyle(document.documentElement);
+const col=n=>C.getPropertyValue(n).trim();
+
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);
+  for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||fig).appendChild(e);return e;}
+
+// ---- geometry of the oscillator panel ----
+const P={x0:70,x1:840,mid:150,scale:0.92,ob:60,os:-60,top:20,bot:290};
+const vy=v=>P.mid - v*P.scale;
+
+// Catmull-Rom -> smooth cubic path
+function smooth(pts){
+  let d=`M ${pts[0][0]} ${pts[0][1]}`;
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[i-1]||pts[i], p1=pts[i], p2=pts[i+1], p3=pts[i+2]||p2;
+    const c1x=p1[0]+(p2[0]-p0[0])/6, c1y=p1[1]+(p2[1]-p0[1])/6;
+    const c2x=p2[0]-(p3[0]-p1[0])/6, c2y=p2[1]-(p3[1]-p1[1])/6;
+    d+=` C ${c1x} ${c1y} ${c2x} ${c2y} ${p2[0]} ${p2[1]}`;
+  }
+  return d;
+}
+const toXY=cp=>cp.map(([x,v])=>[x,vy(v)]);
+
+// control points (x, wavetrend value). Events land at readable spots.
+const wt2=[[70,42],[150,74],[235,50],[330,-4],[435,-78],[520,-34],[620,26],[712,66],[840,38]];
+const wt1=[[70,56],[138,90],[218,58],[312,-6],[420,-90],[505,-26],[602,40],[702,82],[840,50]];
+const mf =[[70,10],[210,15],[360,2],[520,-9],[700,-14],[840,-8]];
+
+// ---- backdrop grid + zero + OB/OS ----
+el("rect",{x:P.x0,y:P.top,width:P.x1-P.x0,height:P.bot-P.top,fill:"#0b0e16"});
+// OB/OS shaded zones
+el("rect",{x:P.x0,y:P.top,width:P.x1-P.x0,height:vy(P.ob)-P.top,fill:"rgba(255,82,82,.06)"});
+el("rect",{x:P.x0,y:vy(P.os),width:P.x1-P.x0,height:P.bot-vy(P.os),fill:"rgba(0,230,118,.06)"});
+[P.ob,P.os].forEach(l=>el("line",{x1:P.x0,y1:vy(l),x2:P.x1,y2:vy(l),
+  stroke:"rgba(255,255,255,.28)","stroke-width":1,"stroke-dasharray":"1 6"}));
+el("line",{x1:P.x0,y1:P.mid,x2:P.x1,y2:P.mid,stroke:col("--zero"),"stroke-width":1});
+
+// level tags
+function tag(v,txt,c){el("text",{x:P.x1+8,y:vy(v)+4,fill:c,"font-size":12.5,
+  "font-family":"ui-monospace,Menlo,monospace"}).textContent=txt;}
+tag(P.ob,"+53 / +60","rgba(255,120,120,.9)");
+tag(P.os,"−53 / −60","rgba(90,230,150,.9)");
+tag(0,"0","rgba(255,255,255,.55)");
+
+// ---- money-flow area (green->red gradient) ----
+const grad=el("linearGradient",{id:"mfg",x1:"0",y1:"0",x2:"1",y2:"0"});
+el("stop",{offset:"0%","stop-color":col("--mfg"),"stop-opacity":.5},grad);
+el("stop",{offset:"52%","stop-color":col("--mfg"),"stop-opacity":.16},grad);
+el("stop",{offset:"58%","stop-color":col("--mfr"),"stop-opacity":.16},grad);
+el("stop",{offset:"100%","stop-color":col("--mfr"),"stop-opacity":.55},grad);
+const mfxy=toXY(mf);
+el("path",{d:smooth(mfxy)+` L ${P.x1} ${P.mid} L ${P.x0} ${P.mid} Z`,fill:"url(#mfg)",stroke:"none"});
+
+// ---- WT areas (slow purple under, fast blue over) ----
+function area(cp,fill,stroke,sw){
+  const xy=toXY(cp);
+  el("path",{d:smooth(xy)+` L ${P.x1} ${P.mid} L ${P.x0} ${P.mid} Z`,fill:fill,stroke:"none"});
+  el("path",{d:smooth(xy),fill:"none",stroke:stroke,"stroke-width":sw,"stroke-linecap":"round"});
+}
+area(wt2,col("--wt2-fill"),"rgba(120,110,255,.55)",1.5);
+area(wt1,col("--wt1-fill"),col("--wt1"),1.6);
+
+// VWAP fast line (thin, bright)
+el("path",{d:smooth(toXY(wt1.map(([x,v])=>[x,v*0.55]))),fill:"none",
+  stroke:col("--vwap"),"stroke-width":1.4,"stroke-dasharray":"5 4",opacity:.8});
+
+// ---- signal dots ----
+function dot(x,v,c,r){const g=el("g");
+  el("circle",{cx:x,cy:vy(v),r:r+4,fill:c,opacity:.18},g);
+  el("circle",{cx:x,cy:vy(v),r:r,fill:c,stroke:"#0b0e16","stroke-width":1.5},g);return[x,vy(v)];}
+const dRed =dot(235,50,col("--sell"),6.5);
+const dGold=dot(435,-78,col("--gold"),7.5);
+const dGreen=dot(520,-34,col("--buy"),6.5);
+
+// ---- bottom money-flow bar ----
+const barY=P.bot+10, barH=9;
+el("rect",{x:P.x0,y:barY,width:(360-P.x0),height:barH,rx:2,fill:col("--mfg"),opacity:.85});
+el("rect",{x:360,y:barY,width:(P.x1-360),height:barH,rx:2,fill:col("--mfr"),opacity:.85});
+
+// ---- callouts: element -> label (straight pointer, arrow down to text) ----
+function callout(from,lx,ly,term,desc,c){
+  const g=el("g");
+  const ey=ly-30;                                   // pilespids lidt over teksten
+  el("line",{x1:from[0],y1:from[1],x2:lx,y2:ey,stroke:c,"stroke-width":1.3,opacity:.9},g);
+  el("circle",{cx:from[0],cy:from[1],r:2.6,fill:c},g);          // anker paa elementet
+  el("path",{d:`M ${lx-4} ${ey-6} L ${lx+4} ${ey-6} L ${lx} ${ey+1} z`,fill:c},g); // pilespids ned
+  el("text",{x:lx,y:ly,fill:c,"font-size":14.5,"font-weight":700,"text-anchor":"middle"},g).textContent=term;
+  el("text",{x:lx,y:ly+17,fill:col("--muted"),"font-size":12.5,"text-anchor":"middle"},g).textContent=desc;
+}
+const cVwap="#c7cfe2";                              // laesbar erstatning for den transparente VWAP
+// tre rene raekker under panelet; x naer elementet, korte tekster -> ingen overlap
+// Raekke 1
+callout([110,vy(P.ob)],130,372,"Overkøbt","Bølge over +53/+60",col("--sell"));
+callout(dGold,455,372,"Guld cirkel","Ekstrem oversolgt — forsigtig",col("--gold"));
+callout([700,vy(12)],775,372,"Hurtig VWAP-bølge","Lys stiplet — vender før",cVwap);
+// Raekke 2
+callout(dRed,240,470,"Rød cirkel = salg","Kryds ned i overkøbt",col("--sell"));
+callout(dGreen,560,470,"Grøn cirkel = køb","Kryds op i oversolgt",col("--buy"));
+callout([740,vy(P.os)],830,470,"Oversolgt","Bølge under −53/−60",col("--buy"));
+// Raekke 3
+callout([310,vy(-2)],210,556,"Hovedbølgen (WaveTrend)","Momentum om nul",col("--wt1"));
+callout([470,barY+barH],510,556,"Pengestrøm","grøn = ind · rød = ud",col("--mfg"));
+
+// ============ DIVERGENCE INSET ============
+const DY=628;
+el("text",{x:P.x0,y:DY-14,fill:col("--ink"),"font-size":16,"font-weight":700})
+  .textContent="Divergenser — indikatorens kerne";
+el("text",{x:P.x0,y:DY+6,fill:col("--muted"),"font-size":13})
+  .textContent="Pris og momentum peger hver sin vej. En lilla trekant = divergens + bølge-kryds i et yderpunkt (stærkest).";
+
+function diverPanel(ox,title,pricePts,wavePts,c,note){
+  const g=el("g");
+  const w=360,h=190,oy=DY+24;
+  el("rect",{x:ox,y:oy,width:w,height:h,rx:8,fill:"#0b0e16",stroke:col("--panel-edge")},g);
+  el("text",{x:ox+14,y:oy+24,fill:c,"font-size":14,"font-weight":700},g).textContent=title;
+  el("text",{x:ox+14,y:oy+h-14,fill:col("--muted"),"font-size":12},g).textContent=note;
+  // price (top third) and wave (mid) — mapped into the box
+  const pmap=(p,y0,y1)=>p.map(([x,v])=>[ox+22+x*(w-44)/100, y0+(1-v)* (y1-y0)]);
+  const P1=pmap(pricePts,oy+40,oy+96);
+  const W1=pmap(wavePts,oy+104,oy+150);
+  el("path",{d:smooth(P1),fill:"none",stroke:"rgba(255,255,255,.75)","stroke-width":1.6},g);
+  el("path",{d:smooth(W1),fill:"none",stroke:c,"stroke-width":1.8},g);
+  el("text",{x:ox+w-14,y:oy+40,fill:"rgba(255,255,255,.6)","font-size":11,"text-anchor":"end"},g).textContent="PRIS";
+  el("text",{x:ox+w-14,y:oy+150,fill:c,"font-size":11,"text-anchor":"end"},g).textContent="BØLGE";
+  // connect the two extremes on price and on wave (dashed) to show divergence
+  const pe=[P1[1],P1[3]], we=[W1[1],W1[3]];
+  [pe,we].forEach(pair=>el("line",{x1:pair[0][0],y1:pair[0][1],x2:pair[1][0],y2:pair[1][1],
+    stroke:col("--gold"),"stroke-width":1.3,"stroke-dasharray":"4 3",opacity:.85},g));
+  // purple triangle marker
+  el("path",{d:`M ${W1[3][0]} ${W1[3][1]-12} l 6 10 l -12 0 z`,fill:"#e600e6"},g);
+}
+// bearish: price higher high, wave lower high
+diverPanel(70,"Bearish divergens",
+  [[8,.35],[28,.7],[52,.45],[74,.95],[95,.55]],   // price: 2nd top higher
+  [[8,.4],[28,.85],[52,.5],[74,.6],[95,.35]],      // wave: 2nd top lower
+  col("--sell"),"Højere pris-top, lavere bølge-top → skjult svaghed");
+// bullish: price lower low, wave higher low
+diverPanel(470,"Bullish divergens",
+  [[8,.6],[28,.25],[52,.5],[74,.05],[95,.5]],      // price: 2nd bottom lower
+  [[8,.6],[28,.2],[52,.55],[74,.42],[95,.7]],      // wave: 2nd bottom higher
+  col("--buy"),"Lavere pris-bund, højere bølge-bund → skjult styrke");
+</script>

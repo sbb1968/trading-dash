@@ -117,6 +117,12 @@ _STANDALONE_DOCS = [
     ("docs_src/market_cipher_b.md", "cipher_01_hvad_viser_den.pdf"),
 ]
 
+# Stand-alone HTML-docs (selvstaendige sider med egen styling/SVG — IKKE MD-skabelonen).
+# Renderes direkte via Chrome print-to-pdf (deres eget @page + print-color-adjust styrer siden).
+_STANDALONE_HTML = [
+    ("docs_src/cipher_anatomi.html", "cipher_02_anatomi.pdf"),
+]
+
 
 def build_all() -> None:
     n = 0
@@ -134,6 +140,14 @@ def build_all() -> None:
             print(f"SPRING OVER (mangler): {md}")
             continue
         convert(md, _DOCS_OUT / out_pdf)
+        n += 1
+    for html_rel, out_pdf in _STANDALONE_HTML:
+        p = HERE / html_rel
+        if not p.is_file():
+            print(f"SPRING OVER (mangler): {p}")
+            continue
+        html_to_pdf(p.read_text(encoding="utf-8"), _DOCS_OUT / out_pdf)  # egen styling
+        print(f"OK  {p.name}  ->  {out_pdf}")
         n += 1
     print(f"\n{n} PDF'er bygget i {_DOCS_OUT}")
 
