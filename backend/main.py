@@ -2446,6 +2446,7 @@ _DOC_CATEGORIES = [
     ("eurev",   "Europa-reversion",  "Strategier"),
     ("btd",     "BuyTheDip",         "Strategier"),
     ("tjl",     "Trend Join Long",   "Strategier"),
+    ("rs",      "Relativ Styrke",    "Strategier"),
 ]
 _DOC_CAT_LABEL = {k: lbl for k, lbl, _ in _DOC_CATEGORIES}
 _DOC_CAT_GROUP = {k: grp for k, _, grp in _DOC_CATEGORIES}

@@ -105,6 +105,8 @@ _STRATEGY_DOCS = [
         ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
     ("trend_join_long", "tjl", [
         ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
+    ("relstyrke", "rs", [
+        ("kort", "01", "kort_fortalt"), ("iben", "02", "forklaring"), ("teknisk", "03", "teknisk_reference")]),
 ]
 _DOCS_OUT = HERE / "docs"
 
