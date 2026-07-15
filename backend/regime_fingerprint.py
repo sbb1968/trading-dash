@@ -41,6 +41,11 @@ FUT = ["ES", "NQ", "RTY"]
 DEFAULT_PAIRS = [("ES", "RTY"), ("ES", "NQ"), ("NQ", "RTY")]
 APR = (date(2026, 4, 1), date(2026, 4, 30))
 MAJ = (date(2026, 5, 1), date(2026, 5, 29))
+STITCHED = HARVEST / "mes_m2k_stitched"        # MES=ES, M2K=RTY, frisk 15-min (2 aar)
+BAR_GAP_15MIN = 15 * 60                          # 900s; > dette = ny kontiguert run
+# Sanity-gulve for spor-A-reglen (afsnit 2, betingelse 4): et signal paa faa runs taeller ikke.
+SPORA_MIN_OBS = 500
+SPORA_MIN_RUNS = 20
 
 # Coverage-noter samles her og skrives i summary.
 NOTES: list[str] = []
@@ -422,6 +427,109 @@ def _r(x, nd=4):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# METRIK 10b — 15-min intradag MES-M2K spread (=ES-RTY; addendum til afsnit 3.10)
+# ═══════════════════════════════════════════════════════════════════
+def load_stitched_15min(label):
+    """[(dt, o,h,l,c,v)] tz-aware ET fra data_harvest/mes_m2k_stitched/{label}_15min.csv."""
+    p = STITCHED / f"{label}_15min.csv"
+    out = []
+    if not p.exists():
+        return out
+    with p.open(newline="") as f:
+        for r in csv.DictReader(f):
+            try:
+                dt = datetime.fromisoformat(r["timestamp"])
+                c = _num(r["close"])
+                if c is None or c <= 0:
+                    continue
+                out.append((dt, c))
+            except (ValueError, KeyError):
+                continue
+    return sorted(out, key=lambda t: t[0])
+
+
+def _spread_runs(mes, m2k, win_start, win_end):
+    """spread = log(MES_close) - log(M2K_close) paa FAELLES timestamps i vinduet, split i
+    kontiguerte 15-min runs (aldrig paa tvaers af session-gap/roll/overnight). Returnerer
+    liste af runs; hver run = liste af (dt, spread)."""
+    m = {dt: c for dt, c in mes}
+    k = {dt: c for dt, c in m2k}
+    common = sorted(set(m) & set(k))
+    pts = [(dt, math.log(m[dt]) - math.log(k[dt])) for dt in common
+           if win_start <= dt.date() <= win_end]
+    runs, cur = [], []
+    for dt, s in pts:
+        if cur and (dt - cur[-1][0]).total_seconds() > BAR_GAP_15MIN:
+            runs.append(cur); cur = []
+        cur.append((dt, s))
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def variance_ratio_runs(run_deltas, k):
+    """VR(k) run-bevidst: k-aggregaterne dannes KUN inden for runs (aldrig paa tvaers af seams)."""
+    all1 = [d for r in run_deltas for d in r]
+    if len(all1) < k * 3 + 2 or k < 2:
+        return None
+    var1 = st.pvariance(all1)
+    if var1 <= 0:
+        return None
+    kagg = [sum(r[i:i + k]) for r in run_deltas for i in range(0, len(r) - k + 1)]
+    if len(kagg) < 3:
+        return None
+    return st.pvariance(kagg) / (k * var1)
+
+
+def half_life_ols(xs, ds):
+    """half-life via OLS af delta paa niveau_{t-1} (pooled, run-bevidste par). None hvis ej revererende."""
+    n = len(xs)
+    if n < 20:
+        return None
+    mx, md = sum(xs) / n, sum(ds) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    if sxx <= 0:
+        return None
+    beta = sum((x - mx) * (d - md) for x, d in zip(xs, ds)) / sxx
+    if beta >= 0 or beta <= -1:
+        return None
+    return -math.log(2) / math.log(1 + beta)
+
+
+def spread_intraday_metrics(mes, m2k, win_start, win_end):
+    """Metrik 10b: 15-min intradag MES-M2K spread. Kontiguerte runs; VR2/5/10 + half-life +
+    autokorr (niveau og delta) + N. Look-ahead-assert. Alt inden for [win_start, win_end]."""
+    runs = _spread_runs(mes, m2k, win_start, win_end)
+    runs = [r for r in runs if len(r) >= 3]
+    n_obs = sum(len(r) for r in runs)
+    if not runs or n_obs < 10:
+        return {"n_runs": len(runs), "n_obs": n_obs}
+    assert max(dt for r in runs for dt, _ in r).date() <= win_end, "LOOK-AHEAD 15-min spread"
+    lvl_x, lvl_y, dlt_x, dlt_y, hl_x, hl_d = [], [], [], [], [], []
+    run_deltas = []
+    for r in runs:
+        lv = [s for _, s in r]
+        dl = [lv[i + 1] - lv[i] for i in range(len(lv) - 1)]
+        run_deltas.append(dl)
+        for i in range(len(lv) - 1):
+            lvl_x.append(lv[i]); lvl_y.append(lv[i + 1])
+            hl_x.append(lv[i]); hl_d.append(dl[i])
+        for i in range(len(dl) - 1):
+            dlt_x.append(dl[i]); dlt_y.append(dl[i + 1])
+    hl_bars = half_life_ols(hl_x, hl_d)
+    return {
+        "n_runs": len(runs), "n_obs": n_obs,
+        "autocorr1_level": _r(pearson(lvl_x, lvl_y)),
+        "autocorr1_delta": _r(pearson(dlt_x, dlt_y)),
+        "VR2": _r(variance_ratio_runs(run_deltas, 2)),
+        "VR5": _r(variance_ratio_runs(run_deltas, 5)),
+        "VR10": _r(variance_ratio_runs(run_deltas, 10)),
+        "half_life_bars": _r(hl_bars),
+        "half_life_min": _r(hl_bars * 15 if hl_bars is not None else None, 1),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
 # PRAE-REGISTRERET verdikt (afsnit 5) — mapping tal -> familie
 # ═══════════════════════════════════════════════════════════════════
 VERDICT_TABLE = [
@@ -429,15 +537,38 @@ VERDICT_TABLE = [
     "|---|---|",
     "| follow_through>0.55 OG intraday_autocorr>+0.05 OG HOD morgen-domineret | Momentum-fortsaettelse (HAR: K2/TrendJoin) |",
     "| intraday_autocorr<-0.05 OG follow_through<0.45 | Intraday mean-reversion (HAR: BuyTheDip/washout) |",
-    "| ES-RTY spread: VR(5)<0.9 OG half_life<~10 | SPOR A (relativ vaerdi/spread) levedygtigt |",
+    "| ES-RTY DAGLIG spread VR5=1.22>0.9 | Daglig-hold spread DISKVALIFICERET (staar) — spor A vurderes KUN paa 15-min (se regel nedenfor) |",
     "| index overnight/intraday-ratio>~1.5 | SPOR C (tids/flow, overnight-edge) |",
     "| halt-frekvens hoej+stigende | SPOR B (halt-resumption) har raamateriale |",
     "| hoej navne-dispersion + lav index-trend-persistens | Relativ vaerdi / stock-picking generelt |",
 ]
 
+# PRAEREGISTRERET spor-A regel (addendum afsnit 2) — LAAST FOER 15-min-tallene beregnes/ses.
+# Spor A rejses (og KUN som "vaerd at backteste") HVIS OG KUN HVIS alle 5 holder i recent-vinduet
+# paa mes_m2k_stitched 15-min (MES=ES, M2K=RTY), inden for kontiguerte runs:
+SPORA_RULE = [
+    "PRAEREGISTRERET SPOR-A REGEL (15-min intradag MES-M2K spread; alle 5 skal holde i recent):",
+    "  1. VR(5) < 0.9 paa delta_spread            (primaer mean-reversion-test)",
+    "  2. half-life < 10 bars (=150 min)          (reverterer fuldt inden for en session)",
+    "  3. VR(10) < 1.0                            (konsistens paa tvaers af horisonter; anti-fluke)",
+    f"  4. N: n_obs >= {SPORA_MIN_OBS} OG n_runs >= {SPORA_MIN_RUNS}          (sanity-gate; faa runs taeller ikke)",
+    "  5. signaturen (VR5<0.9 & half-life<10) GENTAGER i MINDST ETT uafhaengigt vindue (prior/IS/OOS)",
+    "  Ellers: SPOR A FORBLIVER LUKKET; vi gaar videre med spor D (tvaersnitlig relativ styrke).",
+    "  Rejst = kun 'vaerd at backteste'. Fingeraftrykket paastaar INGEN edge.",
+]
 
-def verdict(recent):
-    """recent: samlet metrik-dict for recent-vinduet. Returnerer liste af flaggede familier."""
+
+def _sporA_signature(m):
+    """Betingelse 5-hjaelper: VR5<0.9 & half-life<10 i et givent vindue."""
+    if not m:
+        return False
+    vr5, hl = m.get("VR5"), m.get("half_life_bars")
+    return vr5 is not None and hl is not None and vr5 < 0.9 and hl < 10
+
+
+def verdict(recent, spread15):
+    """recent: recent-vinduets metrik-dict. spread15: dict vindue->15-min-spread-metrik.
+    Returnerer liste af flaggede familier. Spor A afgoeres af den PRAEREGISTREREDE 5-delte regel."""
     flags = []
     sc = recent.get("smallcap", {})
     ft = sc.get("m1_gap_follow_through_rate")
@@ -450,11 +581,22 @@ def verdict(recent):
     # intraday mean-reversion
     if ft is not None and ac is not None and ac < -0.05 and ft < 0.45:
         flags.append("Intraday mean-reversion (HAR allerede BuyTheDip/washout)")
-    # SPOR A — ES-RTY spread
-    sp = recent.get("spread", {}).get("ES-RTY", {})
-    vr5, hl = sp.get("m10_VR5"), sp.get("m10_half_life_bars")
-    if vr5 is not None and hl is not None and vr5 < 0.9 and hl < 10:
-        flags.append("SPOR A (relativ vaerdi / ES-RTY spread mean-reverting NU) — LEVEDYGTIGT")
+    # ── SPOR A — PRAEREGISTRERET 5-delt regel paa 15-min intradag MES-M2K spread ──
+    rm = (spread15 or {}).get("recent", {})
+    c1 = rm.get("VR5") is not None and rm["VR5"] < 0.9
+    c2 = rm.get("half_life_bars") is not None and rm["half_life_bars"] < 10
+    c3 = rm.get("VR10") is not None and rm["VR10"] < 1.0
+    c4 = (rm.get("n_obs", 0) >= SPORA_MIN_OBS) and (rm.get("n_runs", 0) >= SPORA_MIN_RUNS)
+    c5 = any(_sporA_signature((spread15 or {}).get(w)) for w in ("prior", "IS", "OOS"))
+    if c1 and c2 and c3 and c4 and c5:
+        flags.append(f"SPOR A REJST (15-min intradag MES-M2K spread) — VAERD AT BACKTESTE "
+                     f"(VR5={rm['VR5']}, half-life={rm['half_life_bars']} bars, VR10={rm['VR10']}, "
+                     f"n_obs={rm['n_obs']}, gentages OOS)")
+    else:
+        miss = [n for n, ok in (("VR5<0.9", c1), ("hl<10", c2), ("VR10<1.0", c3),
+                                ("N-gate", c4), ("gentag-OOS", c5)) if not ok]
+        flags.append("SPOR A FORBLIVER LUKKET (15-min-regel ikke opfyldt: " + ", ".join(miss) +
+                     ") -> gaa videre med spor D (tvaersnitlig relativ styrke)")
     # SPOR C — overnight-dominans (mindst ett index)
     c_flags = []
     for idx, fm in recent.get("futures", {}).items():
@@ -530,9 +672,30 @@ def main():
             block["smallcap"] = smallcap_metrics(sc, uni, ws, we)
         result["windows"][w] = block
 
-    # verdikt paa recent
+    # ── 15-min intradag MES-M2K spread (addendum) — recent/prior/apr/maj + IS/OOS-split ──
+    mes15, m2k15 = load_stitched_15min("MES"), load_stitched_15min("M2K")
+    spread15 = {}
+    if mes15 and m2k15:
+        common = sorted(set(dt.date() for dt, _ in mes15) &
+                        set(dt.date() for dt, _ in m2k15))
+        s15win = make_windows(common)              # recent/prior/apr/maj
+        if len(common) >= 4:                        # laengere IS/OOS-split (foerste vs anden halvdel)
+            mid = common[len(common) // 2]
+            s15win["IS"] = (common[0], mid)
+            s15win["OOS"] = (common[len(common) // 2 + 1], common[-1]) if len(common) > 2 else None
+        for w, wr in s15win.items():
+            if wr is None:
+                continue
+            if a.window and a.window not in (w, "recent", "prior", "IS", "OOS"):
+                continue                            # ved --window: behold ogsaa recent/prior/IS/OOS til reglen
+            spread15[w] = spread_intraday_metrics(mes15, m2k15, wr[0], wr[1])
+        result["intraday_spread_MES_M2K"] = spread15
+    else:
+        NOTES.append("15-min MES-M2K spread: mangler mes_m2k_stitched/{MES,M2K}_15min.csv -> spor-A-15min ubestemt.")
+
+    # verdikt paa recent (spor A afgoeres af den praeregistrerede 5-delte 15-min-regel)
     rec = result["windows"].get("recent", {})
-    flags = verdict(rec) if isinstance(rec, dict) and "futures" in rec else []
+    flags = verdict(rec, spread15) if isinstance(rec, dict) and "futures" in rec else []
     result["verdict"] = flags
 
     # ── Skriv output ──
@@ -569,6 +732,9 @@ def _write_summary(result, run_date, windows):
     e("\nPRAE-REGISTRERET MAPPING (tal -> familie) — skrevet FOER output fortolkes:")
     for row in VERDICT_TABLE:
         e("  " + row)
+    e("")
+    for row in SPORA_RULE:
+        e("  " + row)
     e("\nCOVERAGE-NOTER:")
     for n in result.get("notes", []):
         e("  - " + n)
@@ -603,6 +769,24 @@ def _write_summary(result, run_date, windows):
             if "m10_VR5" not in sm:
                 e(f"    {pr}: kun {sm.get('coverage_days',0)} dage (for lidt)"); continue
             e(f"    {pr} (dage={sm['coverage_days']}): autokorr1={_fmt(sm['m10_spread_autocorr1'])}  VR2={_fmt(sm['m10_VR2'])} VR5={_fmt(sm['m10_VR5'])} VR10={_fmt(sm['m10_VR10'])}  half-life={_fmt(sm['m10_half_life_bars'])}  [VR<1=mean-rev]")
+    # ── 15-min intradag MES-M2K spread (metrik 10b, addendum) ──
+    s15 = result.get("intraday_spread_MES_M2K")
+    if s15:
+        e("\n" + "-" * 84)
+        e("15-MIN INTRADAG MES-M2K SPREAD (=ES-RTY; kontiguerte runs)  [kerne for spor-A-reglen]")
+        e("-" * 84)
+        e(f"  {'vindue':8}{'n_runs':>8}{'n_obs':>8}{'ac1_lvl':>9}{'VR2':>8}{'VR5':>8}{'VR10':>8}   half-life")
+        for w in ("recent", "prior", "apr", "maj", "IS", "OOS"):
+            m = s15.get(w)
+            if not m:
+                continue
+            if "VR5" not in m:
+                e(f"  {w:8}{m.get('n_runs',0):>8}{m.get('n_obs',0):>8}   (for faa obs)"); continue
+            hl = f"{_fmt(m['half_life_bars'])}b/{_fmt(m['half_life_min'])}m"
+            e(f"  {w:8}{m['n_runs']:>8}{m['n_obs']:>8}{_fmt(m['autocorr1_level']):>9}"
+              f"{_fmt(m['VR2']):>8}{_fmt(m['VR5']):>8}{_fmt(m['VR10']):>8}   {hl}")
+        e("  [VR<1 = mean-rev intradag. Spor A afgoeres af den PRAEREGISTREREDE 5-delte regel ovenfor.]")
+
     e("\n" + "=" * 84)
     e("VERDIKT (recent-vindue):")
     fl = result.get("verdict", [])
