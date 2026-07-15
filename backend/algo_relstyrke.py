@@ -51,7 +51,13 @@ SESSION_START  = dtime(9, 30)     # US RTH-aabning (open_0930 laases her)
 
 # ── FROSNE plateau-parametre (aendres ALDRIG uden ny backtest) ──
 SOURCE            = "Relativ Styrke"
-DECISION_ET       = dtime(9, 45)  # beslutningstid T
+DECISION_ET       = dtime(9, 45)  # beslutningstid T — score-cutoff: early_rs bruger bars <= 09:45
+# BAR-PARITET (jf. relstyrke_parity.py KOERSEL 1+2): IBKR stempler en bar paa dens AABNINGSTID,
+# saa 09:45-baren er foerst KOMPLET kl. 09:46:00. Backtestens price_T = 09:45-barens close. Fyrede
+# vi ved 09:45:xx var 09:45-baren ikke lukket, og live vil se 09:44-close -> anden top-3 end backtesten
+# (divergerede paa 16/43 dage). Vi fyrer derfor beslutningen naar 09:45-baren er komplet (09:46), saa
+# _early_rs (filter <= 09:45) faar 09:45-close == backtesten. AENDRER IKKE T/K/score/exit — kun bar-timing.
+DECISION_FIRE_ET  = dtime(9, 46)  # fyrings-tid: efter 09:45-baren er lukket (== backtest-paritet)
 FORCE_CLOSE_ET    = dtime(15, 51) # tvangsluk-backstop (aldrig over natten)
 TOP_K             = 3
 SCORE             = "early_rs"     # (pris_ved_T - open_0930) / open_0930
@@ -460,17 +466,19 @@ class RelStyrkeLive(BaseStrategy):
                     break
 
                 try:
-                    # Forud-hent universet EEN gang FOER T (maa gerne — ingen handling foer T).
-                    if not _prefetched and not self._decided and t < DECISION_ET:
+                    # Forud-hent universet EEN gang FOER fyring (maa gerne — ingen handling foer T).
+                    if not _prefetched and not self._decided and t < DECISION_FIRE_ET:
                         self.universe = await self._scan_universe()
                         _prefetched = True
                         if self.universe:
                             self._status("scanning",
                                          f"Forud-hentede univers ({len(self.universe)}) — "
-                                         f"afventer beslutning {DECISION_ET.strftime('%H:%M')} ET")
+                                         f"afventer beslutning T={DECISION_ET.strftime('%H:%M')} "
+                                         f"(fyrer {DECISION_FIRE_ET.strftime('%H:%M')} naar T-baren er komplet)")
 
-                    # Dagens ene beslutning ved T.
-                    if not self._decided and t >= DECISION_ET:
+                    # Dagens ene beslutning: fyr naar 09:45-baren er KOMPLET (09:46), saa early_rs
+                    # (bars <= 09:45) faar 09:45-close == backtestens price_T (bar-paritet).
+                    if not self._decided and t >= DECISION_FIRE_ET:
                         await self._make_decision(now_et)
                         self._decided = True
                     elif self._decided and self._positions:

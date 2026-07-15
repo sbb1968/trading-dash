@@ -319,6 +319,85 @@ async def run_full(db, source, day, args, emit):
     emit("  AKKUMULERET dom over mange live-sessioner (koer scriptet dagligt og saml alpha/hit).")
 
 
+# ── --selftest (KOERSEL 3): shadow-alpha == backtest-alpha for samme picks (offline) ────────
+def run_selftest(args, emit) -> bool:
+    """Bevis at shadow-eval's selection-alpha er IDENTISK med backtestens for samme dag/picks/kost.
+    Bruger bar_cache (ingen IBKR): rekonstruerer eventet fra backtesten (samme early_rs + top-3),
+    koerer shadow-eval's EGEN simulate/net_pct/summarize_day paa samme bars, og sammenligner med
+    cross_sectional_rs_backtest.build_day_obs.alpha. Alle dage skal matche (op til afrunding)."""
+    import cross_sectional_rs_backtest as bt
+    cents = args.cost_cents
+    T = dtime(9, 45)
+    T_min = T.hour * 60 + T.minute
+
+    emit("\n  KOERSEL 3 — SELFTEST: shadow-alpha vs backtest-alpha (samme picks, offline bar_cache)")
+    universe = bt.load_universe()
+    if not universe:
+        emit("  INGEN universe-filer -> kan ikke selfteste.")
+        return False
+    all_names = sorted({tk for ticks in universe.values() for tk in ticks})
+    data = {tk: bt.load_ticker_days(tk) for tk in all_names}
+
+    def _silent(*_a, **_k):
+        pass
+
+    emit(f"     {'dag':>11}{'backtest_alpha':>16}{'shadow_alpha':>14}{'diff':>12}   verdikt")
+    n_ok = n_match = 0
+    max_diff = 0.0
+    shown = 0
+    for day in sorted(universe):
+        # backtest-siden (kilden)
+        obs = bt.build_day_obs(universe, data, day, T, "early_rs", 3, "eod", cents,
+                               bt.TARGET_PCT_DEFAULT, bt.STOP_PCT_DEFAULT, bt.TRAIL_LB_DEFAULT)
+        bt_alpha = obs.alpha if obs else None
+
+        # shadow-siden: rekonstruer picks + koer shadow's egen simulate/summarize paa samme bars
+        scores, results = {}, {}
+        for sym in universe[day]:
+            bars = data.get(sym, {}).get(day)
+            if not bars or len(bars) < 3:
+                continue
+            ns = bt.compute_name_score(sym, bars, None, T, "early_rs")
+            if ns.raw is not None:
+                scores[sym] = ns.raw
+            rth = [{"tmin": b.dt.hour * 60 + b.dt.minute, "o": b.o, "h": b.h, "l": b.l, "c": b.c}
+                   for b in bars]
+            results[sym] = simulate(rth, T_min)
+        sel = sorted(scores, key=lambda s: (-scores[s], s))[:TOP_K]
+        agg = summarize_day(day, [], sel, results, cents, _silent)
+        sh_alpha = agg["alpha"] if agg else None
+
+        if bt_alpha is None and sh_alpha is None:
+            continue                                   # begge udelader dagen -> enige, ingen dom
+        n_ok += 1
+        if bt_alpha is None or sh_alpha is None:
+            verdict = "AFVIG (én mangler)"
+            diff = float("nan")
+        else:
+            diff = abs(bt_alpha - sh_alpha)
+            max_diff = max(max_diff, diff)
+            match = diff < 1e-6
+            n_match += match
+            verdict = "match" if match else "AFVIG"
+        if shown < args.days:
+            shown += 1
+            ba = f"{bt_alpha:+.6f}" if bt_alpha is not None else "na"
+            sa = f"{sh_alpha:+.6f}" if sh_alpha is not None else "na"
+            dd = f"{diff:.2e}" if diff == diff else "na"     # nan-check
+            emit(f"     {str(day):>11}{ba:>16}{sa:>14}{dd:>12}   {verdict}")
+
+    ok = (n_ok > 0 and n_match == n_ok)
+    emit("")
+    emit(f"  Dage sammenlignet: {n_ok}  ·  match: {n_match}/{n_ok}  ·  max diff: {max_diff:.2e}")
+    if ok:
+        emit("  -> PASS: shadow-eval maaler PRAECIS samme selection-alpha som backtesten. Route B")
+        emit("     dommer paa det tal backtesten bestod. (entry=naeste-open, exit=EOD, net-kost 1:1.)")
+    else:
+        emit("  -> AFVIG: definitionen (entry-timing / universe-population / slippage) er ude af sync.")
+        emit("     Ret shadow-eval til at spejle backtesten 1:1 og genkoer FOER paper taeller.")
+    return ok
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -329,6 +408,9 @@ def main():
     ap.add_argument("--source", default=SOURCE)
     ap.add_argument("--day", default=None, help="YYYY-MM-DD (default i dag)")
     ap.add_argument("--verify", action="store_true", help="laes BARE dagens event tilbage (intet IBKR)")
+    ap.add_argument("--selftest", action="store_true",
+                    help="KOERSEL 3: bevis shadow-alpha == backtest-alpha (offline, intet IBKR)")
+    ap.add_argument("--days", type=int, default=8, help="antal dage m. detaljer (--selftest)")
     ap.add_argument("--cost-cents", type=float, default=COST_READ_CENTS, help="doms-omkostning cents/side")
     ap.add_argument("--host", default=HOST)
     ap.add_argument("--port", type=int, default=PORT)
@@ -344,11 +426,14 @@ def main():
         print(s, flush=True)
         lines.append(s)
 
+    mode = "SELFTEST" if a.selftest else ("VERIFY" if a.verify else "FULD")
     emit("=" * 78)
-    emit(f"  RELATIV STYRKE — SHADOW SELECTION-ALPHA-EVAL · dag {day} · {'VERIFY' if a.verify else 'FULD'}")
+    emit(f"  RELATIV STYRKE — SHADOW SELECTION-ALPHA-EVAL · dag {day} · {mode}")
     emit("=" * 78)
 
-    if a.verify:
+    if a.selftest:
+        run_selftest(a, emit)
+    elif a.verify:
         run_verify(a.db, a.source, day, emit)
     else:
         try:
