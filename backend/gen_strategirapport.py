@@ -50,6 +50,7 @@ STRATS_CFG = [
     {"source": "Europa-reversion", "name": "EUREVERSION",     "short": "EUREV", "color": "#059669"},
     {"source": "BuyTheDip",        "name": "BuyTheDip",       "short": "BTD",   "color": "#d97706"},
     {"source": "Trend Join Long",  "name": "Trend Join Long", "short": "TJL",   "color": "#7c3aed"},
+    {"source": "Relativ Styrke",   "name": "Relativ Styrke",  "short": "RS",    "color": "#db2777"},
 ]
 STRATS      = [c["name"] for c in STRATS_CFG]
 SOURCE_OF   = {c["name"]: c["source"] for c in STRATS_CFG}
@@ -344,7 +345,7 @@ def build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, com
     story.append(Spacer(1, 6))
     story.append(Image(str(p_bar), width=180*mm, height=58*mm))
     story.append(Paragraph("K2 = Konfluens 2 &nbsp;·&nbsp; EUREV = EUREVERSION &nbsp;·&nbsp; "
-                           "BTD = BuyTheDip &nbsp;·&nbsp; TJL = Trend Join Long", NOTE))
+                           "BTD = BuyTheDip &nbsp;·&nbsp; TJL = Trend Join Long &nbsp;·&nbsp; RS = Relativ Styrke", NOTE))
     story.append(PageBreak())
 
     # ── Tabel 1: nøgletal ──

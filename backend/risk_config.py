@@ -52,11 +52,11 @@ DEFAULTS: dict[str, dict[str, dict]] = {
     "Trend Join Long": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
         "position_size":  {"pct": None, "amount": 250.0},   # risiko/handel ($)
-        "notional_cap":   {"pct": 10.0, "amount": None},    # notional-loft (10 % af NLV)
+        "notional_cap":   {"pct": None, "amount": 250.0},   # notional-loft ($) — binder -> ~$250-position som K2
     },
     "Relativ Styrke": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
-        "position_size":  {"pct": None, "amount": 250.0},   # samlet strategi-notional ($, deles paa 3)
+        "position_size":  {"pct": None, "amount": 250.0},   # notional PR. NAVN ($) — som K2s kapital/handel
         # notional_cap fjernet 2026-07-15: overfloedigt — position_size styrer den faktiske
         # position (equal-weight long, ingen stop), saa pr-navn = position_size/3 er selv-begraenset.
     },
@@ -84,7 +84,7 @@ SCHEMA: dict[str, list[dict]] = {
     ],
     "Relativ Styrke": [
         {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
-        {"key": "position_size",  "label": "Positionsstørrelse (samlet notional)", "hint": "capital"},
+        {"key": "position_size",  "label": "Positionsstørrelse (pr. navn)", "hint": "capital"},
     ],
 }
 

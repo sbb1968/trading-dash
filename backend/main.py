@@ -3857,7 +3857,8 @@ async def health():
     # faktisk KØRER netop nu (samme form som /algo/list) — saa Status-fanens flaade-board
     # kan vise "kører nu" pr. maskine uden en ekstra auth'et round-trip.
     JOBMAP = {"start_konfluens2": "Konfluens 2", "start_europa_reversion": "Europa-reversion",
-              "start_buythedip": "BuyTheDip", "start_trendjoin": "Trend Join Long"}
+              "start_buythedip": "BuyTheDip", "start_trendjoin": "Trend Join Long",
+              "start_relstyrke": "Relativ Styrke"}
     auto_starts = []
     if sched and identity.instance_role == "algoserver":
         for j in sched["jobs"]:
