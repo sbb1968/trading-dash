@@ -365,7 +365,11 @@ class MarketConditionChecker:
         elif mc.score >= 60:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "aktiv", 1.0, True
         elif mc.score >= 10:
-            mc.score_label, mc.position_size_pct, mc.skal_handle = "moderat", 0.5, True
+            # PAPER-TEST (Soeren 2026-07-17): fuld stoerrelse ($250), IKKE halv. Under paper
+            # skal sizingen vaere forudsigelig hver dag. Blokerings-trinnene nedenfor/ovenfor
+            # (0.0 = handl slet ikke paa raadne dage) bevares — kun halveringen er slaaet fra.
+            # Saet tilbage til 0.5 naar vi gaar live med rigtige penge.
+            mc.score_label, mc.position_size_pct, mc.skal_handle = "moderat", 1.0, True
         else:
             mc.score_label, mc.position_size_pct, mc.skal_handle = "rolig", 0.0, False
 
