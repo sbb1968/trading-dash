@@ -43,7 +43,11 @@ DEFAULTS: dict[str, dict[str, dict]] = {
     "BuyTheDip": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
         "position_size":  {"pct": None, "amount": 250.0},   # risiko/handel ($)
-        "notional_cap":   {"pct": None, "amount": 1000.0},  # notional-loft ($)
+        # Loftet BINDER altid ved 250 -> positionen bliver ~$250, dvs. samme stoerrelse som
+        # K2's kapital-baserede $250 (Soeren 2026-07-17). Uden loft ville et taet stop give
+        # $250/risiko-pr-aktie = en position paa titusinder. Loftet er dermed den reelle
+        # positions-styring for BuyTheDip; position_size ovenfor binder i praksis aldrig.
+        "notional_cap":   {"pct": None, "amount": 250.0},   # notional-loft ($)
     },
     "Trend Join Long": {
         "max_daily_loss": {"pct": None, "amount": 25.0},
