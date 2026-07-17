@@ -51,7 +51,7 @@ from trade_forensics import (build_entry_snapshot, build_exit_snapshot,
 from strategies.europa_reversion import EuropaReversionStrategy, rule
 from strategies.europa_reversion.config import (
     SESSION_START_ET, SESSION_END_ET, FORCE_CLOSE_ET, LAST_SESSION_BAR_ET,
-    LOOKBACK, ENTRY_Z, BAR_SIZE, BAR_MINUTES, INSTRUMENTS, RISK_PCT, MULTIPLIER,
+    LOOKBACK, ENTRY_Z, BAR_SIZE, BAR_MINUTES, INSTRUMENTS, RISK_PCT, MULTIPLIER, MAX_CONTRACTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -753,8 +753,7 @@ class EuropaReversionLive(BaseStrategy):
     def _size_contracts(self, sym: str, sd: float) -> tuple[int, float, float]:
         """
         Returnér (antal_kontrakter, stop_afstand_point, per_kontrakt_risiko).
-        antal_kontrakter == 0 → spring handlen over (konto for lille til denne
-        bars stop-afstand).
+        Handler ALTID mindst 1 og højst MAX_CONTRACTS kontrakter — se gulvet nedenfor.
         """
         mult = MULTIPLIER.get(sym, 5.0)
 
@@ -769,10 +768,13 @@ class EuropaReversionLive(BaseStrategy):
 
         contracts = floor(risk_dollars / per_contract_risk)
 
-        if contracts < 1:
-            # Sikkerhedsgulv: handl 1 kontrakt KUN hvis 1-kontrakts-risiko er inden for
-            # risiko/handel; ellers spring over (ærligere end at overtrade en lille konto).
-            contracts = 1 if per_contract_risk <= risk_dollars else 0
+        # GULV + LOFT (Søren 2026-07-17): handl ALTID præcis 1 kontrakt på den lille konto.
+        # Før sprang den over hver gang 1-kontrakts-risiko (~$25+) oversteg risiko/handel
+        # ($19,94) → strategien lavede INGEN handler overhovedet. Vi accepterer bevidst at
+        # 1 kontrakts risiko kan overstige risiko/handel, for ellers kan eureversion slet
+        # ikke testes på paper. Loftet (MAX_CONTRACTS) hindrer omvendt at et større
+        # risiko-budget køber flere kontrakter end kontoen har margin til.
+        contracts = max(1, min(contracts, MAX_CONTRACTS))
 
         return contracts, stop_dist, per_contract_risk
 

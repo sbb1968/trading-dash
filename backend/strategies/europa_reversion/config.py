@@ -38,3 +38,7 @@ MULTIPLIER = {
     "MES": 5.0,
     "M2K": 5.0,
 }
+# Loft paa antal kontrakter pr. handel. 1 = Ibens lille test-konto (~$1.400) har ikke
+# margin til mere; sammen med gulvet i _size_contracts betyder det ALTID praecis 1
+# kontrakt. Haev naar kontoen kan baere det (saa faar risiko/handel effekt igen).
+MAX_CONTRACTS = 1
