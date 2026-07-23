@@ -50,6 +50,16 @@ export function FloatingWindow({ id, title, children, defaultState, onClose, tra
     defaultState.closed,
   ]);
 
+  // Bring-to-front styret UDEFRA: naar parent bumper zIndex (getNextZ) for at
+  // loefte et allerede-aabent vindue frem (fx dobbeltklik paa samme ticker igen,
+  // eller gen-aabning fra menuen), skal vi foelge med. Uden dette blev det nye
+  // zIndex-prop ignoreret, saa pop-up'en kom BAG det aktuelle vindue.
+  // Roerer kun zIndex (ikke position) og kun opad — sikkert selv under drag.
+  useEffect(() => {
+    if (defaultState.zIndex == null) return;
+    setState(prev => (defaultState.zIndex! > (prev.zIndex ?? 0) ? { ...prev, zIndex: defaultState.zIndex } : prev));
+  }, [defaultState.zIndex]);
+
   useEffect(() => {
     localStorage.setItem(`window_${id}`, JSON.stringify(state));
     onStateChange?.(state);
