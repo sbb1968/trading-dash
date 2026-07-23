@@ -421,7 +421,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       <div className="watchlist-add">
         <input className="watchlist-input" type="text" placeholder="Tilføj ticker (tryk Enter)" value={input}
           onChange={e => { setInput(e.target.value.toUpperCase()); setError(""); }}
-          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={6} />
+          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={10} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
       <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>

@@ -117,7 +117,7 @@ export function BuyHoldReport({ onSelectTicker, onOpenDetail }:
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="text" placeholder="Tilføj ticker (fx KO)" value={ticker}
             onChange={e => { setTicker(e.target.value.toUpperCase()); setErr(""); }}
-            onKeyDown={e => { if (e.key === "Enter" && !busy) addTicker(); }} maxLength={6}
+            onKeyDown={e => { if (e.key === "Enter" && !busy) addTicker(); }} maxLength={10}
             style={{ flex: 1, background: "var(--bg-input)", color: "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 10px", fontSize: 14, fontWeight: 700, letterSpacing: "0.5px" }} />
           <button onClick={addTicker} disabled={busy}
             style={{ background: busy ? "var(--bg-elevated)" : "var(--accent)", color: busy ? "var(--text-muted)" : "#fff", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: busy ? "default" : "pointer", whiteSpace: "nowrap" }}>

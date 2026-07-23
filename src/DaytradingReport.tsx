@@ -119,7 +119,7 @@ export function DaytradingReport({ onSelectTicker, onOpenDetail }:
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input type="text" placeholder="Tilføj symbol (fx AMAT)" value={symbol}
             onChange={e => { setSymbol(e.target.value.toUpperCase()); setErr(""); }}
-            onKeyDown={e => { if (e.key === "Enter" && !busy) addSymbol(); }} maxLength={6}
+            onKeyDown={e => { if (e.key === "Enter" && !busy) addSymbol(); }} maxLength={10}
             style={{ flex: 1, background: "var(--bg-input)", color: "var(--text-primary)", border: "1px solid var(--border-strong)", borderRadius: 4, padding: "6px 10px", fontSize: 14, fontWeight: 700, letterSpacing: "0.5px" }} />
           <button onClick={addSymbol} disabled={busy}
             style={{ background: busy ? "var(--bg-elevated)" : "var(--accent)", color: busy ? "var(--text-muted)" : "#fff", border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 13, fontWeight: 700, cursor: busy ? "default" : "pointer", whiteSpace: "nowrap" }}>
