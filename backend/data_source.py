@@ -77,9 +77,58 @@ def _write_cache(ticker: str, df: pd.DataFrame) -> None:
         pass   # cache-fejl maa aldrig vaelte et opslag
 
 
+async def _resolve_stock(ib, ticker: str):
+    """Find en handlbar STK-kontrakt for `ticker` — som TWS' soegefelt goer.
+
+    Hurtig vej (uaendret): US-aktie paa SMART/USD, daekker de allerfleste opslag.
+    Falder den, proever vi:
+      2) Klasse-aktie: TradingView/Yahoo skriver 'BRK.B'/'VPLAY.B', men IBKR
+         bruger MELLEMRUM ('BRK B'). Vi mapper dot -> mellemrum, stadig US/USD.
+      3) IBKRs egen symbol-soegning (reqMatchingSymbols) — praecis det TWS goer.
+         Finder udenlandske/klasse-aktier med rigtig boers OG valuta automatisk
+         (fx VPLAY.B -> Stockholm / SEK), saa vi ikke laengere haardkoder USD.
+    Returnerer en kvalificeret kontrakt (conId sat) eller None.
+    """
+    from ib_async import Stock
+    sym = ticker.upper().strip()
+
+    async def _try(contract):
+        try:
+            q = await ib.qualifyContractsAsync(contract)
+        except Exception:
+            return None
+        return q[0] if q and getattr(q[0], "conId", 0) else None
+
+    # 1) US-aktie (hurtig, uaendret adfaerd)
+    c = await _try(Stock(sym, "SMART", "USD"))
+    if c:
+        return c
+
+    # 2) US klasse-aktie: dot -> mellemrum (fx BRK.B -> 'BRK B')
+    if "." in sym:
+        c = await _try(Stock(sym.replace(".", " "), "SMART", "USD"))
+        if c:
+            return c
+
+    # 3) IBKR symbol-soegning (som TWS) — udenlandske/klasse-aktier med rigtig
+    #    boers og valuta. Vi tager foerste kvalificerbare STK-match.
+    try:
+        matches = await ib.reqMatchingSymbolsAsync(sym.replace(".", " "))
+    except Exception:
+        matches = None
+    for m in (matches or []):
+        cd = getattr(m, "contract", None)
+        if cd is None or getattr(cd, "secType", None) != "STK":
+            continue
+        c = await _try(cd)
+        if c:
+            return c
+    return None
+
+
 async def _fetch_ibkr(ticker: str) -> Optional[pd.DataFrame]:
     try:
-        from ib_async import IB, Stock
+        from ib_async import IB
     except ImportError:
         return None
     ib = IB()
@@ -89,8 +138,9 @@ async def _fetch_ibkr(ticker: str) -> Optional[pd.DataFrame]:
     except Exception:
         return None
     try:
-        c = Stock(ticker.upper(), "SMART", "USD")
-        await ib.qualifyContractsAsync(c)
+        c = await _resolve_stock(ib, ticker)
+        if c is None:
+            return None
         bars = await ib.reqHistoricalDataAsync(
             c, endDateTime="", durationStr=DURATION, barSizeSetting="1 day",
             whatToShow="TRADES", useRTH=True, formatDate=2)
