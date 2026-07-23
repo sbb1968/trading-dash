@@ -49,6 +49,7 @@ CACHE_DIR = Path(__file__).parent / "data_swing_cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 _MEM: dict[str, Optional[pd.DataFrame]] = {}   # in-memory cache pr. proces
+_STATUS: dict[str, str] = {}                   # sidste hente-status pr. ticker (se _fetch_ibkr)
 
 
 def _cache_path(ticker: str) -> Path:
@@ -87,7 +88,8 @@ async def _resolve_stock(ib, ticker: str):
       3) IBKRs egen symbol-soegning (reqMatchingSymbols) — praecis det TWS goer.
          Finder udenlandske/klasse-aktier med rigtig boers OG valuta automatisk
          (fx VPLAY.B -> Stockholm / SEK), saa vi ikke laengere haardkoder USD.
-    Returnerer en kvalificeret kontrakt (conId sat) eller None.
+    Returnerer (kontrakt, is_us): is_us=True for en US-aktie (USD), False hvis
+    tickeren KUN findes paa en ikke-US boers. (None, False) hvis intet match.
     """
     from ib_async import Stock
     sym = ticker.upper().strip()
@@ -102,16 +104,17 @@ async def _resolve_stock(ib, ticker: str):
     # 1) US-aktie (hurtig, uaendret adfaerd)
     c = await _try(Stock(sym, "SMART", "USD"))
     if c:
-        return c
+        return c, True
 
     # 2) US klasse-aktie: dot -> mellemrum (fx BRK.B -> 'BRK B')
     if "." in sym:
         c = await _try(Stock(sym.replace(".", " "), "SMART", "USD"))
         if c:
-            return c
+            return c, True
 
     # 3) IBKR symbol-soegning (som TWS) — udenlandske/klasse-aktier med rigtig
-    #    boers og valuta. Vi tager foerste kvalificerbare STK-match.
+    #    boers og valuta. Vi tager foerste kvalificerbare STK-match og laeser dens
+    #    valuta: USD => US-aktie (stoettet), alt andet => udenlandsk (ikke stoettet).
     try:
         matches = await ib.reqMatchingSymbolsAsync(sym.replace(".", " "))
     except Exception:
@@ -122,38 +125,46 @@ async def _resolve_stock(ib, ticker: str):
             continue
         c = await _try(cd)
         if c:
-            return c
-    return None
+            return c, (getattr(c, "currency", "") == "USD")
+    return None, False
 
 
-async def _fetch_ibkr(ticker: str) -> Optional[pd.DataFrame]:
+async def _fetch_ibkr(ticker: str) -> tuple[Optional[pd.DataFrame], str]:
+    """Returnerer (df, status). status:
+       'ok'      = US-aktie med historik.
+       'foreign' = tickeren findes, men kun paa en ikke-US boers (ikke stoettet).
+       'no_data' = US-aktie fundet, men ingen historik (fx manglende data-tilladelse).
+       'no_conn' = kunne ikke forbinde til TWS/Gateway.
+       'unknown' = symbolet kunne slet ikke resolves / anden fejl."""
     try:
         from ib_async import IB
     except ImportError:
-        return None
+        return None, "unknown"
     ib = IB()
     cid = random.randint(70, 89)   # hoejt id -> kolliderer ikke med live-backend
     try:
         await ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=cid, timeout=CONNECT_TIMEOUT)
     except Exception:
-        return None
+        return None, "no_conn"
     try:
-        c = await _resolve_stock(ib, ticker)
+        c, is_us = await _resolve_stock(ib, ticker)
         if c is None:
-            return None
+            return None, "unknown"
+        if not is_us:
+            return None, "foreign"
         bars = await ib.reqHistoricalDataAsync(
             c, endDateTime="", durationStr=DURATION, barSizeSetting="1 day",
             whatToShow="TRADES", useRTH=True, formatDate=2)
         if not bars:
-            return None
+            return None, "no_data"
         df = pd.DataFrame(
             [{"Open": b.open, "High": b.high, "Low": b.low,
               "Close": b.close, "Volume": b.volume} for b in bars],
             index=pd.to_datetime([b.date for b in bars]),
         )
-        return df if not df.empty else None
+        return (df, "ok") if not df.empty else (None, "no_data")
     except Exception:
-        return None
+        return None, "unknown"
     finally:
         try:
             ib.disconnect()
@@ -285,19 +296,30 @@ async def _fetch_spread_ibkr(ticker: str) -> Optional[float]:
 
 
 def load_bars(ticker: str) -> Optional[pd.DataFrame]:
-    """Daglig OHLCV for én ticker. None hvis utilgaengelig."""
+    """Daglig OHLCV for én ticker. None hvis utilgaengelig.
+
+    Saetter samtidig sidste hente-status (se last_status) saa kalderen kan skelne
+    'udenlandsk aktie' fra 'ingen data' og give en praecis besked."""
     t = ticker.upper()
     if t in _MEM:
         return _MEM[t]
 
     df = _read_cache(t)
-    if df is None:
-        df = _run(_fetch_ibkr(t))
+    if df is not None:
+        _STATUS[t] = "ok"
+    else:
+        df, _STATUS[t] = _run(_fetch_ibkr(t))
         if df is not None and not df.empty:
             _write_cache(t, df)
 
     _MEM[t] = df
     return df
+
+
+def last_status(ticker: str) -> str:
+    """Status for det seneste load_bars(ticker)-opslag i denne proces.
+    'ok' | 'foreign' | 'no_data' | 'no_conn' | 'unknown' (default 'unknown')."""
+    return _STATUS.get(ticker.upper(), "unknown")
 
 
 if __name__ == "__main__":

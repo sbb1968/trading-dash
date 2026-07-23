@@ -248,6 +248,11 @@ def _ohlcv(ticker: str, source: str, period: str):
         df = data_source.load_bars(ticker)
         if df is not None and not df.empty:
             return df
+        # Udenlandsk aktie (findes kun paa en ikke-US boers): vaerktoejet er
+        # US-kun (IBKR US-feed + Tradingview US-fundamentaler), saa vi stopper
+        # med en klar besked frem for en misvisende "ingen prisdata".
+        if data_source.last_status(ticker) == "foreign":
+            raise ValueError("Kun amerikanske aktier understøttes.")
         try:                                   # IBKR tom -> yfinance-fallback
             fb = tech._yf_ohlcv(ticker, period or "2y")
         except Exception:
