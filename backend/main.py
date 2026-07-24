@@ -4230,6 +4230,17 @@ async def get_internal_key():
 # så vi ikke logger ved hver auto-refresh, kun én gang i timen.
 _last_snapshot_journaled_at: datetime | None = None
 
+# Sidste GODE live-pris pr. ticker fra dash-snapshot. IBKR's one-shot snapshot
+# (reqTickers) rammer af og til en enkelt ticker for langsomt og returnerer None
+# i den runde. Positioner fra strategier der IKKE selv skriver current_price til
+# journalen (RelStyrke/BuyTheDip/TrendJoin) laener sig 100% op ad dette snapshot,
+# saa én manglende runde gav "afventer live pris"-striben — selvom vi havde en
+# fin pris et par sekunder foer. Vi cacher derfor sidste gode pris og genbruger
+# den kortvarigt (< TTL) naar en runde svigter. Rent DISPLAY — paavirker ikke
+# handelslogik, ordrer eller journal.
+_last_good_price: dict[str, tuple[float, datetime]] = {}
+DASH_PRICE_CACHE_TTL = 120   # sekunder — hvor gammel en genbrugt pris hoejst maa vaere
+
 
 def _best_snapshot_price(snap: dict):
     """Bedste tilgængelige 'aktuelle' pris fra et get_snapshot-dict.
@@ -4476,8 +4487,19 @@ async def account_dash_snapshot():
             print("[DashSnapshot] Timeout — markedet er lukket, returnerer uden live priser")
             prices = [None] * len(positions)
 
+        now = datetime.now()
         enriched = []
         for p, price in zip(positions, prices):
+            # Daemp snapshot-flimmer: cache sidste gode pris og genbrug den hvis
+            # DENNE runde manglede (og prisen er < TTL gammel). Saa en enkelt
+            # svigtet snapshot-runde for én ticker giver ikke laengere "afventer".
+            tkr = (p.get("ticker") or "").upper()
+            if price is not None:
+                _last_good_price[tkr] = (price, now)
+            else:
+                cached = _last_good_price.get(tkr)
+                if cached and (now - cached[1]).total_seconds() <= DASH_PRICE_CACHE_TTL:
+                    price = cached[0]
             cost = safe_float(p["avg_cost"])
             qty  = p["position"]
 
