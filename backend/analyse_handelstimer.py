@@ -567,7 +567,132 @@ def write_excel(main, agg, dow, split, midpoint, meta):
             if c == len(main.columns):     # faerv kun "Vurdering"-cellen
                 cell.fill = fill; cell.font = font
     ws.freeze_panes = "A3"
-    autosize(ws, [12, 8, 15, 9, 16, 15, 14, 14, 10, 13, 12, 10, 22])
+    autosize(ws, [12, 8, 16, 10, 18, 16, 15, 16, 11, 15, 13, 12, 9, 22])
+
+    # ---- Feltforklaring UNDER hovedtabellen (hvert eneste felt beskrevet) ----
+    # Eksplicit raekke-indeks (ikke ws.append) — tomme append-raekker desynkroniserer
+    # ellers ws.max_row fra openpyxls interne markoer og overskriver felter.
+    ncol = len(main.columns)
+    row = 2 + len(main) + 2      # titel(1) + header(1) + datarraekker + 1 blank
+    ws.cell(row, 1, "FELTFORKLARING — hvad hver kolonne betyder").font = Font(bold=True, size=12)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncol)
+    row += 2
+
+    def doc_block(title, items, row):
+        """Skriv overskrift + raekker af (felt, beskrivelse). Returnerer naeste ledige raekke."""
+        if title:
+            ws.cell(row, 1, title).font = Font(bold=True, italic=True, color="1F3864")
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncol)
+            row += 1
+        for name, desc in items:
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+            c1 = ws.cell(row, 1, name)
+            c1.font = Font(bold=True)
+            c1.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.merge_cells(start_row=row, start_column=4, end_row=row, end_column=ncol)
+            c2 = ws.cell(row, 4, desc)
+            c2.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.row_dimensions[row].height = max(30, 15 * (1 + len(desc) // 95))
+            row += 1
+        return row + 1           # en blank raekke efter blokken
+
+    up = f"{USD_PER_POINT:.0f}"
+    field_docs = [
+        ("Time (DK)",
+         "Dansk time-interval i vaegur-tid (Europe/Copenhagen). Fx '15:00-16:00' = al "
+         "bevaegelse mellem kl. 15:00:00 og 15:59:59 dansk tid, samlet paa tvaers af alle "
+         "dage. Kilden er ET (US-boers) og konverteres tz-bevidst, saa dansk sommertid "
+         "(CET<->CEST) haandteres automatisk."),
+        ("n (dage)",
+         "Antal dage der bidrager til timen (en observation pr. kalenderdato). Hoej n = "
+         "mere paalideligt tal. Er n under 30 vurderes timen som 'for lidt data' (graa). "
+         "Timer med faerre minutter end 30 (vedligeholdelse/weekend-kant) er sorteret fra "
+         "foerst, saa de ikke traekker gennemsnittet."),
+        ("Median range (pt)",
+         "PRIMAERT bevaegelsesmaal. Median af (timens high - low) paa tvaers af dagene, i "
+         "indekspoint. Det typiske spaend timen bevaeger sig i. Retningsloest (siger intet "
+         "om op/ned). Median frem for gennemsnit, saa enkelte vilde nyhedsdage ikke oppuster "
+         "tallet."),
+        ("Range ($)",
+         f"Median range omregnet til dollar: range_pt x ${up} (MES = ${up} pr. indekspoint). "
+         "Hvad timens typiske spaend er vaerd i penge pr. kontrakt — den hurtige "
+         "'kan det betale sig'-linje."),
+        ("Median |beveg.| (pt)",
+         "Median af |close - open|: hvor langt prisen faktisk endte fra sin start i timen "
+         "(absolut netto, uden fortegn). Er typisk mindre end range, fordi prisen ofte "
+         "vender undervejs. Stor forskel range vs. |beveg.| = timen churner (frem og "
+         "tilbage) snarere end at trende."),
+        ("Gns. afkast (pt, +/-)",
+         "GENNEMSNIT af (close - open) MED fortegn. Positiv = timen tenderer op over de to "
+         "aar, negativ = ned. Tal taet paa 0 = ingen retningsbias. Gennemsnit (ikke median) "
+         "her, fordi vi vil fange systematisk drift, ikke den typiske dag."),
+        ("Median max-op (pt)",
+         "Median af (high - open): hvor langt OP timen typisk naaede fra sin aabning. "
+         "Groft long-potentiale i timen — hvor meget en koeb-position kunne loebe med."),
+        ("Median max-ned (pt)",
+         "Median af (open - low): hvor langt NED timen typisk naaede fra sin aabning. "
+         "Groft short-potentiale — hvor meget en salgs-position kunne loebe med."),
+        ("Churn (pt)",
+         "Median af summen af |1-minuts-afkast| inden i timen = total tilbagelagt vej "
+         "(close-til-close). Hoej churn + LAV range = meget frem og tilbage om samme niveau "
+         "(godt for mean-reversion). Hoej range + LAV churn = et enkelt rent spring."),
+        ("Median volumen",
+         "Median antal handlede kontrakter i timen (sum over minutterne, median over dagene). "
+         "Skiller aegte bevaegelse MED likviditet fra tynde spring: en hoej range paa lav "
+         "volumen er upaalidelig (svaer at komme ind/ud, bredere spread)."),
+        ("Range p90 (pt)",
+         "90-percentilen af range paa tvaers af dagene — 'haledagene'. Viser hvor stor timen "
+         "kan blive paa de ~10% vildeste dage. Stor afstand fra medianen = timen har af og "
+         "til eksplosive dage."),
+        ("Andel store",
+         "KONSISTENS-maal i procent: andel af dagene hvor timens range oversteg DAGENS EGEN "
+         "median-range (paa tvaers af doegnets timer). Hoej = timen er paalideligt en af "
+         "dagens mest aktive; lav = kun faa dage traekker den op. En stor-men-inkonsistent "
+         "time nedgraderes et trin i vurderingen."),
+        ("Bias",
+         "Retningstendens ud fra median netto-afkast: LONG hvis klart positiv, SHORT hvis "
+         "klart negativ, ellers 'neutral'. En lille doedzone (0,5 pt) forhindrer stoej i at "
+         "blive kaldt en bias. NB: selv en 'bias' er svag paa MES — det er en tendens, "
+         "ikke en regel."),
+        ("Vurdering",
+         "Trafiklys, samlet dom: GROEN = nok bevaegelse OG konsistent; GUL = moderat, vaelg "
+         "dine spots; ROED = for stille/upaalidelig; GRAA = for lidt data eller lukket time. "
+         "Kombinerer en absolut cost-floor (er der overhovedet nok?) med en relativ tercil "
+         "(bedst vs. resten af doegnet) og nedgraderer inkonsistente timer."),
+    ]
+    row = doc_block("", field_docs, row)
+
+    row = doc_block("Generelt", [
+        ("Enhed",
+         f"Alt i indekspoint (pt). 1 tick = {POINT_PER_TICK} pt; 1 pt = ${up} pr. MES-kontrakt. "
+         "$-kolonnen er point x " + up + "."),
+        ("Median vs. gennemsnit",
+         "Median er primaer (robust mod enkelte ekstreme dage). Gennemsnit vises hvor det "
+         "tilfoejer noget (afkast/drift). Stor forskel = faa dage traekker — stol paa medianen."),
+        ("Ingen strategi",
+         "Ren beskrivende historik. INGEN entry/exit, P&L, indikatorer eller forudsigelse. "
+         "'Groen' betyder 'her er nok at arbejde med', IKKE 'her tjener man penge'."),
+    ], row)
+
+    row = doc_block("Andre faner i regnearket", [
+        ("Ugedag x time (range)",
+         "Matrix: raekker = de 24 danske timer, kolonner = ugedage. Celletal = median range "
+         "(pt) for den ugedag+time. Farve = relativ tercil paa tvaers af ugens celler "
+         "(groen=oeverste tredjedel, gul=midt, roed=nederste, graa=n<30)."),
+        ("Ugedag x time (volumen)",
+         "Samme matrix, men celletal = median volumen (kontrakter) og farve = relativ tercil "
+         "af volumen. Læs sammen med range-matrixen: groen begge steder = bevaegelse MED "
+         "likviditet."),
+        ("Split-half",
+         "Robusthedstjek. '1. halvdel'/'2. halvdel' = trafiklys for hver periode (foer/efter "
+         "midtdatoen). 'Robust?' = samme farve i begge. 'Flag' = 'groen kun i en halvdel' "
+         "(ikke robust) eller 'skift'. Et moenster der kun findes i det ene aar er ikke til "
+         "at stole paa."),
+        ("Raa aggregat",
+         "Alle tal ufarvet til egen graving: dk_hour, n, <maal>_med og <maal>_avg for hvert "
+         "af de 6 maal, vol_med/vol_avg, range_p90, andel_store, bias og level (0=graa, "
+         "1=roed, 2=gul, 3=groen)."),
+    ], row)
 
     # ---- Fane 2: Ugedag x time — heatmap (median range, farvet celle) ----
     ws2 = wb.create_sheet("Ugedag x time (range)")
