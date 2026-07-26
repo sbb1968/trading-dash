@@ -185,6 +185,9 @@ def aggregate_by_hour(valid: pd.DataFrame) -> pd.DataFrame:
         for key in MEASURES:
             row[f"{key}_med"] = sub[key].median() if n else np.nan
             row[f"{key}_avg"] = sub[key].mean()   if n else np.nan
+        # Volumen (kontrakter): skiller "bevaegelse MED likviditet" fra tynde spring.
+        row["vol_med"]     = sub["vol"].median() if n else np.nan
+        row["vol_avg"]     = sub["vol"].mean()   if n else np.nan
         row["range_p90"]   = sub["range"].quantile(0.90) if n else np.nan
         row["andel_store"] = sub["is_big"].mean() if n else np.nan
         row["bias"]        = bias_label(row["net_med"]) if n else "—"
@@ -286,6 +289,7 @@ def aggregate_by_dow_hour(valid: pd.DataFrame) -> pd.DataFrame:
                 "dow": int(dow), "ugedag": DK_DOW[int(dow)], "dk_hour": hour,
                 "n": n, "range_med": sub["range"].median(),
                 "abs_move_med": sub["abs_move"].median(),
+                "vol_med": sub["vol"].median(),
                 "net_med": sub["net"].median(), "bias": bias_label(sub["net"].median()),
             })
     dfc = pd.DataFrame(rows)
@@ -368,6 +372,7 @@ def build_main_table(agg: pd.DataFrame) -> pd.DataFrame:
     out["Median max-op (pt)"]   = agg["max_up_med"].round(2)
     out["Median max-ned (pt)"]  = agg["max_down_med"].round(2)
     out["Churn (pt)"]           = agg["churn_med"].round(2)
+    out["Median volumen"]       = agg["vol_med"].round(0)
     out["Range p90 (pt)"]       = agg["range_p90"].round(2)
     out["Andel store"]          = (agg["andel_store"] * 100).round(0)
     out["Bias"]                 = agg["bias"]
@@ -419,7 +424,7 @@ def write_reports(main, agg, dow, split, midpoint, thin, meta):
     dow_out = dow.copy()
     dow_out["Time (DK)"] = dow_out["dk_hour"].map(hour_label)
     dow_out = dow_out[["ugedag", "Time (DK)", "dk_hour", "n", "range_med",
-                       "abs_move_med", "net_med", "bias", "vurdering"]]
+                       "abs_move_med", "vol_med", "net_med", "bias", "vurdering"]]
     dow_out.to_csv(dow_path, index=False, encoding="utf-8-sig")
 
     # --- MD-rapport ---
@@ -508,6 +513,169 @@ def split_md(split: pd.DataFrame) -> str:
 
 
 # =============================================================================
+# EXCEL-UDGAVE (farvekodet heatmap)
+# =============================================================================
+# Excel-fyldfarver pr. trafiklys-niveau (Excels standard traffic-fills)
+XLSX_FILL = {0: "D9D9D9", 1: "FFC7CE", 2: "FFEB9C", 3: "C6EFCE"}
+XLSX_FONT = {0: "808080", 1: "9C0006", 2: "9C6500", 3: "006100"}
+
+
+def write_excel(main, agg, dow, split, midpoint, meta):
+    """Skriv en paen, farvekodet .xlsx med flere faner. Kraever openpyxl."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    OUT_DIR.mkdir(exist_ok=True)
+    path = OUT_DIR / "handelstimer_mes.xlsx"
+
+    wb = Workbook()
+    thin_border = Border(*[Side(style="thin", color="DDDDDD")] * 4)
+    hdr_fill = PatternFill("solid", fgColor="1F3864")
+    hdr_font = Font(bold=True, color="FFFFFF")
+
+    def style_header(ws, ncols, row=1):
+        for c in range(1, ncols + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.fill = hdr_fill; cell.font = hdr_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+
+    def autosize(ws, widths):
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ---- Fane 1: Timer (DK) — hoveddeliverable, farvet efter niveau ----
+    ws = wb.active
+    ws.title = "Timer (DK)"
+    ws.append([f"MES — bevaegelse pr. time (dansk tid) · {meta['start']} → {meta['slut']} "
+               f"· {meta['days']} handelsdage · 1 pt = ${USD_PER_POINT:.0f}"])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(main.columns))
+    ws.cell(1, 1).font = Font(bold=True, size=12)
+    ws.append(list(main.columns))
+    style_header(ws, len(main.columns), row=2)
+    for i, (_, r) in enumerate(main.iterrows()):
+        ws.append(list(r.values))
+        lvl = int(agg.iloc[i]["level"])
+        fill = PatternFill("solid", fgColor=XLSX_FILL[lvl])
+        font = Font(color=XLSX_FONT[lvl], bold=(lvl == 3))
+        rownum = ws.max_row
+        for c in range(1, len(main.columns) + 1):
+            cell = ws.cell(rownum, c)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center")
+            if c == len(main.columns):     # faerv kun "Vurdering"-cellen
+                cell.fill = fill; cell.font = font
+    ws.freeze_panes = "A3"
+    autosize(ws, [12, 8, 15, 9, 16, 15, 14, 14, 10, 13, 12, 10, 22])
+
+    # ---- Fane 2: Ugedag x time — heatmap (median range, farvet celle) ----
+    ws2 = wb.create_sheet("Ugedag x time (range)")
+    order = [d for d in range(7) if d in dow["dow"].values]
+    cols = ["Time (DK)"] + [DK_DOW[d] for d in order]
+    ws2.append(cols)
+    style_header(ws2, len(cols))
+    for h in range(24):
+        rowvals = [hour_label(h)]
+        levels = [None]
+        for d in order:
+            c = dow[(dow["dow"] == d) & (dow["dk_hour"] == h)]
+            if c.empty:
+                rowvals.append(None); levels.append(None)
+            else:
+                r = c.iloc[0]
+                rowvals.append(round(float(r["range_med"]), 1))
+                levels.append(int(r["level"]))
+        ws2.append(rowvals)
+        rownum = ws2.max_row
+        ws2.cell(rownum, 1).font = Font(bold=True)
+        ws2.cell(rownum, 1).border = thin_border
+        for ci, lvl in enumerate(levels[1:], start=2):
+            cell = ws2.cell(rownum, ci)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center")
+            if lvl is not None:
+                cell.fill = PatternFill("solid", fgColor=XLSX_FILL[lvl])
+                cell.font = Font(color=XLSX_FONT[lvl])
+    ws2.freeze_panes = "B2"
+    autosize(ws2, [12] + [11] * len(order))
+    ws2.append([])
+    ws2.append(["Farve = relativ tercil paa tvaers af ugens celler (groen=top, gul=midt, roed=bund). "
+                "Tal = median range i point. Graa = for lidt data (n<30)."])
+
+    # ---- Fane 3: Ugedag x time — volumen (median kontrakter) ----
+    ws3 = wb.create_sheet("Ugedag x time (volumen)")
+    ws3.append(cols)
+    style_header(ws3, len(cols))
+    # relativ farvning af volumen paa tvaers af cellerne
+    volcells = dow[dow["n"] >= MIN_N]["vol_med"]
+    vq1, vq2 = (volcells.quantile([1/3, 2/3]) if len(volcells) >= 3
+                else (volcells.median(), volcells.median())) if len(volcells) else (0, 0)
+    for h in range(24):
+        rowvals = [hour_label(h)]; vlevels = [None]
+        for d in order:
+            c = dow[(dow["dow"] == d) & (dow["dk_hour"] == h)]
+            if c.empty:
+                rowvals.append(None); vlevels.append(None)
+            else:
+                r = c.iloc[0]; v = float(r["vol_med"])
+                rowvals.append(round(v))
+                if r["n"] < MIN_N:
+                    vlevels.append(0)
+                else:
+                    vlevels.append(3 if v > vq2 else (2 if v > vq1 else 1))
+        ws3.append(rowvals)
+        rownum = ws3.max_row
+        ws3.cell(rownum, 1).font = Font(bold=True)
+        for ci, lvl in enumerate(vlevels[1:], start=2):
+            cell = ws3.cell(rownum, ci)
+            cell.border = thin_border; cell.alignment = Alignment(horizontal="center")
+            if lvl is not None:
+                cell.fill = PatternFill("solid", fgColor=XLSX_FILL[lvl])
+                cell.font = Font(color=XLSX_FONT[lvl])
+    ws3.freeze_panes = "B2"
+    autosize(ws3, [12] + [11] * len(order))
+    ws3.append([])
+    ws3.append(["Farve = relativ tercil af median-volumen (kontrakter) paa tvaers af ugens celler. "
+                "Hoej range + hoej volumen = bevaegelse MED likviditet."])
+
+    # ---- Fane 4: Split-half robusthed ----
+    ws4 = wb.create_sheet("Split-half")
+    ws4.append([f"Robusthed: samme vurdering paa foer/efter {midpoint}"])
+    ws4.append(["Time (DK)", "1. halvdel", "2. halvdel", "Robust?", "Flag"])
+    style_header(ws4, 5, row=2)
+    for _, r in split.iterrows():
+        ws4.append([hour_label(int(r["dk_hour"])),
+                    EMOJI[int(r["level_h1"])], EMOJI[int(r["level_h2"])],
+                    "ja" if r["robust"] else "NEJ", r["flag"]])
+        rn = ws4.max_row
+        for lvlcol, lvlval in ((2, int(r["level_h1"])), (3, int(r["level_h2"]))):
+            cell = ws4.cell(rn, lvlcol)
+            cell.fill = PatternFill("solid", fgColor=XLSX_FILL[lvlval])
+            cell.alignment = Alignment(horizontal="center")
+        if not r["robust"]:
+            ws4.cell(rn, 4).font = Font(bold=True, color="9C0006")
+    ws4.freeze_panes = "A3"
+    autosize(ws4, [12, 12, 12, 10, 22])
+
+    # ---- Fane 5: Raa aggregat (alle tal, ufarvet) ----
+    ws5 = wb.create_sheet("Raa aggregat")
+    raw_cols = ["dk_hour", "n"] + [f"{k}_med" for k in MEASURES] \
+        + [f"{k}_avg" for k in MEASURES] + ["vol_med", "vol_avg", "range_p90",
+                                            "andel_store", "bias", "level"]
+    ws5.append(raw_cols)
+    style_header(ws5, len(raw_cols))
+    for _, r in agg.iterrows():
+        ws5.append([round(r[c], 3) if isinstance(r[c], (int, float)) and not pd.isna(r[c])
+                    else r[c] for c in raw_cols])
+    ws5.freeze_panes = "A2"
+    autosize(ws5, [9] * len(raw_cols))
+
+    wb.save(path)
+    return path
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 def main():
@@ -544,7 +712,8 @@ def main():
           f"(skillelinje {midpoint}).")
 
     p1, p2, p3 = write_reports(main_tbl, agg, dow, split, midpoint, thin, meta)
-    print(f"\n  Skrevet:\n    {p1}\n    {p2}\n    {p3}\n")
+    p4 = write_excel(main_tbl, agg, dow, split, midpoint, meta)
+    print(f"\n  Skrevet:\n    {p1}\n    {p2}\n    {p3}\n    {p4}\n")
 
 
 if __name__ == "__main__":
