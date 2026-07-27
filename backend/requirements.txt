@@ -31,6 +31,7 @@ peewee==4.0.5
 platformdirs==4.9.6
 propcache==0.5.2
 protobuf==7.34.1
+pyarrow==25.0.0
 pycparser==3.0
 pydantic==2.13.3
 pydantic_core==2.46.3

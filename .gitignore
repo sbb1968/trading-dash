@@ -165,3 +165,10 @@ backend/regime_fingerprint_output/
 # Halt-resumption harvest (spor B, fase 1) — genererbar observations-data
 # (matcher ikke backend/*_output/-reglen ovenfor, saa eksplicit linje kraeves)
 backend/halt_harvest/
+
+# Store MES-bevaegelser: selve event-datasaettet er afledt data (~75 MB) og
+# genskabes med `python backend/analyse_store_bevaegelser.py`.
+# Rapporterne + TV-kontrolarket er smaa og committes.
+backend/store_bevaegelser_out/*.parquet
+backend/store_bevaegelser_out/store_bevaegelser_events.csv
+backend/store_bevaegelser_out/store_bevaegelser_baseline.csv
