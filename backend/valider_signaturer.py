@@ -96,7 +96,7 @@ STYRKET_GRAENSE  = 1.0 / SVAEKKET_GRAENSE
 # =============================================================================
 # 1. INDLAESNING OG SPLIT
 # =============================================================================
-def load() -> tuple[pd.DataFrame, pd.DataFrame]:
+def load(baseline_sti: Path | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Laes events + baseline, anvend rul-filteret, og dedupliker events.
 
@@ -106,7 +106,7 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame]:
     begge metoder fanger, vaegte dobbelt.
     """
     ev = pd.read_parquet(EVENTS)
-    bl = pd.read_parquet(BASELINE)
+    bl = pd.read_parquet(baseline_sti or BASELINE)
 
     ev = ev[ev["bars_since_roll"] > ROLL_MIN].copy()
     bl = bl[bl["bars_since_roll"] > ROLL_MIN].copy()
@@ -574,7 +574,7 @@ def num(x: float, d: int = 2) -> str:
 
 
 def rapport(res: dict, grids: dict, splits: dict, faktisk: dict,
-            kontrakt: dict) -> str:
+            kontrakt: dict, foer: dict | None = None) -> str:
     md = ["# IS/OOS-validering af long/short-signaturerne", "",
           "Genereret af `valider_signaturer.py`. Ren signal-validering — ingen",
           "P&L, ingen entry/exit-simulering, ingen taerskel-optimering.", "",
@@ -647,18 +647,44 @@ def rapport(res: dict, grids: dict, splits: dict, faktisk: dict,
         nb_eff = w_up * l["nb"] + w_dn * s["nb"]
         pool[lab] = (K, E, nb_eff, Nb) + ratio_ci(K, E, int(round(nb_eff)), Nb)
 
-    md += ["---", "", "## 0c. Syntese: long og short bevaeger sig modsat", "",
-           f"Af de {len(par)} metrikker der kan sammenlignes, gaar **{modsat}** "
-           f"den ENE vej for long og den ANDEN vej for short.", "",
-           "Se moensteret i tabellerne ovenfor: hver eneste stoerrelses-lift",
-           "falder for long og stiger for short. To uafhaengige signaler ville",
-           "ikke svinge i modfase saa systematisk. Den enkle forklaring er at det",
-           "ikke er signalernes kvalitet der aendrer sig, men **markedet**: den",
-           "foerste halvdel gav de bedste op-bevaegelser, den anden de bedste",
-           "ned-bevaegelser.", "",
-           "Konsekvensen er vigtig for hvordan resultatet skal bruges: *ingen af",
-           "siderne er vist at vaere regime-uafhaengig*. Det der ser stabilt ud, er",
-           "de to tilsammen:", "",
+    # Teksten herunder udledes af tallene, ikke skrevet i haanden. Med det lille
+    # kontrol-sample pegede long og short hver sin vej og lignede et regimeskift;
+    # med det store goer de ikke. Havde teksten staaet fast, ville rapporten
+    # paastaa det modsatte af sine egne tabeller.
+    r_l = res[("IS/OOS", "OOS", "long")]["enrichment"] / res[("IS/OOS", "IS", "long")]["enrichment"]
+    r_s = res[("IS/OOS", "OOS", "short")]["enrichment"] / res[("IS/OOS", "IS", "short")]["enrichment"]
+    r_p = pool["OOS"][4] / pool["IS"][4]
+    modsat_hoved = (r_l - 1) * (r_s - 1) < 0
+    vej = lambda r: "op" if r > 1 else "ned"
+
+    if modsat_hoved:
+        overskrift = "## 0c. Syntese: long og short bevaeger sig modsat"
+        brod = [
+            f"Af de {len(par)} sammenlignelige metrikker gaar **{modsat}** den ENE "
+            f"vej for long og den ANDEN for short — og det gaelder ogsaa "
+            f"hovedtallet: long {vej(r_l)} (x{r_l:.2f}), short {vej(r_s)} (x{r_s:.2f}).", "",
+            "To uafhaengige signaler ville ikke svinge i modfase saa systematisk.",
+            "Den enkle forklaring er at det ikke er signalernes kvalitet der",
+            "aendrer sig, men **markedet**: den ene halvdel gav de bedste",
+            "op-bevaegelser, den anden de bedste ned-bevaegelser.", "",
+            "Konsekvens: *ingen af siderne er vist regime-uafhaengig*. Det der ser",
+            "stabilt ud, er de to tilsammen:", ""]
+    else:
+        overskrift = "## 0c. Syntese: begge sider bevaeger sig samme vej"
+        brod = [
+            f"Hovedtallet gaar **samme vej for begge sider**: long {vej(r_l)} "
+            f"(x{r_l:.2f}), short {vej(r_s)} (x{r_s:.2f}). "
+            f"({modsat} af {len(par)} mindre metrikker peger hver sin vej, men "
+            f"det er stoej i enkeltmaal, ikke i hovedtallet.)", "",
+            "**Det er en anden konklusion end med det lille kontrol-sample.** Der",
+            "faldt long og steg short, hvilket lignede et regimeskift hvor den",
+            "ene side tog over for den anden. Det moenster overlever ikke et",
+            "stoerre kontrol-sample — det var stoej i naevneren, ikke et signal i",
+            "markedet.", "",
+            "Konsekvens: der er ikke belaeg for at behandle long og short som",
+            "regime-modsaetninger. Til sammenligning det samlede tal:", ""]
+
+    md += ["---", "", overskrift, ""] + brod + [
            tabel([[
                "Fyrer (K) / retnings-events (E)", f"{pool['IS'][0]}/{pool['IS'][1]:,}",
                f"{pool['OOS'][0]}/{pool['OOS'][1]:,}"],
@@ -669,14 +695,68 @@ def rapport(res: dict, grids: dict, splits: dict, faktisk: dict,
                 fmt_ci(pool["IS"][4], pool["IS"][5], pool["IS"][6]),
                 fmt_ci(pool["OOS"][4], pool["OOS"][5], pool["OOS"][6])]],
                ["Metrik", "IS", "OOS"]), "",
-           f"Samlet flytter enrichment sig kun fra {pool['IS'][4]:.2f}x til "
-           f"{pool['OOS'][4]:.2f}x — mod {res[('IS/OOS','IS','long')]['enrichment']:.2f}x→"
-           f"{res[('IS/OOS','OOS','long')]['enrichment']:.2f}x for long alene og "
-           f"{res[('IS/OOS','IS','short')]['enrichment']:.2f}x→"
-           f"{res[('IS/OOS','OOS','short')]['enrichment']:.2f}x for short alene. "
-           "Det samlede signal er altsaa markant mere stabilt end hver af "
-           "halvdelene. Det er konsistent med at edgen er aegte, men at "
-           "fordelingen mellem long og short svinger med regimet.", ""]
+           f"Samlet: {pool['IS'][4]:.2f}x → {pool['OOS'][4]:.2f}x (x{r_p:.2f}). "
+           f"Long alene x{r_l:.2f}, short alene x{r_s:.2f}."
+           + (" Det samlede signal er markant mere stabilt end hver af halvdelene "
+              "— netop fordi de to udligner hinanden. Edgen er aegte, men "
+              "fordelingen mellem long og short svinger med regimet."
+              if abs(r_p - 1) < 0.6 * (abs(r_l - 1) + abs(r_s - 1)) / 2 else
+              " Poolingen stabiliserer altsaa ikke noget her: alle tre flytter sig "
+              "omtrent lige meget og samme vej. Det er hvad man forventer naar "
+              "udsvingene er stikproeve-stoej og ikke modsatrettede regimer."), ""]
+
+    # ---------------- CI-KRYMPNING (kun med stor baseline) ----------------
+    if foer is not None:
+        md += ["---", "", "## 0d. Krympede konfidensintervallerne?", "",
+               f"Samme events, samme kriterier — kun kontrol-samplet er skiftet "
+               f"fra {foer['n_baseline']:,} til {res[('IS/OOS','IS','long')]['Nb'] + res[('IS/OOS','OOS','long')]['Nb']:,} "
+               "barer. Det er naevneren i alle lift-tal, saa det er her praecisionen",
+               "af hele analysen bestemmes.", ""]
+        for side in ("long", "short"):
+            r = []
+            for lab in ("IS", "OOS"):
+                a, b = foer["res"][("IS/OOS", lab, side)], res[("IS/OOS", lab, side)]
+                bredde_a = (a["enr_hi"] - a["enr_lo"]) if np.isfinite(a["enr_lo"]) else np.nan
+                bredde_b = (b["enr_hi"] - b["enr_lo"]) if np.isfinite(b["enr_lo"]) else np.nan
+                r.append([f"{lab} enrichment", f"{a['nb']}", fmt_ci(a["enrichment"], a["enr_lo"], a["enr_hi"]),
+                          f"{b['nb']}", fmt_ci(b["enrichment"], b["enr_lo"], b["enr_hi"]),
+                          "—" if not np.isfinite(bredde_a) else f"{bredde_b/bredde_a:.2f}"])
+                # hale-lift ved den stoerste taerskel
+                ha = a["tab_hale"][-1]
+                hb = b["tab_hale"][-1]
+                wa = (ha["lift_hi"] - ha["lift_lo"]) if np.isfinite(ha["lift_lo"]) else np.nan
+                wb = (hb["lift_hi"] - hb["lift_lo"]) if np.isfinite(hb["lift_lo"]) else np.nan
+                r.append([f"{lab} hale-lift ≥ {ha['taerskel_atr']} ATR",
+                          f"{ha['kontrol_hits']}", fmt_ci(ha["lift"], ha["lift_lo"], ha["lift_hi"]),
+                          f"{hb['kontrol_hits']}", fmt_ci(hb["lift"], hb["lift_lo"], hb["lift_hi"]),
+                          "—" if not np.isfinite(wa) else f"{wb/wa:.2f}"])
+            md += [f"### {side.upper()}", "",
+                   tabel(r, ["Metrik", "Lille: hits", "Lille: estimat",
+                             "Stor: hits", "Stor: estimat", "CI-bredde stor/lille"]), ""]
+
+        # --- Regime-spoergsmaalet: kan IS og OOS nu skelnes? --------------
+        md += ["### Er IS/OOS-forskellen nu statistisk paaviselig?", "",
+               "Dette er spoergsmaalet Fase A blev sat i vaerk for at afgoere.",
+               "Kriteriet er enkelt: overlapper IS- og OOS-intervallet stadig?", ""]
+        r = []
+        for side in ("long", "short"):
+            for navn, noegle, idx in (("Enrichment", None, None),
+                                      ("Hale-lift ≥ 8 ATR", "tab_hale", -1)):
+                i_m, o_m = res[("IS/OOS", "IS", side)], res[("IS/OOS", "OOS", side)]
+                if noegle is None:
+                    ai, bi, ao, bo = i_m["enr_lo"], i_m["enr_hi"], o_m["enr_lo"], o_m["enr_hi"]
+                    vi, vo = i_m["enrichment"], o_m["enrichment"]
+                else:
+                    ai, bi = i_m[noegle][idx]["lift_lo"], i_m[noegle][idx]["lift_hi"]
+                    ao, bo = o_m[noegle][idx]["lift_lo"], o_m[noegle][idx]["lift_hi"]
+                    vi, vo = i_m[noegle][idx]["lift"], o_m[noegle][idx]["lift"]
+                if not all(np.isfinite(x) for x in (ai, bi, ao, bo)):
+                    dom = "kan ikke afgoeres"
+                else:
+                    dom = ("**JA — adskilt**" if (bi < ao or bo < ai)
+                           else "NEJ — overlapper")
+                r.append([f"{side} · {navn}", fmt_ci(vi, ai, bi), fmt_ci(vo, ao, bo), dom])
+        md += [tabel(r, ["Metrik", "IS", "OOS", "Paaviselig forskel?"]), ""]
 
     # ---------------- SPLIT ----------------
     md += ["---", "", "## 1. Splittet", ""]
@@ -853,12 +933,14 @@ def rapport(res: dict, grids: dict, splits: dict, faktisk: dict,
 # =============================================================================
 # 8. MAIN
 # =============================================================================
-def main() -> None:
-    print("── IS/OOS-validering af signaturerne ──────────────────────────")
-    ev, bl = load()
-    print(f"Efter rul-filter (bars_since_roll > {ROLL_MIN}) og dedup:")
-    print(f"  events {len(ev):,} unikke (start-bar, retning) · kontrol-barer {len(bl):,}")
+def koer_alt(ev: pd.DataFrame, bl: pd.DataFrame, tael_barer: bool = True) -> dict:
+    """
+    Beregn HELE metrik-saettet for ét (events, baseline)-par.
 
+    Udskilt fra main() saa den samme beregning kan koeres mod to forskellige
+    kontrol-samples (lille og stor baseline) og stilles op mod hinanden.
+    Events er de samme i begge tilfaelde — det er kun naevneren der aendres.
+    """
     t_min = min(ev["start_ts_dk"].min(), bl["start_ts_dk"].min())
     # +1 s af samme grund som i kontrakt_perioder: udsnit er [a, b).
     t_max = max(ev["start_ts_dk"].max(), bl["start_ts_dk"].max()) + pd.Timedelta(seconds=1)
@@ -909,9 +991,45 @@ def main() -> None:
         for side in ("long", "short"):
             grids[(lab, side)] = gitter(e, b_, side)
 
+    return {"res": res, "splits": splits, "faktisk": faktisk,
+            "kontrakt": kontrakt, "grids": grids, "n_baseline": len(bl)}
+
+
+def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--baseline", type=Path, default=None,
+                    help="alternativ baseline-parquet (default: den lille)")
+    ap.add_argument("--sammenlign-med", type=Path, default=None,
+                    help="anden baseline at vise CI-krympning imod")
+    ap.add_argument("--suffix", default="",
+                    help="suffiks paa output-filnavne, fx _30k")
+    args = ap.parse_args()
+
+    print("── IS/OOS-validering af signaturerne ──────────────────────────")
+    ev, bl = load(args.baseline)
+    print(f"Efter rul-filter (bars_since_roll > {ROLL_MIN}) og dedup:")
+    print(f"  events {len(ev):,} unikke (start-bar, retning) · "
+          f"kontrol-barer {len(bl):,}"
+          + (f"  [{args.baseline.name}]" if args.baseline else ""))
+
+    alt = koer_alt(ev, bl)
+    res, grids = alt["res"], alt["grids"]
+    splits, faktisk, kontrakt = alt["splits"], alt["faktisk"], alt["kontrakt"]
+
+    foer = None
+    if args.sammenlign_med:
+        print(f"\nKoerer samme beregning mod {args.sammenlign_med.name} "
+              f"til CI-sammenligning …")
+        _, bl_lille = load(args.sammenlign_med)
+        foer = koer_alt(ev, bl_lille, tael_barer=False)
+
     # --- Skriv rapport + raa tal -----------------------------------------
-    md = rapport(res, grids, splits, faktisk, kontrakt)
-    p_md = OUT_DIR / "signatur_validering_IS_OOS.md"
+    md = rapport(res, grids, splits, faktisk, kontrakt, foer)
+    # Uden suffiks beholdes det oprindelige filnavn (saa commit bb92296's
+    # rapport ikke skifter navn); med suffiks bruges specens navn.
+    p_md = OUT_DIR / (f"signatur_validering{args.suffix}.md" if args.suffix
+                      else "signatur_validering_IS_OOS.md")
     p_md.write_text(md, encoding="utf-8")
 
     raekker = []
@@ -942,7 +1060,7 @@ def main() -> None:
                 raekker.append({"split": "gitter", "halvdel": lab, "side": side,
                                 "blok": f"z{row['z']}_rvol{row['rvol']}_{row['prik']}",
                                 "taerskel_atr": np.nan, "metrik": kk, "vaerdi": row[kk]})
-    p_csv = OUT_DIR / "signatur_validering.csv"
+    p_csv = OUT_DIR / f"signatur_validering{args.suffix}.csv"
     pd.DataFrame(raekker).to_csv(p_csv, index=False)
 
     # --- Terminal-opsummering --------------------------------------------

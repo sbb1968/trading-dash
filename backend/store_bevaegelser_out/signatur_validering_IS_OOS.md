@@ -102,18 +102,15 @@ Hver metrik, ikke kun de fire kriterier. Flag: fald paa 30 %+ =
 
 ## 0c. Syntese: long og short bevaeger sig modsat
 
-Af de 17 metrikker der kan sammenlignes, gaar **14** den ENE vej for long og den ANDEN vej for short.
+Af de 17 sammenlignelige metrikker gaar **14** den ENE vej for long og den ANDEN for short — og det gaelder ogsaa hovedtallet: long ned (x0.82), short op (x1.60).
 
-Se moensteret i tabellerne ovenfor: hver eneste stoerrelses-lift
-falder for long og stiger for short. To uafhaengige signaler ville
-ikke svinge i modfase saa systematisk. Den enkle forklaring er at det
-ikke er signalernes kvalitet der aendrer sig, men **markedet**: den
-foerste halvdel gav de bedste op-bevaegelser, den anden de bedste
-ned-bevaegelser.
+To uafhaengige signaler ville ikke svinge i modfase saa systematisk.
+Den enkle forklaring er at det ikke er signalernes kvalitet der
+aendrer sig, men **markedet**: den ene halvdel gav de bedste
+op-bevaegelser, den anden de bedste ned-bevaegelser.
 
-Konsekvensen er vigtig for hvordan resultatet skal bruges: *ingen af
-siderne er vist at vaere regime-uafhaengig*. Det der ser stabilt ud, er
-de to tilsammen:
+Konsekvens: *ingen af siderne er vist regime-uafhaengig*. Det der ser
+stabilt ud, er de to tilsammen:
 
 | Metrik | IS | OOS |
 |---|---|---|
@@ -121,7 +118,7 @@ de to tilsammen:
 | Kontrol-hits (retnings-vejet) | 26.0/1,990 | 22.8/1,942 |
 | **Enrichment (long+short samlet)** | 4.08x [2.7–6.1] | 4.36x [2.8–6.7] |
 
-Samlet flytter enrichment sig kun fra 4.08x til 4.36x — mod 4.75x→3.90x for long alene og 3.38x→5.40x for short alene. Det samlede signal er altsaa markant mere stabilt end hver af halvdelene. Det er konsistent med at edgen er aegte, men at fordelingen mellem long og short svinger med regimet.
+Samlet: 4.08x → 4.36x (x1.07). Long alene x0.82, short alene x1.60. Det samlede signal er markant mere stabilt end hver af halvdelene — netop fordi de to udligner hinanden. Edgen er aegte, men fordelingen mellem long og short svinger med regimet.
 
 ---
 

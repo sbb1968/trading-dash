@@ -1,0 +1,1387 @@
+split,halvdel,side,blok,taerskel_atr,metrik,vaerdi
+IS/OOS,IS,long,hoved,,hverdage,261.0
+IS/OOS,IS,long,hoved,,B,24012.0
+IS/OOS,IS,long,hoved,,E,1806.0
+IS/OOS,IS,long,hoved,,K,112.0
+IS/OOS,IS,long,hoved,,Nb,14709.0
+IS/OOS,IS,long,hoved,,nb,209.0
+IS/OOS,IS,long,hoved,,n_signaler,114.0
+IS/OOS,IS,long,hoved,,retning_hit,0.9824561403508771
+IS/OOS,IS,long,hoved,,retning_lo,0.9382819730166376
+IS/OOS,IS,long,hoved,,retning_hi,0.995175581262329
+IS/OOS,IS,long,hoved,,event_rate,0.06201550387596899
+IS/OOS,IS,long,hoved,,kontrol_rate,0.014208987694608743
+IS/OOS,IS,long,hoved,,enrichment,4.3645265383331475
+IS/OOS,IS,long,hoved,,enr_lo,3.4877394906347323
+IS/OOS,IS,long,hoved,,enr_hi,5.46173014210634
+IS/OOS,IS,long,hoved,,praecision,0.32826648876518677
+IS/OOS,IS,long,hoved,,praec_lav,0.2626131910121494
+IS/OOS,IS,long,hoved,,praec_hoej,0.43768865168691573
+IS/OOS,IS,long,hoved,,basisrate,0.07521239380309845
+IS/OOS,IS,long,hoved,,median_size_atr,3.986026897713031
+IS/OOS,IS,long,hoved,,median_size_pt,28.375
+IS/OOS,IS,long,hoved,,median_varighed_min,135.0
+IS/OOS,IS,long,hoved,,median_z_start,-2.6467970685835547
+IS/OOS,IS,long,hoved,,median_z_end,0.3621022755062584
+IS/OOS,IS,long,hoved,,andel_overshoot,0.15178571428571427
+IS/OOS,IS,long,hoved,,andel_swing,0.5714285714285714
+IS/OOS,IS,long,fuld,1.5,E_T,1806.0
+IS/OOS,IS,long,fuld,1.5,K_T,112.0
+IS/OOS,IS,long,fuld,1.5,kontrol_hits,209.0
+IS/OOS,IS,long,fuld,1.5,praecision,0.32826648876518677
+IS/OOS,IS,long,fuld,1.5,basisrate,0.07521239380309845
+IS/OOS,IS,long,fuld,1.5,lift,4.3645265383331475
+IS/OOS,IS,long,fuld,1.5,lift_lo,3.4877394906347323
+IS/OOS,IS,long,fuld,1.5,lift_hi,5.46173014210634
+IS/OOS,IS,long,fuld,3.0,E_T,1030.0
+IS/OOS,IS,long,fuld,3.0,K_T,72.0
+IS/OOS,IS,long,fuld,3.0,kontrol_hits,209.0
+IS/OOS,IS,long,fuld,3.0,praecision,0.21102845706333437
+IS/OOS,IS,long,fuld,3.0,basisrate,0.0428952190571381
+IS/OOS,IS,long,fuld,3.0,lift,4.919626515538626
+IS/OOS,IS,long,fuld,3.0,lift_lo,3.792243031700834
+IS/OOS,IS,long,fuld,3.0,lift_hi,6.382166134941969
+IS/OOS,IS,long,fuld,4.0,E_T,689.0
+IS/OOS,IS,long,fuld,4.0,K_T,56.0
+IS/OOS,IS,long,fuld,4.0,kontrol_hits,209.0
+IS/OOS,IS,long,fuld,4.0,praecision,0.16413324438259339
+IS/OOS,IS,long,fuld,4.0,basisrate,0.028693986340163253
+IS/OOS,IS,long,fuld,4.0,lift,5.720126943562891
+IS/OOS,IS,long,fuld,4.0,lift_lo,4.302250450120781
+IS/OOS,IS,long,fuld,4.0,lift_hi,7.605287658126824
+IS/OOS,IS,long,fuld,6.0,E_T,317.0
+IS/OOS,IS,long,fuld,6.0,K_T,34.0
+IS/OOS,IS,long,fuld,6.0,kontrol_hits,209.0
+IS/OOS,IS,long,fuld,6.0,praecision,0.09965232694657455
+IS/OOS,IS,long,fuld,6.0,basisrate,0.013201732467099783
+IS/OOS,IS,long,fuld,6.0,lift,7.548427995713402
+IS/OOS,IS,long,fuld,6.0,lift_lo,5.346260752453016
+IS/OOS,IS,long,fuld,6.0,lift_hi,10.657685407567591
+IS/OOS,IS,long,fuld,8.0,E_T,160.0
+IS/OOS,IS,long,fuld,8.0,K_T,14.0
+IS/OOS,IS,long,fuld,8.0,kontrol_hits,209.0
+IS/OOS,IS,long,fuld,8.0,praecision,0.041033311095648346
+IS/OOS,IS,long,fuld,8.0,basisrate,0.006663334999167083
+IS/OOS,IS,long,fuld,8.0,lift,6.1580741626794255
+IS/OOS,IS,long,fuld,8.0,lift_lo,3.6678087245707314
+IS/OOS,IS,long,fuld,8.0,lift_hi,10.33910987206623
+IS/OOS,IS,long,hale,1.5,E_T,1806.0
+IS/OOS,IS,long,hale,1.5,K_T,35.0
+IS/OOS,IS,long,hale,1.5,kontrol_hits,49.0
+IS/OOS,IS,long,hale,1.5,praecision,0.4375490826015564
+IS/OOS,IS,long,hale,1.5,basisrate,0.07521239380309845
+IS/OOS,IS,long,hale,1.5,lift,5.817513051732321
+IS/OOS,IS,long,hale,1.5,lift_lo,3.7805457197300827
+IS/OOS,IS,long,hale,1.5,lift_hi,8.952003392116684
+IS/OOS,IS,long,hale,3.0,E_T,1030.0
+IS/OOS,IS,long,hale,3.0,K_T,26.0
+IS/OOS,IS,long,hale,3.0,kontrol_hits,49.0
+IS/OOS,IS,long,hale,3.0,praecision,0.32503646136115616
+IS/OOS,IS,long,hale,3.0,basisrate,0.0428952190571381
+IS/OOS,IS,long,hale,3.0,lift,7.577451951654448
+IS/OOS,IS,long,hale,3.0,lift_lo,4.729615845239696
+IS/OOS,IS,long,hale,3.0,lift_hi,12.140051107411212
+IS/OOS,IS,long,hale,4.0,E_T,689.0
+IS/OOS,IS,long,hale,4.0,K_T,22.0
+IS/OOS,IS,long,hale,4.0,kontrol_hits,49.0
+IS/OOS,IS,long,hale,4.0,praecision,0.2750308519209783
+IS/OOS,IS,long,hale,4.0,basisrate,0.028693986340163253
+IS/OOS,IS,long,hale,4.0,lift,9.584964900328782
+IS/OOS,IS,long,hale,4.0,lift_lo,5.8300842094385
+IS/OOS,IS,long,hale,4.0,lift_hi,15.758186132509225
+IS/OOS,IS,long,hale,6.0,E_T,317.0
+IS/OOS,IS,long,hale,6.0,K_T,17.0
+IS/OOS,IS,long,hale,6.0,kontrol_hits,49.0
+IS/OOS,IS,long,hale,6.0,praecision,0.21252384012075595
+IS/OOS,IS,long,hale,6.0,basisrate,0.013201732467099783
+IS/OOS,IS,long,hale,6.0,lift,16.098178072490825
+IS/OOS,IS,long,hale,6.0,lift_lo,9.377834297648116
+IS/OOS,IS,long,hale,6.0,lift_hi,27.634454718251686
+IS/OOS,IS,long,hale,8.0,E_T,160.0
+IS/OOS,IS,long,hale,8.0,K_T,8.0
+IS/OOS,IS,long,hale,8.0,kontrol_hits,49.0
+IS/OOS,IS,long,hale,8.0,praecision,0.10001121888035575
+IS/OOS,IS,long,hale,8.0,basisrate,0.006663334999167083
+IS/OOS,IS,long,hale,8.0,lift,15.009183673469389
+IS/OOS,IS,long,hale,8.0,lift_lo,7.226087137687707
+IS/OOS,IS,long,hale,8.0,lift_hi,31.17532216972775
+IS/OOS,IS,short,hoved,,hverdage,261.0
+IS/OOS,IS,short,hoved,,B,24012.0
+IS/OOS,IS,short,hoved,,E,1743.0
+IS/OOS,IS,short,hoved,,K,77.0
+IS/OOS,IS,short,hoved,,Nb,14709.0
+IS/OOS,IS,short,hoved,,nb,170.0
+IS/OOS,IS,short,hoved,,n_signaler,77.0
+IS/OOS,IS,short,hoved,,retning_hit,1.0
+IS/OOS,IS,short,hoved,,retning_lo,0.9524815740035489
+IS/OOS,IS,short,hoved,,retning_hi,1.0
+IS/OOS,IS,short,hoved,,event_rate,0.04417670682730924
+IS/OOS,IS,short,hoved,,kontrol_rate,0.011557549799442518
+IS/OOS,IS,short,hoved,,enrichment,3.8223245924875977
+IS/OOS,IS,short,hoved,,enr_lo,2.9336410880966017
+IS/OOS,IS,short,hoved,,enr_hi,4.980215660878547
+IS/OOS,IS,short,hoved,,praecision,0.2774575947320458
+IS/OOS,IS,short,hoved,,praec_lav,0.2219660757856366
+IS/OOS,IS,short,hoved,,praec_hoej,0.36994345964272773
+IS/OOS,IS,short,hoved,,basisrate,0.07258870564717641
+IS/OOS,IS,short,hoved,,median_size_atr,3.2233558757481506
+IS/OOS,IS,short,hoved,,median_size_pt,21.0
+IS/OOS,IS,short,hoved,,median_varighed_min,90.0
+IS/OOS,IS,short,hoved,,median_z_start,2.6319826073571235
+IS/OOS,IS,short,hoved,,median_z_end,0.5971824711670396
+IS/OOS,IS,short,hoved,,andel_overshoot,0.1038961038961039
+IS/OOS,IS,short,hoved,,andel_swing,0.6753246753246753
+IS/OOS,IS,short,fuld,1.5,E_T,1743.0
+IS/OOS,IS,short,fuld,1.5,K_T,77.0
+IS/OOS,IS,short,fuld,1.5,kontrol_hits,170.0
+IS/OOS,IS,short,fuld,1.5,praecision,0.2774575947320458
+IS/OOS,IS,short,fuld,1.5,basisrate,0.07258870564717641
+IS/OOS,IS,short,fuld,1.5,lift,3.8223245924875977
+IS/OOS,IS,short,fuld,1.5,lift_lo,2.9336410880966017
+IS/OOS,IS,short,fuld,1.5,lift_hi,4.980215660878547
+IS/OOS,IS,short,fuld,3.0,E_T,1017.0
+IS/OOS,IS,short,fuld,3.0,K_T,42.0
+IS/OOS,IS,short,fuld,3.0,kontrol_hits,170.0
+IS/OOS,IS,short,fuld,3.0,praecision,0.1513405062174795
+IS/OOS,IS,short,fuld,3.0,basisrate,0.04235382308845577
+IS/OOS,IS,short,fuld,3.0,lift,3.5732431025507547
+IS/OOS,IS,short,fuld,3.0,lift_lo,2.564538147200224
+IS/OOS,IS,short,fuld,3.0,lift_hi,4.978700076606693
+IS/OOS,IS,short,fuld,4.0,E_T,694.0
+IS/OOS,IS,short,fuld,4.0,K_T,30.0
+IS/OOS,IS,short,fuld,4.0,kontrol_hits,170.0
+IS/OOS,IS,short,fuld,4.0,praecision,0.10810036158391394
+IS/OOS,IS,short,fuld,4.0,basisrate,0.028902215558887223
+IS/OOS,IS,short,fuld,4.0,lift,3.7402102051195123
+IS/OOS,IS,short,fuld,4.0,lift_lo,2.5562757959072897
+IS/OOS,IS,short,fuld,4.0,lift_hi,5.472481647276647
+IS/OOS,IS,short,fuld,6.0,E_T,378.0
+IS/OOS,IS,short,fuld,6.0,K_T,17.0
+IS/OOS,IS,short,fuld,6.0,kontrol_hits,170.0
+IS/OOS,IS,short,fuld,6.0,praecision,0.06125687156421789
+IS/OOS,IS,short,fuld,6.0,basisrate,0.015742128935532233
+IS/OOS,IS,short,fuld,6.0,lift,3.891269841269841
+IS/OOS,IS,short,fuld,6.0,lift_lo,2.3886739439288314
+IS/OOS,IS,short,fuld,6.0,lift_hi,6.339074035643001
+IS/OOS,IS,short,fuld,8.0,E_T,214.0
+IS/OOS,IS,short,fuld,8.0,K_T,6.0
+IS/OOS,IS,short,fuld,8.0,kontrol_hits,170.0
+IS/OOS,IS,short,fuld,8.0,praecision,0.021620072316782788
+IS/OOS,IS,short,fuld,8.0,basisrate,0.008912210561385974
+IS/OOS,IS,short,fuld,8.0,lift,2.425893347993403
+IS/OOS,IS,short,fuld,8.0,lift_lo,1.0868814297329679
+IS/OOS,IS,short,fuld,8.0,lift_hi,5.4145359142666525
+IS/OOS,IS,short,hale,1.5,E_T,1743.0
+IS/OOS,IS,short,hale,1.5,K_T,24.0
+IS/OOS,IS,short,hale,1.5,kontrol_hits,38.0
+IS/OOS,IS,short,hale,1.5,praecision,0.386885504616113
+IS/OOS,IS,short,hale,1.5,basisrate,0.07258870564717641
+IS/OOS,IS,short,hale,1.5,lift,5.32983060059788
+IS/OOS,IS,short,hale,1.5,lift_lo,3.2049834296694337
+IS/OOS,IS,short,hale,1.5,lift_hi,8.863413759989239
+IS/OOS,IS,short,hale,3.0,E_T,1017.0
+IS/OOS,IS,short,hale,3.0,K_T,17.0
+IS/OOS,IS,short,hale,3.0,kontrol_hits,38.0
+IS/OOS,IS,short,hale,3.0,praecision,0.27404389910308
+IS/OOS,IS,short,hale,3.0,basisrate,0.04235382308845577
+IS/OOS,IS,short,hale,3.0,lift,6.470346219531128
+IS/OOS,IS,short,hale,3.0,lift_lo,3.665190986865773
+IS/OOS,IS,short,hale,3.0,lift_hi,11.422428012789926
+IS/OOS,IS,short,hale,4.0,E_T,694.0
+IS/OOS,IS,short,hale,4.0,K_T,13.0
+IS/OOS,IS,short,hale,4.0,kontrol_hits,38.0
+IS/OOS,IS,short,hale,4.0,praecision,0.2095629816670612
+IS/OOS,IS,short,hale,4.0,basisrate,0.028902215558887223
+IS/OOS,IS,short,hale,4.0,lift,7.250758380100105
+IS/OOS,IS,short,hale,4.0,lift_lo,3.880534567617628
+IS/OOS,IS,short,hale,4.0,lift_hi,13.548003804761438
+IS/OOS,IS,short,hale,6.0,E_T,378.0
+IS/OOS,IS,short,hale,6.0,K_T,7.0
+IS/OOS,IS,short,hale,6.0,kontrol_hits,38.0
+IS/OOS,IS,short,hale,6.0,praecision,0.11284160551303296
+IS/OOS,IS,short,hale,6.0,basisrate,0.015742128935532233
+IS/OOS,IS,short,hale,6.0,lift,7.16812865497076
+IS/OOS,IS,short,hale,6.0,lift_lo,3.2219612403627633
+IS/OOS,IS,short,hale,6.0,lift_hi,15.947450816766423
+IS/OOS,IS,short,hale,8.0,E_T,214.0
+IS/OOS,IS,short,hale,8.0,K_T,2.0
+IS/OOS,IS,short,hale,8.0,kontrol_hits,38.0
+IS/OOS,IS,short,hale,8.0,praecision,0.032240458718009415
+IS/OOS,IS,short,hale,8.0,basisrate,0.008912210561385974
+IS/OOS,IS,short,hale,8.0,lift,3.617560255779636
+IS/OOS,IS,short,hale,8.0,lift_lo,0.8783685882627
+IS/OOS,IS,short,hale,8.0,lift_hi,14.898918721672773
+IS/OOS,OOS,long,hoved,,hverdage,262.0
+IS/OOS,OOS,long,hoved,,B,24104.0
+IS/OOS,OOS,long,hoved,,E,1905.0
+IS/OOS,OOS,long,hoved,,K,111.0
+IS/OOS,OOS,long,hoved,,Nb,14791.0
+IS/OOS,OOS,long,hoved,,nb,171.0
+IS/OOS,OOS,long,hoved,,n_signaler,112.0
+IS/OOS,OOS,long,hoved,,retning_hit,0.9910714285714286
+IS/OOS,OOS,long,hoved,,retning_lo,0.9511515311769158
+IS/OOS,OOS,long,hoved,,retning_hi,0.9984221453141423
+IS/OOS,OOS,long,hoved,,event_rate,0.05826771653543307
+IS/OOS,OOS,long,hoved,,kontrol_rate,0.011561084443242513
+IS/OOS,OOS,long,hoved,,enrichment,5.039987106874798
+IS/OOS,OOS,long,hoved,,enr_lo,3.9881110017886123
+IS/OOS,OOS,long,hoved,,enr_hi,6.369298654443669
+IS/OOS,OOS,long,hoved,,praecision,0.39832291066198516
+IS/OOS,OOS,long,hoved,,praec_lav,0.31865832852958814
+IS/OOS,OOS,long,hoved,,praec_hoej,0.5310972142159802
+IS/OOS,OOS,long,hoved,,basisrate,0.07903252572187189
+IS/OOS,OOS,long,hoved,,median_size_atr,3.3310647278152
+IS/OOS,OOS,long,hoved,,median_size_pt,23.75
+IS/OOS,OOS,long,hoved,,median_varighed_min,90.0
+IS/OOS,OOS,long,hoved,,median_z_start,-2.6970475612875364
+IS/OOS,OOS,long,hoved,,median_z_end,-0.2718100773188158
+IS/OOS,OOS,long,hoved,,andel_overshoot,0.05405405405405406
+IS/OOS,OOS,long,hoved,,andel_swing,0.5495495495495496
+IS/OOS,OOS,long,fuld,1.5,E_T,1905.0
+IS/OOS,OOS,long,fuld,1.5,K_T,111.0
+IS/OOS,OOS,long,fuld,1.5,kontrol_hits,171.0
+IS/OOS,OOS,long,fuld,1.5,praecision,0.39832291066198516
+IS/OOS,OOS,long,fuld,1.5,basisrate,0.07903252572187189
+IS/OOS,OOS,long,fuld,1.5,lift,5.039987106874798
+IS/OOS,OOS,long,fuld,1.5,lift_lo,3.9881110017886123
+IS/OOS,OOS,long,fuld,1.5,lift_hi,6.369298654443669
+IS/OOS,OOS,long,fuld,3.0,E_T,1055.0
+IS/OOS,OOS,long,fuld,3.0,K_T,66.0
+IS/OOS,OOS,long,fuld,3.0,kontrol_hits,171.0
+IS/OOS,OOS,long,fuld,3.0,praecision,0.236840649582802
+IS/OOS,OOS,long,fuld,3.0,basisrate,0.04376866910056422
+IS/OOS,OOS,long,fuld,3.0,lift,5.411191485823562
+IS/OOS,OOS,long,fuld,3.0,lift_lo,4.101691651266188
+IS/OOS,OOS,long,fuld,3.0,lift_hi,7.138760244742042
+IS/OOS,OOS,long,fuld,4.0,E_T,654.0
+IS/OOS,OOS,long,fuld,4.0,K_T,32.0
+IS/OOS,OOS,long,fuld,4.0,kontrol_hits,171.0
+IS/OOS,OOS,long,fuld,4.0,praecision,0.11483183010075249
+IS/OOS,OOS,long,fuld,4.0,basisrate,0.027132426153335547
+IS/OOS,OOS,long,fuld,4.0,lift,4.232272832948834
+IS/OOS,OOS,long,fuld,4.0,lift_lo,2.9254459351698463
+IS/OOS,OOS,long,fuld,4.0,lift_hi,6.122872795964628
+IS/OOS,OOS,long,fuld,6.0,E_T,304.0
+IS/OOS,OOS,long,fuld,6.0,K_T,14.0
+IS/OOS,OOS,long,fuld,6.0,kontrol_hits,171.0
+IS/OOS,OOS,long,fuld,6.0,praecision,0.05023892566907921
+IS/OOS,OOS,long,fuld,6.0,basisrate,0.01261201460338533
+IS/OOS,OOS,long,fuld,6.0,lift,3.9834179747614646
+IS/OOS,OOS,long,fuld,6.0,lift_lo,2.337922406541742
+IS/OOS,OOS,long,fuld,6.0,lift_hi,6.78705962065017
+IS/OOS,OOS,long,fuld,8.0,E_T,158.0
+IS/OOS,OOS,long,fuld,8.0,K_T,8.0
+IS/OOS,OOS,long,fuld,8.0,kontrol_hits,171.0
+IS/OOS,OOS,long,fuld,8.0,praecision,0.02870795752518812
+IS/OOS,OOS,long,fuld,8.0,basisrate,0.006554928642548955
+IS/OOS,OOS,long,fuld,8.0,lift,4.379598785994522
+IS/OOS,OOS,long,fuld,8.0,lift_lo,2.1935647440380874
+IS/OOS,OOS,long,fuld,8.0,lift_hi,8.744162021393082
+IS/OOS,OOS,long,hale,1.5,E_T,1905.0
+IS/OOS,OOS,long,hale,1.5,K_T,34.0
+IS/OOS,OOS,long,hale,1.5,kontrol_hits,39.0
+IS/OOS,OOS,long,hale,1.5,praecision,0.5349617469597555
+IS/OOS,OOS,long,hale,1.5,basisrate,0.07903252572187189
+IS/OOS,OOS,long,hale,1.5,lift,6.768880812975301
+IS/OOS,OOS,long,hale,1.5,lift_lo,4.284245505046708
+IS/OOS,OOS,long,hale,1.5,lift_hi,10.694472902239916
+IS/OOS,OOS,long,hale,3.0,E_T,1055.0
+IS/OOS,OOS,long,hale,3.0,K_T,25.0
+IS/OOS,OOS,long,hale,3.0,kontrol_hits,39.0
+IS/OOS,OOS,long,hale,3.0,praecision,0.3933542257057026
+IS/OOS,OOS,long,hale,3.0,basisrate,0.04376866910056422
+IS/OOS,OOS,long,hale,3.0,lift,8.987118726455218
+IS/OOS,OOS,long,hale,3.0,lift_lo,5.4604923441462265
+IS/OOS,OOS,long,hale,3.0,lift_hi,14.791395704452828
+IS/OOS,OOS,long,hale,4.0,E_T,654.0
+IS/OOS,OOS,long,hale,4.0,K_T,14.0
+IS/OOS,OOS,long,hale,4.0,kontrol_hits,39.0
+IS/OOS,OOS,long,hale,4.0,praecision,0.22027836639519346
+IS/OOS,OOS,long,hale,4.0,basisrate,0.027132426153335547
+IS/OOS,OOS,long,hale,4.0,lift,8.118638751666273
+IS/OOS,OOS,long,hale,4.0,lift_lo,4.430707140194118
+IS/OOS,OOS,long,hale,4.0,lift_hi,14.876247310981048
+IS/OOS,OOS,long,hale,6.0,E_T,304.0
+IS/OOS,OOS,long,hale,6.0,K_T,7.0
+IS/OOS,OOS,long,hale,6.0,kontrol_hits,39.0
+IS/OOS,OOS,long,hale,6.0,praecision,0.11013918319759673
+IS/OOS,OOS,long,hale,6.0,basisrate,0.01261201460338533
+IS/OOS,OOS,long,hale,6.0,lift,8.732877867746287
+IS/OOS,OOS,long,hale,6.0,lift_lo,3.937765865777044
+IS/OOS,OOS,long,hale,6.0,lift_hi,19.367112838214382
+IS/OOS,OOS,long,hale,8.0,E_T,158.0
+IS/OOS,OOS,long,hale,8.0,K_T,5.0
+IS/OOS,OOS,long,hale,8.0,kontrol_hits,39.0
+IS/OOS,OOS,long,hale,8.0,praecision,0.07867084514114052
+IS/OOS,OOS,long,hale,8.0,basisrate,0.006554928642548955
+IS/OOS,OOS,long,hale,8.0,lift,12.001785134696528
+IS/OOS,OOS,long,hale,8.0,lift_lo,4.793836613816293
+IS/OOS,OOS,long,hale,8.0,lift_hi,30.047508503789498
+IS/OOS,OOS,short,hoved,,hverdage,262.0
+IS/OOS,OOS,short,hoved,,B,24104.0
+IS/OOS,OOS,short,hoved,,E,1753.0
+IS/OOS,OOS,short,hoved,,K,78.0
+IS/OOS,OOS,short,hoved,,Nb,14791.0
+IS/OOS,OOS,short,hoved,,nb,146.0
+IS/OOS,OOS,short,hoved,,n_signaler,79.0
+IS/OOS,OOS,short,hoved,,retning_hit,0.9873417721518988
+IS/OOS,OOS,short,hoved,,retning_lo,0.9317242805256475
+IS/OOS,OOS,short,hoved,,retning_hi,0.9977620061696861
+IS/OOS,OOS,short,hoved,,event_rate,0.04449515116942385
+IS/OOS,OOS,short,hoved,,kontrol_rate,0.009870867419376648
+IS/OOS,OOS,short,hoved,,enrichment,4.507724527033891
+IS/OOS,OOS,short,hoved,,enr_lo,3.4397690348340433
+IS/OOS,OOS,short,hoved,,enr_hi,5.907251389802473
+IS/OOS,OOS,short,hoved,,praecision,0.3278311108484239
+IS/OOS,OOS,short,hoved,,praec_lav,0.26226488867873915
+IS/OOS,OOS,short,hoved,,praec_hoej,0.4371081477978986
+IS/OOS,OOS,short,hoved,,basisrate,0.07272651842017923
+IS/OOS,OOS,short,hoved,,median_size_atr,4.24147120358311
+IS/OOS,OOS,short,hoved,,median_size_pt,32.125
+IS/OOS,OOS,short,hoved,,median_varighed_min,75.0
+IS/OOS,OOS,short,hoved,,median_z_start,2.5189387567906314
+IS/OOS,OOS,short,hoved,,median_z_end,0.2062648092105053
+IS/OOS,OOS,short,hoved,,andel_overshoot,0.11538461538461539
+IS/OOS,OOS,short,hoved,,andel_swing,0.5512820512820513
+IS/OOS,OOS,short,fuld,1.5,E_T,1753.0
+IS/OOS,OOS,short,fuld,1.5,K_T,78.0
+IS/OOS,OOS,short,fuld,1.5,kontrol_hits,146.0
+IS/OOS,OOS,short,fuld,1.5,praecision,0.3278311108484239
+IS/OOS,OOS,short,fuld,1.5,basisrate,0.07272651842017923
+IS/OOS,OOS,short,fuld,1.5,lift,4.507724527033891
+IS/OOS,OOS,short,fuld,1.5,lift_lo,3.4397690348340433
+IS/OOS,OOS,short,fuld,1.5,lift_hi,5.907251389802473
+IS/OOS,OOS,short,fuld,3.0,E_T,1008.0
+IS/OOS,OOS,short,fuld,3.0,K_T,51.0
+IS/OOS,OOS,short,fuld,3.0,kontrol_hits,146.0
+IS/OOS,OOS,short,fuld,3.0,praecision,0.2143511109393541
+IS/OOS,OOS,short,fuld,3.0,basisrate,0.04181878526385662
+IS/OOS,OOS,short,fuld,3.0,lift,5.125713470319635
+IS/OOS,OOS,short,fuld,3.0,lift_lo,3.750609376323246
+IS/OOS,OOS,short,fuld,3.0,lift_hi,7.00497864311632
+IS/OOS,OOS,short,fuld,4.0,E_T,688.0
+IS/OOS,OOS,short,fuld,4.0,K_T,40.0
+IS/OOS,OOS,short,fuld,4.0,kontrol_hits,146.0
+IS/OOS,OOS,short,fuld,4.0,praecision,0.16811851838380715
+IS/OOS,OOS,short,fuld,4.0,basisrate,0.02854298041818785
+IS/OOS,OOS,short,fuld,4.0,lift,5.890012742911755
+IS/OOS,OOS,short,fuld,4.0,lift_lo,4.186773777235355
+IS/OOS,OOS,short,fuld,4.0,lift_hi,8.286153481779742
+IS/OOS,OOS,short,fuld,6.0,E_T,373.0
+IS/OOS,OOS,short,fuld,6.0,K_T,19.0
+IS/OOS,OOS,short,fuld,6.0,kontrol_hits,146.0
+IS/OOS,OOS,short,fuld,6.0,praecision,0.07985629623230839
+IS/OOS,OOS,short,fuld,6.0,basisrate,0.015474610023232659
+IS/OOS,OOS,short,fuld,6.0,lift,5.160472290572551
+IS/OOS,OOS,short,fuld,6.0,lift_lo,3.2355313001762367
+IS/OOS,OOS,short,fuld,6.0,lift_hi,8.230634103374792
+IS/OOS,OOS,short,fuld,8.0,E_T,218.0
+IS/OOS,OOS,short,fuld,8.0,K_T,10.0
+IS/OOS,OOS,short,fuld,8.0,kontrol_hits,146.0
+IS/OOS,OOS,short,fuld,8.0,praecision,0.04202962959595179
+IS/OOS,OOS,short,fuld,8.0,basisrate,0.009044142051111849
+IS/OOS,OOS,short,fuld,8.0,lift,4.64716601734322
+IS/OOS,OOS,short,fuld,8.0,lift_lo,2.48357384368783
+IS/OOS,OOS,short,fuld,8.0,lift_hi,8.69559487737307
+IS/OOS,OOS,short,hale,1.5,E_T,1753.0
+IS/OOS,OOS,short,hale,1.5,K_T,23.0
+IS/OOS,OOS,short,hale,1.5,kontrol_hits,39.0
+IS/OOS,OOS,short,hale,1.5,praecision,0.3618858876492464
+IS/OOS,OOS,short,hale,1.5,basisrate,0.07272651842017923
+IS/OOS,OOS,short,hale,1.5,lift,4.975982564687642
+IS/OOS,OOS,short,hale,1.5,lift_lo,2.9793986315052297
+IS/OOS,OOS,short,hale,1.5,lift_hi,8.310536972881046
+IS/OOS,OOS,short,hale,3.0,E_T,1008.0
+IS/OOS,OOS,short,hale,3.0,K_T,18.0
+IS/OOS,OOS,short,hale,3.0,kontrol_hits,39.0
+IS/OOS,OOS,short,hale,3.0,praecision,0.28321504250810586
+IS/OOS,OOS,short,hale,3.0,basisrate,0.04181878526385662
+IS/OOS,OOS,short,hale,3.0,lift,6.772435897435897
+IS/OOS,OOS,short,hale,3.0,lift_lo,3.88850646449936
+IS/OOS,OOS,short,hale,3.0,lift_hi,11.795245399131296
+IS/OOS,OOS,short,hale,4.0,E_T,688.0
+IS/OOS,OOS,short,hale,4.0,K_T,14.0
+IS/OOS,OOS,short,hale,4.0,kontrol_hits,39.0
+IS/OOS,OOS,short,hale,4.0,praecision,0.22027836639519346
+IS/OOS,OOS,short,hale,4.0,basisrate,0.02854298041818785
+IS/OOS,OOS,short,hale,4.0,lift,7.71742695289207
+IS/OOS,OOS,short,hale,4.0,lift_lo,4.210738720082311
+IS/OOS,OOS,short,hale,4.0,lift_hi,14.14447267629579
+IS/OOS,OOS,short,hale,6.0,E_T,373.0
+IS/OOS,OOS,short,hale,6.0,K_T,8.0
+IS/OOS,OOS,short,hale,6.0,kontrol_hits,39.0
+IS/OOS,OOS,short,hale,6.0,praecision,0.12587335222582482
+IS/OOS,OOS,short,hale,6.0,basisrate,0.015474610023232659
+IS/OOS,OOS,short,hale,6.0,lift,8.134185742764831
+IS/OOS,OOS,short,hale,6.0,lift_lo,3.827976936521851
+IS/OOS,OOS,short,hale,6.0,lift_hi,17.284581071148505
+IS/OOS,OOS,short,hale,8.0,E_T,218.0
+IS/OOS,OOS,short,hale,8.0,K_T,5.0
+IS/OOS,OOS,short,hale,8.0,kontrol_hits,39.0
+IS/OOS,OOS,short,hale,8.0,praecision,0.07867084514114052
+IS/OOS,OOS,short,hale,8.0,basisrate,0.009044142051111849
+IS/OOS,OOS,short,hale,8.0,lift,8.698541519642438
+IS/OOS,OOS,short,hale,8.0,lift_lo,3.4618130256720017
+IS/OOS,OOS,short,hale,8.0,lift_hi,21.85693565996549
+aar,aar-1,long,hoved,,hverdage,261.0
+aar,aar-1,long,hoved,,B,24012.0
+aar,aar-1,long,hoved,,E,1806.0
+aar,aar-1,long,hoved,,K,112.0
+aar,aar-1,long,hoved,,Nb,14709.0
+aar,aar-1,long,hoved,,nb,209.0
+aar,aar-1,long,hoved,,n_signaler,114.0
+aar,aar-1,long,hoved,,retning_hit,0.9824561403508771
+aar,aar-1,long,hoved,,retning_lo,0.9382819730166376
+aar,aar-1,long,hoved,,retning_hi,0.995175581262329
+aar,aar-1,long,hoved,,event_rate,0.06201550387596899
+aar,aar-1,long,hoved,,kontrol_rate,0.014208987694608743
+aar,aar-1,long,hoved,,enrichment,4.3645265383331475
+aar,aar-1,long,hoved,,enr_lo,3.4877394906347323
+aar,aar-1,long,hoved,,enr_hi,5.46173014210634
+aar,aar-1,long,hoved,,praecision,0.32826648876518677
+aar,aar-1,long,hoved,,praec_lav,0.2626131910121494
+aar,aar-1,long,hoved,,praec_hoej,0.43768865168691573
+aar,aar-1,long,hoved,,basisrate,0.07521239380309845
+aar,aar-1,long,hoved,,median_size_atr,3.986026897713031
+aar,aar-1,long,hoved,,median_size_pt,28.375
+aar,aar-1,long,hoved,,median_varighed_min,135.0
+aar,aar-1,long,hoved,,median_z_start,-2.6467970685835547
+aar,aar-1,long,hoved,,median_z_end,0.3621022755062584
+aar,aar-1,long,hoved,,andel_overshoot,0.15178571428571427
+aar,aar-1,long,hoved,,andel_swing,0.5714285714285714
+aar,aar-1,long,fuld,1.5,E_T,1806.0
+aar,aar-1,long,fuld,1.5,K_T,112.0
+aar,aar-1,long,fuld,1.5,kontrol_hits,209.0
+aar,aar-1,long,fuld,1.5,praecision,0.32826648876518677
+aar,aar-1,long,fuld,1.5,basisrate,0.07521239380309845
+aar,aar-1,long,fuld,1.5,lift,4.3645265383331475
+aar,aar-1,long,fuld,1.5,lift_lo,3.4877394906347323
+aar,aar-1,long,fuld,1.5,lift_hi,5.46173014210634
+aar,aar-1,long,fuld,3.0,E_T,1030.0
+aar,aar-1,long,fuld,3.0,K_T,72.0
+aar,aar-1,long,fuld,3.0,kontrol_hits,209.0
+aar,aar-1,long,fuld,3.0,praecision,0.21102845706333437
+aar,aar-1,long,fuld,3.0,basisrate,0.0428952190571381
+aar,aar-1,long,fuld,3.0,lift,4.919626515538626
+aar,aar-1,long,fuld,3.0,lift_lo,3.792243031700834
+aar,aar-1,long,fuld,3.0,lift_hi,6.382166134941969
+aar,aar-1,long,fuld,4.0,E_T,689.0
+aar,aar-1,long,fuld,4.0,K_T,56.0
+aar,aar-1,long,fuld,4.0,kontrol_hits,209.0
+aar,aar-1,long,fuld,4.0,praecision,0.16413324438259339
+aar,aar-1,long,fuld,4.0,basisrate,0.028693986340163253
+aar,aar-1,long,fuld,4.0,lift,5.720126943562891
+aar,aar-1,long,fuld,4.0,lift_lo,4.302250450120781
+aar,aar-1,long,fuld,4.0,lift_hi,7.605287658126824
+aar,aar-1,long,fuld,6.0,E_T,317.0
+aar,aar-1,long,fuld,6.0,K_T,34.0
+aar,aar-1,long,fuld,6.0,kontrol_hits,209.0
+aar,aar-1,long,fuld,6.0,praecision,0.09965232694657455
+aar,aar-1,long,fuld,6.0,basisrate,0.013201732467099783
+aar,aar-1,long,fuld,6.0,lift,7.548427995713402
+aar,aar-1,long,fuld,6.0,lift_lo,5.346260752453016
+aar,aar-1,long,fuld,6.0,lift_hi,10.657685407567591
+aar,aar-1,long,fuld,8.0,E_T,160.0
+aar,aar-1,long,fuld,8.0,K_T,14.0
+aar,aar-1,long,fuld,8.0,kontrol_hits,209.0
+aar,aar-1,long,fuld,8.0,praecision,0.041033311095648346
+aar,aar-1,long,fuld,8.0,basisrate,0.006663334999167083
+aar,aar-1,long,fuld,8.0,lift,6.1580741626794255
+aar,aar-1,long,fuld,8.0,lift_lo,3.6678087245707314
+aar,aar-1,long,fuld,8.0,lift_hi,10.33910987206623
+aar,aar-1,long,hale,1.5,E_T,1806.0
+aar,aar-1,long,hale,1.5,K_T,35.0
+aar,aar-1,long,hale,1.5,kontrol_hits,49.0
+aar,aar-1,long,hale,1.5,praecision,0.4375490826015564
+aar,aar-1,long,hale,1.5,basisrate,0.07521239380309845
+aar,aar-1,long,hale,1.5,lift,5.817513051732321
+aar,aar-1,long,hale,1.5,lift_lo,3.7805457197300827
+aar,aar-1,long,hale,1.5,lift_hi,8.952003392116684
+aar,aar-1,long,hale,3.0,E_T,1030.0
+aar,aar-1,long,hale,3.0,K_T,26.0
+aar,aar-1,long,hale,3.0,kontrol_hits,49.0
+aar,aar-1,long,hale,3.0,praecision,0.32503646136115616
+aar,aar-1,long,hale,3.0,basisrate,0.0428952190571381
+aar,aar-1,long,hale,3.0,lift,7.577451951654448
+aar,aar-1,long,hale,3.0,lift_lo,4.729615845239696
+aar,aar-1,long,hale,3.0,lift_hi,12.140051107411212
+aar,aar-1,long,hale,4.0,E_T,689.0
+aar,aar-1,long,hale,4.0,K_T,22.0
+aar,aar-1,long,hale,4.0,kontrol_hits,49.0
+aar,aar-1,long,hale,4.0,praecision,0.2750308519209783
+aar,aar-1,long,hale,4.0,basisrate,0.028693986340163253
+aar,aar-1,long,hale,4.0,lift,9.584964900328782
+aar,aar-1,long,hale,4.0,lift_lo,5.8300842094385
+aar,aar-1,long,hale,4.0,lift_hi,15.758186132509225
+aar,aar-1,long,hale,6.0,E_T,317.0
+aar,aar-1,long,hale,6.0,K_T,17.0
+aar,aar-1,long,hale,6.0,kontrol_hits,49.0
+aar,aar-1,long,hale,6.0,praecision,0.21252384012075595
+aar,aar-1,long,hale,6.0,basisrate,0.013201732467099783
+aar,aar-1,long,hale,6.0,lift,16.098178072490825
+aar,aar-1,long,hale,6.0,lift_lo,9.377834297648116
+aar,aar-1,long,hale,6.0,lift_hi,27.634454718251686
+aar,aar-1,long,hale,8.0,E_T,160.0
+aar,aar-1,long,hale,8.0,K_T,8.0
+aar,aar-1,long,hale,8.0,kontrol_hits,49.0
+aar,aar-1,long,hale,8.0,praecision,0.10001121888035575
+aar,aar-1,long,hale,8.0,basisrate,0.006663334999167083
+aar,aar-1,long,hale,8.0,lift,15.009183673469389
+aar,aar-1,long,hale,8.0,lift_lo,7.226087137687707
+aar,aar-1,long,hale,8.0,lift_hi,31.17532216972775
+aar,aar-1,short,hoved,,hverdage,261.0
+aar,aar-1,short,hoved,,B,24012.0
+aar,aar-1,short,hoved,,E,1743.0
+aar,aar-1,short,hoved,,K,77.0
+aar,aar-1,short,hoved,,Nb,14709.0
+aar,aar-1,short,hoved,,nb,170.0
+aar,aar-1,short,hoved,,n_signaler,77.0
+aar,aar-1,short,hoved,,retning_hit,1.0
+aar,aar-1,short,hoved,,retning_lo,0.9524815740035489
+aar,aar-1,short,hoved,,retning_hi,1.0
+aar,aar-1,short,hoved,,event_rate,0.04417670682730924
+aar,aar-1,short,hoved,,kontrol_rate,0.011557549799442518
+aar,aar-1,short,hoved,,enrichment,3.8223245924875977
+aar,aar-1,short,hoved,,enr_lo,2.9336410880966017
+aar,aar-1,short,hoved,,enr_hi,4.980215660878547
+aar,aar-1,short,hoved,,praecision,0.2774575947320458
+aar,aar-1,short,hoved,,praec_lav,0.2219660757856366
+aar,aar-1,short,hoved,,praec_hoej,0.36994345964272773
+aar,aar-1,short,hoved,,basisrate,0.07258870564717641
+aar,aar-1,short,hoved,,median_size_atr,3.2233558757481506
+aar,aar-1,short,hoved,,median_size_pt,21.0
+aar,aar-1,short,hoved,,median_varighed_min,90.0
+aar,aar-1,short,hoved,,median_z_start,2.6319826073571235
+aar,aar-1,short,hoved,,median_z_end,0.5971824711670396
+aar,aar-1,short,hoved,,andel_overshoot,0.1038961038961039
+aar,aar-1,short,hoved,,andel_swing,0.6753246753246753
+aar,aar-1,short,fuld,1.5,E_T,1743.0
+aar,aar-1,short,fuld,1.5,K_T,77.0
+aar,aar-1,short,fuld,1.5,kontrol_hits,170.0
+aar,aar-1,short,fuld,1.5,praecision,0.2774575947320458
+aar,aar-1,short,fuld,1.5,basisrate,0.07258870564717641
+aar,aar-1,short,fuld,1.5,lift,3.8223245924875977
+aar,aar-1,short,fuld,1.5,lift_lo,2.9336410880966017
+aar,aar-1,short,fuld,1.5,lift_hi,4.980215660878547
+aar,aar-1,short,fuld,3.0,E_T,1017.0
+aar,aar-1,short,fuld,3.0,K_T,42.0
+aar,aar-1,short,fuld,3.0,kontrol_hits,170.0
+aar,aar-1,short,fuld,3.0,praecision,0.1513405062174795
+aar,aar-1,short,fuld,3.0,basisrate,0.04235382308845577
+aar,aar-1,short,fuld,3.0,lift,3.5732431025507547
+aar,aar-1,short,fuld,3.0,lift_lo,2.564538147200224
+aar,aar-1,short,fuld,3.0,lift_hi,4.978700076606693
+aar,aar-1,short,fuld,4.0,E_T,694.0
+aar,aar-1,short,fuld,4.0,K_T,30.0
+aar,aar-1,short,fuld,4.0,kontrol_hits,170.0
+aar,aar-1,short,fuld,4.0,praecision,0.10810036158391394
+aar,aar-1,short,fuld,4.0,basisrate,0.028902215558887223
+aar,aar-1,short,fuld,4.0,lift,3.7402102051195123
+aar,aar-1,short,fuld,4.0,lift_lo,2.5562757959072897
+aar,aar-1,short,fuld,4.0,lift_hi,5.472481647276647
+aar,aar-1,short,fuld,6.0,E_T,378.0
+aar,aar-1,short,fuld,6.0,K_T,17.0
+aar,aar-1,short,fuld,6.0,kontrol_hits,170.0
+aar,aar-1,short,fuld,6.0,praecision,0.06125687156421789
+aar,aar-1,short,fuld,6.0,basisrate,0.015742128935532233
+aar,aar-1,short,fuld,6.0,lift,3.891269841269841
+aar,aar-1,short,fuld,6.0,lift_lo,2.3886739439288314
+aar,aar-1,short,fuld,6.0,lift_hi,6.339074035643001
+aar,aar-1,short,fuld,8.0,E_T,214.0
+aar,aar-1,short,fuld,8.0,K_T,6.0
+aar,aar-1,short,fuld,8.0,kontrol_hits,170.0
+aar,aar-1,short,fuld,8.0,praecision,0.021620072316782788
+aar,aar-1,short,fuld,8.0,basisrate,0.008912210561385974
+aar,aar-1,short,fuld,8.0,lift,2.425893347993403
+aar,aar-1,short,fuld,8.0,lift_lo,1.0868814297329679
+aar,aar-1,short,fuld,8.0,lift_hi,5.4145359142666525
+aar,aar-1,short,hale,1.5,E_T,1743.0
+aar,aar-1,short,hale,1.5,K_T,24.0
+aar,aar-1,short,hale,1.5,kontrol_hits,38.0
+aar,aar-1,short,hale,1.5,praecision,0.386885504616113
+aar,aar-1,short,hale,1.5,basisrate,0.07258870564717641
+aar,aar-1,short,hale,1.5,lift,5.32983060059788
+aar,aar-1,short,hale,1.5,lift_lo,3.2049834296694337
+aar,aar-1,short,hale,1.5,lift_hi,8.863413759989239
+aar,aar-1,short,hale,3.0,E_T,1017.0
+aar,aar-1,short,hale,3.0,K_T,17.0
+aar,aar-1,short,hale,3.0,kontrol_hits,38.0
+aar,aar-1,short,hale,3.0,praecision,0.27404389910308
+aar,aar-1,short,hale,3.0,basisrate,0.04235382308845577
+aar,aar-1,short,hale,3.0,lift,6.470346219531128
+aar,aar-1,short,hale,3.0,lift_lo,3.665190986865773
+aar,aar-1,short,hale,3.0,lift_hi,11.422428012789926
+aar,aar-1,short,hale,4.0,E_T,694.0
+aar,aar-1,short,hale,4.0,K_T,13.0
+aar,aar-1,short,hale,4.0,kontrol_hits,38.0
+aar,aar-1,short,hale,4.0,praecision,0.2095629816670612
+aar,aar-1,short,hale,4.0,basisrate,0.028902215558887223
+aar,aar-1,short,hale,4.0,lift,7.250758380100105
+aar,aar-1,short,hale,4.0,lift_lo,3.880534567617628
+aar,aar-1,short,hale,4.0,lift_hi,13.548003804761438
+aar,aar-1,short,hale,6.0,E_T,378.0
+aar,aar-1,short,hale,6.0,K_T,7.0
+aar,aar-1,short,hale,6.0,kontrol_hits,38.0
+aar,aar-1,short,hale,6.0,praecision,0.11284160551303296
+aar,aar-1,short,hale,6.0,basisrate,0.015742128935532233
+aar,aar-1,short,hale,6.0,lift,7.16812865497076
+aar,aar-1,short,hale,6.0,lift_lo,3.2219612403627633
+aar,aar-1,short,hale,6.0,lift_hi,15.947450816766423
+aar,aar-1,short,hale,8.0,E_T,214.0
+aar,aar-1,short,hale,8.0,K_T,2.0
+aar,aar-1,short,hale,8.0,kontrol_hits,38.0
+aar,aar-1,short,hale,8.0,praecision,0.032240458718009415
+aar,aar-1,short,hale,8.0,basisrate,0.008912210561385974
+aar,aar-1,short,hale,8.0,lift,3.617560255779636
+aar,aar-1,short,hale,8.0,lift_lo,0.8783685882627
+aar,aar-1,short,hale,8.0,lift_hi,14.898918721672773
+aar,aar-2,long,hoved,,hverdage,262.0
+aar,aar-2,long,hoved,,B,24104.0
+aar,aar-2,long,hoved,,E,1905.0
+aar,aar-2,long,hoved,,K,111.0
+aar,aar-2,long,hoved,,Nb,14791.0
+aar,aar-2,long,hoved,,nb,171.0
+aar,aar-2,long,hoved,,n_signaler,112.0
+aar,aar-2,long,hoved,,retning_hit,0.9910714285714286
+aar,aar-2,long,hoved,,retning_lo,0.9511515311769158
+aar,aar-2,long,hoved,,retning_hi,0.9984221453141423
+aar,aar-2,long,hoved,,event_rate,0.05826771653543307
+aar,aar-2,long,hoved,,kontrol_rate,0.011561084443242513
+aar,aar-2,long,hoved,,enrichment,5.039987106874798
+aar,aar-2,long,hoved,,enr_lo,3.9881110017886123
+aar,aar-2,long,hoved,,enr_hi,6.369298654443669
+aar,aar-2,long,hoved,,praecision,0.39832291066198516
+aar,aar-2,long,hoved,,praec_lav,0.31865832852958814
+aar,aar-2,long,hoved,,praec_hoej,0.5310972142159802
+aar,aar-2,long,hoved,,basisrate,0.07903252572187189
+aar,aar-2,long,hoved,,median_size_atr,3.3310647278152
+aar,aar-2,long,hoved,,median_size_pt,23.75
+aar,aar-2,long,hoved,,median_varighed_min,90.0
+aar,aar-2,long,hoved,,median_z_start,-2.6970475612875364
+aar,aar-2,long,hoved,,median_z_end,-0.2718100773188158
+aar,aar-2,long,hoved,,andel_overshoot,0.05405405405405406
+aar,aar-2,long,hoved,,andel_swing,0.5495495495495496
+aar,aar-2,long,fuld,1.5,E_T,1905.0
+aar,aar-2,long,fuld,1.5,K_T,111.0
+aar,aar-2,long,fuld,1.5,kontrol_hits,171.0
+aar,aar-2,long,fuld,1.5,praecision,0.39832291066198516
+aar,aar-2,long,fuld,1.5,basisrate,0.07903252572187189
+aar,aar-2,long,fuld,1.5,lift,5.039987106874798
+aar,aar-2,long,fuld,1.5,lift_lo,3.9881110017886123
+aar,aar-2,long,fuld,1.5,lift_hi,6.369298654443669
+aar,aar-2,long,fuld,3.0,E_T,1055.0
+aar,aar-2,long,fuld,3.0,K_T,66.0
+aar,aar-2,long,fuld,3.0,kontrol_hits,171.0
+aar,aar-2,long,fuld,3.0,praecision,0.236840649582802
+aar,aar-2,long,fuld,3.0,basisrate,0.04376866910056422
+aar,aar-2,long,fuld,3.0,lift,5.411191485823562
+aar,aar-2,long,fuld,3.0,lift_lo,4.101691651266188
+aar,aar-2,long,fuld,3.0,lift_hi,7.138760244742042
+aar,aar-2,long,fuld,4.0,E_T,654.0
+aar,aar-2,long,fuld,4.0,K_T,32.0
+aar,aar-2,long,fuld,4.0,kontrol_hits,171.0
+aar,aar-2,long,fuld,4.0,praecision,0.11483183010075249
+aar,aar-2,long,fuld,4.0,basisrate,0.027132426153335547
+aar,aar-2,long,fuld,4.0,lift,4.232272832948834
+aar,aar-2,long,fuld,4.0,lift_lo,2.9254459351698463
+aar,aar-2,long,fuld,4.0,lift_hi,6.122872795964628
+aar,aar-2,long,fuld,6.0,E_T,304.0
+aar,aar-2,long,fuld,6.0,K_T,14.0
+aar,aar-2,long,fuld,6.0,kontrol_hits,171.0
+aar,aar-2,long,fuld,6.0,praecision,0.05023892566907921
+aar,aar-2,long,fuld,6.0,basisrate,0.01261201460338533
+aar,aar-2,long,fuld,6.0,lift,3.9834179747614646
+aar,aar-2,long,fuld,6.0,lift_lo,2.337922406541742
+aar,aar-2,long,fuld,6.0,lift_hi,6.78705962065017
+aar,aar-2,long,fuld,8.0,E_T,158.0
+aar,aar-2,long,fuld,8.0,K_T,8.0
+aar,aar-2,long,fuld,8.0,kontrol_hits,171.0
+aar,aar-2,long,fuld,8.0,praecision,0.02870795752518812
+aar,aar-2,long,fuld,8.0,basisrate,0.006554928642548955
+aar,aar-2,long,fuld,8.0,lift,4.379598785994522
+aar,aar-2,long,fuld,8.0,lift_lo,2.1935647440380874
+aar,aar-2,long,fuld,8.0,lift_hi,8.744162021393082
+aar,aar-2,long,hale,1.5,E_T,1905.0
+aar,aar-2,long,hale,1.5,K_T,34.0
+aar,aar-2,long,hale,1.5,kontrol_hits,39.0
+aar,aar-2,long,hale,1.5,praecision,0.5349617469597555
+aar,aar-2,long,hale,1.5,basisrate,0.07903252572187189
+aar,aar-2,long,hale,1.5,lift,6.768880812975301
+aar,aar-2,long,hale,1.5,lift_lo,4.284245505046708
+aar,aar-2,long,hale,1.5,lift_hi,10.694472902239916
+aar,aar-2,long,hale,3.0,E_T,1055.0
+aar,aar-2,long,hale,3.0,K_T,25.0
+aar,aar-2,long,hale,3.0,kontrol_hits,39.0
+aar,aar-2,long,hale,3.0,praecision,0.3933542257057026
+aar,aar-2,long,hale,3.0,basisrate,0.04376866910056422
+aar,aar-2,long,hale,3.0,lift,8.987118726455218
+aar,aar-2,long,hale,3.0,lift_lo,5.4604923441462265
+aar,aar-2,long,hale,3.0,lift_hi,14.791395704452828
+aar,aar-2,long,hale,4.0,E_T,654.0
+aar,aar-2,long,hale,4.0,K_T,14.0
+aar,aar-2,long,hale,4.0,kontrol_hits,39.0
+aar,aar-2,long,hale,4.0,praecision,0.22027836639519346
+aar,aar-2,long,hale,4.0,basisrate,0.027132426153335547
+aar,aar-2,long,hale,4.0,lift,8.118638751666273
+aar,aar-2,long,hale,4.0,lift_lo,4.430707140194118
+aar,aar-2,long,hale,4.0,lift_hi,14.876247310981048
+aar,aar-2,long,hale,6.0,E_T,304.0
+aar,aar-2,long,hale,6.0,K_T,7.0
+aar,aar-2,long,hale,6.0,kontrol_hits,39.0
+aar,aar-2,long,hale,6.0,praecision,0.11013918319759673
+aar,aar-2,long,hale,6.0,basisrate,0.01261201460338533
+aar,aar-2,long,hale,6.0,lift,8.732877867746287
+aar,aar-2,long,hale,6.0,lift_lo,3.937765865777044
+aar,aar-2,long,hale,6.0,lift_hi,19.367112838214382
+aar,aar-2,long,hale,8.0,E_T,158.0
+aar,aar-2,long,hale,8.0,K_T,5.0
+aar,aar-2,long,hale,8.0,kontrol_hits,39.0
+aar,aar-2,long,hale,8.0,praecision,0.07867084514114052
+aar,aar-2,long,hale,8.0,basisrate,0.006554928642548955
+aar,aar-2,long,hale,8.0,lift,12.001785134696528
+aar,aar-2,long,hale,8.0,lift_lo,4.793836613816293
+aar,aar-2,long,hale,8.0,lift_hi,30.047508503789498
+aar,aar-2,short,hoved,,hverdage,262.0
+aar,aar-2,short,hoved,,B,24104.0
+aar,aar-2,short,hoved,,E,1753.0
+aar,aar-2,short,hoved,,K,78.0
+aar,aar-2,short,hoved,,Nb,14791.0
+aar,aar-2,short,hoved,,nb,146.0
+aar,aar-2,short,hoved,,n_signaler,79.0
+aar,aar-2,short,hoved,,retning_hit,0.9873417721518988
+aar,aar-2,short,hoved,,retning_lo,0.9317242805256475
+aar,aar-2,short,hoved,,retning_hi,0.9977620061696861
+aar,aar-2,short,hoved,,event_rate,0.04449515116942385
+aar,aar-2,short,hoved,,kontrol_rate,0.009870867419376648
+aar,aar-2,short,hoved,,enrichment,4.507724527033891
+aar,aar-2,short,hoved,,enr_lo,3.4397690348340433
+aar,aar-2,short,hoved,,enr_hi,5.907251389802473
+aar,aar-2,short,hoved,,praecision,0.3278311108484239
+aar,aar-2,short,hoved,,praec_lav,0.26226488867873915
+aar,aar-2,short,hoved,,praec_hoej,0.4371081477978986
+aar,aar-2,short,hoved,,basisrate,0.07272651842017923
+aar,aar-2,short,hoved,,median_size_atr,4.24147120358311
+aar,aar-2,short,hoved,,median_size_pt,32.125
+aar,aar-2,short,hoved,,median_varighed_min,75.0
+aar,aar-2,short,hoved,,median_z_start,2.5189387567906314
+aar,aar-2,short,hoved,,median_z_end,0.2062648092105053
+aar,aar-2,short,hoved,,andel_overshoot,0.11538461538461539
+aar,aar-2,short,hoved,,andel_swing,0.5512820512820513
+aar,aar-2,short,fuld,1.5,E_T,1753.0
+aar,aar-2,short,fuld,1.5,K_T,78.0
+aar,aar-2,short,fuld,1.5,kontrol_hits,146.0
+aar,aar-2,short,fuld,1.5,praecision,0.3278311108484239
+aar,aar-2,short,fuld,1.5,basisrate,0.07272651842017923
+aar,aar-2,short,fuld,1.5,lift,4.507724527033891
+aar,aar-2,short,fuld,1.5,lift_lo,3.4397690348340433
+aar,aar-2,short,fuld,1.5,lift_hi,5.907251389802473
+aar,aar-2,short,fuld,3.0,E_T,1008.0
+aar,aar-2,short,fuld,3.0,K_T,51.0
+aar,aar-2,short,fuld,3.0,kontrol_hits,146.0
+aar,aar-2,short,fuld,3.0,praecision,0.2143511109393541
+aar,aar-2,short,fuld,3.0,basisrate,0.04181878526385662
+aar,aar-2,short,fuld,3.0,lift,5.125713470319635
+aar,aar-2,short,fuld,3.0,lift_lo,3.750609376323246
+aar,aar-2,short,fuld,3.0,lift_hi,7.00497864311632
+aar,aar-2,short,fuld,4.0,E_T,688.0
+aar,aar-2,short,fuld,4.0,K_T,40.0
+aar,aar-2,short,fuld,4.0,kontrol_hits,146.0
+aar,aar-2,short,fuld,4.0,praecision,0.16811851838380715
+aar,aar-2,short,fuld,4.0,basisrate,0.02854298041818785
+aar,aar-2,short,fuld,4.0,lift,5.890012742911755
+aar,aar-2,short,fuld,4.0,lift_lo,4.186773777235355
+aar,aar-2,short,fuld,4.0,lift_hi,8.286153481779742
+aar,aar-2,short,fuld,6.0,E_T,373.0
+aar,aar-2,short,fuld,6.0,K_T,19.0
+aar,aar-2,short,fuld,6.0,kontrol_hits,146.0
+aar,aar-2,short,fuld,6.0,praecision,0.07985629623230839
+aar,aar-2,short,fuld,6.0,basisrate,0.015474610023232659
+aar,aar-2,short,fuld,6.0,lift,5.160472290572551
+aar,aar-2,short,fuld,6.0,lift_lo,3.2355313001762367
+aar,aar-2,short,fuld,6.0,lift_hi,8.230634103374792
+aar,aar-2,short,fuld,8.0,E_T,218.0
+aar,aar-2,short,fuld,8.0,K_T,10.0
+aar,aar-2,short,fuld,8.0,kontrol_hits,146.0
+aar,aar-2,short,fuld,8.0,praecision,0.04202962959595179
+aar,aar-2,short,fuld,8.0,basisrate,0.009044142051111849
+aar,aar-2,short,fuld,8.0,lift,4.64716601734322
+aar,aar-2,short,fuld,8.0,lift_lo,2.48357384368783
+aar,aar-2,short,fuld,8.0,lift_hi,8.69559487737307
+aar,aar-2,short,hale,1.5,E_T,1753.0
+aar,aar-2,short,hale,1.5,K_T,23.0
+aar,aar-2,short,hale,1.5,kontrol_hits,39.0
+aar,aar-2,short,hale,1.5,praecision,0.3618858876492464
+aar,aar-2,short,hale,1.5,basisrate,0.07272651842017923
+aar,aar-2,short,hale,1.5,lift,4.975982564687642
+aar,aar-2,short,hale,1.5,lift_lo,2.9793986315052297
+aar,aar-2,short,hale,1.5,lift_hi,8.310536972881046
+aar,aar-2,short,hale,3.0,E_T,1008.0
+aar,aar-2,short,hale,3.0,K_T,18.0
+aar,aar-2,short,hale,3.0,kontrol_hits,39.0
+aar,aar-2,short,hale,3.0,praecision,0.28321504250810586
+aar,aar-2,short,hale,3.0,basisrate,0.04181878526385662
+aar,aar-2,short,hale,3.0,lift,6.772435897435897
+aar,aar-2,short,hale,3.0,lift_lo,3.88850646449936
+aar,aar-2,short,hale,3.0,lift_hi,11.795245399131296
+aar,aar-2,short,hale,4.0,E_T,688.0
+aar,aar-2,short,hale,4.0,K_T,14.0
+aar,aar-2,short,hale,4.0,kontrol_hits,39.0
+aar,aar-2,short,hale,4.0,praecision,0.22027836639519346
+aar,aar-2,short,hale,4.0,basisrate,0.02854298041818785
+aar,aar-2,short,hale,4.0,lift,7.71742695289207
+aar,aar-2,short,hale,4.0,lift_lo,4.210738720082311
+aar,aar-2,short,hale,4.0,lift_hi,14.14447267629579
+aar,aar-2,short,hale,6.0,E_T,373.0
+aar,aar-2,short,hale,6.0,K_T,8.0
+aar,aar-2,short,hale,6.0,kontrol_hits,39.0
+aar,aar-2,short,hale,6.0,praecision,0.12587335222582482
+aar,aar-2,short,hale,6.0,basisrate,0.015474610023232659
+aar,aar-2,short,hale,6.0,lift,8.134185742764831
+aar,aar-2,short,hale,6.0,lift_lo,3.827976936521851
+aar,aar-2,short,hale,6.0,lift_hi,17.284581071148505
+aar,aar-2,short,hale,8.0,E_T,218.0
+aar,aar-2,short,hale,8.0,K_T,5.0
+aar,aar-2,short,hale,8.0,kontrol_hits,39.0
+aar,aar-2,short,hale,8.0,praecision,0.07867084514114052
+aar,aar-2,short,hale,8.0,basisrate,0.009044142051111849
+aar,aar-2,short,hale,8.0,lift,8.698541519642438
+aar,aar-2,short,hale,8.0,lift_lo,3.4618130256720017
+aar,aar-2,short,hale,8.0,lift_hi,21.85693565996549
+degradering,OOS/IS,long,stabil,,Enrichment (fuld signatur),1.154761475868953
+degradering,OOS/IS,long,stabil,,Retningstraef,1.0087691326530612
+degradering,OOS/IS,long,stabil,,Praecision,1.2134132611596264
+degradering,OOS/IS,long,stabil,,Median size_atr,0.8356854615623359
+degradering,OOS/IS,long,stabil,,Median size_pt,0.8370044052863436
+degradering,OOS/IS,long,⚠ SVAEKKET,,Median varighed (min),0.6666666666666666
+degradering,OOS/IS,long,⚠ SVAEKKET,,Andel overshoot til modsat baand,0.35612082670906203
+degradering,OOS/IS,long,stabil,,Lift ved ≥ 1.5 ATR,1.154761475868953
+degradering,OOS/IS,long,stabil,,Lift ved ≥ 3.0 ATR,1.099919164337441
+degradering,OOS/IS,long,stabil,,Lift ved ≥ 4.0 ATR,0.7398914175692545
+degradering,OOS/IS,long,⚠ SVAEKKET,,Lift ved ≥ 6.0 ATR,0.5277149066035427
+degradering,OOS/IS,long,stabil,,Lift ved ≥ 8.0 ATR,0.711196174371652
+degradering,OOS/IS,long,stabil,,Lift m. RVOL≥4 ved ≥ 1.5 ATR,1.1635351313839657
+degradering,OOS/IS,long,stabil,,Lift m. RVOL≥4 ved ≥ 3.0 ATR,1.1860344062614592
+degradering,OOS/IS,long,stabil,,Lift m. RVOL≥4 ved ≥ 4.0 ATR,0.8470180992929655
+degradering,OOS/IS,long,⚠ SVAEKKET,,Lift m. RVOL≥4 ved ≥ 6.0 ATR,0.5424761627323131
+degradering,OOS/IS,long,stabil,,Lift m. RVOL≥4 ved ≥ 8.0 ATR,0.7996294399349103
+degradering,OOS/IS,short,stabil,,Enrichment (fuld signatur),1.1793149477397549
+degradering,OOS/IS,short,stabil,,Retningstraef,0.9873417721518988
+degradering,OOS/IS,short,stabil,,Praecision,1.1815539277813831
+degradering,OOS/IS,short,stabil,,Median size_atr,1.315855700419257
+degradering,OOS/IS,short,↑ styrket,,Median size_pt,1.5297619047619047
+degradering,OOS/IS,short,stabil,,Median varighed (min),0.8333333333333334
+degradering,OOS/IS,short,stabil,,Andel overshoot til modsat baand,1.1105769230769231
+degradering,OOS/IS,short,stabil,,Lift ved ≥ 1.5 ATR,1.1793149477397549
+degradering,OOS/IS,short,↑ styrket,,Lift ved ≥ 3.0 ATR,1.434470961872326
+degradering,OOS/IS,short,↑ styrket,,Lift ved ≥ 4.0 ATR,1.574781207443807
+degradering,OOS/IS,short,stabil,,Lift ved ≥ 6.0 ATR,1.326166650238918
+degradering,OOS/IS,short,↑ styrket,,Lift ved ≥ 8.0 ATR,1.9156514119580568
+degradering,OOS/IS,short,stabil,,Lift m. RVOL≥4 ved ≥ 1.5 ATR,0.93360989074014
+degradering,OOS/IS,short,stabil,,Lift m. RVOL≥4 ved ≥ 3.0 ATR,1.0466883328426682
+degradering,OOS/IS,short,stabil,,Lift m. RVOL≥4 ved ≥ 4.0 ATR,1.0643613465417285
+degradering,OOS/IS,short,stabil,,Lift m. RVOL≥4 ved ≥ 6.0 ATR,1.134771170314327
+degradering,OOS/IS,short,↑ styrket,,Lift m. RVOL≥4 ved ≥ 8.0 ATR,2.4045325867745024
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,n_signaler,173.0
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,retning_hit,0.9826589595375722
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,K,170.0
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,kontrol_hits,326.0
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,enrichment,4.247141430405804
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,enr_lo,3.551544122560388
+gitter,IS,long,z1.5_rvol1.25_kun kraftig,,enr_hi,5.078976835817912
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,n_signaler,206.0
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,retning_hit,0.9854368932038835
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,K,203.0
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,kontrol_hits,421.0
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,enrichment,3.927166767939016
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,enr_lo,3.345885492834516
+gitter,IS,long,z1.5_rvol1.25_kraftig + alm,,enr_hi,4.6094341411962265
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,n_signaler,155.0
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,retning_hit,0.9806451612903225
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,K,152.0
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,kontrol_hits,286.0
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,enrichment,4.328555165764468
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,enr_lo,3.5775051604183856
+gitter,IS,long,z1.5_rvol1.5_kun kraftig,,enr_hi,5.237278210068342
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,n_signaler,183.0
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,retning_hit,0.9836065573770492
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,K,180.0
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,kontrol_hits,361.0
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,enrichment,4.060978639990429
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,enr_lo,3.419156263219875
+gitter,IS,long,z1.5_rvol1.5_kraftig + alm,,enr_hi,4.82327985177494
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,n_signaler,121.0
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,retning_hit,0.9752066115702479
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,K,118.0
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,kontrol_hits,191.0
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,enrichment,5.031691916995704
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,enr_lo,4.020984576236481
+gitter,IS,long,z1.5_rvol2.0_kun kraftig,,enr_hi,6.296448809375117
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,n_signaler,139.0
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,retning_hit,0.9784172661870504
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,K,136.0
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,kontrol_hits,241.0
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,enrichment,4.596076701451593
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,enr_lo,3.7462628137293477
+gitter,IS,long,z1.5_rvol2.0_kraftig + alm,,enr_hi,5.6386650098895785
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,n_signaler,124.0
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,retning_hit,0.9838709677419355
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,K,122.0
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,kontrol_hits,227.0
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,enrichment,4.377230084739562
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,enr_lo,3.532087384841439
+gitter,IS,long,z2.0_rvol1.25_kun kraftig,,enr_hi,5.424594900165315
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,n_signaler,141.0
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,retning_hit,0.9858156028368794
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,K,139.0
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,kontrol_hits,294.0
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,enrichment,3.8506395913847267
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,enr_lo,3.1660941831040983
+gitter,IS,long,z2.0_rvol1.25_kraftig + alm,,enr_hi,4.683191467223646
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,n_signaler,114.0
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,retning_hit,0.9824561403508771
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,K,112.0
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,kontrol_hits,209.0
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,enrichment,4.3645265383331475
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,enr_lo,3.4877394906347323
+gitter,IS,long,z2.0_rvol1.5_kun kraftig,,enr_hi,5.46173014210634
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,n_signaler,130.0
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,retning_hit,0.9846153846153847
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,K,128.0
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,kontrol_hits,262.0
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,enrichment,3.9790012933985945
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,enr_lo,3.2394291050092323
+gitter,IS,long,z2.0_rvol1.5_kraftig + alm,,enr_hi,4.887420214995743
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,n_signaler,96.0
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,retning_hit,0.9791666666666666
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,K,94.0
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,kontrol_hits,145.0
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,enrichment,5.279894604192921
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,enr_lo,4.091909269631341
+gitter,IS,long,z2.0_rvol2.0_kun kraftig,,enr_hi,6.812782296587216
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,n_signaler,108.0
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,retning_hit,0.9814814814814815
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,K,106.0
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,kontrol_hits,181.0
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,enrichment,4.769717883298765
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,enr_lo,3.772000436023498
+gitter,IS,long,z2.0_rvol2.0_kraftig + alm,,enr_hi,6.031337766822656
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,n_signaler,73.0
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,K,73.0
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,kontrol_hits,128.0
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,enrichment,4.644920577242525
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,enr_lo,3.4990699090408763
+gitter,IS,long,z2.5_rvol1.25_kun kraftig,,enr_hi,6.166006318749142
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,n_signaler,83.0
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,K,83.0
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,kontrol_hits,164.0
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,enrichment,4.1219208329957056
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,enr_lo,3.1799397442407504
+gitter,IS,long,z2.5_rvol1.25_kraftig + alm,,enr_hi,5.342941288197471
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,n_signaler,70.0
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,K,70.0
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,kontrol_hits,121.0
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,enrichment,4.711704785700557
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,enr_lo,3.5247625094993063
+gitter,IS,long,z2.5_rvol1.5_kun kraftig,,enr_hi,6.298342633798348
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,n_signaler,79.0
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,K,79.0
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,kontrol_hits,152.0
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,enrichment,4.233006207378912
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,enr_lo,3.2397551905662745
+gitter,IS,long,z2.5_rvol1.5_kraftig + alm,,enr_hi,5.530770227295002
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,n_signaler,62.0
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,K,62.0
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,kontrol_hits,101.0
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,enrichment,4.999605276142232
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,enr_lo,3.658089096754374
+gitter,IS,long,z2.5_rvol2.0_kun kraftig,,enr_hi,6.83309024359382
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,n_signaler,70.0
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,retning_hit,1.0
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,K,70.0
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,kontrol_hits,128.0
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,enrichment,4.454033430232558
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,enr_lo,3.3420350431689303
+gitter,IS,long,z2.5_rvol2.0_kraftig + alm,,enr_hi,5.9360280611595115
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,n_signaler,136.0
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,retning_hit,0.9852941176470589
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,K,134.0
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,kontrol_hits,306.0
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,enrichment,3.6954653347282687
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,enr_lo,3.035087654423644
+gitter,IS,short,z1.5_rvol1.25_kun kraftig,,enr_hi,4.499528710570848
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,n_signaler,167.0
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,retning_hit,0.9700598802395209
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,K,162.0
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,kontrol_hits,405.0
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,enrichment,3.3755593803786574
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,enr_lo,2.832766019040351
+gitter,IS,short,z1.5_rvol1.25_kraftig + alm,,enr_hi,4.022358731316044
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,n_signaler,111.0
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,retning_hit,0.9819819819819819
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,K,109.0
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,kontrol_hits,225.0
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,enrichment,4.08817747179193
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,enr_lo,3.270118922003867
+gitter,IS,short,z1.5_rvol1.5_kun kraftig,,enr_hi,5.1108829493655
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,n_signaler,135.0
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,retning_hit,0.9703703703703703
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,K,131.0
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,kontrol_hits,306.0
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,enrichment,3.612731036189576
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,enr_lo,2.9622153837560288
+gitter,IS,short,z1.5_rvol1.5_kraftig + alm,,enr_hi,4.406102814609638
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,n_signaler,78.0
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,retning_hit,0.9743589743589743
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,K,76.0
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,kontrol_hits,159.0
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,enrichment,4.033687309886447
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,enr_lo,3.0830055079444665
+gitter,IS,short,z1.5_rvol2.0_kun kraftig,,enr_hi,5.277523271370049
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,n_signaler,98.0
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,retning_hit,0.9591836734693877
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,K,94.0
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,kontrol_hits,205.0
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,enrichment,3.869543679946266
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,enr_lo,3.0468132140711566
+gitter,IS,short,z1.5_rvol2.0_kraftig + alm,,enr_hi,4.9144359167999845
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,n_signaler,91.0
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,K,91.0
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,kontrol_hits,216.0
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,enrichment,3.5552766622043728
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,enr_lo,2.7970686315174587
+gitter,IS,short,z2.0_rvol1.25_kun kraftig,,enr_hi,4.519013942806847
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,n_signaler,108.0
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,K,108.0
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,kontrol_hits,268.0
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,enrichment,3.4007501220232745
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,enr_lo,2.735170856491605
+gitter,IS,short,z2.0_rvol1.25_kraftig + alm,,enr_hi,4.2282921247836915
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,n_signaler,77.0
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,K,77.0
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,kontrol_hits,170.0
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,enrichment,3.8223245924875977
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,enr_lo,2.9336410880966017
+gitter,IS,short,z2.0_rvol1.5_kun kraftig,,enr_hi,4.980215660878547
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,n_signaler,92.0
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,K,92.0
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,kontrol_hits,210.0
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,enrichment,3.6970412261290058
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,enr_lo,2.908301365481634
+gitter,IS,short,z2.0_rvol1.5_kraftig + alm,,enr_hi,4.699689650434122
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,n_signaler,55.0
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,K,55.0
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,kontrol_hits,125.0
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,enrichment,3.713115318416523
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,enr_lo,2.7145984241448917
+gitter,IS,short,z2.0_rvol2.0_kun kraftig,,enr_hi,5.078918946253518
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,n_signaler,67.0
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,K,67.0
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,kontrol_hits,150.0
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,enrichment,3.769374641422834
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,enr_lo,2.8383401606237952
+gitter,IS,short,z2.0_rvol2.0_kraftig + alm,,enr_hi,5.005807755008096
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,n_signaler,47.0
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,K,47.0
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,kontrol_hits,114.0
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,enrichment,3.479194975390283
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,enr_lo,2.4860575972226195
+gitter,IS,short,z2.5_rvol1.25_kun kraftig,,enr_hi,4.86907370541385
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,n_signaler,52.0
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,K,52.0
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,kontrol_hits,133.0
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,enrichment,3.2994189432272596
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,enr_lo,2.403814481566513
+gitter,IS,short,z2.5_rvol1.25_kraftig + alm,,enr_hi,4.528704459685513
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,n_signaler,43.0
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,K,43.0
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,kontrol_hits,100.0
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,enrichment,3.6287263339070566
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,enr_lo,2.5470210308308046
+gitter,IS,short,z2.5_rvol1.5_kun kraftig,,enr_hi,5.169825708936307
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,n_signaler,48.0
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,K,48.0
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,kontrol_hits,115.0
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,enrichment,3.522322831699469
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,enr_lo,2.524391747342789
+gitter,IS,short,z2.5_rvol1.5_kraftig + alm,,enr_hi,4.914751501533348
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,n_signaler,34.0
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,K,34.0
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,kontrol_hits,83.0
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,enrichment,3.4568981606287457
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,enr_lo,2.326557843555495
+gitter,IS,short,z2.5_rvol2.0_kun kraftig,,enr_hi,5.136405667308035
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,n_signaler,38.0
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,retning_hit,1.0
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,K,38.0
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,kontrol_hits,92.0
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,enrichment,3.4856319688692663
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,enr_lo,2.396417609141066
+gitter,IS,short,z2.5_rvol2.0_kraftig + alm,,enr_hi,5.0699135977214596
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,n_signaler,168.0
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,retning_hit,0.9821428571428571
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,K,165.0
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,kontrol_hits,290.0
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,enrichment,4.417621504208526
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,enr_lo,3.671238787154217
+gitter,OOS,long,z1.5_rvol1.25_kun kraftig,,enr_hi,5.315747867649074
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,n_signaler,209.0
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,retning_hit,0.9856459330143541
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,K,206.0
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,kontrol_hits,381.0
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,enrichment,4.198022884934659
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,enr_lo,3.567860823721166
+gitter,OOS,long,z1.5_rvol1.25_kraftig + alm,,enr_hi,4.939485314355529
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,n_signaler,146.0
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,retning_hit,0.9863013698630136
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,K,144.0
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,kontrol_hits,242.0
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,enrichment,4.620081993882996
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,enr_lo,3.7800139957414585
+gitter,OOS,long,z1.5_rvol1.5_kun kraftig,,enr_hi,5.646846190053585
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,n_signaler,182.0
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,retning_hit,0.989010989010989
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,K,180.0
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,kontrol_hits,307.0
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,enrichment,4.552360922311421
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,enr_lo,3.8111984467764013
+gitter,OOS,long,z1.5_rvol1.5_kraftig + alm,,enr_hi,5.437657014296099
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,n_signaler,102.0
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,retning_hit,0.9901960784313726
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,K,101.0
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,kontrol_hits,162.0
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,enrichment,4.840708337383753
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,enr_lo,3.7931425950319646
+gitter,OOS,long,z1.5_rvol2.0_kun kraftig,,enr_hi,6.1775840534724535
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,n_signaler,126.0
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,retning_hit,0.9920634920634921
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,K,125.0
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,kontrol_hits,207.0
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,enrichment,4.6885896509313145
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,enr_lo,3.7746456716808603
+gitter,OOS,long,z1.5_rvol2.0_kraftig + alm,,enr_hi,5.8238242279920245
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,n_signaler,122.0
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,retning_hit,0.9918032786885246
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,K,121.0
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,kontrol_hits,194.0
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,enrichment,4.842684741726871
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,enr_lo,3.878679344317948
+gitter,OOS,long,z2.0_rvol1.25_kun kraftig,,enr_hi,6.046283651189045
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,n_signaler,146.0
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,retning_hit,0.9931506849315068
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,K,145.0
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,kontrol_hits,244.0
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,enrichment,4.614033389268965
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,enr_lo,3.7780263208267417
+gitter,OOS,long,z2.0_rvol1.25_kraftig + alm,,enr_hi,5.63503329765848
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,n_signaler,112.0
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,retning_hit,0.9910714285714286
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,K,111.0
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,kontrol_hits,171.0
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,enrichment,5.039987106874798
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,enr_lo,3.9881110017886123
+gitter,OOS,long,z2.0_rvol1.5_kun kraftig,,enr_hi,6.369298654443669
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,n_signaler,135.0
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,retning_hit,0.9925925925925926
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,K,134.0
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,kontrol_hits,211.0
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,enrichment,4.930885298105509
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,enr_lo,3.9921810974130976
+gitter,OOS,long,z2.0_rvol1.5_kraftig + alm,,enr_hi,6.090312345506595
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,n_signaler,86.0
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,retning_hit,0.9883720930232558
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,K,85.0
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,kontrol_hits,125.0
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,enrichment,5.279727034120735
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,enr_lo,4.024862574788882
+gitter,OOS,long,z2.0_rvol2.0_kun kraftig,,enr_hi,6.925830891577086
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,n_signaler,103.0
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,retning_hit,0.9902912621359223
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,K,102.0
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,kontrol_hits,152.0
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,enrichment,5.210256941566514
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,enr_lo,4.072841654492164
+gitter,OOS,long,z2.0_rvol2.0_kraftig + alm,,enr_hi,6.66531618463496
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,n_signaler,68.0
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,K,68.0
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,kontrol_hits,106.0
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,enrichment,4.980874560491259
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,enr_lo,3.6871229511505543
+gitter,OOS,long,z2.5_rvol1.25_kun kraftig,,enr_hi,6.7285826146934955
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,n_signaler,81.0
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,K,81.0
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,kontrol_hits,119.0
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,enrichment,5.284946734599351
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,enr_lo,4.001220484821182
+gitter,OOS,long,z2.5_rvol1.25_kraftig + alm,,enr_hi,6.980535587456032
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,n_signaler,66.0
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,K,66.0
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,kontrol_hits,101.0
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,enrichment,5.0737039058236535
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,enr_lo,3.7342200952049986
+gitter,OOS,long,z2.5_rvol1.5_kun kraftig,,enr_hi,6.893667397116023
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,n_signaler,79.0
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,K,79.0
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,kontrol_hits,113.0
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,enrichment,5.428142057464056
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,enr_lo,4.088364042811621
+gitter,OOS,long,z2.5_rvol1.5_kraftig + alm,,enr_hi,7.2069722479377925
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,n_signaler,55.0
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,K,55.0
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,kontrol_hits,82.0
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,enrichment,5.207765187888099
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,enr_lo,3.7132115899669627
+gitter,OOS,long,z2.5_rvol2.0_kun kraftig,,enr_hi,7.303870947041956
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,n_signaler,65.0
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,retning_hit,1.0
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,K,65.0
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,kontrol_hits,92.0
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,enrichment,5.485649891589638
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,enr_lo,4.007485695011401
+gitter,OOS,long,z2.5_rvol2.0_kraftig + alm,,enr_hi,7.509036094765596
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,n_signaler,134.0
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,retning_hit,0.9850746268656716
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,K,132.0
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,kontrol_hits,287.0
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,enrichment,3.880678418877743
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,enr_lo,3.176946822525336
+gitter,OOS,short,z1.5_rvol1.25_kun kraftig,,enr_hi,4.740294953622365
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,n_signaler,167.0
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,retning_hit,0.9640718562874252
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,K,161.0
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,kontrol_hits,366.0
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,enrichment,3.7115935523489787
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,enr_lo,3.1044682204602214
+gitter,OOS,short,z1.5_rvol1.25_kraftig + alm,,enr_hi,4.437451350620139
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,n_signaler,116.0
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,retning_hit,0.9827586206896551
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,K,114.0
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,kontrol_hits,215.0
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,enrichment,4.473856113771741
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,enr_lo,3.5845601204944626
+gitter,OOS,short,z1.5_rvol1.5_kun kraftig,,enr_hi,5.583778163545439
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,n_signaler,147.0
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,retning_hit,0.9591836734693877
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,K,141.0
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,kontrol_hits,276.0
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,enrichment,4.310480170639153
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,enr_lo,3.5406012901136914
+gitter,OOS,short,z1.5_rvol1.5_kraftig + alm,,enr_hi,5.247763805925946
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,n_signaler,84.0
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,retning_hit,0.9880952380952381
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,K,83.0
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,kontrol_hits,148.0
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,enrichment,4.73186121089715
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,enr_lo,3.6333156696343982
+gitter,OOS,short,z1.5_rvol2.0_kun kraftig,,enr_hi,6.162555790657762
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,n_signaler,106.0
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,retning_hit,0.9528301886792453
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,K,101.0
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,kontrol_hits,185.0
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,enrichment,4.6064383836203575
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,enr_lo,3.633070056620483
+gitter,OOS,short,z1.5_rvol2.0_kraftig + alm,,enr_hi,5.840590534009495
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,n_signaler,89.0
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,retning_hit,0.9887640449438202
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,K,88.0
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,kontrol_hits,185.0
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,enrichment,4.013530472857341
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,enr_lo,3.129084739808535
+gitter,OOS,short,z2.0_rvol1.25_kun kraftig,,enr_hi,5.147967599477708
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,n_signaler,108.0
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,retning_hit,0.9814814814814815
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,K,106.0
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,kontrol_hits,228.0
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,enrichment,3.922713944015773
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,enr_lo,3.1322629838592535
+gitter,OOS,short,z2.0_rvol1.25_kraftig + alm,,enr_hi,4.912641360533735
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,n_signaler,79.0
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,retning_hit,0.9873417721518988
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,K,78.0
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,kontrol_hits,146.0
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,enrichment,4.507724527033891
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,enr_lo,3.4397690348340433
+gitter,OOS,short,z2.0_rvol1.5_kun kraftig,,enr_hi,5.907251389802473
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,n_signaler,97.0
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,retning_hit,0.979381443298969
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,K,95.0
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,kontrol_hits,181.0
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,enrichment,4.428540812435194
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,enr_lo,3.472036931686255
+gitter,OOS,short,z2.0_rvol1.5_kraftig + alm,,enr_hi,5.6485498608677736
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,n_signaler,61.0
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,retning_hit,0.9836065573770492
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,K,60.0
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,kontrol_hits,113.0
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,enrichment,4.480107426459823
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,enr_lo,3.288743434849293
+gitter,OOS,short,z2.0_rvol2.0_kun kraftig,,enr_hi,6.10304906729224
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,n_signaler,75.0
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,retning_hit,0.9733333333333334
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,K,73.0
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,kontrol_hits,137.0
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,enrichment,4.495913158256336
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,enr_lo,3.3990827707073437
+gitter,OOS,short,z2.0_rvol2.0_kraftig + alm,,enr_hi,5.946673408713762
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,n_signaler,45.0
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,retning_hit,1.0
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,K,45.0
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,kontrol_hits,98.0
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,enrichment,3.8743786162496945
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,enr_lo,2.7317385887499093
+gitter,OOS,short,z2.5_rvol1.25_kun kraftig,,enr_hi,5.494965632462696
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,n_signaler,53.0
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,retning_hit,0.9811320754716981
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,K,52.0
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,kontrol_hits,115.0
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,enrichment,3.8152335127359307
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,enr_lo,2.7600028305917585
+gitter,OOS,short,z2.5_rvol1.25_kraftig + alm,,enr_hi,5.273910082759759
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,n_signaler,42.0
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,retning_hit,1.0
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,K,42.0
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,kontrol_hits,88.0
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,enrichment,4.02700565264741
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,enr_lo,2.7976807868562084
+gitter,OOS,short,z2.5_rvol1.5_kun kraftig,,enr_hi,5.796506378655587
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,n_signaler,50.0
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,retning_hit,0.98
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,K,49.0
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,kontrol_hits,105.0
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,enrichment,3.937516638144134
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,enr_lo,2.815368845620692
+gitter,OOS,short,z2.5_rvol1.5_kraftig + alm,,enr_hi,5.50692933175645
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,n_signaler,34.0
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,retning_hit,1.0
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,K,34.0
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,kontrol_hits,73.0
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,enrichment,3.92981112613211
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,enr_lo,2.6239110270862436
+gitter,OOS,short,z2.5_rvol2.0_kun kraftig,,enr_hi,5.885647542028536
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,n_signaler,40.0
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,retning_hit,0.975
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,K,39.0
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,kontrol_hits,88.0
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,enrichment,3.7393623917440237
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,enr_lo,2.5731977846378884
+gitter,OOS,short,z2.5_rvol2.0_kraftig + alm,,enr_hi,5.434028888205852

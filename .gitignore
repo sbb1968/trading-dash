@@ -172,3 +172,5 @@ backend/halt_harvest/
 backend/store_bevaegelser_out/*.parquet
 backend/store_bevaegelser_out/store_bevaegelser_events.csv
 backend/store_bevaegelser_out/store_bevaegelser_baseline.csv
+backend/store_bevaegelser_out/store_bevaegelser_baseline_30k.parquet
+backend/store_bevaegelser_out/store_bevaegelser_baseline_30k.csv
