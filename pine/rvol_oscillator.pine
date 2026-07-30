@@ -115,7 +115,10 @@ farve  = osc >= 0
 
 // ── Plot ────────────────────────────────────────────────────────────────────
 // Titlen naevner ikke skalaen — den kan skiftes i indstillingerne.
-plot(osc, "RVOL", style=plot.style_columns, color=farve)
+// display: alt UNDTAGEN price_scale, saa den roede sidste-vaerdi-etiket ikke
+// fylder paa y-aksen. Vaerdien staar stadig i status-linjen og Data Window.
+plot(osc, "RVOL", style=plot.style_columns, color=farve,
+     display = display.pane + display.status_line + display.data_window)
 
 hline(0, "Nul (RVOL = 1)", color=color.new(color.gray, 20), linestyle=hline.style_solid)
 
@@ -125,12 +128,20 @@ hline(0, "Nul (RVOL = 1)", color=color.new(color.gray, 20), linestyle=hline.styl
 // ved de RVOL-vaerdier brugeren har indtastet.
 t1 = skala == "Forholdstal" ? niv1 - 1 : math.log(niv1) / math.log(2)
 t2 = skala == "Forholdstal" ? niv2 - 1 : math.log(niv2) / math.log(2)
-plot(visNiv ? t1 : na, "Taerskel 1", color=color.new(color.gray, 45), style=plot.style_linebr)
-plot(visNiv ? t2 : na, "Taerskel 2", color=color.new(color.gray, 65), style=plot.style_linebr)
+// display.pane: kun selve linjen. Taersklerne er konstanter, saa baade
+// akse-etiketten og status-linje-tallet ville blot gentage det der allerede
+// staar i indstillingerne.
+plot(visNiv ? t1 : na, "Taerskel 1", color=color.new(color.gray, 45),
+     style=plot.style_linebr, display = display.pane)
+plot(visNiv ? t2 : na, "Taerskel 2", color=color.new(color.gray, 65),
+     style=plot.style_linebr, display = display.pane)
 
 // Signallinje — kun hvis man vil have MACD-lookket helt igennem.
+// Samme display-regel som hovedplottet, saa den ikke tilfoejer en ny
+// akse-etiket naar den slaas til.
 sig = ta.ema(osc, sigLen)
-plot(visSignal ? sig : na, "Signal", color=color.new(color.orange, 0), linewidth=2)
+plot(visSignal ? sig : na, "Signal", color=color.new(color.orange, 0), linewidth=2,
+     display = display.pane + display.status_line + display.data_window)
 
 // ── Alarmer ─────────────────────────────────────────────────────────────────
 alertcondition(ta.crossover(rvol, niv1), "RVOL over taerskel 1",
