@@ -664,7 +664,18 @@ HISTORY_FIELDS = ["run_date", "span_end", "regime", "dispersion_pct", "follow_th
 
 def _persist_regime_history(out_dir, run_date, result, label):
     """Upsert dagens regime-fingeraftryk til en AKKUMULERENDE CSV, saa skift over uger bliver
-    synligt (og en fremtidig meta-strategi kan laese trenden). Idempotent pr. run_date."""
+    synligt (og en fremtidig meta-strategi kan laese trenden).
+
+    Idempotent pr. SPAN_END (datoen for de nyeste data), ikke pr. run_date.
+
+    Hvorfor: vinduet foelger cachen, saa staar harvesten stille, giver to koersler
+    paa forskellige dage NOEJAGTIG samme maaling. Med run_date som noegle ville
+    historikken fyldes med dubletter og ligne en levende tidsserie der i
+    virkeligheden staar stille — praecis den fejl en meta-strategi ville laese
+    som "regimet er stabilt". Med span_end som noegle opdateres raekken i stedet,
+    og run_date viser hvornaar maalingen senest blev bekraeftet.
+
+    Falder tilbage til run_date som noegle hvis span_end mangler (degraderet koersel)."""
     rec = result["windows"].get("recent", {})
     sc = rec.get("smallcap", {}) if isinstance(rec, dict) else {}
     rm = (result.get("intraday_spread_MES_M2K") or {}).get("recent", {})
@@ -681,15 +692,23 @@ def _persist_regime_history(out_dir, run_date, result, label):
         "es_rty_halflife_bars_15min": rm.get("half_life_bars"),
     }
     path = out_dir / "regime_history.csv"
+    span_end = str(row.get("span_end") or "")
     rows = []
     if path.exists():
         try:
             with path.open(newline="", encoding="utf-8") as f:
-                rows = [r for r in csv.DictReader(f) if r.get("run_date") != run_date]
+                for r in csv.DictReader(f):
+                    # Erstat raekken for SAMME datagrundlag; behold alle andre.
+                    if span_end and str(r.get("span_end") or "") == span_end:
+                        continue
+                    if not span_end and r.get("run_date") == run_date:
+                        continue
+                    rows.append(r)
         except Exception:
             rows = []
     rows.append({k: ("" if row.get(k) is None else row.get(k)) for k in HISTORY_FIELDS})
-    rows.sort(key=lambda r: str(r.get("run_date")))
+    # Sortér paa datagrundlaget — det er den akse en tidsserie skal laeses paa.
+    rows.sort(key=lambda r: (str(r.get("span_end") or ""), str(r.get("run_date") or "")))
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=HISTORY_FIELDS)
         w.writeheader()

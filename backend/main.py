@@ -56,6 +56,11 @@ class _DropSnapshotAccess(logging.Filter):
         return "/account/dash-snapshot" not in record.getMessage()
 logging.getLogger("uvicorn.access").addFilter(_DropSnapshotAccess())
 
+# Modul-logger. Manglede foer, selvom filen kalder logger.* ni steder — bl.a. i
+# scheduler-jobbet for top15, hvor et NameError ramte lige efter at arbejdet var
+# sat i gang og fik jobbet til at melde fejl paa en vellykket koersel.
+logger = logging.getLogger("main")
+
 # De bare print()-kald i alle moduler stemples i ét greb (print er en builtin,
 # så dette rammer [Server]/[Watchdog]/[Algo]/[StrategyManager]/... overalt):
 _orig_print = builtins.print
@@ -3772,6 +3777,75 @@ async def websocket_level2(websocket: WebSocket, ticker: str):
         except Exception:
             pass
 
+# ── Regime-fingeraftryk: koersel + laas ───────────────────────
+# Vinduets "Opdater" laeste tidligere kun filerne igen. Naar fingeraftrykket
+# kun koerer ugentligt (og kun paa algoserveren), betoed det at knappen
+# genindlaeste noejagtig samme data og saa ud til ikke at virke. Her er
+# koerslen, saa knappen kan udloese en frisk analyse.
+_REGIME_OUT_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "regime_fingerprint_output")
+_REGIME_LOCK_PATH = os.path.join(_REGIME_OUT_DIR, "regime_running.lock")
+_REGIME_STALE_SEC = 15 * 60      # koerslen tager ~40 s; 15 min er rigelig backstop
+
+
+def _regime_running():
+    """(running: bool, started_utc: str|None). Laasefilen er kilden, med staale-backstop."""
+    if not os.path.exists(_REGIME_LOCK_PATH):
+        return False, None
+    try:
+        with open(_REGIME_LOCK_PATH, encoding="utf-8") as f:
+            lock = json.load(f)
+        started = lock.get("started_utc")
+        age = (_datetime.datetime.now(_datetime.timezone.utc)
+               - _datetime.datetime.fromisoformat(started)).total_seconds()
+        return (age <= _REGIME_STALE_SEC), started
+    except Exception:
+        return False, None
+
+
+async def _regime_run_bg():
+    """Koer regime_fingerprint.py og ryd laasen bagefter — ogsaa ved fejl."""
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "regime_fingerprint.py", cwd=backend_dir,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+        if proc.returncode != 0:
+            logger.error(f"[Regime] rc={proc.returncode}: "
+                         f"{out.decode(errors='replace')[-500:]}")
+    except asyncio.TimeoutError:
+        logger.error("[Regime] timeout (>600s)")
+    except Exception as e:
+        logger.exception(f"[Regime] koersel fejlede: {e}")
+    finally:
+        try:
+            os.remove(_REGIME_LOCK_PATH)
+        except OSError:
+            pass
+
+
+@app.post("/regime-fingerprint/run", dependencies=[Depends(require_studio_auth)])
+async def regime_fingerprint_run():
+    """Start en frisk regime-analyse. Rent offline (laeser cache, ingen IBKR/TWS),
+    saa den koerer lokalt paa den maskine der spoerger — modsat top15-joberne, der
+    altid dannes paa algoserveren. Det matcher /regime-fingerprint/latest, som
+    ogsaa laeser lokale filer."""
+    running, started = _regime_running()
+    if running:
+        return {"started": False, "already_running": True, "started_utc": started}
+    os.makedirs(_REGIME_OUT_DIR, exist_ok=True)
+    try:
+        with open(_REGIME_LOCK_PATH, "w", encoding="utf-8") as f:
+            json.dump({"started_utc": _datetime.datetime.now(
+                _datetime.timezone.utc).isoformat()}, f)
+    except OSError as e:
+        return {"started": False, "error": f"kunne ikke skrive laas: {e}"}
+    asyncio.create_task(_regime_run_bg())
+    return {"started": True}
+
+
 # ── /regime-fingerprint/latest ────────────────────────────────
 @app.get("/regime-fingerprint/latest", dependencies=[Depends(require_studio_auth)])
 async def regime_fingerprint_latest():
@@ -3780,10 +3854,11 @@ async def regime_fingerprint_latest():
     from pathlib import Path
     import json, glob, os
     try:
+        running, started = _regime_running()
         out_dir = Path(__file__).parent / "regime_fingerprint_output"
         jsons = sorted(glob.glob(str(out_dir / "fingerprint_*.json")), key=os.path.getmtime)
         if not jsons:
-            return {"status": "none"}
+            return {"status": "none", "running": running, "run_started_utc": started}
         latest = jsons[-1]
         with open(latest, encoding="utf-8") as f:
             data = json.load(f)
@@ -3803,6 +3878,8 @@ async def regime_fingerprint_latest():
                 history = []
         return {
             "status": "ok",
+            "running": running,             # koerer en analyse lige nu? (UI poller paa denne)
+            "run_started_utc": started,
             "generated_file": os.path.basename(latest),
             "generated_at": datetime.fromtimestamp(os.path.getmtime(latest)).isoformat(),
             "regime_label": data.get("regime_label", ""),   # kort etiket (til meta-strategi/UI)

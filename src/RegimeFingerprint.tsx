@@ -130,6 +130,8 @@ export function RegimeFingerprint() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [showTech, setShowTech] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -141,6 +143,37 @@ export function RegimeFingerprint() {
     }
     setLoading(false);
   }
+
+  // "Opdater" laeste foer kun de samme filer igen. Da fingeraftrykket kun koerer
+  // ugentligt, saa knappen ud til ikke at virke — den genindlaeste uaendrede data.
+  // Nu udloeser den en frisk analyse (~40 s) og poller til den er faerdig.
+  async function runAnalysis() {
+    if (running) return;
+    setRunning(true);
+    setRunError(null);
+    try {
+      const r = await fetch("http://127.0.0.1:8000/regime-fingerprint/run", { method: "POST" });
+      const j = await r.json();
+      if (!j.started && !j.already_running) {
+        setRunError(j.error || "Kunne ikke starte analysen");
+        setRunning(false);
+        return;
+      }
+      // Poll indtil backenden melder at koerslen er slut (max ~5 min).
+      for (let i = 0; i < 150; i++) {
+        await new Promise(res => setTimeout(res, 2000));
+        try {
+          const s = await fetch("http://127.0.0.1:8000/regime-fingerprint/latest");
+          const sj = await s.json();
+          if (!sj.running) { setResp(sj); break; }
+        } catch { /* forbigaaende — proev igen */ }
+      }
+    } catch {
+      setRunError("Kunne ikke naa backend");
+    }
+    setRunning(false);
+  }
+
   useEffect(() => { load(); }, []);
 
   function copyToClaude() {
@@ -178,10 +211,23 @@ export function RegimeFingerprint() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Regime-fingeraftryk</div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={load} style={btn("var(--bg-elevated)")}>Opdater</button>
+          <button onClick={runAnalysis} disabled={running}
+                  style={{ ...btn("var(--bg-elevated)"), opacity: running ? 0.6 : 1,
+                           cursor: running ? "default" : "pointer" }}>
+            {running ? "Kører analyse…" : "Opdater"}
+          </button>
           {ok && <button onClick={copyToClaude} style={btn("var(--accent, #2563eb)")}>{copied ? "Kopieret!" : "Kopier til Claude"}</button>}
         </div>
       </div>
+
+      {running && (
+        <div style={card({ borderColor: "var(--accent, #2563eb)" })}>
+          Kører ny regime-analyse … tager typisk ~40 sekunder.
+        </div>
+      )}
+      {runError && (
+        <div style={card({ borderColor: "var(--bear)" })}>{runError}</div>
+      )}
 
       {!ok && (
         <div style={card()}>
