@@ -1,23 +1,25 @@
 //@version=6
 // ════════════════════════════════════════════════════════════════════════════
-//  RVOL Oscillator — relativ volumen som MACD-agtigt soejlediagram
+//  RVOL Oscillator + ADX — relativ volumen som MACD-agtigt soejlediagram
 // ════════════════════════════════════════════════════════════════════════════
 //  Nulpunktet er RVOL = 1 (volumen praecis som gennemsnittet).
-//  Soejlen viser afvigelsen fra gennemsnittet som FORHOLDSTAL:
-//      RVOL 2.00  ->  +1.00   (dobbelt volumen — groen, over nul)
-//      RVOL 1.50  ->  +0.50
-//      RVOL 1.00  ->   0.00   (nullinjen)
-//      RVOL 0.60  ->  -0.40   (roed, under nul)
+//  Soejlen viser afvigelsen fra gennemsnittet:
+//      Forholdstal : RVOL 2.00 -> +1.00   RVOL 0.60 -> -0.40  (gulv ved -1)
+//      Log2        : RVOL 2.00 -> +1.00   RVOL 0.50 -> -1.00  (symmetrisk)
 //
 //  Farvelaegningen efterligner MACD-histogrammet: kraftig farve naar soejlen
 //  vokser vaek fra nul, daempet naar den er paa vej tilbage mod nul.
 //
+//  ADX tegnes som linje oveni: LILLA under taersklen (svag trend), GROEN over
+//  (trend). Se noten om skalering i ADX-afsnittet — de to serier deler én
+//  y-akse, saa ADX-linjens hoejde er ikke ADX-vaerdien.
+//
 //  Standardindstillingen (20 perioder, SMA, aktuel bar udeladt) matcher den
 //  RVOL vi brugte i MES-analysen — verificeret bit-identisk mod
-//  store_bevaegelser_lib.rvol() — saa vaerdier i charten kan sammenlignes
-//  direkte med tallene i datasaettet.
+//  store_bevaegelser_lib.rvol(). ADX(14,14) matcher ligeledes bibliotekets
+//  ADX_DI_LEN / ADX_SMOOTH, saa chart og datasaet kan sammenlignes direkte.
 // ════════════════════════════════════════════════════════════════════════════
-indicator("RVOL Oscillator", shorttitle="RVOL Osc", precision=2)
+indicator("RVOL Oscillator + ADX", shorttitle="RVOL Osc", precision=2)
 
 // Pine tillader ikke en collection direkte i en anden collections type-template
 // (`map<int, array<float>>` giver CE10025). Arrayet pakkes derfor i en
@@ -25,22 +27,39 @@ indicator("RVOL Oscillator", shorttitle="RVOL Osc", precision=2)
 type Spor
     array<float> vol
 
-// ── Beregning ───────────────────────────────────────────────────────────────
+// ── Beregning: RVOL ─────────────────────────────────────────────────────────
 metode = input.string("Foregaaende barer", "Sammenlign med",
-     options=["Foregaaende barer", "Samme tidspunkt tidligere dage"], group="Beregning",
+     options=["Foregaaende barer", "Samme tidspunkt tidligere dage"], group="RVOL",
      tooltip="Foregaaende barer: klassisk rullende snit — matcher MES-analysen, men " +
              "paa intradag maaler den delvist HVAD KLOKKEN ER, fordi volumen foelger " +
              "en fast doegnrytme. Samme tidspunkt: sammenligner denne bar med samme " +
              "klokkeslet paa tidligere dage, saa doegnrytmen falder ud.")
-len    = input.int(20, "Perioder i volumen-snittet", minval=1, group="Beregning",
+len    = input.int(20, "Perioder i volumen-snittet", minval=1, group="RVOL",
      tooltip="Antal bars (Foregaaende barer) eller antal DAGE (Samme tidspunkt).")
-maType = input.string("SMA", "Type gennemsnit", options=["SMA", "EMA"], group="Beregning",
+maType = input.string("SMA", "Type gennemsnit", options=["SMA", "EMA"], group="RVOL",
      tooltip="Bruges kun ved 'Foregaaende barer'.")
-excl   = input.bool(true, "Udelad den aktuelle bar fra snittet", group="Beregning",
+excl   = input.bool(true, "Udelad den aktuelle bar fra snittet", group="RVOL",
      tooltip="Til: baren sammenlignes med de FOREGAAENDE bars — en volumen-eksplosion " +
              "traekker ikke sit eget sammenligningsgrundlag op. Fra: baren indgaar i sit " +
              "eget snit og fremstaar mindre usaedvanlig end den er.")
-minDage = input.int(5, "Min. dage foer 'Samme tidspunkt' er gyldig", minval=1, group="Beregning")
+minDage = input.int(5, "Min. dage foer 'Samme tidspunkt' er gyldig", minval=1, group="RVOL")
+
+// ── Beregning: ADX ──────────────────────────────────────────────────────────
+visADX      = input.bool(true,  "Vis ADX-linje", group="ADX")
+adxLen      = input.int(14, "ADX-laengde (DI)", minval=1, group="ADX")
+adxSmooth   = input.int(14, "ADX-udglatning",   minval=1, group="ADX")
+adxTaerskel = input.float(25.0, "ADX-taerskel (trend/ikke-trend)", step=1, group="ADX",
+     tooltip="Under taersklen: lilla (svag eller ingen trend). Over: groen (trend). " +
+             "25 er den klassiske graense.")
+// De to serier deler én y-akse: ADX er 0-100, oscillatoren typisk -1 til +5.
+// Uden skalering ville ADX-linjen presse hele histogrammet ned i en stribe.
+// Derfor mappes ADX 0-100 ind i et baand man selv vaelger. Den RIGTIGE
+// ADX-vaerdi vises stadig i status-linjen og Data Window (se plottet nederst).
+adxBund = input.float(0.0, "ADX-baandets bund i panelet", step=0.5, group="ADX")
+adxTop  = input.float(5.0, "ADX-baandets top i panelet",  step=0.5, group="ADX",
+     tooltip="ADX 0 tegnes ved bunden, ADX 100 ved toppen. Med 0 og 5 lander " +
+             "taersklen 25 ved +1.25 i panelet.")
+visADXniv = input.bool(true, "Vis ADX-taerskellinje", group="ADX")
 
 // ── Visning ─────────────────────────────────────────────────────────────────
 skala = input.string("Forholdstal", "Skala",
@@ -54,11 +73,11 @@ skala = input.string("Forholdstal", "Skala",
              "paa den lave side.")
 visSignal = input.bool(false, "Vis signallinje (som MACD)", group="Visning")
 sigLen    = input.int(9, "Signallinje-laengde", minval=1, group="Visning")
-visNiv    = input.bool(true, "Vis taerskellinjer", group="Visning")
-niv1      = input.float(1.5, "Taerskel 1 (RVOL)", step=0.1, minval=0.1, group="Visning",
-     tooltip="1.5 = signaturens 'hoej RVOL' fra MES-analysen. Tegnes ved +0.50.")
-niv2      = input.float(4.0, "Taerskel 2 (RVOL)", step=0.1, minval=0.1, group="Visning",
-     tooltip="4.0 = hale-filteret fra MES-analysen. Tegnes ved +3.00.")
+visNiv    = input.bool(true, "Vis RVOL-taerskellinjer", group="Visning")
+niv1      = input.float(1.5, "RVOL-taerskel 1", step=0.1, minval=0.1, group="Visning",
+     tooltip="1.5 = signaturens 'hoej RVOL' fra MES-analysen.")
+niv2      = input.float(4.0, "RVOL-taerskel 2", step=0.1, minval=0.1, group="Visning",
+     tooltip="4.0 = hale-filteret fra MES-analysen.")
 
 // ── Grundlaget: rullende snit ───────────────────────────────────────────────
 // excl=true  ->  snit af de FOREGAAENDE `len` bars (volume[1] .. volume[len])
@@ -100,13 +119,22 @@ snit = metode == "Foregaaende barer" ? snitRull : snitSlot
 rvol = not na(snit) and snit > 0 ? volume / snit : na
 
 // Afvigelsen fra gennemsnittet. Begge skalaer har nul ved RVOL = 1.
-//   Forholdstal : RVOL 1.5 -> +0.50   RVOL 0.6 -> -0.40   (gulv ved -1)
-//   Log2        : RVOL 2.0 -> +1.00   RVOL 0.5 -> -1.00   (symmetrisk)
 // log kraever et positivt argument — en bar helt uden volumen giver na.
 osc = skala == "Forholdstal" ? rvol - 1
      : (not na(rvol) and rvol > 0 ? math.log(rvol) / math.log(2) : na)
 
-// ── Farver — samme logik som MACD-histogrammet ──────────────────────────────
+// ── ADX ─────────────────────────────────────────────────────────────────────
+// ta.dmi svarer til ADX(14,14) i store_bevaegelser_lib.adx() — Wilder-udglattet
+// baade paa DI og paa selve ADX'en.
+[_diPlus, _diMinus, adx] = ta.dmi(adxLen, adxSmooth)
+
+// Map ADX 0-100 ind i det valgte baand. Vaerdien paa y-aksen er derfor IKKE
+// ADX — den rigtige vaerdi laeses i status-linjen.
+adxTegnet = adxBund + (adx / 100.0) * (adxTop - adxBund)
+adxNivTegnet = adxBund + (adxTaerskel / 100.0) * (adxTop - adxBund)
+adxFarve = adx >= adxTaerskel ? color.new(color.green, 0) : color.new(color.purple, 0)
+
+// ── Farver paa histogrammet — samme logik som MACD ──────────────────────────
 // Kraftig naar soejlen vokser (vaek fra nul), daempet naar den skrumper.
 vokser = not na(osc) and not na(osc[1]) and math.abs(osc) > math.abs(osc[1])
 farve  = osc >= 0
@@ -114,31 +142,36 @@ farve  = osc >= 0
      : (vokser ? color.new(color.red,   0) : color.new(color.red,   55))
 
 // ── Plot ────────────────────────────────────────────────────────────────────
-// Titlen naevner ikke skalaen — den kan skiftes i indstillingerne.
-// display: alt UNDTAGEN price_scale, saa den roede sidste-vaerdi-etiket ikke
-// fylder paa y-aksen. Vaerdien staar stadig i status-linjen og Data Window.
+// display: alt UNDTAGEN price_scale, saa sidste-vaerdi-etiketten ikke fylder
+// paa y-aksen. Vaerdien staar stadig i status-linjen og Data Window.
 plot(osc, "RVOL", style=plot.style_columns, color=farve,
      display = display.pane + display.status_line + display.data_window)
 
 hline(0, "Nul (RVOL = 1)", color=color.new(color.gray, 20), linestyle=hline.style_solid)
 
-// Taerskellinjerne tegnes med plot() frem for hline(), fordi de udledes af
-// input-vaerdier og dermed ikke er konstanter.
-// Taersklerne foelger den valgte skala, saa linjerne bliver ved med at ligge
-// ved de RVOL-vaerdier brugeren har indtastet.
+// RVOL-taersklerne foelger den valgte skala, saa linjerne bliver ved med at
+// ligge ved de RVOL-vaerdier brugeren har indtastet.
 t1 = skala == "Forholdstal" ? niv1 - 1 : math.log(niv1) / math.log(2)
 t2 = skala == "Forholdstal" ? niv2 - 1 : math.log(niv2) / math.log(2)
-// display.pane: kun selve linjen. Taersklerne er konstanter, saa baade
-// akse-etiketten og status-linje-tallet ville blot gentage det der allerede
-// staar i indstillingerne.
-plot(visNiv ? t1 : na, "Taerskel 1", color=color.new(color.gray, 45),
+// display.pane: kun selve linjen. Taersklerne er konstanter, saa akse-etiket
+// og status-linje-tal ville blot gentage det der staar i indstillingerne.
+plot(visNiv ? t1 : na, "RVOL-taerskel 1", color=color.new(color.gray, 45),
      style=plot.style_linebr, display = display.pane)
-plot(visNiv ? t2 : na, "Taerskel 2", color=color.new(color.gray, 65),
+plot(visNiv ? t2 : na, "RVOL-taerskel 2", color=color.new(color.gray, 65),
      style=plot.style_linebr, display = display.pane)
 
+// ADX: den SKALEREDE linje tegnes i panelet …
+plot(visADX ? adxTegnet : na, "ADX (skaleret)", color=adxFarve, linewidth=2,
+     display = display.pane)
+// … men den RIGTIGE ADX-vaerdi vises i status-linjen og Data Window, saa man
+// aflaeser 24.48 og ikke 1.22.
+plot(visADX ? adx : na, "ADX", color=adxFarve,
+     display = display.status_line + display.data_window)
+plot(visADX and visADXniv ? adxNivTegnet : na, "ADX-taerskel",
+     color=color.new(color.purple, 60), style=plot.style_linebr,
+     display = display.pane)
+
 // Signallinje — kun hvis man vil have MACD-lookket helt igennem.
-// Samme display-regel som hovedplottet, saa den ikke tilfoejer en ny
-// akse-etiket naar den slaas til.
 sig = ta.ema(osc, sigLen)
 plot(visSignal ? sig : na, "Signal", color=color.new(color.orange, 0), linewidth=2,
      display = display.pane + display.status_line + display.data_window)
@@ -150,3 +183,7 @@ alertcondition(ta.crossover(rvol, niv2), "RVOL over taerskel 2",
      "RVOL krydsede op gennem taerskel 2 (hale-niveau)")
 alertcondition(ta.crossunder(rvol, 1.0), "RVOL under gennemsnittet",
      "RVOL faldt under 1 — volumen under gennemsnittet")
+alertcondition(ta.crossover(adx, adxTaerskel), "ADX over taerskel",
+     "ADX krydsede op gennem taersklen — trend tiltager")
+alertcondition(ta.crossunder(adx, adxTaerskel), "ADX under taerskel",
+     "ADX faldt under taersklen — trenden svaekkes")
