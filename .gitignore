@@ -174,3 +174,11 @@ backend/store_bevaegelser_out/store_bevaegelser_events.csv
 backend/store_bevaegelser_out/store_bevaegelser_baseline.csv
 backend/store_bevaegelser_out/store_bevaegelser_baseline_30k.parquet
 backend/store_bevaegelser_out/store_bevaegelser_baseline_30k.csv
+
+# Regime-motor v2: mappen daekkes af backend/*_output/ ovenfor, men
+# rapporterne ER leverancer og skal med. Selve metrik-serien er afledt
+# data (genskabes med regime_backfill.py) og bliver ude.
+!backend/regime_v2_output/
+backend/regime_v2_output/*
+!backend/regime_v2_output/*.md
+!backend/regime_v2_output/regime_metrics_daily.csv
