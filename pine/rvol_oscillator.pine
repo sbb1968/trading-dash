@@ -11,8 +11,9 @@
 //  vokser vaek fra nul, daempet naar den er paa vej tilbage mod nul.
 //
 //  ADX tegnes som linje oveni: LILLA under taersklen (svag trend), GROEN over
-//  (trend). Se noten om skalering i ADX-afsnittet — de to serier deler én
-//  y-akse, saa ADX-linjens hoejde er ikke ADX-vaerdien.
+//  (trend). De to serier deler én y-akse, saa ADX er skaleret ned med 10:
+//  AFLAES Y-AKSEN OG GANG MED 10. Taersklen 25 ligger altsaa ved 2.5.
+//  Den uskalerede vaerdi staar samtidig i status-linjen.
 //
 //  Standardindstillingen (20 perioder, SMA, aktuel bar udeladt) matcher den
 //  RVOL vi brugte i MES-analysen — verificeret bit-identisk mod
@@ -53,12 +54,15 @@ adxTaerskel = input.float(25.0, "ADX-taerskel (trend/ikke-trend)", step=1, group
              "25 er den klassiske graense.")
 // De to serier deler én y-akse: ADX er 0-100, oscillatoren typisk -1 til +5.
 // Uden skalering ville ADX-linjen presse hele histogrammet ned i en stribe.
-// Derfor mappes ADX 0-100 ind i et baand man selv vaelger. Den RIGTIGE
-// ADX-vaerdi vises stadig i status-linjen og Data Window (se plottet nederst).
-adxBund = input.float(0.0, "ADX-baandets bund i panelet", step=0.5, group="ADX")
-adxTop  = input.float(5.0, "ADX-baandets top i panelet",  step=0.5, group="ADX",
-     tooltip="ADX 0 tegnes ved bunden, ADX 100 ved toppen. Med 0 og 5 lander " +
-             "taersklen 25 ved +1.25 i panelet.")
+// Loesningen er et FAST forhold paa 10: linjen tegnes ved adx/10, saa man
+// aflaeser y-aksen og ganger med 10.
+//     y-akse 2.5  ->  ADX 25   (taersklen)
+//     y-akse 4.0  ->  ADX 40
+//     y-akse 7.5  ->  ADX 75
+// Et fast tal frem for et justerbart baand, netop fordi pointen er at
+// forholdet skal kunne huskes. Den rigtige vaerdi staar desuden i
+// status-linjen (se plottet nederst).
+ADX_DIVISOR = 10.0
 visADXniv = input.bool(true, "Vis ADX-taerskellinje", group="ADX")
 
 // ── Visning ─────────────────────────────────────────────────────────────────
@@ -128,10 +132,10 @@ osc = skala == "Forholdstal" ? rvol - 1
 // baade paa DI og paa selve ADX'en.
 [_diPlus, _diMinus, adx] = ta.dmi(adxLen, adxSmooth)
 
-// Map ADX 0-100 ind i det valgte baand. Vaerdien paa y-aksen er derfor IKKE
-// ADX — den rigtige vaerdi laeses i status-linjen.
-adxTegnet = adxBund + (adx / 100.0) * (adxTop - adxBund)
-adxNivTegnet = adxBund + (adxTaerskel / 100.0) * (adxTop - adxBund)
+// Y-aksen gange 10 = ADX. Taerskellinjen skaleres med samme divisor, saa den
+// altid falder sammen med farveskiftet.
+adxTegnet    = adx / ADX_DIVISOR
+adxNivTegnet = adxTaerskel / ADX_DIVISOR
 adxFarve = adx >= adxTaerskel ? color.new(color.green, 0) : color.new(color.purple, 0)
 
 // ── Farver paa histogrammet — samme logik som MACD ──────────────────────────
@@ -161,7 +165,7 @@ plot(visNiv ? t2 : na, "RVOL-taerskel 2", color=color.new(color.gray, 65),
      style=plot.style_linebr, display = display.pane)
 
 // ADX: den SKALEREDE linje tegnes i panelet …
-plot(visADX ? adxTegnet : na, "ADX (skaleret)", color=adxFarve, linewidth=2,
+plot(visADX ? adxTegnet : na, "ADX ÷10", color=adxFarve, linewidth=2,
      display = display.pane)
 // … men den RIGTIGE ADX-vaerdi vises i status-linjen og Data Window, saa man
 // aflaeser 24.48 og ikke 1.22.
