@@ -25,6 +25,11 @@ CONNECT_RETRY_DELAY = 10   # sekunder mellem genforbindelsesforsøg
 # Live-broadcastet er uændret hyppigt; kun DB-rækkerne throttles, så loopets
 # "Venter"/"Overvåger"-tick ikke fylder events-tabellen med en række hver ~20s.
 STATUS_PERSIST_THROTTLE_SEC = 300   # 5 min — samme kadence som diagnostics_heartbeat
+# Sek. place_paper_order venter paa at en ENTRY-ordre bliver fyldt. Spejler algoernes
+# CLOSE_FILL_WAIT_SEC. Pollen bryder saa snart ordren er fyldt (typisk ~0,5s for en MKT),
+# saa i normaltilfaeldet er entry HURTIGERE end den gamle faste sleep(1); de fulde 8 sek
+# bruges kun naar ordren IKKE fyldes — og der vil vi netop hellere vente end gaette.
+ENTRY_FILL_WAIT_SEC = 8
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +69,12 @@ class StrategyStats:
     open_positions:   int   = 0
     orders_rejected:  int   = 0
     last_trade_time:  Optional[str] = None
+    # Fyldnings-regnskab for entries. Baerer to ting: (1) fyldnings-verifikationen
+    # i _entry_fill_qty, (2) nul-fyldnings-alarmen ved sessions-slut. Et forloeb hvor
+    # entries_attempted > 0 og entries_filled == 0 betyder at IBKR afviste ALT — praecis
+    # den tilstand der stod ubemaerket i tre uger paa EUREVERSION (20/7-30/7 2026).
+    entries_attempted: int  = 0
+    entries_filled:    int  = 0
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +339,62 @@ class BaseStrategy(ABC):
         return True
 
     # -----------------------------------------------------------------------
+    # Entry-fyldning
+    # -----------------------------------------------------------------------
+
+    async def _entry_fill_qty(self, result: Optional[dict], ticker: str,
+                              quantity: float) -> float:
+        """Hvor meget af en entry-ordre IBKR har BEKRAEFTET fyldt. 0 = bogfoer intet.
+
+        Exit-stierne har altid verificeret fyldning; entry gjorde det ikke. Den
+        asymmetri lod alle fem algoer bogfoere en position IBKR aldrig fik: en afvist
+        ordre kommer tilbage som status=Inactive/filled=0, og uden dette tjek koerte
+        resten af kaeden — journal, oversigt, force-close, reconcile — videre paa en
+        fiktion. EUREVERSION stod saadan 20/7-30/7 2026 uden at noget sagde fra.
+
+        Delvis fyldning returneres som den er, saa kalderen kan bogfoere PRAECIS det
+        IBKR fyldte. At afvise en delvis fyldning ville efterlade den fyldte del
+        foraeldreloes hos IBKR — stik mod formaalet.
+
+        Kalderen SKAL sende ordren med await_fill_sec=ENTRY_FILL_WAIT_SEC; ellers
+        naar vi at spoerge foer fyldningen er registreret.
+        """
+        self.stats.entries_attempted += 1
+
+        if not result:
+            self.stats.orders_rejected += 1
+            await self._log(
+                f"⛔ {ticker}: entry-ordre kunne IKKE sendes — ingen position bogfoert",
+                level="warning")
+            self._status("trading", f"⛔ {ticker}: entry-ordre kunne ikke sendes")
+            return 0.0
+
+        filled = float(result.get("filled") or 0)
+        status = result.get("status")
+        why    = result.get("reject_reason")
+
+        if filled <= 0:
+            self.stats.orders_rejected += 1
+            await self._log(
+                f"⛔ {ticker}: entry-ordre IKKE fyldt (status={status}, "
+                f"filled=0/{quantity:g}) — ingen position bogfoert"
+                + (f". IBKR: {why}" if why else
+                   ". IBKR gav ingen begrundelse — se backend-loggen (ibkr_error)."),
+                level="warning")
+            self._status("trading",
+                         f"⛔ {ticker}: entry ikke fyldt ({why or status}) — ingen position")
+            return 0.0
+
+        if filled < quantity:
+            await self._log(
+                f"⚠ {ticker}: entry kun DELVIST fyldt ({filled:g}/{quantity:g}, "
+                f"status={status}) — bogfoerer {filled:g}, saa journalen matcher IBKR",
+                level="warning")
+
+        self.stats.entries_filled += 1
+        return filled
+
+    # -----------------------------------------------------------------------
     # Position tracking
     # -----------------------------------------------------------------------
 
@@ -458,12 +525,29 @@ class BaseStrategy(ABC):
                 await self._journal.log_event(
                     source     = self.name,
                     event_type = "strategy_stopped",
-                    payload    = {"reason":       reason,
-                                  "trades_today": self.stats.trades_today,
-                                  "pnl_today":    round(self.stats.pnl_today, 2)},
+                    payload    = {"reason":        reason,
+                                  "trades_today":  self.stats.trades_today,
+                                  "pnl_today":     round(self.stats.pnl_today, 2),
+                                  # Fyldnings-regnskab: gør det eftersporbart om dagens
+                                  # stilhed skyldtes 'ingen signaler' eller 'alt afvist'.
+                                  "entries_attempted": self.stats.entries_attempted,
+                                  "entries_filled":    self.stats.entries_filled},
                 )
             except Exception as e:
                 logger.error(f"[{self.name}] strategy_stopped-skriv fejlede: {e}")
+
+        # Nul-fyldnings-alarm. Forsøgte entries + nul fyldninger = strategien har kørt
+        # hele dagen uden at kunne handle. Den tilstand er usynlig i journalen (fantom-
+        # rækker lukkes med pnl=0), så uden en aktiv alarm kan den stå i ugevis.
+        try:
+            if self.stats.entries_attempted > 0 and self.stats.entries_filled == 0:
+                await self._log(
+                    f"⛔ INGEN af dagens {self.stats.entries_attempted} entry-ordrer blev "
+                    f"fyldt af IBKR — strategien har reelt ikke handlet", level="error")
+                import notifier
+                await notifier.alert_no_fills(self.name, self.stats.entries_attempted)
+        except Exception as e:
+            logger.error(f"[{self.name}] nul-fyldnings-alarm fejlede: {e}")
 
     async def emergency_stop(self) -> None:
         await self._log("⚠ NØDSTOP AKTIVERET", level="warning")

@@ -65,6 +65,63 @@ class IBKRConnection:
         # ..., force_refresh=True) — strategien gør det ved dagsstart.
         self._future_cache: dict = {}
 
+        # Sidste IBKR-fejl pr. ordre-id. Fyldes af _on_ibkr_error, laeses af
+        # place_paper_order, saa en afvist ordre kan fortaelle HVORFOR i stedet for
+        # bare "Inactive". Uden det stod EUREVERSION med ~410 tavse afvisninger om
+        # dagen i tre uger, og aarsagen (for lidt margin) fandtes ingen steder.
+        self._order_errors: dict = {}
+
+        # ib_async har ingen fejl-handler som standard -> IBKR's begrundelser
+        # forsvinder lydloest. Tilknyttes paa IB-objektet (ikke pr. connect), saa vi
+        # ikke faar dubletter naar forbindelsen genetableres.
+        self.ib.errorEvent += self._on_ibkr_error
+
+    # Rent informative IBKR-koder (data-farm status, forbindelse genoprettet osv.).
+    # De kommer i hundredvis og er ikke fejl — hold dem paa debug, ellers druknes
+    # de rigtige afvisninger i stoej.
+    _INFO_CODES = {2100, 2103, 2104, 2105, 2106, 2107, 2108, 2119, 2157, 2158}
+
+    def _on_ibkr_error(self, reqId, errorCode, errorString, contract=None) -> None:
+        """Skriver IBKR's egne fejlbeskeder til loggen.
+
+        Uden denne handler er en afvist ordre usynlig: biblioteket saetter blot
+        orderStatus til 'Inactive', og aarsagen — margin, manglende rettigheder,
+        ugyldig kontrakt — bliver aldrig skrevet nogen steder. Maa ALDRIG kaste:
+        den kaldes fra ib_async's event-loop, og en fejl her ville forplante sig
+        ind i ordrehaandteringen.
+        """
+        try:
+            try:
+                code = int(errorCode)
+            except Exception:
+                code = -1
+
+            sym = ""
+            try:
+                if contract is not None and getattr(contract, "symbol", None):
+                    sym = f" {contract.symbol}"
+            except Exception:
+                pass
+
+            if code in self._INFO_CODES:
+                logger.debug(f"[ibkr_info] {code}{sym}: {errorString}")
+                return
+
+            # Ordre-relaterede fejl baerer ordrens id i reqId. Gem aarsagen, saa
+            # place_paper_order kan give den videre til strategien.
+            if isinstance(reqId, int) and reqId > 0:
+                self._order_errors[reqId] = f"{code}: {errorString}"
+                if len(self._order_errors) > 200:
+                    for k in list(self._order_errors)[:100]:
+                        self._order_errors.pop(k, None)
+
+            if code < 1000 or code in (1100, 1101, 1102):
+                logger.error(f"[ibkr_error] kode={code} reqId={reqId}{sym}: {errorString}")
+            else:
+                logger.warning(f"[ibkr_error] kode={code} reqId={reqId}{sym}: {errorString}")
+        except Exception:
+            pass
+
     @property
     def connected(self) -> bool:
         """
@@ -628,16 +685,23 @@ class IBKRConnection:
                         break
             else:
                 await asyncio.sleep(1)
+            _oid = trade.order.orderId
             return {
                 "ticker":    ticker,
                 "action":    action,
                 "quantity":  quantity,
-                "order_id":  trade.order.orderId,
+                "order_id":  _oid,
                 "order_ref": trade.order.orderRef,
                 "status":    trade.orderStatus.status,
                 "filled":    trade.orderStatus.filled,
                 "avg_fill":  trade.orderStatus.avgFillPrice,
-            } 
+                # IBKR's egen begrundelse hvis ordren blev afvist (sat af
+                # _on_ibkr_error). None naar alt gik godt. getattr-vaernet holder
+                # ordrestien i live selv paa et objekt uden __init__ (test-doubles
+                # bruger __new__) — en manglende diagnose-detalje maa ALDRIG kunne
+                # faa det ydre except til at melde 'ordre ikke sendt'.
+                "reject_reason": getattr(self, "_order_errors", {}).get(_oid),
+            }
         except asyncio.TimeoutError:
             logger.error(
                 f"Ordre TIMEOUT {ticker} — kontrakt-kvalificering svarede "

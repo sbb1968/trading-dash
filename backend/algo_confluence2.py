@@ -30,7 +30,8 @@ from datetime import datetime, timedelta, time as dtime, date as date_cls
 from typing import Optional
 import pytz
 
-from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
+from strategy_base import (
+    BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus, ENTRY_FILL_WAIT_SEC)
 from ibkr_connect import IBKRConnection
 from reconcile_idempotency import (
     RECONCILE_CLOSING, reconcile_close_ref, decide_confirmation, WAIT, FLATTEN, RETRY)
@@ -1081,9 +1082,14 @@ class Confluence2Live(BaseStrategy):
             if not approved:
                 return
 
-        result = await self.conn.place_paper_order(signal.ticker, "BUY", shares, source=self.name)
-        if not result:
+        result = await self.conn.place_paper_order(
+            signal.ticker, "BUY", shares, source=self.name,
+            await_fill_sec=ENTRY_FILL_WAIT_SEC)
+        # Bogfoer KUN hvad IBKR bekraefter fyldt — ellers bygger vi en fantom-position.
+        filled_qty = await self._entry_fill_qty(result, signal.ticker, shares)
+        if filled_qty <= 0:
             return
+        shares = int(filled_qty)
 
         # Registrer hos OrdersTracker
         try:

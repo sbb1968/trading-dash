@@ -2966,12 +2966,57 @@ async def journal_today(archive: str = None):
 
 @app.get("/journal/open-positions")
 async def journal_open_positions(archive: str = None):
-    """Alle nuværende åbne positioner."""
+    """Alle nuværende åbne positioner, krydstjekket mod IBKR.
+
+    Hver række får `ibkr_confirmed`:
+      True  — IBKR holder faktisk en position i symbolet
+      False — IBKR er FLAD i symbolet; journal-rækken er en fantom
+      None  — positions-feedet var upålideligt; vi VED det ikke
+
+    None og False er bevidst forskellige. Et degraderet feed må aldrig få ægte
+    positioner til at se fantom ud (samme fare som opstarts-reconcile er hærdet
+    imod) — derfor get_positions_reliable(), ikke get_positions().
+
+    Bemærk: IBKR netter på tværs af strategier, så matchet er på symbol-niveau,
+    ikke pr. strategi. Det fanger præcis den fejl vi er ude efter — journalen
+    påstår en position IBKR slet ikke har — uden at falsk-alarmere på netting.
+    `ibkr_position` sendes med, så en retnings-uoverensstemmelse kan ses.
+    """
     async with _resolve_db(archive) as db:
         positions = await trade_queries.open_positions(db)
+
+    ibkr_map: dict = {}
+    reliable = False
+    try:
+        ibkr = strategy_manager.get_ibkr()
+        if ibkr is not None and ibkr.connected:
+            live, reliable = await ibkr.get_positions_reliable()
+            if reliable:
+                for p in (live or []):
+                    t = p.get("ticker")
+                    if t:
+                        ibkr_map[t] = ibkr_map.get(t, 0.0) + float(p.get("position") or 0)
+    except Exception as e:
+        logger.warning(f"open-positions: krydstjek mod IBKR fejlede: {e}")
+        reliable = False
+
+    unconfirmed = 0
+    for row in positions:
+        if not reliable:
+            row["ibkr_confirmed"] = None
+            row["ibkr_position"]  = None
+            continue
+        net = ibkr_map.get(row.get("symbol"))
+        row["ibkr_position"]  = net
+        row["ibkr_confirmed"] = bool(net)
+        if not net:
+            unconfirmed += 1
+
     return {
-        "positions": positions,
-        "count":     len(positions),
+        "positions":    positions,
+        "count":        len(positions),
+        "ibkr_checked": reliable,
+        "unconfirmed":  unconfirmed if reliable else None,
     }
 
 

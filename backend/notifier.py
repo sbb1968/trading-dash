@@ -141,6 +141,25 @@ async def alert_tws_offline():
     )
 
 
+async def alert_no_fills(strategy: str, attempted: int):
+    """Strategien forsøgte at handle, men IBKR fyldte INTET.
+
+    AKTIV — i modsætning til de fleste øvrige alarmer. En strategi der kører uden
+    at kunne handle er præcis den tilstand der ellers står ubemærket: journalen ser
+    fredelig ud, fordi fantom-rækkerne lukkes med pnl=0, og ingenting råber op.
+    EUREVERSION stod sådan 20/7–30/7 2026 — tre uger, ~410 afviste ordrer om dagen.
+    """
+    await send(
+        message   = (f"{strategy} forsøgte {attempted} entry-ordre(r) i dag, men IBKR "
+                     f"fyldte INGEN af dem. Strategien handler reelt ikke. "
+                     f"Tjek kontodækning/margin og backend-loggen (ibkr_error)."),
+        title     = "⛔ Ingen ordrer blev fyldt",
+        priority  = 4,
+        tags      = "warning,no_entry_sign",
+        dedup_key = f"no_fills_{strategy}",
+    )
+
+
 async def alert_algo_started():
     # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
     return

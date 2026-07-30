@@ -30,7 +30,8 @@ from typing import Optional
 import aiohttp
 import pytz
 
-from strategy_base import BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus
+from strategy_base import (
+    BaseStrategy, StrategyConfig, OrderRequest, StrategyStatus, ENTRY_FILL_WAIT_SEC)
 from ibkr_connect import IBKRConnection
 from ib_async import Stock
 from reconcile_idempotency import (
@@ -878,9 +879,14 @@ class TrendJoinLive(BaseStrategy):
         if self._risk_manager:
             if not await self.request_order(order):
                 return
-        result = await self.conn.place_paper_order(ticker, "BUY", shares, source=self.name)
-        if not result:
+        result = await self.conn.place_paper_order(
+            ticker, "BUY", shares, source=self.name,
+            await_fill_sec=ENTRY_FILL_WAIT_SEC)
+        # Bogfoer KUN hvad IBKR bekraefter fyldt — ellers bygger vi en fantom-position.
+        filled_qty = await self._entry_fill_qty(result, ticker, shares)
+        if filled_qty <= 0:
             return
+        shares = int(filled_qty)
         fill = result.get("avg_fill")
         if fill and fill > 0:
             entry = fill
