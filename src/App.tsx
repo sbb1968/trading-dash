@@ -131,6 +131,61 @@ function getMarketStatus(): "open" | "pre" | "after" | "closed" {
   return "closed";
 }
 
+// ── Futures-session (CME) ─────────────────────────────────────
+// MES/M2K foelger IKKE aktiemarkedets aabningstid. CME's equity-index-futures
+// handler soendag 18:00 ET til fredag 17:00 ET, med en daglig vedligeholdelses-
+// pause 17:00-18:00 ET. Uden dette blev MES spaerret af aktie-gaten det meste
+// af det doegn hvor den faktisk kan handles.
+//
+// Symbol-listen spejler FUTURES_EXCHANGE i backend/ibkr_connect.py — det er
+// dén der afgoer om en ordre resolves til en Future- eller Stock-kontrakt.
+// Tilfoejes et symbol dér, skal det ogsaa tilfoejes her.
+const FUTURES_SYMBOLS = new Set(["MES", "M2K"]);
+
+export function isFutureSymbol(ticker: string): boolean {
+  return FUTURES_SYMBOLS.has(ticker.toUpperCase().trim());
+}
+
+// open = handelbar · break = daglig vedligeholdelsespause · closed = weekend
+function getFuturesStatus(): "open" | "break" | "closed" {
+  const now = new Date(), day = now.getDay();
+  const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const mins = et.getHours() * 60 + et.getMinutes();
+  const CLOSE = 17 * 60, OPEN = 18 * 60;      // 17:00 / 18:00 ET
+  if (day === 6) return "closed";                       // loerdag
+  if (day === 0) return mins >= OPEN ? "open" : "closed";  // soendag: aabner 18:00
+  if (day === 5) return mins < CLOSE ? "open" : "closed";  // fredag: lukker 17:00
+  return (mins >= CLOSE && mins < OPEN) ? "break" : "open";  // man-tors
+}
+
+// Handelsstatus PR. INSTRUMENT — futures og aktier har hver deres kalender.
+function tradeStatus(ticker: string, mkt: "open" | "pre" | "after" | "closed") {
+  if (isFutureSymbol(ticker)) {
+    const f = getFuturesStatus();
+    return {
+      canTrade: f === "open",
+      color: f === "open" ? "var(--bull)" : "var(--bear)",
+      title: f === "open" ? "FUTURES — handles naesten doegnet rundt (kan handles)"
+           : f === "break" ? "FUTURES — daglig pause 23:00-00:00 dansk tid"
+           : "FUTURES — weekend (aabner soendag 24:00 dansk tid)",
+      blockMsg: f === "break"
+        ? "CME holder daglig vedligeholdelsespause (23:00-00:00 dansk tid)."
+        : "CME er lukket i weekenden. Handlen aabner soendag kl. 24:00 dansk tid.",
+    };
+  }
+  return {
+    canTrade: mkt === "open" || mkt === "pre",
+    color: mkt === "open" ? "var(--bull)" : mkt === "pre" ? "var(--neutral)" : "var(--bear)",
+    title: mkt === "open" ? "marked ÅBENT (kan handles)"
+         : mkt === "pre" ? "PRE-MARKET (kan handles)"
+         : mkt === "after" ? "AFTER-HOURS (handel ikke tilladt)"
+         : "marked LUKKET (afvent åbning)",
+    blockMsg: (mkt === "after" ? "after-hours — handel er slået fra" : "markedet er lukket")
+      + ".\n\nHandel er muligt i pre-market (fra kl. 10:00 dansk tid) og regulær "
+      + "åbningstid (15:30–22:00). After-hours er ikke tilladt.",
+  };
+}
+
 function MarketStatus() {
   const [status, setStatus] = useState<"open" | "pre" | "after" | "closed">("closed");
   useEffect(() => {
@@ -223,10 +278,12 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // Markedsstatus (RTH) — styrer om KØB/SÆLG er muligt + farve pr. ticker.
   const [mkt, setMkt] = useState<"open" | "pre" | "after" | "closed">(getMarketStatus);
   useEffect(() => { const id = setInterval(() => setMkt(getMarketStatus()), 10000); return () => clearInterval(id); }, []);
-  // Handelbar = RTH (open) ELLER pre-market. After-hours + lukket = IKKE handelbar.
-  const canTrade = mkt === "open" || mkt === "pre";
-  // Ticker-farve: grøn=åbent · gul=pre-market · rød=after-hours/lukket.
-  const tickerColor = mkt === "open" ? "var(--bull)" : mkt === "pre" ? "var(--neutral)" : "var(--bear)";
+  // Handelbarhed afgoeres PR. INSTRUMENT (tradeStatus): aktier foelger RTH +
+  // pre-market, futures foelger CME's egen kalender. Tidligere gjaldt aktie-
+  // reglen for hele listen, saa MES blev spaerret naesten hele det doegn den
+  // faktisk kan handles.
+  // `mkt` opdateres hvert 10. sekund og driver gen-render, saa futures-status
+  // (som laeses direkte i tradeStatus) ogsaa opdateres loebende.
 
   // Route Ibens ordre-resultater (fills) ind i den rette rækkes køb-tilstand:
   // KØB akkumulerer beholdning + vægtet gennemsnits-købspris; SÆLG reducerer (lukker
@@ -306,11 +363,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   }
 
   function handleOrder(action: "BUY" | "SELL", stock: any) {
-    if (!canTrade) {
-      const lbl = mkt === "after" ? "after-hours — handel er slået fra" : "markedet er lukket";
-      alert(`${stock.ticker} kan ikke handles nu (${lbl}).\n\n` +
-        `Handel er muligt i pre-market (fra kl. 10:00 dansk tid) og regulær åbningstid (15:30–22:00). ` +
-        `After-hours er ikke tilladt.`);
+    const ts = tradeStatus(stock.ticker, mkt);
+    if (!ts.canTrade) {
+      alert(`${stock.ticker} kan ikke handles nu.\n\n${ts.blockMsg}`);
       return;
     }
     const shares = parseInt(getShares(stock.ticker), 10);
@@ -469,8 +524,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   <td style={{ textAlign: "center", color: selectedNum === i + 1 ? "var(--accent)" : "var(--text-muted)", fontWeight: 700 }}>{i + 1}</td>
                   <td className="sym-cell">
                     <span onClick={e => { e.stopPropagation(); openCompanySite(stock.ticker); }}
-                      title={`${stock.ticker} — ${mkt === "open" ? "marked ÅBENT (kan handles)" : mkt === "pre" ? "PRE-MARKET (kan handles)" : mkt === "after" ? "AFTER-HOURS (handel ikke tilladt)" : "marked LUKKET (afvent åbning)"} · klik for hjemmeside`}
-                      style={{ cursor: "pointer", textDecoration: "underline dotted", color: tickerColor, fontWeight: 700 }}>{stock.ticker}</span>
+                      title={`${stock.ticker} — ${tradeStatus(stock.ticker, mkt).title} · klik for hjemmeside`}
+                      style={{ cursor: "pointer", textDecoration: "underline dotted",
+                               color: tradeStatus(stock.ticker, mkt).color, fontWeight: 700 }}>{stock.ticker}</span>
                     {halted && (
                       <span title={isHaltedHeld
                           ? "HALT: handlen i din åbne position er midlertidigt STOPPET på børsen"
