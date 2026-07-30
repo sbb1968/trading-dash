@@ -19,6 +19,12 @@
 // ════════════════════════════════════════════════════════════════════════════
 indicator("RVOL Oscillator", shorttitle="RVOL Osc", precision=2)
 
+// Pine tillader ikke en collection direkte i en anden collections type-template
+// (`map<int, array<float>>` giver CE10025). Arrayet pakkes derfor i en
+// user-defined type, som map'et saa kan holde.
+type Spor
+    array<float> vol
+
 // ── Beregning ───────────────────────────────────────────────────────────────
 metode = input.string("Foregaaende barer", "Sammenlign med",
      options=["Foregaaende barer", "Samme tidspunkt tidligere dage"], group="Beregning",
@@ -37,6 +43,15 @@ excl   = input.bool(true, "Udelad den aktuelle bar fra snittet", group="Beregnin
 minDage = input.int(5, "Min. dage foer 'Samme tidspunkt' er gyldig", minval=1, group="Beregning")
 
 // ── Visning ─────────────────────────────────────────────────────────────────
+skala = input.string("Forholdstal", "Skala",
+     options=["Forholdstal", "Log2 (doblinger)"], group="Visning",
+     tooltip="Forholdstal (rvol-1): raat og let at laese — men skalaen er skaev. " +
+             "Volumen kan ikke blive negativ, saa nedadgaaende barer er klemt " +
+             "sammen mellem 0 og -1, mens opadgaaende er ubegraensede. Paa MES " +
+             "fylder opsiden 83 % af aksen.\n\n" +
+             "Log2: én enhed = en dobling. Halv volumen = -1, dobbelt = +1, " +
+             "fire gange = +2. Symmetrisk om nul og langt nemmere at aflaese " +
+             "paa den lave side.")
 visSignal = input.bool(false, "Vis signallinje (som MACD)", group="Visning")
 sigLen    = input.int(9, "Signallinje-laengde", minval=1, group="Visning")
 visNiv    = input.bool(true, "Vis taerskellinjer", group="Visning")
@@ -60,23 +75,23 @@ snitRull  = maType == "SMA" ? ta.sma(grundlag, len) : ta.ema(grundlag, len)
 // Noeglen er minut-paa-doegnet i symbolets egen tidszone. Det haandterer
 // helligdage og forskellig sessionslaengde af sig selv — modsat en
 // "bars pr. dag"-udregning, der skrider hver gang en dag er kortere.
-var map<int, array<float>> arkiv = map.new<int, array<float>>()
+var map<int, Spor> arkiv = map.new<int, Spor>()
 
 noegle = timeframe.isintraday
      ? hour(time, syminfo.timezone) * 60 + minute(time, syminfo.timezone)
      : 0
 spor = map.get(arkiv, noegle)
 if na(spor)
-    spor := array.new<float>()
+    spor := Spor.new(array.new<float>())
     map.put(arkiv, noegle, spor)
 
 // Snittet laeses FOER dagens volumen laegges i arkivet — saa den aktuelle bar
 // aldrig indgaar i sit eget sammenligningsgrundlag.
-snitSlot = array.size(spor) >= minDage ? array.avg(spor) : na
+snitSlot = array.size(spor.vol) >= minDage ? array.avg(spor.vol) : na
 if barstate.isconfirmed and not na(volume) and volume > 0
-    array.push(spor, volume)
-    if array.size(spor) > len
-        array.shift(spor)
+    array.push(spor.vol, volume)
+    if array.size(spor.vol) > len
+        array.shift(spor.vol)
 
 snit = metode == "Foregaaende barer" ? snitRull : snitSlot
 
@@ -84,9 +99,12 @@ snit = metode == "Foregaaende barer" ? snitRull : snitSlot
 // giver et hul i plottet frem for et vildledende tal.
 rvol = not na(snit) and snit > 0 ? volume / snit : na
 
-// Afvigelsen fra gennemsnittet som forholdstal. RVOL 1 -> 0 (nullinjen),
-// RVOL 1.5 -> +0.5, RVOL 0.6 -> -0.4.
-osc = rvol - 1
+// Afvigelsen fra gennemsnittet. Begge skalaer har nul ved RVOL = 1.
+//   Forholdstal : RVOL 1.5 -> +0.50   RVOL 0.6 -> -0.40   (gulv ved -1)
+//   Log2        : RVOL 2.0 -> +1.00   RVOL 0.5 -> -1.00   (symmetrisk)
+// log kraever et positivt argument — en bar helt uden volumen giver na.
+osc = skala == "Forholdstal" ? rvol - 1
+     : (not na(rvol) and rvol > 0 ? math.log(rvol) / math.log(2) : na)
 
 // ── Farver — samme logik som MACD-histogrammet ──────────────────────────────
 // Kraftig naar soejlen vokser (vaek fra nul), daempet naar den skrumper.
@@ -96,14 +114,17 @@ farve  = osc >= 0
      : (vokser ? color.new(color.red,   0) : color.new(color.red,   55))
 
 // ── Plot ────────────────────────────────────────────────────────────────────
-plot(osc, "RVOL - 1", style=plot.style_columns, color=farve)
+// Titlen naevner ikke skalaen — den kan skiftes i indstillingerne.
+plot(osc, "RVOL", style=plot.style_columns, color=farve)
 
 hline(0, "Nul (RVOL = 1)", color=color.new(color.gray, 20), linestyle=hline.style_solid)
 
 // Taerskellinjerne tegnes med plot() frem for hline(), fordi de udledes af
 // input-vaerdier og dermed ikke er konstanter.
-t1 = niv1 - 1
-t2 = niv2 - 1
+// Taersklerne foelger den valgte skala, saa linjerne bliver ved med at ligge
+// ved de RVOL-vaerdier brugeren har indtastet.
+t1 = skala == "Forholdstal" ? niv1 - 1 : math.log(niv1) / math.log(2)
+t2 = skala == "Forholdstal" ? niv2 - 1 : math.log(niv2) / math.log(2)
 plot(visNiv ? t1 : na, "Taerskel 1", color=color.new(color.gray, 45), style=plot.style_linebr)
 plot(visNiv ? t2 : na, "Taerskel 2", color=color.new(color.gray, 65), style=plot.style_linebr)
 
