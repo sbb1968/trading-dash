@@ -1,0 +1,120 @@
+//@version=6
+// ════════════════════════════════════════════════════════════════════════════
+//  RVOL Oscillator — relativ volumen som MACD-agtigt soejlediagram
+// ════════════════════════════════════════════════════════════════════════════
+//  Nulpunktet er RVOL = 1 (volumen praecis som gennemsnittet).
+//  Soejlen viser afvigelsen fra gennemsnittet som FORHOLDSTAL:
+//      RVOL 2.00  ->  +1.00   (dobbelt volumen — groen, over nul)
+//      RVOL 1.50  ->  +0.50
+//      RVOL 1.00  ->   0.00   (nullinjen)
+//      RVOL 0.60  ->  -0.40   (roed, under nul)
+//
+//  Farvelaegningen efterligner MACD-histogrammet: kraftig farve naar soejlen
+//  vokser vaek fra nul, daempet naar den er paa vej tilbage mod nul.
+//
+//  Standardindstillingen (20 perioder, SMA, aktuel bar udeladt) matcher den
+//  RVOL vi brugte i MES-analysen — verificeret bit-identisk mod
+//  store_bevaegelser_lib.rvol() — saa vaerdier i charten kan sammenlignes
+//  direkte med tallene i datasaettet.
+// ════════════════════════════════════════════════════════════════════════════
+indicator("RVOL Oscillator", shorttitle="RVOL Osc", precision=2)
+
+// ── Beregning ───────────────────────────────────────────────────────────────
+metode = input.string("Foregaaende barer", "Sammenlign med",
+     options=["Foregaaende barer", "Samme tidspunkt tidligere dage"], group="Beregning",
+     tooltip="Foregaaende barer: klassisk rullende snit — matcher MES-analysen, men " +
+             "paa intradag maaler den delvist HVAD KLOKKEN ER, fordi volumen foelger " +
+             "en fast doegnrytme. Samme tidspunkt: sammenligner denne bar med samme " +
+             "klokkeslet paa tidligere dage, saa doegnrytmen falder ud.")
+len    = input.int(20, "Perioder i volumen-snittet", minval=1, group="Beregning",
+     tooltip="Antal bars (Foregaaende barer) eller antal DAGE (Samme tidspunkt).")
+maType = input.string("SMA", "Type gennemsnit", options=["SMA", "EMA"], group="Beregning",
+     tooltip="Bruges kun ved 'Foregaaende barer'.")
+excl   = input.bool(true, "Udelad den aktuelle bar fra snittet", group="Beregning",
+     tooltip="Til: baren sammenlignes med de FOREGAAENDE bars — en volumen-eksplosion " +
+             "traekker ikke sit eget sammenligningsgrundlag op. Fra: baren indgaar i sit " +
+             "eget snit og fremstaar mindre usaedvanlig end den er.")
+minDage = input.int(5, "Min. dage foer 'Samme tidspunkt' er gyldig", minval=1, group="Beregning")
+
+// ── Visning ─────────────────────────────────────────────────────────────────
+visSignal = input.bool(false, "Vis signallinje (som MACD)", group="Visning")
+sigLen    = input.int(9, "Signallinje-laengde", minval=1, group="Visning")
+visNiv    = input.bool(true, "Vis taerskellinjer", group="Visning")
+niv1      = input.float(1.5, "Taerskel 1 (RVOL)", step=0.1, minval=0.1, group="Visning",
+     tooltip="1.5 = signaturens 'hoej RVOL' fra MES-analysen. Tegnes ved +0.50.")
+niv2      = input.float(4.0, "Taerskel 2 (RVOL)", step=0.1, minval=0.1, group="Visning",
+     tooltip="4.0 = hale-filteret fra MES-analysen. Tegnes ved +3.00.")
+
+// ── Grundlaget: rullende snit ───────────────────────────────────────────────
+// excl=true  ->  snit af de FOREGAAENDE `len` bars (volume[1] .. volume[len])
+// excl=false ->  snit inkl. den aktuelle bar
+grundlag  = excl ? volume[1] : volume
+snitRull  = maType == "SMA" ? ta.sma(grundlag, len) : ta.ema(grundlag, len)
+
+// ── Grundlaget: samme tidspunkt tidligere dage ──────────────────────────────
+// Volumen foelger en fast doegnrytme (aabning hoej, midt paa dagen lav). Et
+// rullende snit sammenligner derfor aabningsbaren med nattetimer, og RVOL
+// maaler mest hvad klokken er. Her holdes i stedet ét volumen-arkiv pr.
+// klokkeslet, saa baren sammenlignes med SIG SELV paa tidligere dage.
+//
+// Noeglen er minut-paa-doegnet i symbolets egen tidszone. Det haandterer
+// helligdage og forskellig sessionslaengde af sig selv — modsat en
+// "bars pr. dag"-udregning, der skrider hver gang en dag er kortere.
+var map<int, array<float>> arkiv = map.new<int, array<float>>()
+
+noegle = timeframe.isintraday
+     ? hour(time, syminfo.timezone) * 60 + minute(time, syminfo.timezone)
+     : 0
+spor = map.get(arkiv, noegle)
+if na(spor)
+    spor := array.new<float>()
+    map.put(arkiv, noegle, spor)
+
+// Snittet laeses FOER dagens volumen laegges i arkivet — saa den aktuelle bar
+// aldrig indgaar i sit eget sammenligningsgrundlag.
+snitSlot = array.size(spor) >= minDage ? array.avg(spor) : na
+if barstate.isconfirmed and not na(volume) and volume > 0
+    array.push(spor, volume)
+    if array.size(spor) > len
+        array.shift(spor)
+
+snit = metode == "Foregaaende barer" ? snitRull : snitSlot
+
+// Guard: uden volumen-data (eller et snit paa nul) er RVOL udefineret — na
+// giver et hul i plottet frem for et vildledende tal.
+rvol = not na(snit) and snit > 0 ? volume / snit : na
+
+// Afvigelsen fra gennemsnittet som forholdstal. RVOL 1 -> 0 (nullinjen),
+// RVOL 1.5 -> +0.5, RVOL 0.6 -> -0.4.
+osc = rvol - 1
+
+// ── Farver — samme logik som MACD-histogrammet ──────────────────────────────
+// Kraftig naar soejlen vokser (vaek fra nul), daempet naar den skrumper.
+vokser = not na(osc) and not na(osc[1]) and math.abs(osc) > math.abs(osc[1])
+farve  = osc >= 0
+     ? (vokser ? color.new(color.green, 0) : color.new(color.green, 55))
+     : (vokser ? color.new(color.red,   0) : color.new(color.red,   55))
+
+// ── Plot ────────────────────────────────────────────────────────────────────
+plot(osc, "RVOL - 1", style=plot.style_columns, color=farve)
+
+hline(0, "Nul (RVOL = 1)", color=color.new(color.gray, 20), linestyle=hline.style_solid)
+
+// Taerskellinjerne tegnes med plot() frem for hline(), fordi de udledes af
+// input-vaerdier og dermed ikke er konstanter.
+t1 = niv1 - 1
+t2 = niv2 - 1
+plot(visNiv ? t1 : na, "Taerskel 1", color=color.new(color.gray, 45), style=plot.style_linebr)
+plot(visNiv ? t2 : na, "Taerskel 2", color=color.new(color.gray, 65), style=plot.style_linebr)
+
+// Signallinje — kun hvis man vil have MACD-lookket helt igennem.
+sig = ta.ema(osc, sigLen)
+plot(visSignal ? sig : na, "Signal", color=color.new(color.orange, 0), linewidth=2)
+
+// ── Alarmer ─────────────────────────────────────────────────────────────────
+alertcondition(ta.crossover(rvol, niv1), "RVOL over taerskel 1",
+     "RVOL krydsede op gennem taerskel 1")
+alertcondition(ta.crossover(rvol, niv2), "RVOL over taerskel 2",
+     "RVOL krydsede op gennem taerskel 2 (hale-niveau)")
+alertcondition(ta.crossunder(rvol, 1.0), "RVOL under gennemsnittet",
+     "RVOL faldt under 1 — volumen under gennemsnittet")
