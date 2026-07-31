@@ -343,6 +343,9 @@ def main() -> int:
     ap.add_argument("--symbol", default="MES")
     ap.add_argument("--variant", default=None, choices=list(VARIANTS),
                     help=f"én variant (default: {LIVE_VARIANT_KEY})")
+    ap.add_argument("--variants", default=None,
+                    help="kommasepareret delmængde, fx 'rise0_12,r12_z150' — "
+                         "til at isolere én parameter uden at køre hele gridet")
     ap.add_argument("--sweep", action="store_true", help="kør ALLE varianter")
     ap.add_argument("--oos-split", type=float, default=0.6)
     ap.add_argument("--cost-read-bp", type=float, default=2.0)
@@ -369,6 +372,12 @@ def main() -> int:
 
     if args.sweep:
         keys = list(VARIANTS)
+    elif args.variants:
+        keys = [k.strip() for k in args.variants.split(",") if k.strip()]
+        ukendte = [k for k in keys if k not in VARIANTS]
+        if ukendte:
+            print(f"❌ Ukendte varianter: {ukendte}\n   Gyldige: {sorted(VARIANTS)}")
+            return 1
     elif args.variant:
         keys = [args.variant]
     else:

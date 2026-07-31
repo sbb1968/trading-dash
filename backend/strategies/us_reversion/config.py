@@ -165,6 +165,23 @@ VARIANTS: dict[str, UsReversionVariantConfig] = {
         require_cmf_positive=True,
         exit_at_upper_z=True,
     ),
+
+    # ── Båndets placering OVEN PÅ rise0_12 (Søren 31/7-2026) ───
+    # Det første sweep pegede på rise_pct=0,12 som den bedste af de tre
+    # stigningskrav. Herfra drejes så på båndet alene, med alt andet holdt fast,
+    # så effekten af z kan aflæses isoleret. Strategien er long-only og bruger
+    # ikke Z-exit i denne gren, så entry_z er reelt KUN det nedre bånd her.
+    #
+    # Lavere z  = båndet ligger tættere på middel = flere, svagere udvidelser.
+    # Højere z  = kun kraftigere udvidelser, men færre handler at bedømme på.
+    "r12_z150": UsReversionVariantConfig(
+        name="rise 0,12% + bånd z±1,50", rise_pct=0.12, entry_z=1.50),
+    "r12_z175": UsReversionVariantConfig(
+        name="rise 0,12% + bånd z±1,75", rise_pct=0.12, entry_z=1.75),
+    "r12_z225": UsReversionVariantConfig(
+        name="rise 0,12% + bånd z±2,25", rise_pct=0.12, entry_z=2.25),
+    "r12_z250": UsReversionVariantConfig(
+        name="rise 0,12% + bånd z±2,50", rise_pct=0.12, entry_z=2.50),
 }
 
 # Hvilken variant live-wrapperen kører. Skift denne ene streng for at ændre
