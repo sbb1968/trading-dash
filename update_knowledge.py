@@ -67,6 +67,7 @@ SKIP_DIRS = {
     "_archive",        # backend/_archive — gamle eksperimenter
     "logs",
     "data",            # backend/data — store CSV-filer
+    "_daily_cache",    # regime_v2_output — én JSON pr. ticker med daglige bars
     ".pytest_cache",
 }
 
@@ -83,6 +84,15 @@ SKIP_FILES = {
 
 # Maks filstørrelse — filer større end dette springes over (i KB)
 MAX_FILE_KB = 500
+
+# Strammere loft for .json. Extensionen står på listen for KONFIG-filer
+# (package.json, tsconfig.json, tauri.conf.json) — ikke for data. Uden et
+# separat loft sluger scriptet hver eneste data-dump og cache-fil det møder:
+# 31/7-2026 var codebase.md vokset til 56 MB, hvoraf 49 MB var JSON fra
+# regime-backfillen. Alt strukturelt (rules.json, top15-lister, peers.json,
+# tauri.conf.json) ligger under 25 KB; alt over er data.
+# ALWAYS_INCLUDE-filer rammes ikke — de slipper igennem før størrelsestjekket.
+MAX_JSON_KB = 25
 
 # ─────────────────────────────────────────────────────────────
 # Helpers
@@ -104,6 +114,8 @@ def should_include_file(path: Path) -> bool:
     try:
         size_kb = path.stat().st_size / 1024
         if size_kb > MAX_FILE_KB:
+            return False
+        if path.suffix.lower() == ".json" and size_kb > MAX_JSON_KB:
             return False
     except OSError:
         return False
