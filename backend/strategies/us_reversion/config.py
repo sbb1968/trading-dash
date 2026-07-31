@@ -169,4 +169,13 @@ VARIANTS: dict[str, UsReversionVariantConfig] = {
 
 # Hvilken variant live-wrapperen kører. Skift denne ene streng for at ændre
 # hvad der handles — backtesten sweeper alle nøgler i VARIANTS.
-LIVE_VARIANT_KEY = "base"
+#
+# rise0_12 valgt af Søren 31/7-2026 efter det første sweep (2 år MES, 2 bp):
+#     base       n=124  PF 0,84 IS / 1,16 OOS   ← ingen edge
+#     rise0_12   n=95   PF 1,00 IS / 1,32 OOS   ← valgt
+#     rise0_20   n=32   PF 2,33 IS / 2,73 OOS   ← bedst, men kun 14 OOS-handler
+# rise0_20 ser stærkest ud, men på et datagrundlag der er for tyndt til at
+# betyde noget. rise0_12 har tre gange så mange handler og peger samme vej:
+# et STRAMMERE krav til stigningen er bedre end Sørens oprindelige 0,08%.
+# Retningen er sammenhængende i gridet, ikke et enkelt heldigt punkt.
+LIVE_VARIANT_KEY = "rise0_12"
