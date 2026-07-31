@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from datetime import datetime, date
 from pathlib import Path
 
@@ -44,7 +44,7 @@ from strategies.us_reversion import rule
 from strategies.us_reversion.config import (
     SESSION_START_ET, ENTRY_CUTOFF_ET, FORCE_CLOSE_ET, LAST_SESSION_BAR_ET,
     LOOKBACK, CMF_LEN, MACD_FAST, MACD_SLOW, MACD_SIG,
-    MIN_WARMUP_TRIG, MIN_WARMUP_BAND,
+    MACD_WINDOW, MIN_WARMUP_TRIG, MIN_WARMUP_BAND,
     VARIANTS, LIVE_VARIANT_KEY, UsReversionVariantConfig,
 )
 
@@ -124,6 +124,46 @@ def contiguous(bars: list[Bar], i: int, need: int, seconds: int) -> bool:
         if (bars[k].ts - bars[k - 1].ts).total_seconds() != seconds:
             return False
     return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MACD-cache
+# ═══════════════════════════════════════════════════════════════
+# MACD afhænger KUN af faste konstanter (MACD_WINDOW/FAST/SLOW/SIG) — ingen
+# variant-parameter rører den. Ved et gitter-sweep spørges de samme bar-indeks
+# igen og igen, så vi beregner hver kun én gang. Gyldig fordi bars5 er den samme
+# liste gennem hele processen; ryddes af clear_macd_cache() hvis det skulle ændre sig.
+_MACD_CACHE: dict[int, tuple[float | None, float | None]] = {}
+
+
+def clear_macd_cache() -> None:
+    _MACD_CACHE.clear()
+
+
+def macd_pair(bars5: list[Bar], i: int) -> tuple[float | None, float | None]:
+    """
+    (macd_nu, macd_forrige) på bar i — begge beregnet på PRÆCIS MACD_WINDOW bars.
+
+    Samme udsnit som live-wrapperen bruger. Det er ikke pedanteri: en EMA huskes
+    fra sit første element, så et andet vinduelængde giver et andet MACD-tal, og
+    de to var uenige om "er MACD stigende?" på 4,1 % af barerne før dette blev
+    ensrettet.
+    """
+    hit = _MACD_CACHE.get(i)
+    if hit is not None:
+        return hit
+
+    lo = i - MACD_WINDOW
+    if lo < 0 or not contiguous(bars5, i, MACD_WINDOW + 1, TRIG_SECONDS):
+        pair = (None, None)
+    else:
+        w = [x.close for x in bars5[lo: i + 1]]        # MACD_WINDOW + 1 closes
+        a = macd_of(w[1:],  MACD_FAST, MACD_SLOW, MACD_SIG)
+        b = macd_of(w[:-1], MACD_FAST, MACD_SLOW, MACD_SIG)
+        pair = (a.macd if a else None, b.macd if b else None)
+
+    _MACD_CACHE[i] = pair
+    return pair
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -232,15 +272,13 @@ def run_backtest(bars5: list[Bar], bars15: list[Bar],
         if not contiguous(bars5, i, MIN_WARMUP_TRIG, TRIG_SECONDS):
             continue
 
-        closes5 = [x.close for x in bars5[i - MIN_WARMUP_TRIG + 1: i + 1]]
-        m_now  = macd_of(closes5, MACD_FAST, MACD_SLOW, MACD_SIG)
-        m_prev = macd_of(closes5[:-1], MACD_FAST, MACD_SLOW, MACD_SIG)
+        m_now, m_prev = macd_pair(bars5, i)
 
         ok, _ = rule.check_entry(
             bars5     = [{"open": bars5[i - 1].open, "close": bars5[i - 1].close},
                          {"open": b5.open,           "close": b5.close}],
-            macd_now  = m_now.macd if m_now else None,
-            macd_prev = m_prev.macd if m_prev else None,
+            macd_now  = m_now,
+            macd_prev = m_prev,
             cmf_now   = cmf_now,
             cmf_prev  = cmf_prev,
             cfg       = cfg,
@@ -332,6 +370,62 @@ def report_variant(out, key: str, cfg: UsReversionVariantConfig,
       f"PF={fmt_pf(so['pf'])}\n")
 
 
+# Gitteret for --grid-exit. Spænder fra klart strammere til klart løsere end de
+# nuværende 0,12 / 0,10, så et evt. toppunkt har naboer på begge sider — det er
+# formen på tværs af gitteret, ikke det enkelte bedste tal, der er beviset.
+STOP_GRID  = [0.06, 0.08, 0.10, 0.12, 0.16, 0.20, 0.30]
+TRAIL_GRID = [0.05, 0.08, 0.10, 0.15, 0.20, 0.30]
+
+
+def run_exit_grid(bars5: list[Bar], bars15: list[Bar],
+                  base: UsReversionVariantConfig, read_bp: float,
+                  oos_frac: float) -> tuple[list[str], list[tuple]]:
+    """
+    Kør stop_pct × trail_pct med ENTRY-siden holdt helt fast.
+
+    Entry afhænger kun af entry_z, rise_pct og require_cmf_positive — ingen af
+    dem røres her. Derfor er ALLE forskelle mellem cellerne exit-effekter, og
+    MACD-cachen rammer plet fra og med anden celle.
+    """
+    lines: list[str] = []
+    rows: list[tuple] = []
+    total = len(STOP_GRID) * len(TRAIL_GRID)
+    k = 0
+    for sp in STOP_GRID:
+        for tp in TRAIL_GRID:
+            k += 1
+            cfg = dc_replace(base, stop_pct=sp, trail_pct=tp,
+                             name=f"stop {sp}% / trail {tp}%")
+            print(f"  [{k:>2}/{total}] stop={sp}%  trail={tp}% ...", flush=True)
+            tr = run_backtest(bars5, bars15, cfg)
+            s = stats(tr, read_bp)
+            _, oos = split_by_date(tr, oos_frac)
+            so = stats(oos, read_bp)
+            rows.append((sp, tp, s, so))
+
+    def cell(rows_, key):
+        return {(sp, tp): (s, so) for sp, tp, s, so in rows_}[key]
+
+    for titel, hent, fmt in (
+        ("PF — hele perioden @ %.0f bp", lambda s, so: s["pf"], "{:>7}"),
+        ("PF — OUT-OF-SAMPLE @ %.0f bp", lambda s, so: so["pf"], "{:>7}"),
+        ("Antal handler",                lambda s, so: float(s["n"]), "{:>7}"),
+    ):
+        lines.append("\n" + "=" * 78 + "\n")
+        lines.append("  " + (titel % read_bp if "%" in titel else titel) + "\n")
+        lines.append("  rækker = stop_pct · kolonner = trail_pct\n")
+        lines.append("=" * 78 + "\n")
+        lines.append(f"  {'stop\\trail':<12}" + "".join(f"{t:>8}" for t in TRAIL_GRID) + "\n")
+        for sp in STOP_GRID:
+            row = f"  {sp:<12}"
+            for tp in TRAIL_GRID:
+                s, so = cell(rows, (sp, tp))
+                v = hent(s, so)
+                row += f"{fmt_pf(v):>8}" if "PF" in titel else f"{int(v):>8}"
+            lines.append(row + "\n")
+    return lines, rows
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -347,6 +441,11 @@ def main() -> int:
                     help="kommasepareret delmængde, fx 'rise0_12,r12_z150' — "
                          "til at isolere én parameter uden at køre hele gridet")
     ap.add_argument("--sweep", action="store_true", help="kør ALLE varianter")
+    ap.add_argument("--grid-exit", action="store_true",
+                    help="2D-gitter over stop_pct × trail_pct, med ENTRY holdt fast "
+                         "på live-varianten. Isolerer exit-siden alene.")
+    ap.add_argument("--grid-base", default=None,
+                    help=f"hvilken variant gitteret bygger på (default: {LIVE_VARIANT_KEY})")
     ap.add_argument("--oos-split", type=float, default=0.6)
     ap.add_argument("--cost-read-bp", type=float, default=2.0)
     args = ap.parse_args()
@@ -369,6 +468,31 @@ def main() -> int:
         return 1
     print(f"  {len(bars5):,} 5m-bars · {len(bars15):,} 15m-bars "
           f"({bars5[0].ts.date()} → {bars5[-1].ts.date()})\n")
+
+    if args.grid_exit:
+        base_key = args.grid_base or LIVE_VARIANT_KEY
+        if base_key not in VARIANTS:
+            print(f"❌ Ukendt --grid-base '{base_key}'. Gyldige: {sorted(VARIANTS)}")
+            return 1
+        base = VARIANTS[base_key]
+        out_dir = Path.cwd() / OUTPUT_DIRNAME
+        out_dir.mkdir(exist_ok=True)
+        head = ["=" * 78 + "\n",
+                "  US-REVERSION — EXIT-GITTER (stop × trailing)\n",
+                "=" * 78 + "\n",
+                f"Entry HOLDT FAST paa '{base_key}': z=±{base.entry_z}  "
+                f"stigning≥{base.rise_pct}%  cmf+={base.require_cmf_positive}\n",
+                f"Data: {data_dir}   {args.symbol}   "
+                f"{bars5[0].ts.date()} → {bars5[-1].ts.date()}\n",
+                f"Alle tal aflaest ved {args.cost_read_bp:.0f} bp rundtur.\n"]
+        grid_lines, _ = run_exit_grid(bars5, bars15, base,
+                                      args.cost_read_bp, args.oos_split)
+        text = "".join(head + grid_lines)
+        print(text)
+        p = out_dir / "exit_grid.txt"
+        p.write_text(text, encoding="utf-8")
+        print(f"\nFil: {p}")
+        return 0
 
     if args.sweep:
         keys = list(VARIANTS)

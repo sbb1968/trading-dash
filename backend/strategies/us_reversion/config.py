@@ -63,9 +63,21 @@ MACD_FAST = 12    # MACD på 5m
 MACD_SLOW = 26
 MACD_SIG  = 9
 
-# Mindste antal bars før vi overhovedet evaluerer. MACD(12,26,9) kræver
-# slow+signal = 35 bars for en gyldig signallinje; vi giver lidt luft.
-MIN_WARMUP_TRIG = 40
+# Hvor mange 5m-closes MACD beregnes på. FAST tal, og det er ikke kosmetik:
+# en EMA huskes fra sit første element, så MACD på 40 bars og MACD på 320 bars
+# giver FORSKELLIGE tal på samme sted. Målt på rigtige MES-data var forskellen
+# op til 2,4 point, og de to vinduer var uenige om selve entry-kriteriet
+# ("er MACD stigende?") på 4,1 % af barerne. Live og backtest SKAL derfor
+# skære til nøjagtig samme længde, ellers handler de to forskellige strategier.
+#
+# 150 er valgt fordi EMA(26) er konvergeret et godt stykke inden da (~5×26),
+# og fordi live-wrapperen altid har mindst så mange bars efter warmup.
+MACD_WINDOW = 150
+
+# Mindste antal bars før vi overhovedet evaluerer entry. Skal rumme MACD-vinduet
+# PLUS én ekstra bar, så "forrige" MACD kan beregnes på lige så mange bars som
+# den aktuelle — ellers sammenlignes 150 bars med 149.
+MIN_WARMUP_TRIG = MACD_WINDOW + 1
 MIN_WARMUP_BAND = LOOKBACK + CMF_LEN   # z OG CMF skal begge være definerede
 
 

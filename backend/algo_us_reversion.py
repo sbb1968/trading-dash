@@ -58,7 +58,7 @@ from strategies.us_reversion.config import (
     SESSION_START_ET, ENTRY_CUTOFF_ET, FORCE_CLOSE_ET, LAST_SESSION_BAR_ET,
     BAR_BAND, BAR_BAND_MINUTES, BAR_TRIG, BAR_TRIG_MINUTES,
     LOOKBACK, CMF_LEN, MACD_FAST, MACD_SLOW, MACD_SIG,
-    MIN_WARMUP_TRIG, MIN_WARMUP_BAND,
+    MACD_WINDOW, MIN_WARMUP_TRIG, MIN_WARMUP_BAND,
     INSTRUMENTS, MULTIPLIER, MAX_CONTRACTS, LIVE_VARIANT_KEY,
 )
 
@@ -829,9 +829,12 @@ class UsReversionLive(BaseStrategy):
         if len(hist) < MIN_WARMUP_TRIG:
             return
 
-        closes5 = [b.close for b in hist]
-        m_now  = macd_of(closes5, MACD_FAST, MACD_SLOW, MACD_SIG)
-        m_prev = macd_of(closes5[:-1], MACD_FAST, MACD_SLOW, MACD_SIG)
+        # PRÆCIS MACD_WINDOW bars til begge beregninger. Vinduet skal være fast og
+        # ens med backtesten (se config.MACD_WINDOW), og "forrige" skal have samme
+        # længde som "nu" — ellers sammenlignes 150 bars med 149.
+        w = [b.close for b in hist[-(MACD_WINDOW + 1):]]
+        m_now  = macd_of(w[1:],  MACD_FAST, MACD_SLOW, MACD_SIG)
+        m_prev = macd_of(w[:-1], MACD_FAST, MACD_SLOW, MACD_SIG)
 
         bars5_rows = [{"open": b.open, "close": b.close} for b in hist[-2:]]
         ok, detaljer = self._strategy.check_entry(
