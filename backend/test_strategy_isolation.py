@@ -40,6 +40,8 @@ STRATEGIES = {
     "algo_buythedip.py":        ("BuyTheDip",        None),   # selvstændig, ingen egen pakke
     "algo_europa_reversion.py": ("Europa-reversion", "strategies.europa_reversion"),
     "algo_trendjoin.py":        ("Trend Join Long",  None),   # selvstændig, ingen egen pakke
+    "algo_relstyrke.py":        ("Relativ Styrke",   "strategies.relstyrke"),
+    "algo_us_reversion.py":     ("US-reversion",     "strategies.us_reversion"),
 }
 ALL_SOURCES = [src for src, _ in STRATEGIES.values()]
 

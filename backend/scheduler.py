@@ -78,6 +78,17 @@ REGIME_RETRY_UNTIL_ET = dtime(3, 0)    # transient fejl (fx fil-laas) genforsoeg
 RELSTYRKE_START_ET       = dtime(9, 28)   # 15:28 dansk
 RELSTYRKE_RETRY_UNTIL_ET = dtime(9, 44)   # foer beslutningen fyrer (09:46 ET)
 
+# Auto-start af US-reversion (KUN algoserveren — instance-guard som de oevrige).
+# Starter PRAECIS ved US-aabning 09:30 ET, som Soeren bad om. Modsat de fire andre
+# US-strategier er der ingen grund til at starte foer: loopet venter alligevel paa
+# SESSION_START_ET, og foerste mulige entry kraever to faerdige 5m-bars (tidligst
+# 09:40), saa der er ti minutters luft til warmup paa begge tidsrammer. Slottet
+# 09:30 ligger desuden EFTER RelStyrkes 09:28, saa pre-flight ikke rammer TWS
+# samtidig med de andres (pacing).
+USREV_START_ET       = dtime(9, 30)    # 15:30 dansk
+USREV_RETRY_UNTIL_ET = dtime(14, 30)   # 20:30 dansk = entry-cutoff; efter den kan
+                                       # strategien alligevel ikke aabne noget nyt
+
 # Efter-luk shadow-eval af Relativ Styrke (KUN algoserveren). Maaler dagens realiserede
 # selection alpha (Route B-beviset) og AKKUMULERER det. Koerer 16:05 ET (=22:05 dansk), efter
 # US-luk (16:00) saa dagens event + bars er tilgaengelige. Kraever TWS (historik-pull, egen
@@ -263,6 +274,8 @@ class AlgoScheduler:
                          window_end_et=TJL_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("start_relstyrke", RELSTYRKE_START_ET, self._job_start_relstyrke,
                          window_end_et=RELSTYRKE_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("start_us_reversion", USREV_START_ET, self._job_start_us_reversion,
+                         window_end_et=USREV_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("relstyrke_shadow_eval", RELSTYRKE_EVAL_START_ET, self._job_relstyrke_eval,
                          window_end_et=RELSTYRKE_EVAL_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("reset_daily",      dtime( 0,  5), self._job_reset_daily),
@@ -289,7 +302,8 @@ class AlgoScheduler:
                 f"Konfluens 2 @ {K2_START_ET.strftime('%H:%M')}, "
                 f"BuyTheDip @ {BTD_START_ET.strftime('%H:%M')}, "
                 f"Trend Join Long @ {TJL_START_ET.strftime('%H:%M')}, "
-                f"Relativ Styrke @ {RELSTYRKE_START_ET.strftime('%H:%M')} ET (alle m. genforsøg); "
+                f"Relativ Styrke @ {RELSTYRKE_START_ET.strftime('%H:%M')}, "
+                f"US-reversion @ {USREV_START_ET.strftime('%H:%M')} ET (alle m. genforsøg); "
                 f"relstyrke_shadow_eval @ {RELSTYRKE_EVAL_START_ET.strftime('%H:%M')} ET"
                 if self._instance_role == "algoserver" else "ingen (manuel start)")
         logger.info(
@@ -321,7 +335,8 @@ class AlgoScheduler:
         + Konfluens 2 09:20 ET). I dag hvis et af tidspunkterne endnu ikke er passeret og det er
         en handelsdag; ellers første tidspunkt på næste handelsdag."""
         now = now_et()
-        start_times = sorted([EUREV_START_ET, K2_START_ET, BTD_START_ET, TJL_START_ET, RELSTYRKE_START_ET])
+        start_times = sorted([EUREV_START_ET, K2_START_ET, BTD_START_ET, TJL_START_ET,
+                              RELSTYRKE_START_ET, USREV_START_ET])
 
         if is_trading_day(now.date()):
             for st in start_times:
@@ -439,6 +454,28 @@ class AlgoScheduler:
             return False  # genforsøg inden for vinduet
         logger.info("[Scheduler] Auto-starter Relativ Styrke")
         await self._start_algo("Relativ Styrke")
+        return True
+
+    async def _job_start_us_reversion(self) -> bool:
+        """Auto-start US-reversion ved US-aabning (09:30 ET). KUN paa algoserveren.
+
+        Instance-guard som de oevrige: uden den ville BAADE algoserver og workstation
+        koere strategien paa den DELTE konto (DUO509856) -> dobbelte MES-ordrer. Og her
+        ville det vaere saerlig grimt, fordi EUREVERSION handler samme kontrakt.
+        start_strategy har egne guards (koerer-allerede/limits), saa et genforsoegs-kald
+        er idempotent."""
+        if self._instance_role != "algoserver":
+            logger.info(
+                f"[Scheduler] start_us_reversion sprunget over — instance_role="
+                f"'{self._instance_role}' (ikke 'algoserver'); startes manuelt paa workstation")
+            return True   # bevidst skip — markér færdig, ingen genforsøg/spam
+        if not self._tws_is_online():
+            logger.warning(
+                "[Scheduler] Kan IKKE auto-starte US-reversion — TWS/Gateway offline. "
+                f"Genforsøger hvert loop-tick indtil {USREV_RETRY_UNTIL_ET.strftime('%H:%M')} ET")
+            return False  # genforsøg inden for vinduet
+        logger.info("[Scheduler] Auto-starter US-reversion")
+        await self._start_algo("US-reversion")
         return True
 
     async def _job_relstyrke_eval(self) -> bool:

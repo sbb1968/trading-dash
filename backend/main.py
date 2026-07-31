@@ -360,6 +360,23 @@ async def startup():
         europa_rev._broadcast_fn = broadcast_algo_sync
         print(f"[Server] Europa-reversion registreret — futures MES/M2K, EU-session")
 
+        # ── Registrér US-reversion (futures mean-reversion, US-session) ──
+        # Samme familie som Europa-reversion, men long-only, kun MES, og med
+        # 5m-bekræftelse oven på 15m-båndbruddet. Sessionerne overlapper ikke
+        # (EU slutter 08:00 ET, US starter 09:30), så de to deler aldrig marked.
+        from algo_us_reversion import UsReversionLive
+
+        us_rev_config = StrategyConfig(
+            max_loss_per_trade  = 60.0,    # 0,12% stop på MES ≈ 8,9 pt ≈ $44
+            max_daily_loss      = 300.0,   # samme som de øvrige
+            max_open_positions  = 1,       # kun MES, og altid præcis 1 kontrakt
+            max_position_size   = 2000.0,  # defensivt; futures sizer på kontrakter
+        )
+        us_rev = UsReversionLive(strategy_manager.get_ibkr(), config=us_rev_config)
+        strategy_manager.register(us_rev)
+        us_rev._broadcast_fn = broadcast_algo_sync
+        print(f"[Server] US-reversion registreret — futures MES, US-session (long-only)")
+
         # ── Registrér BuyTheDip (buy-the-dip, K2-komplement, paper) ──
         from algo_buythedip import BuyTheDipLive
 
@@ -3980,7 +3997,7 @@ async def health():
     # kan vise "kører nu" pr. maskine uden en ekstra auth'et round-trip.
     JOBMAP = {"start_konfluens2": "Konfluens 2", "start_europa_reversion": "Europa-reversion",
               "start_buythedip": "BuyTheDip", "start_trendjoin": "Trend Join Long",
-              "start_relstyrke": "Relativ Styrke"}
+              "start_relstyrke": "Relativ Styrke", "start_us_reversion": "US-reversion"}
     auto_starts = []
     if sched and identity.instance_role == "algoserver":
         for j in sched["jobs"]:
