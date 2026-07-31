@@ -130,12 +130,14 @@ async def execute(db, sources, force):
     from algo_europa_reversion import EuropaReversionLive
     from algo_buythedip import BuyTheDipLive
     from algo_relstyrke import RelStyrkeLive
+    from algo_us_reversion import UsReversionLive
 
     KLASS = {
         "Konfluens 2":      Confluence2Live,
         "Europa-reversion": EuropaReversionLive,
         "BuyTheDip":        BuyTheDipLive,
         "Relativ Styrke":   RelStyrkeLive,
+        "US-reversion":     UsReversionLive,
     }
 
     # ── Sikkerhed: koerer en strategi lige nu? ──

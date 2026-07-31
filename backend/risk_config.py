@@ -60,6 +60,12 @@ DEFAULTS: dict[str, dict[str, dict]] = {
         # notional_cap fjernet 2026-07-15: overfloedigt — position_size styrer den faktiske
         # position (equal-weight long, ingen stop), saa pr-navn = position_size/3 er selv-begraenset.
     },
+    "US-reversion": {
+        "max_daily_loss": {"pct": None, "amount": 25.0},    # samme som de oevrige
+        # INGEN position_size: strategien handler ALTID praecis 1 MES-kontrakt
+        # (config.MAX_CONTRACTS), saa der er intet risiko-budget at skrue paa.
+        # At vise et felt der ikke goer noget ville vaere misvisende.
+    },
 }
 
 # UI-metadata: rækkefølge + danske labels + enhed pr. nøgle (bruges af Konfiguratoren).
@@ -85,6 +91,10 @@ SCHEMA: dict[str, list[dict]] = {
     "Relativ Styrke": [
         {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
         {"key": "position_size",  "label": "Positionsstørrelse (pr. navn)", "hint": "capital"},
+    ],
+    # US-reversion har kun ét knap-punkt: positionen er altid præcis 1 kontrakt.
+    "US-reversion": [
+        {"key": "max_daily_loss", "label": "Max dagligt tab",  "hint": "loss"},
     ],
 }
 

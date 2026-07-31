@@ -9,6 +9,7 @@ const LOG_MAX = 500;                 // maks. antal linjer i hukommelse/persiste
 const STRAT_TAG: Record<string, string> = {
   "Konfluens 2":      "[KONF2] ",
   "Europa-reversion": "[REV] ",
+  "US-reversion":     "[USREV] ",
   "BuyTheDip":        "[DIP] ",
   "Trend Join Long":  "[TJL] ",
   "Relativ Styrke":   "[RS] ",

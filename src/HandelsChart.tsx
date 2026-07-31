@@ -37,6 +37,7 @@ const ALGOS = [
   { source: "BuyTheDip",        label: "BuyTheDip" },
   { source: "Trend Join Long",  label: "Trend Join Long" },
   { source: "Relativ Styrke",   label: "Relativ Styrke" },
+  { source: "US-reversion",     label: "USREVERSION" },
 ];
 // PRÆCIS Studios pill-farver (index.html .pill-konfl2/.pill-rev/.pill-bd/.pill-tjl):
 // tekstfarve + kant + subtil fyld. Én sandhedskilde for strategi-farverne her.
@@ -46,6 +47,7 @@ const STRAT_PILL: Record<string, { fg: string; border: string; bg: string }> = {
   "BuyTheDip":        { fg: "#f9a8d4", border: "rgba(244,114,182,0.55)", bg: "rgba(244,114,182,0.16)" },
   "Trend Join Long":  { fg: "#93c5fd", border: "rgba(96,165,250,0.55)",  bg: "rgba(96,165,250,0.16)" },
   "Relativ Styrke":   { fg: "#c4b5fd", border: "rgba(167,139,250,0.55)", bg: "rgba(167,139,250,0.16)" },
+  "US-reversion":     { fg: "#67e8f9", border: "rgba(34,211,238,0.55)",  bg: "rgba(34,211,238,0.16)" },
 };
 const _FALLBACK_PILL = { fg: "#8a94a6", border: "rgba(138,148,166,0.5)", bg: "rgba(138,148,166,0.15)" };
 const pillOf = (s: string) => STRAT_PILL[s] || _FALLBACK_PILL;

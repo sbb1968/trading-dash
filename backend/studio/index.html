@@ -843,6 +843,15 @@
             border: 1px solid rgba(167, 139, 250, 0.4);
         }
 
+        /* US-reversion. Cyan er den eneste tydeligt frie plads i paletten:
+           groen er long-pillen (og strategien er long-only, saa de to ville staa
+           side om side), orange er Manuel, gul er EUREVERSION, teal er Konfluens 2. */
+        .pill-usrev {
+            background: rgba(34, 211, 238, 0.18);
+            color: #67e8f9;
+            border: 1px solid rgba(34, 211, 238, 0.4);
+        }
+
         .pill-manuel {
             background: rgba(251, 146, 60, 0.18);
             color: #fdba74;
@@ -2259,6 +2268,7 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "US-reversion") return `<span class="pill pill-usrev">USREVERSION</span>`;
                 if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
                 if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "Relativ Styrke") return `<span class="pill pill-rs">RelStyrke</span>`;
@@ -2515,6 +2525,7 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "US-reversion") return `<span class="pill pill-usrev">USREVERSION</span>`;
                 if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
                 if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "Relativ Styrke") return `<span class="pill pill-rs">RelStyrke</span>`;
@@ -2866,6 +2877,7 @@
                 if (source === "Konfluens")    return `<span class="pill pill-konfl">Konfluens</span>`;
                 if (source === "Konfluens 2")  return `<span class="pill pill-konfl2">Konfluens 2</span>`;
                 if (source === "Europa-reversion") return `<span class="pill pill-rev">EUREVERSION</span>`;
+                if (source === "US-reversion") return `<span class="pill pill-usrev">USREVERSION</span>`;
                 if (source === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
                 if (source === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (source === "Relativ Styrke") return `<span class="pill pill-rs">RelStyrke</span>`;

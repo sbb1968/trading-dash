@@ -51,6 +51,7 @@ STRATS_CFG = [
     {"source": "BuyTheDip",        "name": "BuyTheDip",       "short": "BTD",   "color": "#d97706"},
     {"source": "Trend Join Long",  "name": "Trend Join Long", "short": "TJL",   "color": "#7c3aed"},
     {"source": "Relativ Styrke",   "name": "Relativ Styrke",  "short": "RS",    "color": "#db2777"},
+    {"source": "US-reversion",     "name": "USREVERSION",     "short": "USREV", "color": "#0891b2"},
 ]
 STRATS      = [c["name"] for c in STRATS_CFG]
 SOURCE_OF   = {c["name"]: c["source"] for c in STRATS_CFG}
