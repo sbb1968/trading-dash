@@ -245,6 +245,54 @@ def vwap_distance_pct(current_price: float, vwap_value: float) -> Optional[float
 
 
 # ─────────────────────────────────────────────────────────────────
+# Chaikin Money Flow (CMF)
+# ─────────────────────────────────────────────────────────────────
+
+def cmf(bars: list[dict], length: int = 20) -> Optional[float]:
+    """
+    Chaikin Money Flow over de seneste `length` bars.
+
+        mult = ((close − low) − (high − close)) / (high − low)
+        mfv  = mult × volume
+        cmf  = Σ(mfv, n) / Σ(volume, n)
+
+    Måler om volumen samler sig i toppen eller bunden af hver bars range:
+    positiv = akkumulation (køberne lukker barerne højt), negativ = distribution.
+
+    Nul-range bars (high == low) giver en udefineret mult og sættes til 0 —
+    samme konvention som Pine (`high - low == 0 ? 0 : ...`) og som pandas-
+    udgaven i store_bevaegelser_lib.cmf(), så live, backtest og TradingView
+    beregner det ens. Verificeret bit-identisk mod pandas-udgaven i
+    test_indicators_cmf.py.
+
+    None når der er for få bars, eller når volumen-summen er nul (ingen
+    handel i vinduet → forholdet er udefineret, ikke 0).
+    """
+    if len(bars) < length:
+        return None
+
+    window = bars[-length:]
+    mfv_sum = 0.0
+    vol_sum = 0.0
+
+    for b in window:
+        high  = b["high"]
+        low   = b["low"]
+        close = b["close"]
+        vol   = b["volume"] or 0.0
+
+        rng = high - low
+        mult = 0.0 if rng == 0 else ((close - low) - (high - close)) / rng
+
+        mfv_sum += mult * vol
+        vol_sum += vol
+
+    if vol_sum == 0:
+        return None
+    return mfv_sum / vol_sum
+
+
+# ─────────────────────────────────────────────────────────────────
 # Aggregator — kører alle indikatorer på én gang for forensics
 # ─────────────────────────────────────────────────────────────────
 
@@ -267,6 +315,7 @@ def compute_all(bars: list[dict]) -> dict:
             "bb_upper": None, "bb_middle": None, "bb_lower": None,
             "bb_width_pct": None, "bb_position_pct": None,
             "vwap": None, "vwap_distance_pct": None,
+            "cmf_20": None,
         }
 
     closes = [b["close"] for b in bars]
@@ -279,6 +328,7 @@ def compute_all(bars: list[dict]) -> dict:
     bb = bollinger(closes, 20, 2.0)
     vwap_val = vwap(bars)
     vwap_dist = vwap_distance_pct(last_close, vwap_val) if vwap_val else None
+    cmf_val = cmf(bars, 20)
 
     return {
         "bars_used":         len(bars),
@@ -295,6 +345,7 @@ def compute_all(bars: list[dict]) -> dict:
         "bb_position_pct":   round(bb.position_pct, 2) if bb else None,
         "vwap":              round(vwap_val, 4) if vwap_val is not None else None,
         "vwap_distance_pct": round(vwap_dist, 3) if vwap_dist is not None else None,
+        "cmf_20":            round(cmf_val, 4) if cmf_val is not None else None,
     }
 
 
