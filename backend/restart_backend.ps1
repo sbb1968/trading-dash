@@ -78,24 +78,42 @@ try {
     exit 1
 }
 
-# Vent og bekraeft at backend kommer op
+# Vent og bekraeft at backend kommer op.
+#
+# Her stod foer et Get-NetTCPConnection-opslag pr. runde. Det kald tager ~1 sek
+# (det gaar gennem CIM), saa 20 runder tog 40-60 sek og ikke de 20 der blev lovet
+# — scriptet saa doedt ud netop mens det arbejdede. Et raat TCP-connect-forsoeg
+# svarer derimod med det samme: lykkes det, lytter nogen; ellers ikke.
+$TimeoutSec = 30
 Write-Host ""
-Write-Host "Venter paa at backend lytter paa port $Port (op til 20 sek)..."
+Write-Host "Venter paa at backend lytter paa port $Port (op til $TimeoutSec sek)..."
 $up = $false
-for ($i = 0; $i -lt 20; $i++) {
-    Start-Sleep -Seconds 1
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+    $client = New-Object Net.Sockets.TcpClient
+    try {
+        $client.Connect('127.0.0.1', $Port)
+        $up = $true
+    } catch {
+        # ingen lytter endnu
+    } finally {
+        $client.Close()
+    }
+    if ($up) { break }
+    Start-Sleep -Milliseconds 500
+    # Vis fremdrift, saa det er tydeligt at der stadig arbejdes
+    Write-Host "." -NoNewline
+}
+Write-Host ""
+if ($up) {
     $listening = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
                  Where-Object { $_.LocalPort -eq $Port }
-    if ($listening) {
-        $up = $true
-        $newPid = ($listening | Select-Object -First 1).OwningProcess
-        Write-Host "OK: Backend koerer - lytter paa port $Port (PID $newPid)" -ForegroundColor Green
-        break
-    }
-}
-if (-not $up) {
-    Write-Host "ADVARSEL: Backend lytter ikke paa $Port efter 20 sek." -ForegroundColor Yellow
-    Write-Host "  Tjek logfilen i backend\logs\ for opstartsfejl." -ForegroundColor Yellow
+    $newPid = if ($listening) { ($listening | Select-Object -First 1).OwningProcess } else { "?" }
+    Write-Host ("OK: Backend koerer - lytter paa port {0} (PID {1}) efter {2:N1} sek." -f `
+                $Port, $newPid, $sw.Elapsed.TotalSeconds) -ForegroundColor Green
+} else {
+    Write-Host "ADVARSEL: Backend lytter ikke paa $Port efter $TimeoutSec sek." -ForegroundColor Yellow
+    Write-Host "  Tjek Task Scheduler-historikken og backendens output for opstartsfejl." -ForegroundColor Yellow
 }
 
 Write-Host ""
