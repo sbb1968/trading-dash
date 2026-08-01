@@ -120,6 +120,13 @@ async def load_closed_trades(db, *, start: Optional[str] = None, end: Optional[s
             "exit_reason": t.get("exit_reason"),
             "current_stop":   t.get("current_stop"),
             "current_target": t.get("current_target"),
+            # Kontekst til trade-listen: gør det muligt at læse en handel uden at
+            # klikke den op. entry_reason bærer strategiens egen begrundelse
+            # (K2: "score=2, bricks=VBGEK··"), som er dét man sammenligner på.
+            "shares":       t.get("shares"),
+            "pnl_pct":      t.get("pnl_pct"),
+            "variant":      t.get("variant"),
+            "entry_reason": t.get("entry_reason"),
         })
     return out
 

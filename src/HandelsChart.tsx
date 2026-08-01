@@ -25,6 +25,10 @@ interface Trade {
   exit_reason?: string;
   current_stop?: number;
   current_target?: number;
+  shares?: number;
+  pnl_pct?: number;
+  variant?: string;
+  entry_reason?: string;
   // Sat af fleet-endpointet: hvilken maskine handlen hoerer til.
   machine_id?: string;
   machine_name?: string;
@@ -189,6 +193,27 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
   const pnlColor = (p?: number) => (typeof p !== "number" ? "var(--text-secondary)"
     : p >= 0 ? "var(--bull, #16a34a)" : "var(--bear, #dc2626)");
 
+  // Priser vises med den praecision aktien faktisk har — $9.165 maa ikke blive $9.17
+  // naar man sammenligner med et stop paa $9.1346.
+  const fmtPx = (p?: number) =>
+    typeof p !== "number" ? "—" : p < 20 ? p.toFixed(3) : p.toFixed(2);
+
+  // Holdetid i minutter, udledt af tidsstemplerne. Returnerer null hvis den bliver
+  // negativ: entry stemples med BARENS tid og exit med vaegurets, saa korte handler
+  // kan se ud til at slutte foer de begyndte (20 tilfaelde i juli 2026). Hellere
+  // ingen varighed end en forkert.
+  const holdMin = (t: Trade): number | null => {
+    if (!t.entry_time_et || !t.exit_time_et) return null;
+    const a = Date.parse(t.entry_time_et), b = Date.parse(t.exit_time_et);
+    if (isNaN(a) || isNaN(b)) return null;
+    const m = Math.round((b - a) / 60000);
+    return m < 0 ? null : m;
+  };
+
+  // Rækker lukket af reconcile er ikke strategiens beslutning: exit-pris og -tid
+  // afspejler intet, og P&L er altid 0. De skal kunne ses paa afstand.
+  const isPhantom = (t: Trade) => (t.exit_reason || "").startsWith("reconcile");
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column",
       background: "var(--bg-base)", color: "var(--text-primary)" }}>
@@ -281,13 +306,46 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                   fontSize: 14, color: "var(--text-secondary)", marginTop: 5 }}>
                   <SourcePill source={t.source} />
-                  <span>{(t.side || "").toUpperCase()} · {t.exit_reason || "?"}</span>
+                  <span>
+                    {(t.side || "").toUpperCase()} · {t.exit_reason || "?"}
+                    {typeof t.pnl_pct === "number" &&
+                      <span style={{ color: pnlColor(t.pnl), marginLeft: 6, fontWeight: 700 }}>
+                        {t.pnl_pct >= 0 ? "+" : ""}{t.pnl_pct.toFixed(2)}%
+                      </span>}
+                  </span>
+                </div>
+                {/* Antal, ind-/udpris og stop — nok til at bedømme handlen uden at
+                    aabne den. Stoppets afstand til entry er tit hele forklaringen
+                    paa et hurtigt stop-ud. */}
+                <div style={{ fontSize: 13.5, color: "var(--text-secondary)", marginTop: 4 }}>
+                  {typeof t.shares === "number" && <span>{t.shares} stk · </span>}
+                  <span>${fmtPx(t.entry_price)} → ${fmtPx(t.exit_price)}</span>
+                  {typeof t.current_stop === "number" &&
+                    <span style={{ color: "var(--text-muted)" }}> · stop ${fmtPx(t.current_stop)}
+                      {typeof t.entry_price === "number" && t.entry_price > 0 &&
+                        ` (${((t.current_stop / t.entry_price - 1) * 100).toFixed(2)}%)`}
+                    </span>}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5,
                   color: "var(--text-secondary)", marginTop: 4 }}>
-                  <span>{fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}</span>
+                  <span>
+                    {fmtTime(t.entry_time_et)} → {fmtTime(t.exit_time_et)}
+                    {holdMin(t) !== null &&
+                      <span style={{ color: "var(--text-muted)" }}> · {holdMin(t)} min</span>}
+                  </span>
                   {t.machine_name && <span style={{ color: "var(--text-muted)" }}>🖥 {t.machine_name}</span>}
                 </div>
+                {/* Strategiens EGEN begrundelse (K2: "score=2, bricks=VBGEK··").
+                    Det er det felt man sammenligner handler paa. */}
+                {t.entry_reason &&
+                  <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginTop: 3,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {t.entry_reason}
+                  </div>}
+                {isPhantom(t) &&
+                  <div style={{ fontSize: 12, color: "#ff9d4d", marginTop: 4, fontWeight: 700 }}>
+                    ⚠ Fantom — lukket af reconcile, ikke af strategien. Tæller ikke med.
+                  </div>}
               </div>
             );
           })}
@@ -321,14 +379,34 @@ export function HandelsChart({ onSelectTicker }: { onSelectTicker?: (t: string) 
                 <SourcePill source={sel.source} />
                 <span style={{ fontSize: 15, color: pnlColor(sel.pnl), fontWeight: 800 }}>
                   P&amp;L {typeof sel.pnl === "number" ? `${sel.pnl >= 0 ? "+" : ""}$${sel.pnl.toFixed(2)}` : "—"}
+                  {typeof sel.pnl_pct === "number" &&
+                    ` (${sel.pnl_pct >= 0 ? "+" : ""}${sel.pnl_pct.toFixed(2)}%)`}
                 </span>
                 <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>
-                  {(sel.side || "").toUpperCase()} · entry ${sel.entry_price?.toFixed(2) ?? "—"} → exit
-                  ${sel.exit_price?.toFixed(2) ?? "—"} · {sel.exit_reason || "?"}
-                  {typeof sel.current_stop === "number" && ` · stop $${sel.current_stop.toFixed(2)}`}
-                  {typeof sel.current_target === "number" && ` · target $${sel.current_target.toFixed(2)}`}
+                  {(sel.side || "").toUpperCase()}
+                  {typeof sel.shares === "number" && ` ${sel.shares} stk`}
+                  {` · entry $${fmtPx(sel.entry_price)} → exit $${fmtPx(sel.exit_price)} · ${sel.exit_reason || "?"}`}
+                  {typeof sel.current_stop === "number" && ` · stop $${fmtPx(sel.current_stop)}`}
+                  {typeof sel.current_target === "number" && ` · target $${fmtPx(sel.current_target)}`}
+                  {holdMin(sel) !== null && ` · ${holdMin(sel)} min`}
                 </span>
               </div>
+
+              {/* Strategiens egen begrundelse + variant — det der forklarer HVORFOR
+                  handlen blev taget, og hvad den skal sammenlignes med. */}
+              {(sel.entry_reason || sel.variant) &&
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8,
+                  lineHeight: 1.5 }}>
+                  {sel.entry_reason && <div>↳ {sel.entry_reason}</div>}
+                  {sel.variant && <div style={{ opacity: 0.85 }}>variant: {sel.variant}</div>}
+                </div>}
+
+              {isPhantom(sel) &&
+                <div style={{ fontSize: 13, color: "#ff9d4d", marginBottom: 8, fontWeight: 600 }}>
+                  ⚠ Fantom-række: lukket af reconcile, ikke af strategien. Exit-pris og
+                  -tidspunkt afspejler ingen beslutning, og P&amp;L er altid $0. Udelad den
+                  fra enhver analyse.
+                </div>}
 
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 8, fontSize: 13,
                 color: "var(--text-secondary)" }}>
