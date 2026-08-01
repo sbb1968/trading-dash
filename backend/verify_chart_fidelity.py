@@ -210,7 +210,11 @@ async def run(args) -> int:
             n_verified += 1
 
     await db.close()
-    await conn.disconnect() if hasattr(conn, "disconnect") else None
+    # IBKRConnection.disconnect() er SYNKRON og returnerer None. Den blev await'et,
+    # hvilket kastede TypeError paa vej ud — efter alt arbejdet var gjort, saa
+    # harnessen aldrig naaede at printe sin opsummering.
+    if hasattr(conn, "disconnect"):
+        conn.disconnect()
 
     # Opsummering
     from collections import Counter

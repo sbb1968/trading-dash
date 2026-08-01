@@ -53,19 +53,47 @@ def _bars_to_dicts(bars) -> list[dict]:
     return out
 
 
-def bars_to_chart_payload(bars, cap: int = 160) -> list:
+def bars_to_chart_payload(bars, cap: int = 600, entry_time=None,
+                          lead_bars: int = 45) -> list:
     """Kompakt OHLCV-oejebliksbillede til Handels-charten: [ts_iso, o, h, l, c, v].
 
-    Delt af alle fire algoer. Gemmer de FAERDIGE bars algoen faktisk evaluerede
+    Delt af alle algoer. Gemmer de FAERDIGE bars algoen faktisk evaluerede
     (self._bar_history) i close-payloadet, saa charten kan vise PRAECIS den situation
     der gjaldt ved entry/exit — uafhaengigt af IBKR-historik (revisioner, sletning af
     udloebne futures) og kontrakt-roll. Ground truth, aldrig gen-hentet.
 
-    Bounded til de sidste `cap` bars saa payloadet ikke vokser ubegraenset.
+    VINDUET FOELGER HANDLEN, ikke historikkens hale. Foer var loftet 160 bars taget
+    bagfra: en K2-handel paa 1-min bars der loeb 314 minutter fik derfor kun sine
+    sidste 160 minutter med, og ENTRY faldt helt ud af snapshottet. Charten tegnede
+    saa entry-markoeren i venstre kant (se _bar_pos' klemning), saa det lignede en
+    fejl paa x-aksen frem for manglende data. TAL 30/7-2026 var et af tilfaeldene.
+
+    Med `entry_time` skaeres der i stedet fra `lead_bars` FOER entry og frem — saa
+    hele handlen altid er med, uanset hvor laenge den loeb. `cap` er den absolutte
+    oevre graense (600 = mere end en fuld RTH-dag paa 1-min bars).
+
     Fejl-sikker: springer ubrugelige bars over (maa aldrig kaste — kaldes ved close).
     """
+    seq = list(bars or [])
+
+    if entry_time is not None and seq:
+        # Find foerste bar hvis tidsstempel er >= entry (barens start-tid), og gaa
+        # lead_bars tilbage derfra. Fejler sammenligningen (tz-mismatch e.l.), falder
+        # vi tilbage paa halen — et daarligt vindue er bedre end ingen chart.
+        try:
+            start = 0
+            for i, b in enumerate(seq):
+                if b.timestamp >= entry_time:
+                    start = max(0, i - lead_bars)
+                    break
+            else:
+                start = max(0, len(seq) - lead_bars)
+            seq = seq[start:]
+        except Exception:
+            pass
+
     out: list = []
-    for b in (bars or [])[-cap:]:
+    for b in seq[-cap:]:
         try:
             out.append([b.timestamp.isoformat(),
                         round(float(b.open), 4), round(float(b.high), 4),

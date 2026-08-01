@@ -1308,7 +1308,8 @@ class Confluence2Live(BaseStrategy):
         # ── Trades-tabel: luk trade-row ──────────────────────────
         # OHLCV-oejebliksbillede + stop-trajektorie (ground truth til Handels-charten). FAIL-SAFE.
         try:
-            chart_bars = bars_to_chart_payload(self._bar_history.get(ticker, []))
+            chart_bars = bars_to_chart_payload(self._bar_history.get(ticker, []),
+                                               entry_time=getattr(position, "entry_time", None))
         except Exception as e:
             logger.warning(f"[Konfluens 2] chart_bars-snapshot fejlede for {ticker}: {e}")
             chart_bars = []

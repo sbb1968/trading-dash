@@ -193,6 +193,36 @@ def _bar_pos(index, target_et: datetime) -> int:
     return max(0, min(pos, len(index) - 1))
 
 
+def _snapshot_covers(df: pd.DataFrame, entry_dt_utc: datetime, exit_dt_utc: datetime) -> bool:
+    """Naar snapshottet baade entry- OG exit-baren?
+
+    Et snapshot der mangler entry er ikke ground truth — det er en afskaaren hale.
+    Charten ville tegne entry-markoeren i venstre kant paa et helt forkert
+    klokkeslet. Bruges til at falde tilbage paa gen-hentning i stedet.
+    """
+    if df.empty:
+        return False
+    first, last = df.index[0], df.index[-1]
+    return first <= entry_dt_utc.astimezone(ET) and last >= exit_dt_utc.astimezone(ET)
+
+
+def _bar_pos_strict(index, target_et: datetime) -> Optional[int]:
+    """Som _bar_pos, men None naar target ligger UDEN FOR bar-vinduet.
+
+    _bar_pos klemmer til [0, n-1]. Det er rigtigt naar man skal skaere et vindue,
+    men foerende naar man skal TEGNE en markoer: en entry der ligger foer foerste
+    bar blev klemt til position 0 og tegnet i venstre kant, som om den laa der.
+    Charten saa da ud som om x-aksen var forkert, mens problemet i virkeligheden
+    var at snapshottet manglede bars (TAL 30/7-2026: 314 min hold, kun 160 bars
+    gemt). Renderen skal kunne se forskel og sige det.
+    """
+    if len(index) == 0:
+        return None
+    if target_et < index[0] or target_et > index[-1]:
+        return None
+    return _bar_pos(index, target_et)
+
+
 def _trim_to_window(df: pd.DataFrame, entry_dt_utc: datetime, exit_dt_utc: datetime,
                     bars_before: int, bars_after: int) -> pd.DataFrame:
     """Skaer en ET-indekseret OHLCV-DataFrame til [entry-bar - before, exit-bar + after]
@@ -388,6 +418,11 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     entry_pos = _bar_pos(df.index, entry_et)
     exit_pos = _bar_pos(df.index, exit_et)
 
+    # Ligger entry/exit uden for de bars vi har? Saa er markoeren klemt til kanten
+    # og LYVER om hvor handlen skete. Det skal staa paa charten, ikke gaettes.
+    entry_in_view = _bar_pos_strict(df.index, entry_et) is not None
+    exit_in_view  = _bar_pos_strict(df.index, exit_et) is not None
+
     # Faste x-graenser: markoer-linjerne skal ramme akserne PRAECIS.
     x_lo, x_hi = -0.5, n - 0.5
 
@@ -523,6 +558,26 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
     ax.text(0.995, 1.015, f"KILDE: {kilde}", transform=ax.transAxes, ha="right", va="bottom",
             fontsize=11, fontweight="bold", color=kilde_col)
 
+    # ADVARSEL naar handlen raekker ud over de bars vi har. Uden den ligner et
+    # afkortet snapshot en fejl paa x-aksen: markoeren staar i kanten, men aksen
+    # viser et helt andet klokkeslet end titlen. Sig hvad der faktisk mangler.
+    if not entry_in_view or not exit_in_view:
+        mangler = []
+        if not entry_in_view:
+            mangler.append(f"ENTRY ({entry_et.astimezone(DK).strftime('%H:%M')} DK)")
+        if not exit_in_view:
+            mangler.append(f"EXIT ({exit_et.astimezone(DK).strftime('%H:%M')} DK)")
+        foerste = df.index[0].astimezone(DK).strftime("%H:%M")
+        sidste  = df.index[-1].astimezone(DK).strftime("%H:%M")
+        ax.text(0.5, 0.5,
+                f"⚠ {' og '.join(mangler)} ligger UDEN FOR de gemte bars "
+                f"({foerste}–{sidste} DK, {n} bars).\n"
+                f"Markøren er klemt til kanten og viser IKKE det rigtige sted.",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=13, fontweight="bold", color="#b45309",
+                bbox=dict(boxstyle="round,pad=0.6", facecolor="#fef3c7",
+                          edgecolor="#b45309", alpha=0.95))
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -547,6 +602,12 @@ async def build_trade_png(db, conn, trade_id: str,
     # PRAECIS dem (ground truth). Ellers falder vi tilbage til gen-hentning.
     df = bars_from_snapshot(trade)
     provenance = "snapshot"
+    if not df.empty and not _snapshot_covers(df, entry_dt, exit_dt):
+        # Snapshottet findes, men naar ikke om hele handlen. Det gaelder alt gemt
+        # foer 1/8-2026, hvor loftet var 160 bars taget bagfra: en handel laengere
+        # end 160 bars mistede sin entry. Ground truth der mangler begyndelsen er
+        # ubrugelig — saa hellere en aerlig rekonstruktion.
+        df = pd.DataFrame()
     if df.empty:
         df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
                                     entry_dt, exit_dt, bars_before, bars_after)
@@ -568,9 +629,12 @@ async def build_trade_bars_json(db, conn, trade_id: str,
     exit_dt = _parse_iso_utc(trade.get("exit_time_utc"))
     if not (entry_dt and exit_dt and trade.get("symbol")):
         return None
-    # Snapshot-first (som PNG-stien): ground-truth bars naar de findes.
+    # Snapshot-first (som PNG-stien): ground-truth bars naar de findes — men kun
+    # hvis de daekker hele handlen. Se _snapshot_covers.
     df = bars_from_snapshot(trade)
     provenance = "snapshot"
+    if not df.empty and not _snapshot_covers(df, entry_dt, exit_dt):
+        df = pd.DataFrame()
     if df.empty:
         df = await fetch_trade_bars(conn, trade["symbol"], trade.get("source", ""),
                                     entry_dt, exit_dt, bars_before, bars_after)

@@ -1074,7 +1074,8 @@ class EuropaReversionLive(BaseStrategy):
         # Handels-charten viser PRAECIS situationen ved entry/exit (ingen gen-hentning).
         # FAIL-SAFE — maa aldrig vaelte luk.
         try:
-            chart_bars = bars_to_chart_payload(self._bar_history.get(sym, []))
+            chart_bars = bars_to_chart_payload(self._bar_history.get(sym, []),
+                                               entry_time=pos.get("entry_time"))
         except Exception as e:
             logger.warning(f"[Europa-reversion] chart_bars-snapshot fejlede for {sym}: {e}")
             chart_bars = []

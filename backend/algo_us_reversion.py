@@ -1163,7 +1163,8 @@ class UsReversionLive(BaseStrategy):
         mae = self._mae.pop(sym, None)
 
         try:
-            chart_bars = bars_to_chart_payload(self._bar_history.get(sym, []))
+            chart_bars = bars_to_chart_payload(self._bar_history.get(sym, []),
+                                               entry_time=pos.get("entry_time"))
         except Exception as e:
             logger.warning(f"[US-reversion] chart_bars-snapshot fejlede for {sym}: {e}")
             chart_bars = []
