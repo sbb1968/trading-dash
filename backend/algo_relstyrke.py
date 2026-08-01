@@ -777,10 +777,22 @@ class RelStyrkeLive(BaseStrategy):
             return
         filled = result.get("filled") or 0
         if filled < shares:
-            await self._log(f"⚠ {ticker}: SELL ikke bekraeftet fyldt "
-                            f"(status={result.get('status')}, filled={filled}/{shares}) "
-                            f"— beholder position aaben, genforsoeger", level="warning")
-            return
+            # Spoerg IBKR FOER naeste bar gen-afgiver — ellers saelges en position der
+            # allerede er lukket, og residualet bliver en ejerloes short.
+            still = await self._ibkr_still_holds(ticker, "long", shares)
+            if still is False:
+                await self._log(f"ℹ {ticker}: SELL var ubekraeftet, men IBKR er flad — "
+                                f"ordren fyldte alligevel. Bogfoerer (gen-afgiver IKKE).",
+                                level="warning")
+            else:
+                _why = result.get("reject_reason")
+                await self._log(f"⚠ {ticker}: SELL ikke bekraeftet fyldt "
+                                f"(status={result.get('status')}, filled={filled}/{shares}"
+                                + (f", IBKR: {_why}" if _why else "") + ")"
+                                + (" — position bekraeftet aaben, genforsoeger" if still
+                                   else " — positions-feed upaalideligt, gen-afgiver IKKE"),
+                                level="warning")
+                return
         fill = result.get("avg_fill")
         if fill and fill > 0:
             price = fill

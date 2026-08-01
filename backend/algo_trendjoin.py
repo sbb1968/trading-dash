@@ -1026,10 +1026,22 @@ class TrendJoinLive(BaseStrategy):
             return
         filled = result.get("filled") or 0
         if filled < shares:
-            await self._log(f"⚠ {ticker}: SELL ikke bekræftet fyldt "
-                            f"(status={result.get('status')}, filled={filled}/{shares}) "
-                            f"— beholder position, genforsøger", level="warning")
-            return
+            # Spørg IBKR FØR næste bar gen-afgiver — ellers sælges en position der
+            # allerede er lukket, og residualet bliver en ejerløs short.
+            still = await self._ibkr_still_holds(ticker, "long", shares)
+            if still is False:
+                await self._log(f"ℹ {ticker}: SELL var ubekræftet, men IBKR er flad — "
+                                f"ordren fyldte alligevel. Bogfører (gen-afgiver IKKE).",
+                                level="warning")
+            else:
+                _why = result.get("reject_reason")
+                await self._log(f"⚠ {ticker}: SELL ikke bekræftet fyldt "
+                                f"(status={result.get('status')}, filled={filled}/{shares}"
+                                + (f", IBKR: {_why}" if _why else "") + ")"
+                                + (" — position bekræftet åben, genforsøger" if still
+                                   else " — positions-feed upålideligt, gen-afgiver IKKE"),
+                                level="warning")
+                return
         fill = result.get("avg_fill")
         if fill and fill > 0:
             price = fill

@@ -337,11 +337,52 @@ def section_C():
     check("C1 fyldt → log_trade_close exit_reason=test", journal.closes == ["test"], journal.closes)
     check("C1 fyldt → total_pnl opdateret", algo.total_pnl == 50.0, algo.total_pnl)
 
-    # C2 ikke fyldt (dict, filled=0) → IKKE popped, INGEN close, ingen exception
-    algo, conn, journal = setup({"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    # ── C2: ufyldt lukkeordre — udfaldet afhaenger af hvad IBKR siger ──
+    # Foer 31/7-2026 blev en ubekraeftet ordre ALTID regnet for fejlet, positionen
+    # holdt aaben, og naeste bar sendte en ny SELL. Fyldte den oprindelige alligevel,
+    # blev der solgt to gange -> ejerloes short (8 stk. paa kontoen 31/7). Nu spoerges
+    # IBKR foerst, og de tre svar giver tre forskellige udfald.
+
+    def setup_pos(order_ret, positions):
+        conn = MockConn(order_ret=order_ret, positions=positions, last=5.05)
+        journal = MockJournal()
+        algo = make_algo(conn, journal)
+        algo._positions["AAA"] = mk_position(100, 5.0)
+        return algo, conn, journal
+
+    UNFILLED = {"filled": 0, "avg_fill": 0, "status": "Submitted"}
+    HOLDT    = [{"ticker": "AAA", "position": 100, "avg_cost": 5.0}]
+
+    # C2a ufyldt + IBKR HOLDER stadig positionen -> aegte ufyldt, behold + genforsoeg
+    algo, conn, journal = setup_pos(UNFILLED, HOLDT)
     asyncio.run(algo._close("AAA", 5.05, "test"))
-    check("C2 ufyldt → AAA STADIG åben", "AAA" in algo._positions, list(algo._positions))
-    check("C2 ufyldt → INGEN log_trade_close", journal.closes == [], journal.closes)
+    check("C2a ufyldt + IBKR holder → AAA STADIG åben",
+          "AAA" in algo._positions, list(algo._positions))
+    check("C2a ufyldt + IBKR holder → INGEN log_trade_close",
+          journal.closes == [], journal.closes)
+
+    # C2b ufyldt + IBKR FLAD -> ordren fyldte alligevel: bogfoer, gen-afgiv ALDRIG.
+    # Det er praecis dette tilfaelde der skabte over-sell.
+    algo, conn, journal = setup_pos(UNFILLED, [])
+    asyncio.run(algo._close("AAA", 5.05, "test"))
+    check("C2b ufyldt + IBKR flad → AAA popped (ordren fyldte alligevel)",
+          "AAA" not in algo._positions, list(algo._positions))
+    check("C2b ufyldt + IBKR flad → lukningen bogført",
+          journal.closes == ["test"], journal.closes)
+    check("C2b ufyldt + IBKR flad → INGEN ekstra SELL afgivet",
+          len(conn.order_calls) == 1, conn.order_calls)
+
+    # C2c ufyldt + positions-feed UPAALIDELIGT -> ukendt udfald: behold, men
+    # gen-afgiv aldrig paa tvivl (samme invariant som decide_confirmation).
+    algo, conn, journal = setup_pos(UNFILLED, [])
+    async def _degraderet():
+        return ([], False)
+    conn.get_positions_reliable = _degraderet
+    asyncio.run(algo._close("AAA", 5.05, "test"))
+    check("C2c ufyldt + feed upålideligt → AAA STADIG åben",
+          "AAA" in algo._positions, list(algo._positions))
+    check("C2c ufyldt + feed upålideligt → INGEN log_trade_close",
+          journal.closes == [], journal.closes)
 
     # C3 ikke sendt (None) → uændret: ikke popped, ingen close
     algo, conn, journal = setup(None)
@@ -354,11 +395,16 @@ def section_C():
 def section_D():
     print("\nSektion D — _close_all genforsøger ufyldte lukninger")
 
+    # Genforsoeg forudsaetter nu at IBKR BEKRAEFTER at positionen stadig er aaben.
+    # Mocken skal derfor holde den, ellers ville _close (korrekt) konkludere at
+    # ordren fyldte alligevel og bogfoere i stedet for at sende en ny.
+    HOLDT = [{"ticker": "AAA", "position": 100, "avg_cost": 5.0}]
+
     # D1 fyldes på 3. forsøg → til sidst lukket, 3 ordrer
     def ret_d1(idx):
         return {"filled": 0, "status": "Submitted"} if idx < 3 \
             else {"filled": 100, "avg_fill": 5.10, "status": "Filled"}
-    conn = MockConn(order_ret=ret_d1, last=5.05)
+    conn = MockConn(order_ret=ret_d1, positions=HOLDT, last=5.05)
     journal = MockJournal()
     algo = make_algo(conn, journal)
     algo._positions["AAA"] = mk_position(100, 5.0)
@@ -367,7 +413,8 @@ def section_D():
     check("D1 place_paper_order kaldt 3 gange", len(conn.order_calls) == 3, conn.order_calls)
 
     # D2 fyldes aldrig → AAA stadig åben, kaldt FORCE_CLOSE_MAX_ATTEMPTS gange
-    conn = MockConn(order_ret={"filled": 0, "status": "Submitted"}, last=5.05)
+    conn = MockConn(order_ret={"filled": 0, "status": "Submitted"},
+                    positions=HOLDT, last=5.05)
     journal = MockJournal()
     algo = make_algo(conn, journal)
     algo._positions["AAA"] = mk_position(100, 5.0)
@@ -375,6 +422,17 @@ def section_D():
     check("D2 fyldes aldrig → AAA STADIG åben", "AAA" in algo._positions, list(algo._positions))
     check(f"D2 kaldt {k2mod.FORCE_CLOSE_MAX_ATTEMPTS} gange (= MAX_ATTEMPTS)",
           len(conn.order_calls) == k2mod.FORCE_CLOSE_MAX_ATTEMPTS, conn.order_calls)
+
+    # D3 (NY) — over-sell-vagten: ufyldt svar MEN IBKR er flad -> ÉN ordre i alt.
+    # Det er praecis scenariet der skabte de otte ejerloese shorts 31/7-2026.
+    conn = MockConn(order_ret={"filled": 0, "status": "Inactive"}, positions=[], last=5.05)
+    journal = MockJournal()
+    algo = make_algo(conn, journal)
+    algo._positions["AAA"] = mk_position(100, 5.0)
+    asyncio.run(algo._close_all("market_close"))
+    check("D3 ufyldt + IBKR flad → AAA lukket", "AAA" not in algo._positions, list(algo._positions))
+    check("D3 ufyldt + IBKR flad → KUN 1 ordre (ingen over-sell)",
+          len(conn.order_calls) == 1, conn.order_calls)
 
 
 # ── SEKTION E — feed-gated genoprettelses-luk (Fase 2, markedslukke-bundet) ──

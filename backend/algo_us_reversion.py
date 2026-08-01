@@ -1085,14 +1085,24 @@ class UsReversionLive(BaseStrategy):
         # åben (og åben-i-journal), så næste bar / _close_all kan genforsøge.
         filled = result.get("filled") or 0
         if filled < contracts:
-            _why = result.get("reject_reason")
-            logger.warning(f"[US-reversion] _close({sym}): lukke-ordre IKKE bekræftet fyldt "
-                           f"(status={result.get('status')}, filled={filled}/{contracts}"
-                           + (f", IBKR: {_why}" if _why else "") + ") — beholder position åben")
-            self._status("trading",
-                         f"⚠ {sym}: lukkeordre ikke bekræftet fyldt "
-                         f"({_why or result.get('status')}) — position forbliver åben")
-            return
+            # Spørg IBKR FØR næste bar gen-afgiver — ellers lukkes en position der
+            # allerede er lukket, og residualet bliver en ejerløs modsat position.
+            still = await self._ibkr_still_holds(sym, side, contracts)
+            if still is False:
+                await self._log(
+                    f"ℹ {sym}: lukkeordre var ubekræftet, men IBKR er flad — ordren "
+                    f"fyldte alligevel. Bogfører lukningen (gen-afgiver IKKE).",
+                    level="warning")
+            else:
+                _why = result.get("reject_reason")
+                logger.warning(f"[US-reversion] _close({sym}): lukke-ordre IKKE bekræftet "
+                               f"(status={result.get('status')}, filled={filled}/{contracts}"
+                               + (f", IBKR: {_why}" if _why else "") + ")")
+                self._status("trading",
+                             f"⚠ {sym}: lukkeordre ikke bekræftet ({_why or result.get('status')})"
+                             + (" — position åben, genforsøger" if still
+                                else " — feed upålideligt, gen-afgiver IKKE"))
+                return
 
         fill = result.get("avg_fill")
         if fill and fill > 0:

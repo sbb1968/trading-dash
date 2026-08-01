@@ -394,6 +394,44 @@ class BaseStrategy(ABC):
         self.stats.entries_filled += 1
         return filled
 
+    async def _ibkr_still_holds(self, ticker: str, side: str,
+                                quantity: float) -> Optional[bool]:
+        """Holder IBKR stadig positionen? True / False / None (ved det ikke).
+
+        SKAL spoerges foer en lukkeordre gen-afgives. Uden dette tjek stolede
+        _close paa sin egen 8-sekunders aflaesning: kom der ingen bekraeftelse,
+        blev ordren regnet for fejlet og afgivet igen — og naar den oprindelige
+        alligevel fyldte, blev positionen solgt TO gange og efterlod en
+        tilsvarende short uden ejer. Otte af dem laa paa kontoen 31/7-2026
+        (fx SKYQ +59 -> -59, SPRC +23 -> -23).
+
+        None returneres naar feedet ikke kan stoles paa. Kalderen skal da
+        BEHOLDE positionen og IKKE gen-afgive: ukendt udfald maa aldrig udloese
+        en ny ordre. Samme invariant som decide_confirmation i
+        reconcile_idempotency, som loeste praecis dette hul i reconcile-stien —
+        men aldrig blev anvendt paa den almindelige luk.
+        """
+        if self.conn is None or not getattr(self.conn, "connected", False):
+            return None
+        try:
+            poss, feed_ok = await self.conn.get_positions_reliable()
+        except Exception as e:
+            logger.warning(f"[{self.name}] positions-opslag foer gen-luk fejlede: {e}")
+            return None
+        if not feed_ok:
+            return None
+
+        want_long = (side == "long")
+        for p in (poss or []):
+            if (p.get("ticker") or "").upper() != ticker.upper():
+                continue
+            pos = float(p.get("position") or 0)
+            if pos == 0:
+                continue
+            if (pos > 0) == want_long and abs(pos) >= quantity:
+                return True
+        return False
+
     # -----------------------------------------------------------------------
     # Position tracking
     # -----------------------------------------------------------------------

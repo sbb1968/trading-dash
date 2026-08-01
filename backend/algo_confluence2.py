@@ -1241,11 +1241,25 @@ class Confluence2Live(BaseStrategy):
         # stadig holder positionen.
         filled = close_result.get("filled") or 0
         if filled < shares:
-            await self._log(
-                f"⚠ {ticker}: SELL ikke bekræftet fyldt "
-                f"(status={close_result.get('status')}, filled={filled}/{shares}) "
-                f"— beholder position åben, genforsøger", level="warning")
-            return
+            # Spørg IBKR FØR vi lader næste bar gen-afgive. Er positionen væk,
+            # fyldte ordren alligevel — så bogfører vi den i stedet for at sælge
+            # endnu en gang og efterlade en ejerløs short (over-sell, 31/7-2026).
+            still = await self._ibkr_still_holds(ticker, "long", shares)
+            if still is False:
+                await self._log(
+                    f"ℹ {ticker}: SELL var ubekræftet, men IBKR er flad — ordren "
+                    f"fyldte alligevel. Bogfører lukningen (gen-afgiver IKKE).",
+                    level="warning")
+            else:
+                _why = close_result.get("reject_reason")
+                await self._log(
+                    f"⚠ {ticker}: SELL ikke bekræftet fyldt "
+                    f"(status={close_result.get('status')}, filled={filled}/{shares}"
+                    + (f", IBKR: {_why}" if _why else "") + ")"
+                    + (" — position bekræftet åben, genforsøger" if still
+                       else " — positions-feed upålideligt, gen-afgiver IKKE"),
+                    level="warning")
+                return
 
         fill = close_result.get("avg_fill")
         if fill and fill > 0:

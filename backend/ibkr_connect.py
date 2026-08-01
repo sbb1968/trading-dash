@@ -676,7 +676,16 @@ class IBKRConnection:
             # close-ordrer hvor BEKRÆFTET fyldning er nødvendig.
             if await_fill_sec and await_fill_sec > 0:
                 _waited = 0.0
-                _TERMINAL = {"Filled", "Cancelled", "ApiCancelled", "Inactive"}
+                # 'Inactive' hoerer IKKE hjemme her. IBKR bruger den BAADE for en
+                # afvist ordre OG for en ordre der midlertidigt afventer aktivering
+                # og fylder kort efter. Da den stod paa listen, sprang loekken ud
+                # ved foerste poll med filled=0, kalderen konkluderede "fejlede",
+                # gen-afgav — og BEGGE ordrer fyldte. Resultatet var over-sell:
+                # en lang position blev solgt to gange og endte som en tilsvarende
+                # short uden ejer (8 stk. paa kontoen 31/7-2026, fx SKYQ +59 -> -59).
+                # Vi venter nu hele vinduet ud paa en Inactive og lader kalderen
+                # verificere mod IBKR i stedet for at gaette.
+                _TERMINAL = {"Filled", "Cancelled", "ApiCancelled"}
                 while _waited < await_fill_sec:
                     await asyncio.sleep(0.5)
                     _waited += 0.5
