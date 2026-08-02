@@ -53,6 +53,12 @@ class Confluence2ExitState:
     target_price: Optional[float] # for target_r-mode
     trail_stop: float             # for trail_hl-mode (starter = impulse_low)
     variant_key: str
+    # Højeste CLOSE siden entry — grundlaget for den procentuelle trailing
+    # take-profit (cfg.trail_pct). Starter ved ENTRY-prisen, ikke ved første
+    # close bagefter: falder prisen straks, måles trailingen fra entry i stedet
+    # for at referencen sænkes til et lavere niveau og stoppet bliver meningsløst
+    # løst. Samme konvention som US-reversion.
+    hh_close: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -222,6 +228,7 @@ class Confluence2Exit:
             target_price=target,
             trail_stop=impulse_low,
             variant_key=variant_key,
+            hh_close=entry,          # trailing måles fra entry, ikke fra næste close
         )
         return Position(
             ticker=signal.ticker, entry_price=entry, entry_time=signal.entry_time,
@@ -234,6 +241,12 @@ class Confluence2Exit:
         For breakeven_r: løft stop til entry når high ≥ entry + breakeven_r × R."""
         cfg = VARIANTS[variant_key]
         st: Confluence2ExitState = position.state
+
+        # Trailing take-profit: HH følger højeste CLOSE siden entry. Wrapperen
+        # sender barens close som high_seen, så den er allerede den rigtige værdi.
+        if cfg.trail_pct > 0.0 and high_seen > st.hh_close:
+            st.hh_close = high_seen
+
         if cfg.exit_mode == "trail_hl" and low_seen is not None:
             if low_seen > st.trail_stop:
                 st.trail_stop = low_seen
@@ -252,6 +265,24 @@ class Confluence2Exit:
         # ── Lag 0: session-luk (backstop, matcher K1/ORB 15:45) ──
         if bar.time_et >= dtime(*cfg.force_close_hhmm):
             return ExitDecision(exit_price=bar.close, reason="session_close")
+
+        # ── Lag 0b: trailing take-profit (tilføjet 1/8-2026) ──
+        # Vurderes FØR de mode-specifikke stops, men EFTER session-luk. Bevidst
+        # rækkefølge: er begge ramt på samme bar, vinder den der er tættest på
+        # entry — og et katastrofe-stop skal aldrig kunne maskeres af en trailing.
+        # Derfor tjekkes det egentlige stop først i hver mode nedenfor; trailingen
+        # her fanger kun de bars hvor stoppet IKKE er ramt.
+        #
+        # Måles på CLOSE mod HH (højeste close siden entry) — som US-reversion.
+        # bar.low bruges ikke: et enkelt spike ned skal ikke afbryde en position
+        # der lukker højt.
+        if cfg.trail_pct > 0.0 and st.hh_close > 0:
+            trail_level = st.hh_close * (1.0 - cfg.trail_pct / 100.0)
+            stop_level = st.trail_stop
+            # Kun hvis stoppet IKKE også er brudt på denne bar — så beholder
+            # stoppet sin forrang og handlen får den rigtige exit_reason.
+            if bar.close <= trail_level and bar.low > stop_level:
+                return ExitDecision(exit_price=bar.close, reason="trail_pct")
 
         mode = cfg.exit_mode
 

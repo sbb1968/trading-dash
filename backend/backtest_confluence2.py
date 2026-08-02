@@ -521,17 +521,22 @@ async def run(args):
         print(f"\n{BOLD}{'='*92}{RESET}")
         print(f"{BOLD}  EXIT-MIX pr. variant — fordeling af exit-årsager (rå-signaler){RESET}")
         print(f"{BOLD}{'='*92}{RESET}")
-        print(f"  {'variant':<16} {'trades':>7} | {'stop':>13} {'session_close':>15} {'andet':>13}")
-        print(f"  {'-'*16} {'-'*7} | {'-'*13} {'-'*15} {'-'*13}")
+        # trail_pct faar sin EGEN kolonne. Uden den forsvandt den nye trailing
+        # take-profit ned i "andet", og hele pointen med T_trail_*-sweepet er
+        # netop at se hvor mange hold-til-luk den konverterer til gevinstsikring.
+        print(f"  {'variant':<16} {'trades':>7} | {'stop':>13} {'session_close':>15} "
+              f"{'trail_pct':>13} {'andet':>13}")
+        print(f"  {'-'*16} {'-'*7} | {'-'*13} {'-'*15} {'-'*13} {'-'*13}")
         for vk in variant_keys:
             trades = results_by_variant[vk]
             n = len(trades) or 1
             cnt = Counter(t["reason"] for t in trades)
             stop, sess = cnt.get("stop", 0), cnt.get("session_close", 0)
-            other = len(trades) - stop - sess
+            trail = cnt.get("trail_pct", 0)
+            other = len(trades) - stop - sess - trail
             print(f"  {vk:<16} {len(trades):>7} | "
                   f"{stop:>6} ({100*stop/n:>3.0f}%) {sess:>6} ({100*sess/n:>3.0f}%) "
-                  f"{other:>6} ({100*other/n:>3.0f}%)")
+                  f"{trail:>6} ({100*trail/n:>3.0f}%) {other:>6} ({100*other/n:>3.0f}%)")
 
         # ── Detaljer for live-variant (eller den ene valgte) ──
         focus = args.variant or LIVE_VARIANT_KEY

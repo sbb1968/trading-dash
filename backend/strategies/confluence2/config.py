@@ -63,6 +63,19 @@ class Confluence2VariantConfig:
     force_close_hhmm: tuple[int, int] = (15, 45)   # luk alt (matcher K1/ORB)
     min_warmup_bars: int = 25      # færre 1-min bars end dette → spring over
 
+    # ── Trailing take-profit (tilføjet 1/8-2026) ───────────────
+    # Samme mekanik som US-reversion: HH = HØJESTE CLOSE siden entry (starter ved
+    # entry-prisen), og vi lukker når en close falder trail_pct under HH.
+    #
+    # Baggrunden er at exit_mode="impulse_low" IKKE har nogen take-profit. En
+    # vinder har derfor kun én udgang: klokken 15:45. I juli 2026 gav det 30
+    # session_close-exits med holdetider på 5-6 timer, mens alle 159 stop-exits
+    # tabte. Strategien kunne kun tabe på stoppet og kun vinde på klokken.
+    #
+    # 0.0 = FRA. Alle eksisterende varianter beholder den, så de er bit-for-bit
+    # uændrede — kun de nye T_*-varianter nedenfor slår den til.
+    trail_pct: float = 0.0
+
     # ── Stop-eksperimenter (deep-dive 2026-06-12) ──────────────
     # Begge default 0.0 = FRA → A_impulse_low og alle eksisterende varianter er
     # fuldstændig uændrede. Kun de nye A_minR_* / A_atrfloor_*-varianter sætter dem.
@@ -171,6 +184,33 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
     "A_atrfloor_50": Confluence2VariantConfig(
         name="A+ATR-gulv 5,0x", exit_mode="impulse_low", catastrophe_stop=False, stop_atr_floor_mult=5.0,
     ),
+
+    # ── Trailing take-profit oven på live-varianten (Søren 1/8-2026) ──────
+    # Identisk med A_atrfloor_20 bortset fra trail_pct. Uden trailing har
+    # impulse_low-modet INGEN take-profit: en vinder kan kun komme ud kl. 15:45,
+    # og juli 2026 viste konsekvensen — 30 session_close-exits med 5-6 timers
+    # holdetid, mens alle 159 stop-exits tabte.
+    #
+    # Intervallet er valgt ud fra TAL 30/7 (entry 11,53 · top 12,44 · exit 12,37):
+    #   0,5 % og 1,0 %  havde udløst ved tilbagefaldet kl. 20:37 (~12,32-12,38)
+    #   1,5 %           ligger lige på kanten af samme tilbagefald
+    #   2,0 % og 3,0 %  havde ikke udløst — positionen var kørt til lukketid
+    # Det er ÉN handel, ikke et bevis. Sweep dem før du stoler på et af tallene.
+    "T_trail_0_5": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0x + trailing 0,5%", exit_mode="impulse_low",
+        catastrophe_stop=False, stop_atr_floor_mult=2.0, trail_pct=0.5),
+    "T_trail_1_0": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0x + trailing 1,0%", exit_mode="impulse_low",
+        catastrophe_stop=False, stop_atr_floor_mult=2.0, trail_pct=1.0),
+    "T_trail_1_5": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0x + trailing 1,5%", exit_mode="impulse_low",
+        catastrophe_stop=False, stop_atr_floor_mult=2.0, trail_pct=1.5),
+    "T_trail_2_0": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0x + trailing 2,0%", exit_mode="impulse_low",
+        catastrophe_stop=False, stop_atr_floor_mult=2.0, trail_pct=2.0),
+    "T_trail_3_0": Confluence2VariantConfig(
+        name="A+ATR-gulv 2,0x + trailing 3,0%", exit_mode="impulse_low",
+        catastrophe_stop=False, stop_atr_floor_mult=2.0, trail_pct=3.0),
 }
 
 # Live-variant: A_atrfloor_20 — impuls-low-stop med ATR-gulv på 2,0× ATR. Gulvet
@@ -186,7 +226,20 @@ VARIANTS: dict[str, Confluence2VariantConfig] = {
 # aprils OOS-PF topper ~3,0× og FALDER ved 4,0× → uvalideret regime-risiko uden en
 # bear/choppy måned. A_impulse_low + øvrige (B/C/D, A_minR_*, A_atrfloor 0,5–5,0×)
 # bevares som dokumenterede backtest-referencer.
-LIVE_VARIANT_KEY = "A_atrfloor_20"
+# SKIFTET 1/8-2026 til T_trail_2_0 — samme variant som ovenfor, men med en
+# trailing take-profit på 2,0 %. Alt om stoppet (impuls-low + 2,0× ATR-gulv) og
+# hele entry-siden er UÆNDRET; kun exit-siden får en ny udgang.
+#
+# Hvorfor 2,0 % og ikke tættere: det nye univers (small/mid cap, Volatility 1M
+# mellem 5 og 50 %) bevæger sig markant mere end det gamle large cap-univers. En
+# månedlig volatilitet på 15 % svarer groft til ~3,3 % daglig range, og en
+# trailing på 1 % ville da udløse på almindelig intradag-støj frem for på en
+# reel vending. 2,0 % er valgt som det mest konservative sted at begynde — det
+# fjerner 5-timers-holdene uden at klippe vinderne på første tilbagefald.
+#
+# TALLET ER IKKE VALIDERET. Kør backtest_confluence2.py --sweep over T_trail_*
+# før du fæster lid til det; 0,5–3,0 % ligger klar som varianter.
+LIVE_VARIANT_KEY = "T_trail_2_0"
 
 # ── Strategi-konstanter (ikke variant-specifikke) ─────────────
 SESSION_START_HHMM = (9, 30)
