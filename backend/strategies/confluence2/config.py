@@ -193,17 +193,34 @@ SESSION_START_HHMM = (9, 30)
 SESSION_END_HHMM   = (16, 0)
 MINTICK            = 0.01
 
-# ── Universe-filtre — "Intraday Volatility"-screener ─────────────
-# K2 bruger IKKE længere top-gainers (gav elendige kandidater). I stedet
-# replikeres Sørens TradingView "Intraday Volatility"-screener: mellem-/large-
-# cap aktier med høj ugentlig ATR — likvide navne der bevæger sig nok intraday
-# til at impuls-setuppet giver mening. Se fetch_tv_intraday_volatility i
-# strategies/confluence/tv_scanner.py (feltnavne verificeret mod TV's API).
+# ── Universe-filtre — TradingView-screener ───────────────────────
+# OMLAGT 1/8-2026 efter Søren og Ibens gennemgang af juli. Selve eksekveringen
+# (impuls-kriterier og exit) er UÆNDRET — det var universet der var problemet.
+#
+# Hvad der ændrede sig og hvorfor:
+#   Market cap  5B–1T  ->  300M–10B    fra large cap til small/mid cap. De store
+#                                      navne bevæger sig for lidt til impuls-setuppet.
+#   Børser      4      ->  2           AMEX og CBOE ude; kun NASDAQ + NYSE.
+#   ATR%(1W)    fjernet                erstattet af de to nedenfor.
+#   Volatility 1M      NY   5–50%      månedens udsving. Nedre grænse sikrer at der
+#                                      ER bevægelse; øvre sorterer det ukontrollable fra.
+#   Perf 1W            NY   > 6%       aktien skal allerede være i medvind.
+#   type        stock+dr  ->  stock    ingen depotbeviser.
+#   sortering   change  ->  Volatility.M   vi vil have de mest volatile øverst,
+#                                      ikke dem der tilfældigvis steg mest i dag.
+#
+# Feltnavnene er verificeret mod TV's API 1/8-2026: 'Volatility.M' og 'Perf.W'
+# returnerer tal. 'Perf.1W' returnerer None og ville have gjort filteret tavst
+# virkningsløst — samme fælde som 'ATRP|1D' faldt i tidligere.
 UNIVERSE_PRICE_MIN    = 5.0
 UNIVERSE_PRICE_MAX    = 50.0
 UNIVERSE_MIN_VOLUME   = 500_000               # 30-dages gennemsnitsvolumen
 UNIVERSE_TOP_N        = 25
-UNIVERSE_MKT_CAP_MIN  = 5_000_000_000         # 5 B
-UNIVERSE_MKT_CAP_MAX  = 1_000_000_000_000     # 1 T
-UNIVERSE_ATR_PCT_MIN  = 5.0                    # ATR(14) 1W > 5%
-UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE", "AMEX", "CBOE"]  # AMEX = TV's "NYSE Arca"
+UNIVERSE_MKT_CAP_MIN  = 300_000_000           # 300 M — small cap-gulvet
+UNIVERSE_MKT_CAP_MAX  = 10_000_000_000        # 10 B — mid cap-loftet
+UNIVERSE_VOL_M_MIN    = 5.0                   # Volatility 1M, nedre (%)
+UNIVERSE_VOL_M_MAX    = 50.0                  # Volatility 1M, øvre (%)
+UNIVERSE_PERF_W_MIN   = 6.0                   # Perf 1W > 6 %
+UNIVERSE_TYPES        = ["stock"]             # kun aktier — ingen depotbeviser
+UNIVERSE_ORDER_BY     = "Volatility.M"        # sorteres faldende på denne
+UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE"]

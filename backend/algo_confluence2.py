@@ -52,7 +52,11 @@ from strategies.confluence2.config import (
     UNIVERSE_TOP_N,
     UNIVERSE_MKT_CAP_MIN,
     UNIVERSE_MKT_CAP_MAX,
-    UNIVERSE_ATR_PCT_MIN,
+    UNIVERSE_VOL_M_MIN,
+    UNIVERSE_VOL_M_MAX,
+    UNIVERSE_PERF_W_MIN,
+    UNIVERSE_TYPES,
+    UNIVERSE_ORDER_BY,
     UNIVERSE_EXCHANGES,
 )
 from strategies.base import Bar, Position
@@ -596,9 +600,11 @@ class Confluence2Live(BaseStrategy):
 
         self._status("scanning",
                      f"Scanner fandt {len(raw_tickers)} tickers fra TradingView "
-                     f"Intraday Volatility (pris ${UNIVERSE_PRICE_MIN:.0f}-${UNIVERSE_PRICE_MAX:.0f}, "
-                     f"mkt-cap ${UNIVERSE_MKT_CAP_MIN/1e9:.0f}B-${UNIVERSE_MKT_CAP_MAX/1e12:.0f}T, "
-                     f"avg-vol >{UNIVERSE_MIN_VOLUME:,}, ATR-1W >{UNIVERSE_ATR_PCT_MIN:.0f}%)")
+                     f"(pris ${UNIVERSE_PRICE_MIN:.0f}-${UNIVERSE_PRICE_MAX:.0f}, "
+                     f"mkt-cap ${UNIVERSE_MKT_CAP_MIN/1e6:.0f}M-${UNIVERSE_MKT_CAP_MAX/1e9:.0f}B, "
+                     f"avg-vol >{UNIVERSE_MIN_VOLUME:,}, "
+                     f"Vol-1M {UNIVERSE_VOL_M_MIN:.0f}-{UNIVERSE_VOL_M_MAX:.0f}%, "
+                     f"Perf-1W >{UNIVERSE_PERF_W_MIN:.0f}%)")
 
         # ── Stol 100% på TV-screeneren — INTET andet-trins IBKR-pris-refilter ──
         # TradingView-queryen har allerede filtreret på pris ($5–50), market cap,
@@ -631,10 +637,18 @@ class Confluence2Live(BaseStrategy):
                 # Del 1-instrumentering (rent tilføjende — påvirker ikke udvælgelsen):
                 "pool_size":  getattr(self, "_last_scan_pool_size", None),
                 "rows":       getattr(self, "_last_scan_rows", []),
+                # Journaliser de filtre der FAKTISK blev brugt, saa et univers kan
+                # tolkes bagefter uden at kende koden paa den paagaeldende dag.
                 "filters":    {
                     "mkt_cap_min": UNIVERSE_MKT_CAP_MIN,
+                    "mkt_cap_max": UNIVERSE_MKT_CAP_MAX,
                     "min_avg_vol": UNIVERSE_MIN_VOLUME,
-                    "atrp_1w_min": UNIVERSE_ATR_PCT_MIN,
+                    "exchanges":   UNIVERSE_EXCHANGES,
+                    "vol_m_min":   UNIVERSE_VOL_M_MIN,
+                    "vol_m_max":   UNIVERSE_VOL_M_MAX,
+                    "perf_w_min":  UNIVERSE_PERF_W_MIN,
+                    "types":       UNIVERSE_TYPES,
+                    "order_by":    UNIVERSE_ORDER_BY,
                 },
             },
         )
@@ -720,12 +734,11 @@ class Confluence2Live(BaseStrategy):
         """
         Hent K2's univers via TradingViews "Intraday Volatility"-screener.
 
-        IKKE længere top-gainers (som gav elendige kandidater) — i stedet
-        mellem-/large-cap aktier med høj ugentlig ATR: likvide navne der
-        bevæger sig nok intraday til at impuls-setuppet giver mening.
-        Filtrene (pris/mkt-cap/børs/avg-vol/ATR) kommer fra confluence2.config
-        og matcher Sørens screener. Returnerer symboler sorteret efter seneste
-        dagsændring (faldende). Tom liste hvis API fejler.
+        OMLAGT 1/8-2026: small/mid cap ($300M–$10B) på NASDAQ+NYSE, filtreret på
+        månedlig volatilitet (5–50 %) og ugens afkast (>6 %), sorteret efter
+        Volatility.M faldende. Tidligere: large cap sorteret efter dagsændring.
+        Filtrene kommer fra confluence2.config; ATR-1W-filteret er væk (atr_pct_min
+        sendes derfor IKKE med). Tom liste hvis API fejler.
         """
         from strategies.shared.tv_scanner import build_volatility_universe_rows
         pool_size, rows = await build_volatility_universe_rows(
@@ -735,8 +748,12 @@ class Confluence2Live(BaseStrategy):
             mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
             mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
             min_avg_vol = UNIVERSE_MIN_VOLUME,
-            atr_pct_min = UNIVERSE_ATR_PCT_MIN,
             exchanges   = UNIVERSE_EXCHANGES,
+            vol_m_min   = UNIVERSE_VOL_M_MIN,
+            vol_m_max   = UNIVERSE_VOL_M_MAX,
+            perf_w_min  = UNIVERSE_PERF_W_MIN,
+            types       = UNIVERSE_TYPES,
+            order_by    = UNIVERSE_ORDER_BY,
             timeout     = 15.0,
             log_tag     = "Konfluens 2",
         )

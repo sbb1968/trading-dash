@@ -194,8 +194,17 @@ def _query_intraday_volatility(
     mkt_cap_min:  float = VOL_MKT_CAP_MIN,
     mkt_cap_max:  float = VOL_MKT_CAP_MAX,
     min_avg_vol:  int   = VOL_MIN_AVG_VOL,
-    atr_pct_min:  float = VOL_ATR_PCT_MIN,
+    atr_pct_min:  Optional[float] = VOL_ATR_PCT_MIN,
     exchanges:    Optional[list[str]] = None,
+    # ── Valgfrie filtre (None = anvendes IKKE) ──────────────────
+    # Tilfoejet for K2 1/8-2026. De er valgfri fordi BuyTheDip deler denne
+    # funktion og skal blive PRAECIS som den var — den sender dem ikke med,
+    # og faar dermed bit-for-bit samme forespoergsel som foer.
+    vol_m_min:    Optional[float] = None,   # Volatility.M nedre graense (%)
+    vol_m_max:    Optional[float] = None,   # Volatility.M oevre graense (%)
+    perf_w_min:   Optional[float] = None,   # Perf.W (ugens afkast) skal overstige dette (%)
+    types:        Optional[list[str]] = None,   # default ['stock', 'dr']
+    order_by:     str = "change",           # felt der sorteres paa, faldende
 ) -> tuple[int, list[dict]]:
     """
     Kør "Intraday Volatility"-screener-queryen og returnér (pool_size, rows).
@@ -223,26 +232,39 @@ def _query_intraday_volatility(
 
     exch = exchanges if exchanges is not None else VOL_EXCHANGES
 
+    # Filtrene bygges dynamisk, saa en kalder der ikke oensker et filter simpelthen
+    # lader det vaere None. Feltnavnene er verificeret mod TV's API 1/8-2026:
+    # 'Volatility.M' og 'Perf.W' returnerer tal — 'Perf.1W' returnerer None og ville
+    # have gjort filteret tavst virkningsloest (samme faelde som 'ATRP|1D' tidligere).
+    filters = [
+        col('close').between(price_min, price_max),
+        col('market_cap_basic').between(mkt_cap_min, mkt_cap_max),
+        col('exchange').isin(exch),
+        col('average_volume_30d_calc') > min_avg_vol,
+        col('type').isin(types if types is not None else ['stock', 'dr']),
+    ]
+    if atr_pct_min is not None:
+        filters.append(col('ATRP|1W') > atr_pct_min)
+    if vol_m_min is not None and vol_m_max is not None:
+        filters.append(col('Volatility.M').between(vol_m_min, vol_m_max))
+    if perf_w_min is not None:
+        filters.append(col('Perf.W') > perf_w_min)
+
     try:
         pool_size, df = (
             Query()
             .select('name', 'close', 'change', 'volume',
                     'average_volume_30d_calc', 'market_cap_basic',
                     'exchange', 'ATRP|1W',
-                    'ATRP',                         # NY: dagligt ATR% (TV's default-
+                    'ATRP',                         # dagligt ATR% (TV's default-
                                                     # timeframe ER daglig → BARE 'ATRP';
                                                     # 'ATRP|1D' verificeret → None)
-                    'relative_volume_10d_calc',     # NY: RVOL i dag
-                    'Volatility.D')                 # NY: dagens (high-low)/low i %
-            .where(
-                col('close').between(price_min, price_max),
-                col('market_cap_basic').between(mkt_cap_min, mkt_cap_max),
-                col('exchange').isin(exch),
-                col('average_volume_30d_calc') > min_avg_vol,
-                col('ATRP|1W') > atr_pct_min,
-                col('type').isin(['stock', 'dr']),
-            )
-            .order_by('change', ascending=False)
+                    'relative_volume_10d_calc',     # RVOL i dag
+                    'Volatility.D',                 # dagens (high-low)/low i %
+                    'Volatility.M',                 # maanedens — K2 filtrerer OG sorterer paa den
+                    'Perf.W')                       # ugens afkast i %
+            .where(*filters)
+            .order_by(order_by, ascending=False)
             .limit(top_n)
             .get_scanner_data()
         )
@@ -285,12 +307,23 @@ def _query_intraday_volatility(
             "atrp_1d":      _to_float(row.get('ATRP')),   # daglig ATR% = bare 'ATRP'
             "rvol":         _to_float(row.get('relative_volume_10d_calc')),
             "volatility_d": _to_float(row.get('Volatility.D')),
+            "volatility_m": _to_float(row.get('Volatility.M')),
+            "perf_w":       _to_float(row.get('Perf.W')),
         })
 
+    # Log kun de filtre der FAKTISK blev anvendt — ellers staar der en ATR-graense
+    # i loggen som forespoergslen slet ikke brugte.
+    aktive = [f"pris ${price_min}-${price_max}",
+              f"mkt-cap ${mkt_cap_min/1e6:,.0f}M-${mkt_cap_max/1e9:,.0f}B",
+              f"avg-vol >{min_avg_vol:,}"]
+    if atr_pct_min is not None:
+        aktive.append(f"ATR-1W >{atr_pct_min}%")
+    if vol_m_min is not None and vol_m_max is not None:
+        aktive.append(f"Volatility-1M {vol_m_min}-{vol_m_max}%")
+    if perf_w_min is not None:
+        aktive.append(f"Perf-1W >{perf_w_min}%")
     logger.info(f"TV intraday-volatility: {len(rows)} af {pool_size} i puljen "
-                f"(pris ${price_min}-${price_max}, mkt-cap "
-                f"${mkt_cap_min/1e9:.0f}B-${mkt_cap_max/1e12:.0f}T, "
-                f"avg-vol >{min_avg_vol:,}, ATR-1W >{atr_pct_min}%): "
+                f"({' · '.join(aktive)}, sorteret paa {order_by}): "
                 f"{', '.join(r['symbol'] for r in rows)}")
     return pool_size, rows
 
@@ -331,8 +364,13 @@ async def build_volatility_universe_rows(
     mkt_cap_min:  float,
     mkt_cap_max:  float,
     min_avg_vol:  int,
-    atr_pct_min:  float,
+    atr_pct_min:  Optional[float] = None,
     exchanges:    Optional[list[str]] = None,
+    vol_m_min:    Optional[float] = None,
+    vol_m_max:    Optional[float] = None,
+    perf_w_min:   Optional[float] = None,
+    types:        Optional[list[str]] = None,
+    order_by:     str = "change",
     timeout:      float = 15.0,
     log_tag:      str = "TV",
 ) -> tuple[int, list[dict]]:
@@ -359,6 +397,8 @@ async def build_volatility_universe_rows(
                     mkt_cap_min=mkt_cap_min, mkt_cap_max=mkt_cap_max,
                     min_avg_vol=min_avg_vol, atr_pct_min=atr_pct_min,
                     exchanges=exchanges,
+                    vol_m_min=vol_m_min, vol_m_max=vol_m_max,
+                    perf_w_min=perf_w_min, types=types, order_by=order_by,
                 ),
             ),
             timeout=timeout,
