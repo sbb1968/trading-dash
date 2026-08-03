@@ -71,9 +71,33 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
   bunden af impuls-vinduet"*. Entry ligger tæt på `dip_low`, R bliver lille, og
   2R-targetet er inden for rækkevidde — win rate går fra 49 % til 56 %.
   **Prisen er ~27 % færre handler** (444 → 322). Det er bevidst.
-- **`MIN_RUNUP_PCT` er nu næsten redundant.** Et fald på 3 % fra vinduets top garanterer
-  nærmest at vinduet spænder 3 %. Impuls 2,5 % og 3,0 % giver identiske tal (1,70) ved
-  dip 3,0 %. Konstanten beholdes som gulv, men skal ikke forventes at binde.
+- **`MIN_RUNUP_PCT` er *beviseligt* inert ved `DIP_PCT = 3,0 %`** — ikke bare næsten.
+  Dip-baren ligger selv i vinduet, så `ref_low ≤ bar.low ≤ ref_high·(1−d/100)`. Run-up'et
+  er faldende i `ref_low`, så minimum antages ved den største tilladte `ref_low`:
+  `runup ≥ 3/97 = 3,093 %`. Kravet på 3,0 % kan derfor aldrig afvise noget dip-testen
+  har godkendt. Bekræftet empirisk: `min_runup` 0,00 / 1,00 / 2,00 / 3,00 / 3,09 % giver
+  identiske tal (322 handler, PF 1,70); først 3,20 % bider. Grænsen er
+  `IMPULS_INERT_OVER = 100·DIP_PCT/(100−DIP_PCT)`, og **status logges ved hver start**.
+  Konstanten er bevidst **ikke** slettet: sænkes `DIP_PCT` igen (fx til 1,5 %), bider den
+  straks, og 3,0 % var netop optimum dér. Sletning ville give et tavst gulv på nul.
+- **⚠ Strategiens tese holder ikke.** Impuls-testen måler `(ref_high − ref_low)/ref_low`
+  **uden** at kræve at bunden kom *før* toppen. En aktie der kun er faldet i 20 minutter
+  består den. En ægte ordnet impuls (bund → top → dip) blev testet og er dårligere i
+  alle varianter (2 ¢, tre måneder, dip 3,0 %, vol 2,5×):
+
+  | konfiguration | april | maj | juni | poolet | n |
+  |---|---|---|---|---|---|
+  | nuværende (range 3,0 %) | 1,40 | 2,21 | 1,45 | **1,70** | 322 |
+  | ordnet 0,0 % | 1,36 | 2,07 | 0,81 | 1,43 | 270 |
+  | ordnet 2,0 % | 1,11 | 2,33 | 1,08 | 1,57 | 112 |
+  | ordnet 3,0 % | 1,19 | 1,84 | 0,89 | 1,41 | 59 |
+
+  Selv den svageste ordnede variant smider 52 handler væk og koster 0,27 PF. Setups
+  **uden** forudgående optur — de faldende knive — er dem der tjener pengene. BuyTheDip
+  handler altså reelt *"3 %-udsalg fra 20-minutters-toppen, bekræftet af volumen"*,
+  uanset hvad der gik forud. Formuleringen "impuls → dip → bounce" er en
+  efterrationalisering. Reproducerbart via `scan_and_sim(..., impuls_mode="ordered")`
+  i `washout_reclaim_backtest.py`.
 - **Samlet status efter revision 1.** De to ændringer er komplementære, ikke
   overlappende: ved `DIP_PCT = 3,0 %` **uden** volumenkrav er PF 0,83 (2 ¢) — dippet
   alene redder intet. Volumenmultiplen er efterprøvet ved dip 3,0 % og 2,5× står fast

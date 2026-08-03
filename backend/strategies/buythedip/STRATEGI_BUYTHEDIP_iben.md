@@ -24,8 +24,13 @@ der udgør jagtmarken.
 
 Setuppet aflæses på færdige 1-minuts candles i tre trin:
 
-1. **Impuls** — over de seneste ca. 20 minutter er aktien løbet mindst 3 % op (fra
-   bunden til toppen i vinduet). Det er beviset på at der er købspres til stede.
+1. **Bevægelse** — over de seneste ca. 20 minutter har aktien bevæget sig mindst 3 %
+   fra bund til top. Bemærk: kravet siger ikke noget om *rækkefølgen*. Vi troede
+   længe det betød "aktien er løbet op", men det gør det ikke — en aktie der kun er
+   faldet i 20 minutter opfylder det også. Vi testede i august 2026 at kræve en
+   ægte optur før dykket, og det blev **dårligere**. Netop de tilfælde hvor der
+   ikke har været nogen optur — hvor aktien bare falder — er dem der tjener
+   pengene. Se afsnittet nedenfor.
 2. **Dip** — prisen falder mindst 3 % tilbage fra vinduets top. Da impulsen selv er
    på 3 %, betyder det i praksis at aktien er faldet **helt tilbage til udgangspunktet**.
    Det er tilbagefaldet vi vil købe. (Kravet var 1,5 % indtil august 2026 — se nedenfor.)
@@ -80,6 +85,21 @@ Og der er to ting man skal vide om det resultat:
 hvor det var nok at prisen tikkede op — ville den have tabt over de tre måneder,
 når man regner handelsomkostninger med. Det var ikke et lille problem vi rettede;
 det var forskellen på at tabe og ikke at tabe.
+
+**Strategien handler ikke det vi troede.** Navnet og beskrivelsen siger "køb dykket
+efter en optur". Da vi gik tallene efter, viste det sig at kravet om en optur ikke
+gjorde noget som helst — dels fordi det matematisk ikke kan afvise noget når vi nu
+kræver et 3 %-dyk, dels fordi det aldrig har krævet at opturen kom *før* dykket.
+Vi byggede så en rigtig version, der insisterer på optur-så-dyk. Den var dårligere
+i alle de varianter vi prøvede. De handler den ville have sorteret fra — hvor
+aktien bare falder uden nogen forudgående optur — er dem der tjener mest.
+
+Så det ærlige billede er: BuyTheDip køber et **3 %-udsalg fra de sidste 20
+minutters top, når volumen bekræfter at der er købere**. Om der gik en optur forud
+er strategien ligeglad med, og det er tilsyneladende rigtigt at være det. Vi har
+ladet kravet stå som et gulv — det bliver relevant igen hvis vi en dag sænker
+dyk-kravet — men det gør intet som det er sat op nu, og det skriver algoritmen
+selv i loggen hver gang den starter.
 
 **Vi krævede et dybere dyk.** Det oprindelige krav var at aktien skulle falde 1,5 %
 tilbage. Men da vi skiftede jagtmarken til mindre og mere svingende selskaber, blev

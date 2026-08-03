@@ -240,8 +240,34 @@ def _bar_bekraefter(bars, j, bo: Bounce, ref_high, washout_low) -> bool:
     return True
 
 
+def _impuls_ok(window, ref_high, min_runup, mode) -> bool:
+    """Er der en impuls i vinduet?
+
+    mode="range" — den OPRINDELIGE test: (ref_high − ref_low) / ref_low, hvor
+      ref_low er vinduets laveste low UANSET hvornaar det faldt. Den siger altsaa
+      kun "vinduet spaender min_runup %" — ikke at prisen er GAAET OP. En aktie der
+      udelukkende er faldet i 20 minutter bestaar testen: toppen ligger i starten,
+      bunden til sidst. Det er en faldende kniv, ikke et dip efter en impuls.
+
+    mode="ordered" — kraever at bunden kom FOER toppen, og maaler run-up'et derfra:
+      low -> high -> dip. Det er den bevaegelse strategien PAASTAAR den handler.
+    """
+    if mode == "ordered":
+        k = max(range(len(window)), key=lambda x: window[x].high)
+        if k == 0 or k == len(window) - 1:
+            return False        # toppen skal have baade et foer og et efter
+        pre_low = min(b.low for b in window[:k + 1])
+        if pre_low <= 0:
+            return False
+        return (ref_high - pre_low) / pre_low * 100.0 >= min_runup
+    ref_low = min(b.low for b in window)
+    if ref_low <= 0:
+        return False
+    return (ref_high - ref_low) / ref_low * 100.0 >= min_runup
+
+
 def scan_and_sim(bars, lookback, min_runup, washout, target, stop_pct, slip,
-                 bounce: "Bounce" = None, target_r=None):
+                 bounce: "Bounce" = None, target_r=None, impuls_mode="range"):
     """Find ÉN washout-reclaim long pr. dag og simulér den. Returnér dict|None."""
     if bounce is None:
         bounce = Bounce("original")
@@ -254,8 +280,8 @@ def scan_and_sim(bars, lookback, min_runup, washout, target, stop_pct, slip,
         ref_low = min(b.low for b in window)
         if ref_low <= 0:
             continue
-        runup = (ref_high - ref_low) / ref_low * 100.0
-        if runup < min_runup:
+        runup = (ref_high - ref_low) / ref_low * 100.0   # kun til rapportering
+        if not _impuls_ok(window, ref_high, min_runup, impuls_mode):
             continue
         wo_lvl = ref_high * (1 - washout / 100.0)
         if bars[i].low > wo_lvl:
@@ -441,7 +467,8 @@ def run_universe(backend, data, params, slip_cents, emit):
             scanned += 1
             tr = scan_and_sim(bars, params["lookback"], params["min_runup"],
                               params["washout"], params["target"], params["stop_pct"], slip,
-                              bounce=params.get("bounce"), target_r=params.get("target_r"))
+                              bounce=params.get("bounce"), target_r=params.get("target_r"),
+                              impuls_mode=params.get("impuls_mode", "range"))
             if tr:
                 tr["ticker"] = t
                 trades.append(tr)

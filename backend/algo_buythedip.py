@@ -113,10 +113,43 @@ DIP_PCT   = 3.0    # dip: bar.low ≤ ref_high·(1−dette/100)
 # til bunden af impuls-vinduet". Entry ligger saa taet paa dip_low, R bliver
 # lille, og 2R-targetet er inden for raekkevidde — win rate gaar fra 49 % til 56 %.
 #
-# BEMAERK: ved dip 3,0 % er MIN_RUNUP_PCT = 3,0 % naesten redundant. Et fald paa
-# 3 % fra vinduets top garanterer naermest at vinduet spaender 3 %. Impuls 2,5 %
-# og 3,0 % giver da ogsaa identiske tal (1,70). Konstanten beholdes som gulv;
-# den skal bare ikke forventes at binde.
+# MIN_RUNUP_PCT ER INERT VED DIP_PCT = 3,0 % — ikke "naesten", men beviseligt.
+#
+# Dip-testen kraever bar.low <= ref_high*(1 - d/100). Dip-baren ligger SELV i
+# vinduet, saa ref_low <= bar.low, og dermed ref_low <= ref_high*(1 - d/100).
+# Run-up'et er faldende i ref_low, saa minimum antages ved den stoerste tilladte
+# ref_low:
+#     runup >= (ref_high - 0,97*ref_high) / (0,97*ref_high) = 3/97 = 3,093 %
+# Kravet paa 3,0 % kan altsaa ALDRIG afvise noget dip-testen har godkendt.
+# Bekraeftet empirisk: min_runup 0,00 / 1,00 / 2,00 / 3,00 / 3,09 % giver
+# identiske resultater (322 handler, PF 1,70); foerst 3,20 % begynder at bide.
+# Graensen er IMPULS_INERT_OVER (nedenfor), som logges ved start.
+#
+# Konstanten BEHOLDES alligevel. Den er ikke meningsloes — den er blot ikke
+# bindende ved den nuvaerende DIP_PCT. Saenkes DIP_PCT igen (fx tilbage til
+# 1,5 %), bider den med det samme, og 3,0 % var netop optimum dér. At slette
+# den ville betyde at en senere saenkning af DIP_PCT tavst gav et gulv paa nul.
+#
+# STRATEGIENS TESE HOLDER IKKE — vaerd at vide foer nogen "forbedrer" impulsen:
+# testen maaler (vinduets top - vinduets bund)/bund UDEN at kraeve at bunden kom
+# FOER toppen. En aktie der kun er faldet i 20 minutter bestaar den. Vi testede
+# en aegte ordnet impuls (bund -> top -> dip) og den er DAARLIGERE i alle
+# varianter (2 cent, tre maaneder, dip 3,0 %, vol 2,5x):
+#
+#   nuvaerende (range 3,0 %)   apr 1,40  maj 2,21  jun 1,45  |  1,70   n=322
+#   ordnet 0,0 %               apr 1,36  maj 2,07  jun 0,81  |  1,43   n=270
+#   ordnet 2,0 %               apr 1,11  maj 2,33  jun 1,08  |  1,57   n=112
+#   ordnet 3,0 %               apr 1,19  maj 1,84  jun 0,89  |  1,41   n= 59
+#
+# Selv den svageste ordnede variant smider 52 handler vaek og koster 0,27 PF.
+# De setups UDEN forudgaaende optur — de faldende knive — er dem der tjener
+# pengene. BuyTheDip handler altsaa reelt "3 %-udsalg fra 20-min-toppen,
+# bekraeftet af volumen", uanset hvad der gik forud. Navnet og docs' "impuls
+# -> dip -> bounce" er en efterrationalisering. Aendr ikke paa det uden at
+# koere tallene igen.
+
+# Over denne graense begynder MIN_RUNUP_PCT at bide. Under den er den inert.
+IMPULS_INERT_OVER = 100.0 * DIP_PCT / (100.0 - DIP_PCT)
 #
 # PRIS: ~27 % faerre handler (444 -> 322 over tre maaneder). Det er bevidst.
 
@@ -302,6 +335,16 @@ class BuyTheDipLive(BaseStrategy):
             logger.warning("[BuyTheDip] _trading_loop kører allerede — afbryder ny start")
             return
         self._status("started", "Algoritme starter — BuyTheDip (buy-the-dip)")
+        # Gør impuls-gulvets status eksplicit. Ved DIP_PCT=3,0 % er MIN_RUNUP_PCT
+        # matematisk inert (se konstant-blokken); det skal staa i loggen, ikke
+        # opdages af den naeste der undrer sig over hvorfor den ikke gør noget.
+        if MIN_RUNUP_PCT <= IMPULS_INERT_OVER:
+            await self._log(f"impuls-gulv {MIN_RUNUP_PCT:.2f} % er INERT ved dip "
+                            f"{DIP_PCT:.2f} % (dip-testen giver selv ≥ "
+                            f"{IMPULS_INERT_OVER:.2f} %) — kun dip-kravet binder")
+        else:
+            await self._log(f"impuls-gulv {MIN_RUNUP_PCT:.2f} % binder "
+                            f"(dip-testen giver kun ≥ {IMPULS_INERT_OVER:.2f} %)")
         # Best-effort OG tidsbegrænset: hverken fejl eller hang må blokere starten.
         try:
             await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)

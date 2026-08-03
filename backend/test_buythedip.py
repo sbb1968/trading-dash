@@ -244,6 +244,31 @@ def section_A():
     check("A8 close>forrige men close<open + høj volumen → INGEN setup",
           a8._detect("X", krop) is None)
 
+    # A9: impuls-gulvet er INERT ved DIP_PCT=3,0 % — og det er bevidst.
+    # Dip-baren ligger selv i vinduet, saa dip-testen giver af sig selv
+    # runup >= DIP/(100-DIP) = 3,093 %. MIN_RUNUP_PCT=3,0 kan derfor aldrig
+    # afvise noget dip-testen godkender.
+    graense = 100.0 * btd.DIP_PCT / (100.0 - btd.DIP_PCT)
+    check("A9 IMPULS_INERT_OVER regnet korrekt",
+          abs(btd.IMPULS_INERT_OVER - graense) < 1e-9, btd.IMPULS_INERT_OVER)
+    check("A9 impuls-gulvet er inert ved nuvaerende konstanter",
+          btd.MIN_RUNUP_PCT <= btd.IMPULS_INERT_OVER,
+          (btd.MIN_RUNUP_PCT, btd.IMPULS_INERT_OVER))
+
+    # A10: REN NEDTUR (ingen optur overhovedet) saetter stadig dip-state.
+    # Det er ikke en fejl — vi har testet at kraeve en aegte optur foer dykket,
+    # og det var daarligere i alle varianter. Strategien handler washouts,
+    # ikke impuls-pullbacks. Testen findes for at den sandhed ikke bliver
+    # "rettet" af en der stoler paa navnet.
+    a10 = make_algo(MockConn(), MockJournal())
+    ned = [mk(base + timedelta(minutes=i), 104.0 - i * 0.19 + 0.02,
+              104.0 - i * 0.19 + 0.05, 104.0 - i * 0.19 - 0.05,
+              104.0 - i * 0.19) for i in range(btd.LOOKBACK)]
+    a10._bar_history["Z"] = ned
+    r10 = a10._detect("Z", ned[-1])
+    check("A10 ren nedtur (top FOERST) bestaar impuls-testen → dip-state sat",
+          r10 is None and "Z" in a10._dip_state, list(a10._dip_state))
+
     # A5: efter entry → ingen ny entry samme ticker samme dag (_check_ticker-gate)
     a = make_algo(MockConn(), MockJournal())
     a._done_today.add("X")
