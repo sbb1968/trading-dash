@@ -145,7 +145,7 @@ def _news_ts_epoch(t) -> float:
 
 
 async def check_positive_catalyst(
-    conn, ticker: str, provider_codes: str
+    conn, ticker: str, provider_codes: str, collect: Optional[list] = None
 ) -> tuple[bool, str, float]:
     """Har `ticker` en FRISK, POSITIV nyhedskatalysator i dag? Nu via IBKR
     (reqHistoricalNews — Dow Jones/Briefing.com) i stedet for Finnhub: dybere micro-
@@ -155,6 +155,11 @@ async def check_positive_catalyst(
     UAENDRET gate-semantik: mindst én 'bullish' overskrift nyere end NEWS_MAX_AGE_HOURS
     OG netto bullish (flere bullish end bearish blandt friske). Returnerer
     (har_katalysator, overskrift, best_ts). Best-effort: enhver fejl -> (False, ...).
+
+    `collect`: valgfri liste. Er den givet, appendes HVER frisk overskrift som
+    {headline, ts, sentiment} — raamateriale til at kvalificere keyword-listen.
+    3-tuple-kontrakten er bevidst UROERT (flere kaldere afhaenger af den); derfor
+    en opsamler-parameter frem for et fjerde returfelt.
     """
     if not provider_codes:
         return False, "ingen nyheds-providere", 0.0
@@ -195,6 +200,8 @@ async def check_positive_catalyst(
             continue
         friske.append(headline)
         sent = _guess_sentiment(headline)
+        if collect is not None:
+            collect.append({"headline": headline, "ts": ts, "sentiment": sent})
         if sent == "bullish":
             bull += 1
             if ts > best_ts:
@@ -557,9 +564,17 @@ class TrendJoinLive(BaseStrategy):
                     rec["verdict"] = "tidl_afvist"; records.append(rec); continue
 
                 # ── KERNE: positiv nyhedskatalysator? ──
-                has_cat, detail, catalyst_ts = await check_positive_catalyst(self.conn, sym, provider_codes)
+                # `overskrifter` opsamler HVER frisk overskrift gaten saa. Nyhederne
+                # hentes alligevel — vi smed dem bare vaek. Uden dem kan keyword-listen
+                # aldrig kvalificeres paa andet end gaet: "bullish" skal betyde "gik
+                # forud for fortsaettelse", og det kraever raamateriale + udfald.
+                # Nul ekstra IBKR-kald.
+                overskrifter: list[dict] = []
+                has_cat, detail, catalyst_ts = await check_positive_catalyst(
+                    self.conn, sym, provider_codes, collect=overskrifter)
                 await asyncio.sleep(0.4)   # IBKR historisk-nyhed pacing
                 rec["detail"] = detail[:120]
+                await self._log_headlines(sym, change, price, has_cat, overskrifter)
                 if not has_cat:
                     self._vetted[sym] = False
                     rec["verdict"] = "ingen_katalysator"
@@ -638,6 +653,43 @@ class TrendJoinLive(BaseStrategy):
                 })
         except Exception as e:
             logger.error(f"[TrendJoin] scan-event-skriv fejlede: {e}")
+
+    async def _log_headlines(self, sym: str, change: float, price: float,
+                             has_cat: bool, overskrifter: list) -> None:
+        """Gem RAAT de friske overskrifter gaten saa ('trendjoin_headlines').
+
+        Formaal: gøre keyword-listen kvalificerbar. Indtil nu var den udvidet paa
+        intuition — vores eller en sprogmodels — og ingen af delene kan efterproeves.
+        Med (overskrift, tidspunkt, vores klassifikation, ticker, dagens gap) plus
+        kursdata bagefter kan man maale det eneste der betyder noget: hvilke
+        formuleringer gaar forud for FORTSAETTELSE, ikke hvilke der lyder positive.
+
+        Append-only, aendrer INGEN beslutning, nul ekstra IBKR-kald (nyhederne er
+        allerede hentet af gaten). Best-effort — maa aldrig vaelte en handelsdag.
+        """
+        if not self._journal or not overskrifter:
+            return
+        now_et = datetime.now(ET)
+        try:
+            await self._journal.log_event(
+                source=self.name, event_type="trendjoin_headlines", symbol=sym,
+                payload={
+                    "symbol": sym,
+                    "scan_ts_utc": now_et.timestamp(),
+                    "scan_et": now_et.strftime("%H:%M:%S"),
+                    "change_pct": round(change, 2),
+                    "price": round(price, 2),
+                    "gate_bestod": bool(has_cat),
+                    "n": len(overskrifter),
+                    # FULD overskrift — ikke afkortet. Afkortede strenge er
+                    # ubrugelige til at udlede ordforraad fra.
+                    "headlines": [
+                        {"h": o["headline"], "ts": o["ts"], "s": o["sentiment"]}
+                        for o in overskrifter[:25]
+                    ],
+                })
+        except Exception as e:
+            logger.warning(f"[TrendJoin] kunne ikke logge overskrifter for {sym}: {e}")
 
     async def _log_shadow_candidate(self, sym: str, change: float, price: float,
                                     detail: str) -> None:

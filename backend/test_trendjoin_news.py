@@ -12,6 +12,7 @@ Sektioner:
   B — check_positive_catalyst aabner paa en frisk bullish overskrift
   C — afvisningsgrundene kan skelnes fra hinanden (den gamle kode sagde det samme
       uanset aarsag, hvilket skjulte fejlen i over en maaned)
+  D — opsamling af friske overskrifter (raamateriale til at kvalificere ordlisten)
 
 Kør i backend-mappen:  python test_trendjoin_news.py
 """
@@ -136,8 +137,37 @@ def section_C():
           ok[1] == "ingen nyheds-providere", ok)
 
 
+# -- D — overskrift-opsamling (raamateriale til at kvalificere keyword-listen) --
+def section_D():
+    print("\nSektion D — opsamling af friske overskrifter")
+    fangst = []
+    ok, d, _ = kald_med([
+        FakeNews(frisk(1), "{A:1:L:en}Acme wins FDA approval"),
+        FakeNews(frisk(2), "{A:1:L:en}Acme to present at investor conference"),
+        FakeNews(frisk(40), "{A:1:L:en}Gammel nyhed der skal IGNORERES"),
+    ], fangst)
+    check("D1 kun FRISKE overskrifter opsamles", len(fangst) == 2, fangst)
+    check("D2 overskrift gemt UDEN metadata-praefiks",
+          all(not o["headline"].startswith("{") for o in fangst), fangst)
+    check("D3 vores klassifikation foelger med",
+          {o["sentiment"] for o in fangst} == {"bullish", "neutral"},
+          [o["sentiment"] for o in fangst])
+    check("D4 tidsstempel er et rigtigt epoch", all(o["ts"] > 0 for o in fangst), fangst)
+    check("D5 gaten paavirkes IKKE af opsamlingen", ok is True, d)
+
+    # Uden collect skal adfaerden vaere bit-for-bit som foer.
+    ok2, d2, _ = kald([FakeNews(frisk(1), "{A:1:L:en}Acme wins FDA approval")])
+    check("D6 uden collect: uaendret 3-tuple-kontrakt", ok2 is True and d2.startswith("Acme"), d2)
+
+
+def kald_med(news, fangst):
+    conn = FakeConn(news)
+    return asyncio.run(tj.check_positive_catalyst(conn, "TEST", "BRFG+DJNL", collect=fangst))
+
+
 if __name__ == "__main__":
     section_A()
     section_B()
     section_C()
+    section_D()
     print("\nALLE TESTS BESTÅET ✓")
