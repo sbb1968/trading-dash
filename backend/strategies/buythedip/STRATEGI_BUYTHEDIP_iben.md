@@ -26,8 +26,9 @@ Setuppet aflæses på færdige 1-minuts candles i tre trin:
 
 1. **Impuls** — over de seneste ca. 20 minutter er aktien løbet mindst 3 % op (fra
    bunden til toppen i vinduet). Det er beviset på at der er købspres til stede.
-2. **Dip** — prisen falder mindst 1,5 % tilbage fra vinduets top. Det er tilbagefaldet
-   vi vil købe.
+2. **Dip** — prisen falder mindst 3 % tilbage fra vinduets top. Da impulsen selv er
+   på 3 %, betyder det i praksis at aktien er faldet **helt tilbage til udgangspunktet**.
+   Det er tilbagefaldet vi vil købe. (Kravet var 1,5 % indtil august 2026 — se nedenfor.)
 3. **Bounce** — når faldet vender, køber strategien ved bounce-candlens lukkekurs.
    Men det er ikke nok at prisen bare tikker op: candlen skal også *lukke grønt*
    (over sin egen åbning) og handles på **mindst to en halv gang så meget volumen**
@@ -80,12 +81,25 @@ hvor det var nok at prisen tikkede op — ville den have tabt over de tre måned
 når man regner handelsomkostninger med. Det var ikke et lille problem vi rettede;
 det var forskellen på at tabe og ikke at tabe.
 
-**Kanten er tynd, og den hviler på én måned.** Med volumen-kravet er resultatet
-omkring 24 % overskud per risikeret krone samlet — men det tal kommer næsten helt
-fra maj. April og juni ligger begge omkring nul (3-4 %), og bliver
-handelsomkostningerne bare lidt større, går april i minus. Vi ved altså at
-volumen-kravet gør strategien *bedre*, men vi ved ikke om den er *god*. Det kræver
-flere måneders paper-handel at afgøre. Rigtige penge er ikke på tale.
+**Vi krævede et dybere dyk.** Det oprindelige krav var at aktien skulle falde 1,5 %
+tilbage. Men da vi skiftede jagtmarken til mindre og mere svingende selskaber, blev
+1,5 % til ren støj — den slags aktier bevæger sig så meget på egen hånd. Vi testede
+derfor både et større krav til *optrækket* og til *tilbagefaldet*. Et større optræk
+gjorde det værre. Et større tilbagefald gjorde det markant bedre, med et tydeligt
+optimum ved 3 %: netop dér hvor aktien er faldet hele vejen tilbage til sit
+udgangspunkt. Så køber vi i bunden af bevægelsen i stedet for midt i den, og vores
+stop kan ligge tæt på. Det koster os cirka en fjerdedel af handlerne — bevidst.
+
+**Hvor står vi så?** Med begge ændringer giver de tre testmåneder omkring 70 %
+overskud per risikeret krone, og alle tre måneder er positive hver for sig, også hvis
+vi regner med højere handelsomkostninger. Til sammenligning ville strategien som den
+var sat op *før* denne revision have **tabt** penge over de samme tre måneder.
+
+Men tag ikke tallet for pålydende. Tre måneder og 322 handler er ikke meget, maj er
+stadig klart den bedste af de tre, og det hele er regnet på rekonstruerede
+historiske data — ikke på handler vi faktisk har foretaget. Vi ved nu at
+ændringerne gør strategien *bedre*. Om den er *god nok*, afgør paper-handlen over de
+kommende måneder. Rigtige penge er ikke på tale.
 
 Strategien kører **udelukkende paper trading** (Ibens konto). På handelsserveren
 starter den **automatisk** kort før den amerikanske børsåbning; på Sørens egen maskine

@@ -25,7 +25,7 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
 | Trin | Betingelse | Parameter |
 |---|---|---|
 | **Impuls** | Run-up i vinduet: `(ref_high − ref_low) / ref_low ≥ MIN_RUNUP_PCT` | `MIN_RUNUP_PCT = 3.0 %` |
-| **Dip** | `bar.low ≤ ref_high × (1 − DIP_PCT/100)` | `DIP_PCT = 1.5 %` |
+| **Dip** | `bar.low ≤ ref_high × (1 − DIP_PCT/100)` | `DIP_PCT = 3.0 %` (hævet fra 1,5 % den 3/8-2026) |
 | **Bounce** | `close > forrige close` **og** `close > open` **og** `volume ≥ BOUNCE_VOL_MULT × snit(20 foregående bars)` → entry på bounce-barens `close` | `BOUNCE_REQUIRE_GREEN = True`, `BOUNCE_VOL_MULT = 2.5`, `BOUNCE_VOL_LEN = 20` |
 
 - **Entry-pris** = `bar.close` (færdig bar).
@@ -50,10 +50,47 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
   overfitter på. 2,5× og 2,75× er de eneste to varianter over 1,0 i alle tre måneder.
   Filteret fjerner næsten ingen setups (n = 451 → 444); det udskyder entry til volumen
   bekræfter. Dip-state bevares imens, så et setup aldrig kasseres (test A7).
-- **Kanten er tynd og hviler på maj.** April 1,03 og juni 1,04 er praktisk talt nul,
-  og ved 3 ¢ slippage falder april til 0,89. Ingen af de øvrige 10 testede
-  bounce-filtre (close-position, reclaim-andel, to grønne bars) er positive i alle
-  tre måneder overhovedet.
+- **`DIP_PCT` hævet 1,5 % → 3,0 % (3/8-2026).** Spørgsmålet var om *impuls*-kravet
+  skulle op nu hvor universet er small/mid cap sorteret på `Volatility.M`. Det skulle
+  det ikke — at hæve impulsen skader (poolet PF ved 2 ¢, dip fast 1,5 %): 3,0 % → 1,24,
+  3,5 % → 1,20, 4,0 % → 1,19, 5,0 % → 1,00, 6,0 % → 0,75. Men intuitionen om det mere
+  volatile univers var rigtig; den gjaldt bare dippet:
+
+  | dip | april | maj | juni | poolet (2 ¢) | n |
+  |---|---|---|---|---|---|
+  | 1,5 % | 1,03 | 1,65 | 1,04 | 1,24 | 444 |
+  | 2,0 % | 1,01 | 1,93 | 1,19 | 1,36 | 405 |
+  | 2,5 % | 1,06 | 2,03 | 1,38 | 1,47 | 376 |
+  | **3,0 %** | **1,40** | **2,21** | **1,45** | **1,70** | **322** ← valgt |
+  | 3,5 % | 1,00 | 2,21 | 1,28 | 1,46 | 191 |
+  | 4,0 % | 1,15 | 2,25 | 0,64 | 1,29 | 132 |
+
+  Toppen holder ved 1, 2 og 3 ¢ (poolet 1,91 / 1,70 / 1,51), og ved 3 ¢ er 3,0 % den
+  eneste indstilling over 1,0 i alle tre måneder. Der er en struktur bag: når dippet er
+  lige så stort som impulsen, betyder kravet reelt *"prisen er faldet helt tilbage til
+  bunden af impuls-vinduet"*. Entry ligger tæt på `dip_low`, R bliver lille, og
+  2R-targetet er inden for rækkevidde — win rate går fra 49 % til 56 %.
+  **Prisen er ~27 % færre handler** (444 → 322). Det er bevidst.
+- **`MIN_RUNUP_PCT` er nu næsten redundant.** Et fald på 3 % fra vinduets top garanterer
+  nærmest at vinduet spænder 3 %. Impuls 2,5 % og 3,0 % giver identiske tal (1,70) ved
+  dip 3,0 %. Konstanten beholdes som gulv, men skal ikke forventes at binde.
+- **Samlet status efter revision 1.** De to ændringer er komplementære, ikke
+  overlappende: ved `DIP_PCT = 3,0 %` **uden** volumenkrav er PF 0,83 (2 ¢) — dippet
+  alene redder intet. Volumenmultiplen er efterprøvet ved dip 3,0 % og 2,5× står fast
+  (bredt plateau 2,25×–3,5×, top delt med 2,75×). Samlet konfiguration:
+
+  | | april | maj | juni | poolet | n |
+  |---|---|---|---|---|---|
+  | 2 ¢ | 1,40 | 2,21 | 1,45 | **1,70** | 322 |
+  | 3 ¢ | 1,22 | 1,98 | 1,32 | **1,51** | 322 |
+
+  Til sammenligning: den konfiguration strategien kørte med **før** revisionen
+  (dip 1,5 %, intet volumenkrav) gav poolet 0,89 ved 2 ¢ — altså tabsgivende.
+- **Forbeholdene står stadig.** Tre måneder og 322 handler er ikke meget, maj er
+  fortsat klart den stærkeste måned, og alle tal er målt på et rekonstrueret univers
+  (se nedenfor), ikke på faktisk handel. Ingen af de øvrige 10 testede bounce-filtre
+  (close-position, reclaim-andel, to grønne bars) er positive i alle tre måneder
+  overhovedet — volumen er det eneste der bærer. Paper forbliver dommeren.
 - **Backtestens forbehold:** universet er rekonstrueret point-in-time fra daglige bars
   (`reconstruct_midcap_universe.py --perf-w-min 6.0`) ud fra en fast pulje på 98 navne.
   Pris/volumen/Perf 1W er eksakt genskabt; TradingViews `Volatility.M` kan kun

@@ -173,7 +173,7 @@ def section_A():
     # A1: run-up + dip-bar → dip-state sat, dip_low = vinduets min-low
     a = make_algo(MockConn(), MockJournal())
     a._bar_history["X"] = runup_hist("X", base)               # ref_high ≈ 103.99
-    dipbar = mk(base + timedelta(minutes=20), 103.9, 103.95, 101.5, 101.6)
+    dipbar = mk(base + timedelta(minutes=20), 103.9, 103.95, 100.5, 100.6)  # dyb nok til DIP_PCT=3
     a._bar_history["X"].append(dipbar)
     r = a._detect("X", dipbar)
     win_low = min(b.low for b in a._bar_history["X"][-btd.LOOKBACK:])
@@ -194,12 +194,12 @@ def section_A():
     a = make_algo(MockConn(), MockJournal())
     a._bar_history["X"] = runup_hist("X", base) + [dipbar]
     a._detect("X", dipbar)
-    red = mk(base + timedelta(minutes=21), 101.6, 101.8, 101.0, 101.2)  # close < forrige (101.6)
+    red = mk(base + timedelta(minutes=21), 100.6, 100.8, 100.0, 100.2)  # close < forrige (100.6)
     a._bar_history["X"].append(red)
     check("A3 rød bar → ingen setup (venter)", a._detect("X", red) is None)
 
     # A4: GRØN bar m. volumen → SETUP med korrekte værdier
-    green = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9,  # close > forrige (101.2)
+    green = mk(base + timedelta(minutes=22), 100.3, 101.0, 100.25, 100.9,  # close > forrige (100.2)
                v=30000)                                                    # 3× snit
     a._bar_history["X"].append(green)
     r = a._detect("X", green)
@@ -207,7 +207,7 @@ def section_A():
     _, setup, bar = r
     ref_high = a._dip_state.get("X", {}).get("ref_high") or setup["ref_high"]
     exp_depth = (setup["ref_high"] - setup["dip_low"]) / setup["ref_high"] * 100.0
-    check("A4 entry = grøn bars LUK", bar.close == 101.9, bar.close)
+    check("A4 entry = grøn bars LUK", bar.close == 100.9, bar.close)
     check("A4 stop = dip_low", setup["dip_low"] == win_low, setup["dip_low"])
     check("A4 dip_depth korrekt", abs(setup["dip_depth"] - exp_depth) < 1e-9, setup["dip_depth"])
 
@@ -219,7 +219,7 @@ def section_A():
     a6._detect("X", dipbar)
     a6._bar_history["X"].append(red)
     a6._detect("X", red)
-    tyndt = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9, v=20000)
+    tyndt = mk(base + timedelta(minutes=22), 100.3, 101.0, 100.25, 100.9, v=20000)
     a6._bar_history["X"].append(tyndt)
     check("A6 grøn bounce m. for lidt volumen (2,0×) → INGEN setup",
           a6._detect("X", tyndt) is None)
@@ -227,19 +227,19 @@ def section_A():
     # A7: dip-state OVERLEVER en afvist bounce — den venter bare paa naeste bar
     # med volumen. Ellers ville filteret smide setuppet vaek i stedet for at udskyde det.
     check("A7 dip-state bevaret efter afvist bounce", "X" in a6._dip_state)
-    sen = mk(base + timedelta(minutes=23), 101.85, 102.4, 101.8, 102.3, v=30000)
+    sen = mk(base + timedelta(minutes=23), 100.85, 101.4, 100.8, 101.3, v=30000)
     a6._bar_history["X"].append(sen)
     r7 = a6._detect("X", sen)
     check("A7 senere bar MED volumen → setup", r7 is not None)
     if r7:
-        check("A7 entry = den SENERE bars luk", r7[2].close == 102.3, r7[2].close)
+        check("A7 entry = den SENERE bars luk", r7[2].close == 101.3, r7[2].close)
 
     # A8: RØD bar (close < open) med masser af volumen → stadig ingen entry
     a8 = make_algo(MockConn(), MockJournal())
     a8._bar_history["X"] = runup_hist("X", base) + [dipbar]
     a8._detect("X", dipbar)
-    # close 101.9 > forrige close (101.6) men UNDER egen open (102.5) → doji/roed krop
-    krop = mk(base + timedelta(minutes=21), 102.5, 102.6, 101.5, 101.9, v=50000)
+    # close 100.9 > forrige close (100.6) men UNDER egen open (101.5) → doji/roed krop
+    krop = mk(base + timedelta(minutes=21), 101.5, 101.6, 100.5, 100.9, v=50000)
     a8._bar_history["X"].append(krop)
     check("A8 close>forrige men close<open + høj volumen → INGEN setup",
           a8._detect("X", krop) is None)

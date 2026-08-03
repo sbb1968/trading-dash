@@ -83,7 +83,42 @@ FORCE_CLOSE_ET = dtime(15, 30)   # tvangsluk-backstop — 30 min før 16:00-lukn
 # ── Validerede strategi-parametre (june_correlation DEFAULTS) ──
 LOOKBACK      = 20
 MIN_RUNUP_PCT = 3.0    # impuls: (ref_high−ref_low)/ref_low ≥ dette
-DIP_PCT   = 1.5    # dip: bar.low ≤ ref_high·(1−dette/100)
+DIP_PCT   = 3.0    # dip: bar.low ≤ ref_high·(1−dette/100)
+
+# DIP_PCT hævet fra 1,5 % til 3,0 % den 3/8-2026 (revision 1).
+#
+# Spoergsmaalet var oprindeligt om IMPULS-kravet skulle op, nu hvor universet
+# er skiftet til small/mid cap sorteret paa Volatility.M. Svaret var nej — at
+# haeve impulsen skader (poolet PF ved 2 cent, tre maaneder, dip fast 1,5 %):
+#
+#   impuls   2,0 %  2,5 %  3,0 %  3,5 %  4,0 %  5,0 %  6,0 %
+#   PF        1,18   1,20   1,24   1,20   1,19   1,00   0,75
+#   n          768    595    444    316    229    112     64
+#
+# Men intuitionen var rigtig — den gjaldt bare DIPPET. Et mere volatilt univers
+# goer et fald paa 1,5 % til stoej. Med impuls fast paa 3,0 %:
+#
+#     dip    april    maj   juni  |  poolet PF (2 cent)    n
+#   1,5 %     1,03   1,65   1,04  |     1,24             444   <- var live
+#   2,0 %     1,01   1,93   1,19  |     1,36             405
+#   2,5 %     1,06   2,03   1,38  |     1,47             376
+#   3,0 %     1,40   2,21   1,45  |     1,70             322   <- valgt
+#   3,5 %     1,00   2,21   1,28  |     1,46             191
+#   4,0 %     1,15   2,25   0,64  |     1,29             132
+#
+# Toppen ved 3,0 % er ikke en tilfaeldighed: den holder ved 1, 2 OG 3 cent
+# (poolet PF 1,91 / 1,70 / 1,51), og ved 3 cent er den den ENESTE indstilling
+# der er over 1,0 i alle tre maaneder. Der er ogsaa en struktur bag: naar dippet
+# er lige saa stort som impulsen, betyder kravet "prisen er faldet helt tilbage
+# til bunden af impuls-vinduet". Entry ligger saa taet paa dip_low, R bliver
+# lille, og 2R-targetet er inden for raekkevidde — win rate gaar fra 49 % til 56 %.
+#
+# BEMAERK: ved dip 3,0 % er MIN_RUNUP_PCT = 3,0 % naesten redundant. Et fald paa
+# 3 % fra vinduets top garanterer naermest at vinduet spaender 3 %. Impuls 2,5 %
+# og 3,0 % giver da ogsaa identiske tal (1,70). Konstanten beholdes som gulv;
+# den skal bare ikke forventes at binde.
+#
+# PRIS: ~27 % faerre handler (444 -> 322 over tre maaneder). Det er bevidst.
 
 # Bounce-bekraeftelse (revision 1, 3/8-2026). Det oprindelige krav var alene
 # "close > forrige close" — ét grønt tick, uden krav om at nogen faktisk koebte.
