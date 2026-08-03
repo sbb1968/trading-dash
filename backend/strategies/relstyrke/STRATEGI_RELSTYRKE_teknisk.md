@@ -104,14 +104,45 @@ small-cap-beta; edgen er selection alpha (måles i shadow-eval), ikke det rå af
 | `SESSION_START` | 09:30 ET |
 | `DECISION_ET` / `DECISION_FIRE_ET` | 09:45 / 09:46 ET |
 | `FORCE_CLOSE_ET` | 15:51 ET |
-| `UNIVERSE_PRICE_MIN … MAX` | $3 … $500 |
+| `UNIVERSE_PRICE_MIN … MAX` | $5 … $50 |
+| `UNIVERSE_MKT_CAP_MIN … MAX` | 300 mio. … 10 mia. (small + mid) |
 | `UNIVERSE_MIN_VOLUME` | 500.000 |
+| `UNIVERSE_ORDER_BY` | `Volatility.M` (**ikke** `change`) |
+| `UNIVERSE_TYPES` / `UNIVERSE_EXCHANGES` | `["stock"]` / NASDAQ + NYSE |
 | `REQUIRE_ALL_GREEN` | False (bredt tværsnit at range på) |
 | `UNIVERSE_TOP_N` | 25 |
 | `LOOP_SLEEP_SECONDS` | 15 |
 
 De fire plateau-parametre (T=09:45, K=3, score=early_rs, exit=eod) er **frosne** — ændres
 ALDRIG uden en ny backtest.
+
+### Universet blev bragt i overensstemmelse 3/8-2026
+
+Indtil da hentede live via `fetch_tv_top_gainers` ($3–500, NYSE/NASDAQ/AMEX). Det afveg fra
+den validerede population på to måder, og begge betyder noget for en **tværsnitlig** strategi:
+
+**1. Spredningen var fire gange for stor.** `early_rs`, median pr. dag:
+
+| | spænd | std | IQR | negative |
+|---|---|---|---|---|
+| live (11 dage, jul-2026) | 33,80 % | **5,85 %** | 4,33 % | 60 % |
+| backtest (43 dage, mar–maj) | 8,51 % | **1,92 %** | 2,28 % | 56 % |
+
+Live blandede $2,41-navne med $195-navne. Relationen "morgen-styrke forudsiger dags-styrke"
+er ikke skalauafhængig: i midcap-universet er +2 % kl. 09:45 et signal; i live-universet var
+dagens topnavn typisk +14 %, og det er ofte et nyhedsspring der falder tilbage.
+
+**2. Live forfiltrerede på momentum.** Top-gainer-scannet vælger dagens største stigninger.
+Backtestens univers blev valgt på pris/likviditet og rangeret på en **volatilitets-proxy** —
+aldrig på dagsændring. At forfiltrere på momentum skærer i netop den rangordning `early_rs`
+skal måle. Derfor sendes `perf_w_min` **bevidst ikke** til den delte screener, selvom K2 og
+BuyTheDip bruger den. Samme grund til at `REQUIRE_ALL_GREEN` altid har været `False`.
+
+Ændringen er **ikke tuning**: intet er sweepet, og ingen parameter er valgt ud fra et
+resultat — sporets præregistrering forbyder udtrykkeligt nye sweeps. Den fjerner en utestet
+afvigelse, så det vi kører er det vi validerede. Market cap-båndet er den validerede
+midcap-population udvidet nedad med small cap (Sørens valg 3/8). Beslutnings-parametrene er
+urørt. `test_relstyrke_universe.py` låser både universet og at T/K/score ikke er rørt.
 
 ---
 
@@ -145,8 +176,10 @@ BÅDE in-sample (maj, +0,46 median/dag) OG out-of-sample (apr, +0,58), hit-rate 
 med et sammenhængende plateau over score/T/K/exit; en uafhængig score (above_vwap) pegede
 samme vej. Paritet bevist: live == backtest på score, entry og selection-alpha-måling.
 
-**Status: paper trading.** Forbehold: lille stikprøve (43 dage / 44 navne) + universe-
-mismatch (backtesten kørte på et midcap-univers, live på scannerens rigtige liste).
+**Status: paper trading.** Forbehold: lille stikprøve (43 dage / 44 navne). Universe-
+mismatchet blev lukket 3/8-2026 (se afsnittet ovenfor) — live rangerer nu i den samme
+population backtesten bestod på, udvidet nedad med small cap. Paper-tal fra **før** den dato
+er målt på et fire gange bredere univers og kan ikke sammenlignes direkte med tal efter.
 Backtest-hærdning på flere måneder kører parallelt, men **paper er den endelige dommer**.
 Rigtige penge overvejes først efter konsistent, positiv selection alpha over mange sessioner.
 Retirement-trigger: hvis det ugentlige regime-fingeraftryk holder op med at flage "relativ

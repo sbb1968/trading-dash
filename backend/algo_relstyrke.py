@@ -68,16 +68,52 @@ STRATEGY_NOTIONAL_USD     = None     # udledes = NOTIONAL_PCT * NLV ved on_start
 NOTIONAL_PCT              = 0.03     # 3% af NLV fordeles paa K=3 (~1% pr. navn) — fallback-default
 STRATEGY_NOTIONAL_FB      = 500.0    # fallback hvis NLV ikke kan laeses (~3% af ~$16k)
 
-# ── Univers: scannerens live-univers (genbruger TrendJoins TV-gainer-helper) ──
-#    $3-500, NYSE/NASDAQ/AMEX, vol-filter. Broad tvaersnit at range paa — derfor
-#    IKKE all-green-momentum-forfilter (early_rs er selv rangeringen). Backtesten
-#    koerte paa et midcap-univers; live er scanner-universet, paper er dommeren.
-UNIVERSE_TOP_N      = 25
-UNIVERSE_PRICE_MIN  = 3.0
-UNIVERSE_PRICE_MAX  = 500.0
-UNIVERSE_MIN_VOLUME = 500_000
-REQUIRE_ALL_GREEN   = False
-SCAN_TIMEOUT_SEC    = 15
+# ── Univers ────────────────────────────────────────────────────
+# BRAGT I OVERENSSTEMMELSE MED DEN VALIDEREDE POPULATION 3/8-2026.
+#
+# Indtil nu hentede live sit univers via fetch_tv_top_gainers ($3-500,
+# NYSE/NASDAQ/AMEX). Det afveg fra backtesten paa TO maader, og begge betyder
+# noget for en TVAERSNITLIG strategi:
+#
+#   1. SPREDNINGEN VAR FIRE GANGE SAA STOR. Maalt paa early_rs, median pr. dag:
+#          live (11 dage, jul-2026):  spaend 33,80 %   std 5,85 %   IQR 4,33 %
+#          backtest (43 dage, mar-maj): spaend  8,51 % std 1,92 %   IQR 2,28 %
+#      Live blandede $2,41-navne (NCRA) med $195-navne (MANH). Relationen
+#      "morgen-styrke forudsiger dags-styrke" er ikke skalauafhaengig: i midcap-
+#      universet er +2 % kl. 09:45 et signal, i live-universet er dagens topnavn
+#      typisk +14 % — og det er ofte et nyhedsspring der falder tilbage.
+#
+#   2. LIVE FORFILTREREDE PAA MOMENTUM. fetch_tv_top_gainers vaelger dagens
+#      stoerste STIGNINGER. Backtestens univers blev valgt paa pris/likviditet og
+#      rangeret paa en VOLATILITETS-proxy — aldrig paa dagsaendring. At forfiltrere
+#      paa momentum skaerer i netop den rangordning early_rs skal maale.
+#
+# Nu bruges den delte volatilitets-screener (samme som K2/BuyTheDip), rangeret paa
+# Volatility.M — ikke paa change. Market cap-baandet er small+mid (300 mio.-10 mia.),
+# hvilket er den validerede midcap-population udvidet nedad med small cap (Soerens
+# valg 3/8). Prisbaandet foelger rekonstruktionen ($5-50).
+#
+# ⚠ perf_w_min sendes BEVIDST IKKE. K2 og BuyTheDip bruger det som momentum-gate,
+#   men her ville det vaere selvmord: early_rs ER rangeringen. Forfiltrering paa
+#   samme akse som scoren afkorter tvaersnittet og oedelaegger selection alpha.
+#   Samme grund til at REQUIRE_ALL_GREEN altid har vaeret False.
+#
+# Dette er IKKE tuning. Der er ikke sweepet noget, og ingen parameter er valgt ud
+# fra et resultat — sporets praeregistrering forbyder udtrykkeligt nye sweeps.
+# Aendringen FJERNER en utestet afvigelse, saa det vi koerer er det vi validerede.
+# relstyrke_shadow_eval maaler fortsat selection alpha 1:1 med backtestens
+# definition og er dermed dommeren.
+UNIVERSE_TOP_N        = 25
+UNIVERSE_PRICE_MIN    = 5.0
+UNIVERSE_PRICE_MAX    = 50.0
+UNIVERSE_MKT_CAP_MIN  = 300_000_000        # small cap-gulv
+UNIVERSE_MKT_CAP_MAX  = 10_000_000_000     # mid cap-loft
+UNIVERSE_MIN_VOLUME   = 500_000
+UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE"]
+UNIVERSE_TYPES        = ["stock"]          # ingen depotbeviser
+UNIVERSE_ORDER_BY     = "Volatility.M"     # IKKE "change" — se punkt 2 ovenfor
+REQUIRE_ALL_GREEN     = False
+SCAN_TIMEOUT_SEC      = 15
 
 # ── Score-bars (1-min RTH, look-ahead-ren: kun bars <= T) ──────
 SCORE_BAR_DURATION = "3600 S"
@@ -417,25 +453,39 @@ class RelStyrkeLive(BaseStrategy):
     # Univers — genbruger TrendJoins TV-gainer-helper (scannerens live-univers)
     # -------------------------------------------------------------
     async def _scan_universe(self) -> list[str]:
-        """Dagens scanner-univers via TV-gainer-screeneren (samme delte helper som TrendJoin),
-        men med Relativ Styrkes egne filtre ($3-500, ingen all-green-forfilter). Returnerer
-        symboler (upper, dedup); tom liste ved timeout/fejl."""
-        from strategies.shared.tv_scanner import fetch_tv_top_gainers
-        loop = asyncio.get_event_loop()
+        """Dagens univers via den DELTE volatilitets-screener (samme som K2/BuyTheDip),
+        rangeret paa Volatility.M — ikke paa dagsaendring.
+
+        Skiftet 3/8-2026 fra fetch_tv_top_gainers. Se univers-blokken oeverst: den
+        gamle kilde forfiltrerede paa momentum (dagens stoerste stigninger), hvilket
+        skaerer i netop den rangordning early_rs skal maale, og gav et univers med
+        fire gange backtestens spredning. Returnerer symboler (upper, dedup);
+        tom liste ved timeout/fejl.
+        """
+        from strategies.shared.tv_scanner import build_volatility_universe_rows
         try:
-            rows = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: fetch_tv_top_gainers(
-                    top_n=UNIVERSE_TOP_N, price_min=UNIVERSE_PRICE_MIN,
-                    price_max=UNIVERSE_PRICE_MAX, min_volume=UNIVERSE_MIN_VOLUME,
-                    require_all_green=REQUIRE_ALL_GREEN)),
-                timeout=SCAN_TIMEOUT_SEC)
+            _pool, rows = await build_volatility_universe_rows(
+                top_n       = UNIVERSE_TOP_N,
+                price_min   = UNIVERSE_PRICE_MIN,
+                price_max   = UNIVERSE_PRICE_MAX,
+                mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
+                mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
+                min_avg_vol = UNIVERSE_MIN_VOLUME,
+                # perf_w_min sendes BEVIDST IKKE — se univers-blokken.
+                types       = UNIVERSE_TYPES,
+                order_by    = UNIVERSE_ORDER_BY,
+                exchanges   = UNIVERSE_EXCHANGES,
+                timeout     = SCAN_TIMEOUT_SEC,
+                log_tag     = "RelStyrke",
+            )
         except asyncio.TimeoutError:
-            logger.error("[RelStyrke] TV top-gainer scan timeout")
+            logger.error("[RelStyrke] TV volatilitets-scan timeout")
             return []
         except Exception as e:
-            logger.error(f"[RelStyrke] TV top-gainer scan fejl: {e}")
+            logger.error(f"[RelStyrke] TV volatilitets-scan fejl: {e}")
             return []
-        return list(dict.fromkeys((sym or "").upper() for sym, _p, _c, _v in rows if sym))
+        return list(dict.fromkeys(
+            (r.get("symbol") or "").upper() for r in (rows or []) if r.get("symbol")))
 
     # -------------------------------------------------------------
     # Trading-loop — EEN beslutning ved T; ellers hold til EOD
@@ -561,8 +611,10 @@ class RelStyrkeLive(BaseStrategy):
         # ── Log dagens univers (Lag A) ──
         await self.log_universe(self.universe, meta={
             "scored": len(scored), "score": SCORE, "decision_et": DECISION_ET.strftime("%H:%M"),
-            "source": "tv_top_gainers", "top_k": TOP_K,
-            "price_min": UNIVERSE_PRICE_MIN, "price_max": UNIVERSE_PRICE_MAX})
+            "source": "tv_intraday_volatility", "top_k": TOP_K,
+            "order_by": UNIVERSE_ORDER_BY,
+            "price_min": UNIVERSE_PRICE_MIN, "price_max": UNIVERSE_PRICE_MAX,
+            "mkt_cap_min": UNIVERSE_MKT_CAP_MIN, "mkt_cap_max": UNIVERSE_MKT_CAP_MAX})
 
         if len(scored) < 2:
             self._status("orb_ready",
