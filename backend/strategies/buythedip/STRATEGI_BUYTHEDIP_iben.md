@@ -30,20 +30,23 @@ Setuppet aflæses på færdige 1-minuts candles i tre trin:
    vi vil købe.
 3. **Bounce** — når faldet vender, køber strategien ved bounce-candlens lukkekurs.
 
-Nye handler åbnes **kun i åbningstimen** — mellem 09:30 og 10:30 amerikansk tid, hvor
-bevægelserne er størst og renest.
+Nye handler åbnes **fra åbningen og frem til middag** — mellem 09:30 og 12:00
+amerikansk tid. Langt de fleste muligheder opstår i den første time, hvor
+bevægelserne er størst og renest; resten af formiddagen giver nogle få ekstra.
 
 ## Hvornår sælger den
 
 BuyTheDip har tre exits:
 
 - **Stop** — hvis prisen falder ned til dip-bunden igen (så fejlede bouncen).
-- **Target** — et lille, defineret mål på +2 % over købskursen.
-- **Force-close** — alle positioner lukkes senest kl. 15:55 amerikansk tid, så intet
+- **Target** — **dobbelt så langt væk som stoppet**. Ligger stoppet 1 % under
+  købskursen, sættes målet 2 % over. Er dykket dybere, og stoppet altså længere
+  væk, flytter målet tilsvarende længere op.
+- **Force-close** — alle positioner lukkes senest kl. 15:30 amerikansk tid, så intet
   bæres natten over.
 
-Det giver mange små, kontrollerede tab når bouncen ikke holder, mod til gengæld hurtige
-+2 %-gevinster når den gør.
+Det giver mange små, kontrollerede tab når bouncen ikke holder, mod til gengæld
+gevinster der altid er dobbelt så store som risikoen når den holder.
 
 ## Hvor mange penge per handel
 
@@ -68,6 +71,6 @@ penge overhovedet overvejes.
 ## Kort sagt
 
 BuyTheDip køber det korte tilbagefald efter en impuls i likvide, volatile amerikanske
-aktier i åbningstimen, risikerer et lille fast beløb per handel, tager stop ved
-dip-bunden og mål ved +2 %, og lukker alt inden lukketid. Den er Konfluens 2's
-komplement og er stadig i paper-test-fasen.
+aktier om formiddagen, risikerer et lille fast beløb per handel, tager stop ved
+dip-bunden og mål dobbelt så langt væk som stoppet, og lukker alt i god tid inden
+lukketid. Den er Konfluens 2's komplement og er stadig i paper-test-fasen.

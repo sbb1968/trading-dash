@@ -31,8 +31,11 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
 - **Entry-pris** = `bar.close` (færdig bar).
 - **dip_low** = laveste low i vinduet → bruges som stop.
 - **Side:** altid `long`.
-- **Entry-vindue:** kun `SESSION_START (09:30) … OPEN_UNTIL_ET (10:30)` ET. Ingen nye
-  entries efter 10:30.
+- **Entry-vindue:** kun `SESSION_START (09:30) … OPEN_UNTIL_ET (12:00)` ET. Ingen nye
+  entries efter 12:00. (Rykket fra 10:30 den 3/8-2026 — backtesten viser at 95 % af
+  opsætningerne alligevel falder før 10:30, men 11-timen var positiv i begge testede
+  måneder. Cutoff'et holdes bevidst 3½ time før tvangsluk, så en handel har tid til at
+  virke.)
 - Ved flere samtidige kandidater åbnes de efter **dybeste `dip_depth`** først
   (`dip_depth = (ref_high − dip_low) / ref_high × 100`).
 
@@ -45,8 +48,8 @@ Positionen bæres med tre exits (tjekkes på færdige bars):
 | Exit | Betingelse |
 |---|---|
 | **Stop** | `bar.low ≤ stop` hvor `stop = dip_low` |
-| **Target** | `bar.high ≥ target` hvor `target = entry × (1 + TARGET_PCT/100)`, `TARGET_PCT = 2.0 %` |
-| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET = 15:55 ET` → luk (backstop før 16:00) |
+| **Target** | `bar.high ≥ target` hvor `target = entry + TARGET_R × R`, `R = entry − dip_low`, `TARGET_R = 2.0` (R-baseret siden 3/8-2026; var faste +2 %, hvilket gav vilkårlige risiko/gevinst-forhold fordi stoppet er `dip_low` råt uden gulv — fra 1:20 til 1:0,6 i juli) |
+| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET = 15:30 ET` → luk (30 min før 16:00, så genforsøg sker mens markedet er åbent) |
 
 Force-close er robust: bekræftet fyldning med op til `FORCE_CLOSE_MAX_ATTEMPTS = 4`
 genforsøg (`FORCE_CLOSE_RETRY_DELAY = 4 s`), så en position aldrig bæres natten over.
@@ -81,8 +84,8 @@ kan skalere sizing efter markedsforhold før ordren sendes.
 | Konstant | Værdi |
 |---|---|
 | `SESSION_START` | 09:30 ET |
-| `OPEN_UNTIL_ET` (entry-cutoff) | 10:30 ET |
-| `FORCE_CLOSE_ET` | 15:55 ET |
+| `OPEN_UNTIL_ET` (entry-cutoff) | 12:00 ET |
+| `FORCE_CLOSE_ET` | 15:30 ET |
 | `LOOKBACK` | 20 bars |
 | `LOOP_SLEEP_SECONDS` | 15 |
 | `CLOSE_FILL_WAIT_SEC` | 8 |

@@ -44,7 +44,26 @@ logger = logging.getLogger(__name__)
 # ── Tidszone + session ─────────────────────────────────────────
 ET            = pytz.timezone("America/New_York")
 SESSION_START = dtime(9, 30)     # US RTH-åbning
-OPEN_UNTIL_ET = dtime(10, 30)    # ingen nye entries efter dette (kun åbningen)
+# RYKKET 3/8-2026 (revision 1) fra 10:30 til 12:00.
+#
+# Backtesten (april+maj 2026, 606 handler, midcap-univers) koerte HELE dagen og
+# viser at cutoff'et naesten ikke binder — 95 % af alle opsaetninger falder
+# alligevel foer 10:30, fordi reglen kraever en 3 %-bevaegelse inden for 20
+# minutter, og det er et aabningsfaenomen:
+#     kl 09  459 handler · kl 10  120 · kl 11  13 · kl 12  4 · kl 13-15  10
+#
+#     cutoff 10:30   n=579  PF 1,82
+#     cutoff 12:00   n=592  PF 1,85
+#     hele dagen     n=606  PF 1,84
+#
+# 12:00 fanger 11-timen, hvor begge maaneder var positive (n=27, PF 2,58), og
+# lader de sene entries vaere: efter 13:00 er der kun 10 handler med PF 1,21.
+#
+# Vi gaar BEVIDST ikke helt til force-close (15:30). En entry kl. 15:25 ville have
+# fem minutter, mod en median-holdetid paa 15 — den ville blive tvangslukket til
+# hvad prisen nu stod i, ikke afsluttet efter reglen. Cutoff'et holdes derfor
+# mindst 3½ time foer tvangsluk.
+OPEN_UNTIL_ET = dtime(12, 0)     # ingen nye entries efter dette
 # RYKKET 3/8-2026 (revision 1) fra 15:55 til 15:30 — en HALV time før lukningen
 # i stedet for fem minutter.
 #
@@ -56,7 +75,7 @@ OPEN_UNTIL_ET = dtime(10, 30)    # ingen nye entries efter dette (kun åbningen)
 #
 # Med 15:30 sker alle genforsøg mens markedet er åbent.
 #
-# Prisen er nul: BuyTheDip åbner kun frem til 10:30, og på tværs af HELE
+# Prisen er nul: BuyTheDip åbner kun frem til 12:00, og på tværs af HELE
 # journalens levetid er der ikke én eneste exit efter 15:30 ET. Den seneste
 # nogensinde var 14:16. Ændringen ville ikke have rørt en eneste handel.
 FORCE_CLOSE_ET = dtime(15, 30)   # tvangsluk-backstop — 30 min før 16:00-lukningen

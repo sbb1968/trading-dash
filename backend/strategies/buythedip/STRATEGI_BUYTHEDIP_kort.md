@@ -20,14 +20,14 @@ Tre trin i rækkefølge:
 - **Dip** — prisen falder mindst **1,5 %** tilbage fra toppen.
 - **Bounce** — når dykket vender, købes ved bounce-candlens **lukkekurs**.
 
-Kun i **åbningstimen (09:30–10:30** amerikansk tid). Ved flere kandidater prioriteres
+Kun **formiddag (09:30–12:00** amerikansk tid). Ved flere kandidater prioriteres
 det **dybeste dyk** først.
 
 ## Sælger når
 
-- **Target:** +2 % over købskursen.
+- **Target:** dobbelt så langt væk som stoppet (2 × risikoen).
 - **Stop:** prisen falder tilbage til dip-bunden (bouncen fejlede).
-- **Force-close kl. 15:55** amerikansk tid: alt lukkes, intet natten over.
+- **Force-close kl. 15:30** amerikansk tid: alt lukkes, intet natten over.
 
 ## Penge pr. handel
 
