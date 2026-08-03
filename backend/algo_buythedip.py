@@ -144,7 +144,20 @@ UNIVERSE_MIN_VOLUME   = 500_000              # 30-dages gennemsnitsvolumen
 UNIVERSE_VOL_M_MIN    = 5.0                  # Volatility 1M, nedre (%)
 UNIVERSE_VOL_M_MAX    = 50.0                 # Volatility 1M, oevre (%)
 UNIVERSE_PERF_W_MIN   = 6.0                  # Perf 1W > 6 %
-UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE", "AMEX", "CBOE"]  # AMEX = TV's "NYSE Arca"
+UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE"]   # AMEX + CBOE fjernet 3/8 — ens med K2
+
+# SORTERING: Volatility.M, ikke dagsaendring (skiftet 3/8-2026).
+#
+# Filtrene er nu identiske med K2's, saa de to straekker den SAMME pulje paa 98
+# navne — men de plukkede deres 25 forskelligt. K2 tog de mest volatile;
+# BuyTheDip tog dem der var steget mest i dag.
+#
+# For netop denne strategi er dagsaendring et daarligt valg: den udvaelger aktier
+# der ALLEREDE har haft deres bevaegelse. Et navn oppe 12 % ved middagstid har
+# sandsynligvis brugt sit krudt, mens BuyTheDip skal bruge et der stadig kan lave
+# en 3 %-impuls OG et efterfoelgende dyk. Volatilitet siger noget om hvad navnet
+# PLEJER at goere; dagsaendring kun hvad det allerede har gjort.
+UNIVERSE_ORDER_BY     = "Volatility.M"
 MIN_UNIVERSE_SIZE     = 3                    # færre end dette → fallback/advarsel
 SCAN_TIMEOUT_SEC      = 15                   # TV-screener timeout pr. forsøg
 FALLBACK_UNIVERSE: list[str] = []            # tom = ingen handel hvis scan fejler
@@ -498,6 +511,7 @@ class BuyTheDipLive(BaseStrategy):
                     "vol_m_min":   UNIVERSE_VOL_M_MIN,
                     "vol_m_max":   UNIVERSE_VOL_M_MAX,
                     "perf_w_min":  UNIVERSE_PERF_W_MIN,
+                    "order_by":    UNIVERSE_ORDER_BY,
                 },
             },
         )
@@ -521,6 +535,7 @@ class BuyTheDipLive(BaseStrategy):
             vol_m_min   = UNIVERSE_VOL_M_MIN,
             vol_m_max   = UNIVERSE_VOL_M_MAX,
             perf_w_min  = UNIVERSE_PERF_W_MIN,
+            order_by    = UNIVERSE_ORDER_BY,
             exchanges   = UNIVERSE_EXCHANGES,
             timeout     = SCAN_TIMEOUT_SEC,
             log_tag     = "BuyTheDip",
