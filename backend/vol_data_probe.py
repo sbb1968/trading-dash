@@ -231,6 +231,47 @@ async def hent_skive(ib, contract, bar: str, slut: datetime | None, what: str,
 AELDSTE_STIGE_DAGE = [9125, 5475, 3650, 2555, 1825, 1100, 730, 550, 365, 180, 90]
 
 
+# ── Futures maales ANDERLEDES — og det er ikke en detalje ──────────────────────
+# ContFuture UNDERSTOETTER IKKE historik med angivet endDateTime. Verificeret
+# 3/8-2026: ES ContFuture kvalificerer til Sep-2026-kontrakten (conId 649180671)
+# og returnerer 0 bars ved BAADE 30 og 90 dage tilbage, mens tom slutdato virker.
+#
+# Foerste probe-koersel maalte derfor ES og RTY med den samme anker-metode som
+# aktier/indeks og fik "ingen data" paa alle 11 stigetrin — hvilket saa ud som en
+# haard graense, men var et artefakt af maalemetoden. Kvalitetstjekket (tom
+# slutdato) hentede samtidig 1054 dagsbarer for ES. Samme fejl ville have
+# forgiftet enhver konklusion om futures-dybde.
+#
+# Korrekt metode: tom slutdato + stigende durationStr. Det stoerste trin der giver
+# bars fortaeller hvor langt ContFuture'ens SAMMENSATTE serie raekker.
+VARIGHEDS_STIGE = {
+    "1 day":   ["20 Y", "10 Y", "5 Y", "2 Y", "1 Y"],
+    "1 hour":  ["2 Y", "1 Y", "6 M", "1 M"],
+    "30 mins": ["1 Y", "6 M", "1 M", "1 W"],
+    "5 mins":  ["6 M", "1 M", "1 W", "1 D"],
+    "1 min":   ["1 M", "1 W", "1 D"],
+}
+
+
+async def probe_contfut_serie(ib, contract, bar, what, emit, navn):
+    """Raekkevidde for en continuous future. Tom slutdato, faldende varighed.
+
+    Returnerer (foerste_dt, sidste_dt, n, brugt_varighed, kald).
+    """
+    kald = 0
+    for v in VARIGHEDS_STIGE.get(bar, ["1 Y", "6 M", "1 M"]):
+        n, foerste, sidste, fejl = await hent_skive(ib, contract, bar, None, what,
+                                                    False, v)
+        kald += 1
+        await asyncio.sleep(SLEEP_BETWEEN)
+        if n > 0 and foerste is not None:
+            return foerste, sidste, n, v, kald
+        if fejl and "pacing" in (fejl or "").lower():
+            emit(f"    pacing — venter {PACING_WAIT}s")
+            await asyncio.sleep(PACING_WAIT)
+    return None, None, 0, None, kald
+
+
 async def find_faktisk_aeldste(ib, contract, bar, what, emit, navn):
     """Naar reqHeadTimeStamp overlover, siger den intet om hvor data FAKTISK
     begynder. Vi gaar en stige bagfra og tager det foerste trin der giver bars.
@@ -302,6 +343,33 @@ async def probe_instrument(ib, inst, bars, kontrol_aeldste, emit, ventet):
     for bar in bars:
         head, head_fejl = await hent_head(ib, contract, what_valgt)
         await asyncio.sleep(SLEEP_BETWEEN)
+
+        # ── Futures: egen metode (se VARIGHEDS_STIGE ovenfor) ──
+        if inst["art"] == "contfut":
+            foerste, sidste, n, brugt, kald = await probe_contfut_serie(
+                ib, contract, bar, what_valgt, emit, inst["navn"])
+            aar = round((datetime.now() - foerste).days / 365.25, 1) if foerste else None
+            aarsag = ("CONTFUTURE-GRAENSE — IBKR's sammensatte serie raekker ikke laengere; "
+                      "dybere historik kraever PR-EXPIRY-kontrakter + stitching"
+                      if foerste else
+                      "INGEN DATA — heller ikke med tom slutdato")
+            serier.append({
+                "bar": bar, "what": what_valgt,
+                "headstamp_paastand": head.isoformat() if head else None,
+                "headstamp_fejl": head_fejl,
+                "bekraeftet_aeldste": foerste.isoformat() if foerste else None,
+                "nyeste": sidste.isoformat() if sidste else None,
+                "n_i_nyeste_skive": n,
+                "nyeste_fejl": None,
+                "metode": f"tom slutdato + durationStr={brugt}",
+                "verifikation_indenfor": None, "verifikation_udenfor": None,
+                "headstamp_overlover": None,
+                "soegte_ekstra_kald": kald, "soegning_tom_indtil_dage": None,
+                "aar_tilbage": aar, "aarsag": aarsag,
+            })
+            emit(f"  {inst['navn']:<7} {bar:<8} {brugt or '-':<6} "
+                 f"foerste={str(foerste)[:10]:<10} n={n:<6} ~{aar} aar")
+            continue
 
         # Nyeste bar — hvor frisk er serien?
         n_ny, _f, sidste, e_ny = await hent_skive(ib, contract, bar, None, what_valgt, False)
@@ -527,6 +595,9 @@ async def koer(args, emit):
 
     niveauer = {"A": ["A"], "AB": ["A", "B"], "ALL": ["A", "B", "C"]}[args.niveau]
     valgte = [i for i in INSTRUMENTER if i["niveau"] in niveauer]
+    if args.kun:
+        oensket = {x.strip().upper() for x in args.kun.split(",") if x.strip()}
+        valgte = [i for i in INSTRUMENTER if i["navn"].upper() in oensket]
     bars = [b.strip() for b in args.bars.split(",") if b.strip()]
 
     # Genoptagelse
@@ -534,11 +605,19 @@ async def koer(args, emit):
     if json_sti.exists() and not args.forfra:
         try:
             gl = json.loads(json_sti.read_text(encoding="utf-8"))
+            gen = {x.strip().upper() for x in (args.kun or "").split(",") if x.strip()}
             tidligere = {i["navn"]: i for i in gl.get("instrumenter", [])
-                         if i.get("serier")}
+                         if i.get("serier") and i["navn"].upper() not in gen}
             if tidligere:
                 emit(f"Genoptager — {len(tidligere)} instrumenter er allerede maalt "
                      f"(brug --forfra for at maale alt igen).")
+        except Exception:
+            pass
+
+    tidligere_kvalitet = []
+    if json_sti.exists() and not args.forfra:
+        try:
+            tidligere_kvalitet = json.loads(json_sti.read_text(encoding="utf-8")).get("kvalitet", [])
         except Exception:
             pass
 
@@ -564,7 +643,11 @@ async def koer(args, emit):
     rest = [i for i in valgte if i["navn"] not in tidligere]
     rest.sort(key=lambda i: (i["navn"] != "SPY", i["niveau"], i["navn"]))
 
-    for inst in valgte:
+    # Baer ALLE tidligere maalte instrumenter med over — ogsaa dem der ikke staar i
+    # --kun. Foer itererede denne loekke over `valgte`, som --kun havde skaaret ned,
+    # saa en genmaaling af ES+RTY SLETTEDE SPY/VIX/VIX3M fra JSON'en. Fejlen kostede
+    # en probe-koersel 3/8-2026; .md'en reddede tallene.
+    for inst in INSTRUMENTER:
         if inst["navn"] in tidligere:
             resultater.append(tidligere[inst["navn"]])
     try:
@@ -583,7 +666,7 @@ async def koer(args, emit):
             json_sti.write_text(json.dumps(
                 {"koert": datetime.now().isoformat(timespec="seconds"),
                  "niveauer": args.niveau, "bars": bars,
-                 "instrumenter": resultater, "kvalitet": []},
+                 "instrumenter": resultater, "kvalitet": tidligere_kvalitet},
                 ensure_ascii=False, indent=2), encoding="utf-8")
 
         kvalitet = []
@@ -624,6 +707,9 @@ def main():
                     help="komma-separerede barstoerrelser")
     ap.add_argument("--port", type=int, default=IBKR_PORT)
     ap.add_argument("--client-id", type=int, default=CLIENT_ID)
+    ap.add_argument("--kun", default=None,
+                    help="komma-separeret liste af instrumenter der skal (gen)maales, "
+                         "fx ES,RTY — resten beholdes fra tidligere koersel")
     ap.add_argument("--forfra", action="store_true",
                     help="ignorer tidligere resultater og maal alt igen")
     ap.add_argument("--spring-kvalitet", action="store_true",
