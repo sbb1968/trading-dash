@@ -46,7 +46,13 @@ class EuropaReversionStrategy:
 
     @staticmethod
     def entry_side(z):
+        """RÅT z-signal. Live bruger confirmed_entry_side — se dér."""
         return rule.entry_side(z, config.ENTRY_Z)
+
+    @staticmethod
+    def confirmed_entry_side(closes, z):
+        return rule.confirmed_entry_side(closes, z, config.ENTRY_Z,
+                                         config.REQUIRE_CONFIRM)
 
     @staticmethod
     def exit_reason(side, z):

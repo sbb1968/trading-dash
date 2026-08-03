@@ -421,6 +421,18 @@ class BaseStrategy(ABC):
         if not feed_ok:
             return None
 
+        # ENHVER resterende eksponering paa samme side taeller som "holder stadig".
+        #
+        # RETTET 3/8-2026. Testen var `abs(pos) >= quantity`, altsaa "holder IBKR
+        # HELE positionen?". Ved en DELVIS fyldning (fx 4 af 10 fyldt, 6 tilbage)
+        # gav den False — praecis samme svar som hvis kontoen var flad. Kalderen
+        # laeste det som "ordren fyldte alligevel", bogfoerte en HEL lukning og
+        # holdt op med at genforsoege. De 6 resterende kontrakter blev dermed
+        # forældreloese: ingen journal-raekke, ingen der lukker dem.
+        #
+        # Det er samme skade som over-sell-fejlen 31/7 (ejerloese shorts), bare ad
+        # den modsatte vej. Spoergsmaalet funktionen skal svare paa er ikke "er alt
+        # der?" men "er der NOGET tilbage jeg ikke maa bogfoere som lukket?".
         want_long = (side == "long")
         for p in (poss or []):
             if (p.get("ticker") or "").upper() != ticker.upper():
@@ -428,7 +440,12 @@ class BaseStrategy(ABC):
             pos = float(p.get("position") or 0)
             if pos == 0:
                 continue
-            if (pos > 0) == want_long and abs(pos) >= quantity:
+            if (pos > 0) == want_long:
+                if quantity and abs(pos) < quantity:
+                    logger.warning(
+                        f"[{self.name}] {ticker}: IBKR holder {abs(pos):g} af "
+                        f"{quantity:g} — DELVIS fyldning. Positionen beholdes aaben "
+                        f"(bogfoerer ikke luk).")
                 return True
         return False
 

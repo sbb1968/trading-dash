@@ -153,12 +153,59 @@ def last_in_session(bars, i, session):
     return False
 
 
-def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol, entry_hours=None):
+def efficiency_ratio(bars, i, lookback):
+    """Kaufman efficiency ratio over lookback: |netto bevaegelse| / |samlet sti|.
+
+    1,0 = ren trend (hver bar i samme retning) → fortsaettelse er sandsynlig.
+    0,0 = ren stoej (prisen ender hvor den startede) → mean reversion virker.
+
+    Bruges som TREND-VAGT: en z-udstraekning kan lige saa godt vaere begyndelsen
+    paa en trend som en overdrivelse der skal tilbage. ER skelner de to uden at
+    kraeve andet end closes.
+    """
+    seg = bars[i - lookback + 1: i + 1]
+    if len(seg) < 2:
+        return None
+    netto = abs(seg[-1].close - seg[0].close)
+    sti = sum(abs(seg[k].close - seg[k - 1].close) for k in range(1, len(seg)))
+    if sti <= 0:
+        return None
+    return netto / sti
+
+
+def _vendt_tilbage(bars, i, side) -> bool:
+    """Lukkede bar i tilbage MOD middelvaerdien i forhold til bar i-1?
+
+    short = prisen er straakket OP, saa en vending er en LAVERE luk.
+    long  = prisen er straakket NED, saa en vending er en HOEJERE luk.
+    """
+    if i < 1:
+        return False
+    if side == "short":
+        return bars[i].close < bars[i - 1].close
+    return bars[i].close > bars[i - 1].close
+
+
+def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol, entry_hours=None,
+                 confirm=None, confirm_max_wait=4, max_er=None):
     """Returnér liste af Trade. Intraday: tvangsluk ved sessions-slut.
     entry_hours: valgfri maengde af ET-timer hvor entries tillades (default None = hele
-    sessionen; additivt, aendrer ikke standard-adfaerd)."""
+    sessionen; additivt, aendrer ikke standard-adfaerd).
+
+    ENTRY-BEKRAEFTELSE (tilfoejet 3/8-2026, default None = uaendret adfaerd):
+      confirm=None         — entry straks naar |z| >= entry_z (den oprindelige regel)
+      confirm="same_bar"   — kraev at SELVE udstraekningsbaren lukkede tilbage mod middel
+      confirm="z_contract" — kraev at |z| er MINDRE end forrige bars |z| (straekket skrumper)
+      confirm="armed"      — |z| >= entry_z ARMERER; entry sker foerst paa en SENERE bar
+                             der lukker tilbage mod middel (max confirm_max_wait bars;
+                             armeringen annulleres hvis |z| falder under exit_z imens)
+
+    max_er: trend-vagt. Spring entry over hvis efficiency ratio > denne vaerdi
+      (høj ER = trend, ikke overdrivelse). None = ingen vagt.
+    """
     trades = []
     pos = None  # dict: side, entry, entry_ts, entry_i
+    armed = None  # dict: side, i  — kun brugt af confirm="armed"
     n = len(bars)
     for i in range(lookback, n):
         bar = bars[i]
@@ -177,16 +224,46 @@ def run_backtest(bars, session, lookback, entry_z, exit_z, stop_z, min_vol, entr
                                     bar.close, reason, i - pos["entry_i"]))
                 pos = None
         # ── ny entry (kun hvis flad) ──
-        if pos is None and session_of(bar.ts.hour) == session \
+        if pos is not None:
+            armed = None          # en aaben position ophaever enhver armering
+        elif session_of(bar.ts.hour) == session \
                 and (entry_hours is None or bar.ts.hour in entry_hours):
             if (min_vol is None or bar.volume >= min_vol) and contiguous(bars, i, lookback):
                 z = zscore(bars, i, lookback)
                 if z is not None and not last_in_session(bars, i, session):
                     side = _rule_entry_side(z, entry_z)
-                    if side == "short":
-                        pos = {"side": "short", "entry": bar.close, "entry_ts": bar.ts, "entry_i": i}
-                    elif side == "long":
-                        pos = {"side": "long", "entry": bar.close, "entry_ts": bar.ts, "entry_i": i}
+
+                    # Trend-vagt: er udstraekningen en overdrivelse eller en trend?
+                    if side is not None and max_er is not None:
+                        er = efficiency_ratio(bars, i, lookback)
+                        if er is not None and er > max_er:
+                            side = None
+
+                    tag = None
+                    if confirm is None:
+                        tag = side
+                    elif confirm == "same_bar":
+                        if side is not None and _vendt_tilbage(bars, i, side):
+                            tag = side
+                    elif confirm == "z_contract":
+                        z_prev = zscore(bars, i - 1, lookback) \
+                            if contiguous(bars, i - 1, lookback) else None
+                        if side is not None and z_prev is not None and abs(z) < abs(z_prev):
+                            tag = side
+                    elif confirm == "armed":
+                        if side is not None and (armed is None or armed["side"] != side):
+                            armed = {"side": side, "i": i}
+                        if armed is not None:
+                            if i - armed["i"] > confirm_max_wait or abs(z) < exit_z:
+                                armed = None            # for sent, eller straekket er vaek
+                            elif i > armed["i"] and _vendt_tilbage(bars, i, armed["side"]):
+                                tag = armed["side"]
+                                armed = None
+                    else:
+                        raise ValueError(f"ukendt confirm: {confirm!r}")
+
+                    if tag in ("short", "long"):
+                        pos = {"side": tag, "entry": bar.close, "entry_ts": bar.ts, "entry_i": i}
     return trades
 
 

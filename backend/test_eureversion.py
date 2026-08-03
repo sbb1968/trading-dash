@@ -205,18 +205,33 @@ def section_B():
     print("\nSektion B — _size_contracts (1% risiko + loft + gulv)")
 
     # B1 normal: equity 100k → risk_dollars 1000; std 4 → stop_dist 6, pcr 30 (×MES $5).
-    #   by_risk=floor(1000/30)=33, by_cap=floor(170/30)=5 → contracts=5.
+    #   by_risk=floor(1000/30)=33, by_cap=floor(170/30)=5 → min 5, derefter MAX_CONTRACTS.
+    #   MAX_CONTRACTS blev sat til 1 (Ibens lille konto), saa testen laeser den fra
+    #   config i stedet for at haardkode 5 — ellers fejler den hver gang loftet aendres.
+    from strategies.europa_reversion.config import MAX_CONTRACTS
     a = make_algo(MockConn(equity=100000.0), MockJournal())
     contracts, stop_dist, pcr = a._size_contracts("MES", 4.0)
     check("B1 stop_dist = 1.5×std", abs(stop_dist - 6.0) < 1e-9, stop_dist)
     check("B1 per-contract-risk = stop_dist×$5", abs(pcr - 30.0) < 1e-9, pcr)
-    check("B1 contracts = min(by_risk 33, by_cap 5) = 5", contracts == 5, contracts)
+    forventet = min(5, MAX_CONTRACTS)
+    check(f"B1 contracts = min(by_risk 33, by_cap 5, MAX_CONTRACTS {MAX_CONTRACTS}) = {forventet}",
+          contracts == forventet, contracts)
 
-    # B2 stop for stor til kontoen → 0 (springer over).
-    #   std 40 → stop_dist 60 → pcr 300 > per-trade 170 → by_cap 0, pcr>loft → 0.
+    # B2 stop for stor til risiko-budgettet → GULVET giver stadig 1 kontrakt.
+    #   std 40 → stop_dist 60 → pcr 300, langt over risiko/handel.
+    #   Adfaerden blev bevidst aendret 17/7-2026: foer sprang den over, og saa lavede
+    #   eureversion INGEN handler overhovedet paa den lille konto. Vi accepterer nu
+    #   at én kontrakts risiko kan overstige risiko/handel — ellers kan strategien
+    #   ikke paper-testes. Testen laaser den beslutning, saa den ikke gaar tabt.
     a = make_algo(MockConn(equity=100000.0), MockJournal())
     c2, _, pcr2 = a._size_contracts("MES", 40.0)
-    check("B2 pcr > per-trade-loft → 0 kontrakter (skip)", c2 == 0, (c2, pcr2))
+    check("B2 pcr over budget → gulvet giver 1 kontrakt (bevidst, 17/7-2026)",
+          c2 == 1, (c2, pcr2))
+
+    # B2b eneste vej til 0: ingen brugbar stop-afstand (pcr ≤ 0).
+    a = make_algo(MockConn(equity=100000.0), MockJournal())
+    c2b, _, pcr2b = a._size_contracts("MES", 0.0)
+    check("B2b std=0 → pcr≤0 → 0 kontrakter (springer over)", c2b == 0, (c2b, pcr2b))
 
     # B3 sikkerhedsgulv: lille konto, by_risk=0 men pcr≤loft → 1 kontrakt.
     #   equity 10k → risk_dollars 100; std 16 → stop_dist 24 → pcr 120.
@@ -237,9 +252,12 @@ def section_C():
 
     pos = a._positions.get("MES")
     check("C1 position oprettet (long)", pos and pos["side"] == "long", pos)
-    check("C1 5 kontrakter (sizing)", pos and pos["contracts"] == 5, pos and pos["contracts"])
-    check("C1 BUY-ordre 5 sendt", conn.orders == [("MES", "BUY", 5)], conn.orders)
-    check("C1 what_if_init_margin kaldt", conn.whatif_calls == [("MES", "BUY", 5)], conn.whatif_calls)
+    from strategies.europa_reversion.config import MAX_CONTRACTS as _MAXC
+    _forv = min(5, _MAXC)   # sizing giver 5, loftet skaerer ned — se B1
+    check(f"C1 {_forv} kontrakter (sizing, MAX_CONTRACTS={_MAXC})",
+          pos and pos["contracts"] == _forv, pos and pos["contracts"])
+    check(f"C1 BUY-ordre {_forv} sendt", conn.orders == [("MES", "BUY", _forv)], conn.orders)
+    check("C1 what_if_init_margin kaldt", conn.whatif_calls == [("MES", "BUY", _forv)], conn.whatif_calls)
     check("C1 init_margin gemt i position", pos and pos["init_margin"] == 1320.0, pos and pos.get("init_margin"))
     check("C1 MFE/MAE init = entry", a._mfe.get("MES") == 5000.0 and a._mae.get("MES") == 5000.0)
     check("C1 log_trade_open kaldt m. init_margin i payload",
@@ -492,22 +510,41 @@ def section_I():
     check("I0 fyldt (filled==contracts) → MES lukket", "MES" not in a._positions, list(a._positions))
     check("I0 fyldt → log_trade_close bogført", len(j.closes) == 1, j.closes)
 
-    # I1: lukke-ordre IKKE bekræftet fyldt (filled=0, Submitted) → position FORBLIVER
-    #     åben, INGEN journal-close, _close popper IKKE. Dette er M2K-fix'en (16/6:
-    #     journal sagde 'lukket' mens IBKR holdt 10 kontrakter).
+    # I1: lukke-ordre IKKE bekræftet fyldt (filled=0, Submitted). Udfaldet afhaenger
+    #     af hvad IBKR SIGER — ikke af ordre-svaret alene. Skaerpelsen kom med
+    #     over-sell-fixet (48bff37): "ufyldt" maa ikke automatisk betyde "stadig aaben",
+    #     for saa gensender vi og saelger dobbelt. Tre udfald, to af dem her:
+    #
+    # I1a: ufyldt OG IBKR holder stadig positionen → behold aaben (M2K-fix'en 16/6:
+    #      journal sagde 'lukket' mens IBKR holdt 10 kontrakter).
     a, conn, j = _algo_with_pos("long", 5000.0,
                                 order_ret={"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    conn._pos = [{"ticker": "MES", "position": 5, "avg_cost": 25000.0}]
     asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
-    check("I1 ufyldt → MES FORBLIVER åben (popper IKKE)", "MES" in a._positions, list(a._positions))
-    check("I1 ufyldt → INGEN log_trade_close bogført", j.closes == [], j.closes)
-    check("I1 ufyldt → ingen handel tilføjet trades", a.trades == [], a.trades)
+    check("I1a ufyldt + IBKR HOLDER → MES forbliver åben", "MES" in a._positions, list(a._positions))
+    check("I1a ufyldt + IBKR holder → INGEN log_trade_close", j.closes == [], j.closes)
+    check("I1a ufyldt + IBKR holder → ingen handel i trades", a.trades == [], a.trades)
 
-    # I2: delvis fyldt (filled<contracts) → også behold åben (samme sikre retning).
+    # I1b: ufyldt MEN IBKR er flad → ordren fyldte alligevel; bogfoer lukningen og
+    #      send IKKE en ny ordre. Uden dette opstod de ejerloese shorts 31/7.
+    a, conn, j = _algo_with_pos("long", 5000.0,
+                                order_ret={"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    conn._pos = []
+    asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
+    check("I1b ufyldt + IBKR FLAD → MES lukket (ordren fyldte alligevel)",
+          "MES" not in a._positions, list(a._positions))
+    check("I1b ufyldt + IBKR flad → KUN 1 ordre (ingen over-sell)",
+          len(conn.orders) == 1, conn.orders)
+
+    # I2: delvis fyldt (4/10) OG IBKR holder stadig resten → behold aaben.
+    #     Samme skaerpelse som I1: IBKR er dommeren, ikke ordre-svaret.
     a, conn, j = _algo_with_pos("long", 5000.0, contracts=10,
                                 order_ret={"filled": 4, "avg_fill": 5010.0, "status": "Submitted"})
+    conn._pos = [{"ticker": "MES", "position": 6, "avg_cost": 30000.0}]
     asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
-    check("I2 delvis fyldt (4/10) → MES FORBLIVER åben", "MES" in a._positions, list(a._positions))
-    check("I2 delvis fyldt → INGEN log_trade_close", j.closes == [], j.closes)
+    check("I2 delvis fyldt (4/10) + IBKR holder 6 → MES forbliver åben",
+          "MES" in a._positions, list(a._positions))
+    check("I2 delvis fyldt + IBKR holder → INGEN log_trade_close", j.closes == [], j.closes)
 
     # I3: _close passerer await_fill_sec=CLOSE_FILL_WAIT_SEC til place_paper_order.
     captured = {}
@@ -526,6 +563,9 @@ def section_I():
     #     og forbliver åben hvis den ALDRIG fylder. (sleep gøres til no-op for fart.)
     a, conn, j = _algo_with_pos("long", 5000.0,
                                 order_ret=lambda n: {"filled": 0, "avg_fill": 0, "status": "Submitted"})
+    # IBKR holder stadig positionen — ellers ville "ufyldt" med rette blive tolket
+    # som "ordren fyldte alligevel" (over-sell-fixet 48bff37) og lukningen bogfoert.
+    conn._pos = [{"ticker": "MES", "position": 5, "avg_cost": 25000.0}]
     _real_sleep = asyncio.sleep
     async def _no_sleep(*_a, **_k):
         return None
@@ -666,6 +706,56 @@ def section_K():
         eur.LATE_CLOSE_MAX_MIN, eur.FORCE_CLOSE_RETRY_DELAY = _save_max, _save_delay
 
 
+# ── L — entry-bekraeftelse (3/8-2026) ──────────────────────────
+def section_L():
+    """Den raa |z|>=2-regel gik ind paa selve udstraekningsbaren — en bar der per
+    definition lukkede i straekkets retning. Bekraeftelsen kraever at seneste bar
+    lukkede TILBAGE mod middel. Backtest MES+M2K, europaeisk, 2 bp:
+    PF 1,52 -> 5,05 og stop-andel 8,3 % -> 2,0 %."""
+    print("\nSektion L — entry-bekraeftelse (reversionen skal vaere begyndt)")
+    from strategies.europa_reversion import rule as R
+    from strategies.europa_reversion import config as C
+
+    # L1: den raa regel er uaendret — den er stadig sandhedskilden for z
+    check("L1 raa entry_side: z=+2.5 -> short", R.entry_side(2.5) == "short")
+    check("L1 raa entry_side: z=-2.5 -> long", R.entry_side(-2.5) == "long")
+    check("L1 raa entry_side: z=+1.5 -> None", R.entry_side(1.5) is None)
+
+    # L2: strakt OP (short). DEN PRAECISE FAELDE er den anden linje: strakt op OG
+    # stadig stigende betyder at vi gaar ind mens straekket vokser. Gammel adfaerd.
+    check("L2 short + faldende luk -> ENTRY",
+          R.confirmed_entry_side([100.0, 99.0], 2.5) == "short")
+    check("L2 short + STIGENDE luk -> INGEN entry (afventer)",
+          R.confirmed_entry_side([99.0, 100.0], 2.5) is None)
+
+    # L3: strakt NED (long) — spejlvendt
+    check("L3 long + stigende luk -> ENTRY",
+          R.confirmed_entry_side([99.0, 100.0], -2.5) == "long")
+    check("L3 long + FALDENDE luk -> INGEN entry (afventer)",
+          R.confirmed_entry_side([100.0, 99.0], -2.5) is None)
+
+    # L4: bekraeftelse kan ikke redde et manglende z-signal
+    check("L4 |z| under graensen -> None uanset vending",
+          R.confirmed_entry_side([100.0, 99.0], 1.5) is None)
+
+    # L5: uaendret luk er IKKE en vending (streng ulighed)
+    check("L5 flad luk -> ingen vending (short)",
+          R.turned_back("short", 100.0, 100.0) is False)
+    check("L5 flad luk -> ingen vending (long)",
+          R.turned_back("long", 100.0, 100.0) is False)
+
+    # L6: for lidt historik -> ingen entry (ikke crash, ikke gaet)
+    check("L6 kun een close -> None", R.confirmed_entry_side([100.0], 2.5) is None)
+    check("L6 tom liste -> None", R.confirmed_entry_side([], 2.5) is None)
+
+    # L7: kontakten kan slaas fra uden kodeaendring
+    check("L7 require_confirm=False -> gammel raa adfaerd",
+          R.confirmed_entry_side([99.0, 100.0], 2.5, require_confirm=False) == "short")
+
+    # L8: og den ER slaaet til live (ellers er alt ovenstaaende ligegyldigt)
+    check("L8 REQUIRE_CONFIRM slaaet til i config", C.REQUIRE_CONFIRM is True)
+
+
 if __name__ == "__main__":
     print("Test: Europa-reversion (adfærds-lås + Trin 2 regressions-gate)")
     section_A()
@@ -679,4 +769,5 @@ if __name__ == "__main__":
     section_I()
     section_J()
     section_K()
+    section_L()
     print("\nALLE TESTS BESTÅET ✓")

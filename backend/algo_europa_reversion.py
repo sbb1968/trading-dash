@@ -741,9 +741,20 @@ class EuropaReversionLive(BaseStrategy):
         if self.stats.open_positions >= self.config.max_open_positions:
             return
 
-        # Entry-beslutning fra den delte regel (None hvis |z| < ENTRY_Z).
-        side = rule.entry_side(z)
+        # Entry-beslutning fra den delte regel. Siden 3/8-2026 kraeves ogsaa at
+        # den seneste bar lukkede TILBAGE mod middel — ellers gaar vi ind praecis
+        # naar bevaegelsen er staerkest imod os. Se rule.confirmed_entry_side.
+        hist = self._bar_history.get(sym, [])
+        closes = [b.close for b in hist[-LOOKBACK:]]
+        side = rule.confirmed_entry_side(closes, z)
         if side is None:
+            # Log naar det RENE z-signal var der, men bekraeftelsen manglede —
+            # ellers ser det ud som om strategien intet saa. log_rejection_change
+            # er throttlet (kun ved AENDRET begrundelse), saa den spammer ikke.
+            if rule.entry_side(z) is not None:
+                await self.log_rejection_change(
+                    sym, f"z={z:+.2f} udloest, men seneste bar lukkede ikke "
+                         f"tilbage mod middel — afventer bekraeftelse")
             return
         await self._open(sym, side, bar, sd, z)
 
