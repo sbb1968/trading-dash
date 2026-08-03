@@ -641,7 +641,7 @@ class IBKRConnection:
         source:         str   = "",
         await_fill_sec: float = 0,
         order_ref:      Optional[str] = None,
-        tif:            Optional[str] = None,   # "DAY"/"GTC"/... None = TWS' eget preset
+        tif:            Optional[str] = "DAY",  # None = overlad til TWS' preset (frarådes)
     ) -> Optional[dict]:
         """Sender en ordre til paper trading kontoen.
 
@@ -668,11 +668,26 @@ class IBKRConnection:
             _ref = order_ref or source
             if _ref:
                 order.orderRef = _ref
-            # Eksplicit TIF slaar TWS' order preset. Uden den kan et preset tvinge
-            # TIF til GTC — og en MARKEDSORDRE med GTC er ugyldig hos IBKR (den skal
-            # jo fylde straks), saa ordren annulleres med fejl 10349. Det ramte
-            # oprydningen 3/8-2026: alle otte ordrer Cancelled uden en eneste fill.
-            # None = roer den ikke (uaendret adfaerd for alle strategier).
+            # TIF saettes EKSPLICIT og er som standard DAY. To grunde:
+            #
+            # 1. Et TWS order preset kan ellers tvinge TIF til GTC — og en
+            #    MARKEDSORDRE med GTC er ugyldig hos IBKR (den skal jo fylde
+            #    straks), saa ordren annulleres med fejl 10349. Det ramte
+            #    oprydningen 3/8-2026: otte ordrer Cancelled, ingen fills. De fire
+            #    aktie-strategier auto-starter 09:20-09:28 ET, altsaa FOER US-
+            #    aabningen 09:30 — deres opstarts-reconcile kan derfor sende en
+            #    lukkeordre ind i et lukket marked og ramme praecis samme fejl.
+            #
+            # 2. GTC er FORKERT for alt hvad disse strategier laver. De handler
+            #    intradag og tvangslukker foer sessionsslut; en ordre der ikke
+            #    fylder i dag skal doe, ikke ligge og vente til i morgen. At det
+            #    ikke var tilfaeldet har kostet foer — cogt_fix_dupe_orders.py
+            #    findes udelukkende for at rydde op i hvilende GTC-SELL-ordrer
+            #    lagt af forskellige klienter paa tvaers af sessioner.
+            #
+            # Ingen kalder i kodebasen oensker GTC; hver eneste omtale af det er
+            # en beskrivelse af noget man forsvarer sig imod. tif=None overlader
+            # valget til TWS' preset og frarådes.
             if tif:
                 order.tif = tif
             trade = self.ib.placeOrder(contract, order)
