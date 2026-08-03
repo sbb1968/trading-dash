@@ -114,8 +114,29 @@ def _strip_news_prefix(h: str) -> str:
     return h.lstrip("* ").strip()
 
 
-def _news_ts_epoch(t: str) -> float:
-    """IBKR news-tid 'YYYY-MM-DD HH:MM:SS[.f]' (UTC) -> epoch. 0.0 ved fejl."""
+def _news_ts_epoch(t) -> float:
+    """IBKR news-tid -> epoch (sekunder). 0.0 ved fejl.
+
+    ⚠ RETTET 3/8-2026 — dette var grunden til at Trend Join Long ALDRIG handlede.
+
+    ib_async 2.1 leverer `HistoricalNews.time` som et NAIVT datetime (wrapper.py
+    kalder `parseIBDatetime` foer objektet bygges), ikke som den
+    'YYYY-MM-DD HH:MM:SS'-streng denne funktion var skrevet til. Et datetime har
+    ingen `.strip()`, saa hvert eneste kald landede i `except` og returnerede 0.0.
+    Og 0.0 er aeldre end enhver taenkelig cutoff, saa `check_positive_catalyst`
+    sprang ALLE nyheder over foer sentiment overhovedet blev talt — `bull` og
+    `bear` forblev 0, og den returnerede "ingen frisk positiv nyhed" uanset hvad
+    der stod i overskrifterne.
+
+    Symptomet passede perfekt: 100 % af kandidaterne afvist hver dag, aldrig én
+    eneste "blandet/negativ"-afvisning (den kraever bull > 0), universe_size = 0,
+    evaluations = 0. Se test_trendjoin_news.py.
+
+    IBKR leverer historiske nyhedstider i UTC, saa et naivt datetime laeses som
+    UTC — samme antagelse som streng-grenen altid har haft.
+    """
+    if isinstance(t, datetime):
+        return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
     try:
         s = (t or "").strip().split(".")[0]
         return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
@@ -159,13 +180,20 @@ async def check_positive_catalyst(
 
     cutoff = now.timestamp() - NEWS_MAX_AGE_HOURS * 3600
     bull, bear, best, best_ts = 0, 0, "", 0.0
+    friske: list[str] = []      # til diagnostik naar gaten lukker
+    ts_fejl = 0
     for it in news:
-        ts = _news_ts_epoch(getattr(it, "time", ""))
+        raw_ts = getattr(it, "time", "")
+        ts = _news_ts_epoch(raw_ts)
+        if ts <= 0.0:
+            ts_fejl += 1
+            continue
         if ts < cutoff:
             continue
         headline = _strip_news_prefix(getattr(it, "headline", ""))
         if not headline:
             continue
+        friske.append(headline)
         sent = _guess_sentiment(headline)
         if sent == "bullish":
             bull += 1
@@ -175,9 +203,22 @@ async def check_positive_catalyst(
             bear += 1
     if bull > 0 and bull > bear:
         return True, best, best_ts
-    if bull > 0 and bull <= bear:
+
+    # Gaten lukkede. Skeln praecist mellem de tre grunde — de kraever HVER SIN
+    # loesning, og indtil 3/8-2026 saa de alle tre ens ("ingen frisk positiv
+    # nyhed"), hvilket skjulte en ren parse-fejl i over en maaned.
+    if ts_fejl:
+        return False, (f"tidsstempel kunne ikke laeses paa {ts_fejl}/{len(news)} "
+                       f"nyheder — PARSE-FEJL, ikke datamangel"), 0.0
+    if bull > 0:
         return False, f"blandet/negativ (bull={bull} bear={bear})", 0.0
-    return False, "ingen frisk positiv nyhed", 0.0
+    if not friske:
+        return False, (f"{len(news)} nyheder, men ingen friskere end "
+                       f"{NEWS_MAX_AGE_HOURS}t"), 0.0
+    # Der ER friske overskrifter — de scorer bare ikke bullish. Tag et par med,
+    # saa keyword-listen kan vurderes paa virkelige overskrifter i stedet for gaet.
+    smag = " | ".join(h[:70] for h in friske[:3])
+    return False, (f"{len(friske)} friske, 0 bullish (bear={bear}): {smag}"), 0.0
 
 
 def _swing_low_2_2(bars: list[Bar]) -> Optional[float]:
