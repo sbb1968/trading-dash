@@ -184,8 +184,67 @@ def get_day_bars(backend: Path, ticker: str, d: date_cls):
 # ─────────────────────────────────────────────────────────────────────────────
 # Scanner + simulator (TESTBAR)
 # ─────────────────────────────────────────────────────────────────────────────
-def scan_and_sim(bars, lookback, min_runup, washout, target, stop_pct, slip):
+class Bounce:
+    """Hvad der skal til foer et dyk regnes for vendt.
+
+    Den ODUARSPRONKELIGE regel var ét eneste krav: close > forrige close. Den
+    tester ikke engang om baren er GROEN — en roed bar, hvor prisen faldt fra
+    open til close, kvalificerer hvis blot dens close ligger over den forrige.
+    Ét tick op i et fortsat fald var nok.
+
+    Hvert krav herunder kan slaas til uafhaengigt, saa de kan sweepes:
+      green       close > open (aegte groen bar)
+      close_pos   (close-low)/(high-low) >= vaerdi — lukker i toppen af sin range
+      vol_mult    volumen >= vaerdi x snittet af de foregaaende vol_len bars
+      reclaim     close >= washout_low + vaerdi x (ref_high - washout_low)
+                  altsaa: hvor stor en del af faldet er hentet tilbage
+      two_bars    KRAEVER to bekraeftende bars i traek (som US-reversion)
+    """
+    __slots__ = ("navn", "green", "close_pos", "vol_mult", "vol_len",
+                 "reclaim", "two_bars")
+
+    def __init__(self, navn, green=False, close_pos=None, vol_mult=None,
+                 vol_len=20, reclaim=None, two_bars=False):
+        self.navn = navn
+        self.green = green
+        self.close_pos = close_pos
+        self.vol_mult = vol_mult
+        self.vol_len = vol_len
+        self.reclaim = reclaim
+        self.two_bars = two_bars
+
+
+def _bar_bekraefter(bars, j, bo: Bounce, ref_high, washout_low) -> bool:
+    """Opfylder bars[j] bounce-kravene? j > 0 forudsat."""
+    b = bars[j]
+    if b.close <= bars[j - 1].close:          # grundkravet, uaendret
+        return False
+    if bo.green and b.close <= b.open:
+        return False
+    if bo.close_pos is not None:
+        rng = b.high - b.low
+        pos = ((b.close - b.low) / rng) if rng > 0 else 0.0
+        if pos < bo.close_pos:
+            return False
+    if bo.vol_mult is not None:
+        lo = max(0, j - bo.vol_len)
+        prev = [x.volume for x in bars[lo:j] if x.volume]
+        if not prev:
+            return False
+        if b.volume < bo.vol_mult * (sum(prev) / len(prev)):
+            return False
+    if bo.reclaim is not None:
+        span = ref_high - washout_low
+        if span <= 0 or b.close < washout_low + bo.reclaim * span:
+            return False
+    return True
+
+
+def scan_and_sim(bars, lookback, min_runup, washout, target, stop_pct, slip,
+                 bounce: "Bounce" = None, target_r=None):
     """Find ÉN washout-reclaim long pr. dag og simulér den. Returnér dict|None."""
+    if bounce is None:
+        bounce = Bounce("original")
     n = len(bars)
     if n < lookback + 3:
         return None
@@ -205,17 +264,37 @@ def scan_and_sim(bars, lookback, min_runup, washout, target, stop_pct, slip):
         # reclaim
         entry_idx = None
         for j in range(i + 1, n - 1):
-            if bars[j].close > bars[j - 1].close:
+            if not _bar_bekraefter(bars, j, bounce, ref_high, washout_low):
+                continue
+            if bounce.two_bars:
+                # Kraev at NAESTE bar ogsaa bekraefter; entry sker da paa DEN bar.
+                if j + 1 > n - 2 or not _bar_bekraefter(bars, j + 1, bounce,
+                                                        ref_high, washout_low):
+                    continue
+                entry_idx = j + 1
+            else:
                 entry_idx = j
-                break
+            break
         if entry_idx is None:
             return None
-        p_in = bars[entry_idx].open
+        # ENTRY PAA BOUNCEBARENS CLOSE — ikke dens open.
+        # Foer stod her bars[entry_idx].open, men baren blev UDVALGT paa sin close.
+        # Man kunne altsaa ikke vide ved barens aabning at den ville lukke hoejere;
+        # backtesten handlede til en pris der ikke fandtes endnu. Live har hele
+        # tiden handlet til close (dokumenteret i algo_buythedip's docstring), saa
+        # rettelsen bringer ogsaa de to i overensstemmelse.
+        p_in = bars[entry_idx].close
         fill_in = p_in + slip
         if fill_in <= 0:
             return None
         stop_lvl = washout_low if stop_pct is None else p_in * (1 - stop_pct / 100.0)
-        tgt_lvl = p_in * (1 + target / 100.0) if target is not None else None
+        # Target: R-baseret naar target_r er sat (som live siden 3/8-2026), ellers
+        # den gamle faste procent — saa de to kan sammenlignes i samme koersel.
+        if target_r is not None:
+            R = p_in - stop_lvl
+            tgt_lvl = (p_in + target_r * R) if R > 0 else None
+        else:
+            tgt_lvl = p_in * (1 + target / 100.0) if target is not None else None
         exit_reason = "eod"
         pnl = None
         for b in bars[entry_idx + 1:]:
@@ -361,7 +440,8 @@ def run_universe(backend, data, params, slip_cents, emit):
                 continue
             scanned += 1
             tr = scan_and_sim(bars, params["lookback"], params["min_runup"],
-                              params["washout"], params["target"], params["stop_pct"], slip)
+                              params["washout"], params["target"], params["stop_pct"], slip,
+                              bounce=params.get("bounce"), target_r=params.get("target_r"))
             if tr:
                 tr["ticker"] = t
                 trades.append(tr)
@@ -384,6 +464,10 @@ def main():
     ap.add_argument("--target", type=float, default=DEFAULTS["target"])
     ap.add_argument("--stop-pct", type=float, default=None, help="None=strukturstop")
     ap.add_argument("--sweep", action="store_true", help="sweep washout×target×lookback")
+    ap.add_argument("--bounce-sweep", action="store_true",
+                    help="sweep bounce-definitionen (hvad skal til foer et dyk er vendt)")
+    ap.add_argument("--target-r", type=float, default=None,
+                    help="R-baseret target (som live siden 3/8-2026). Uden: fast --target%%")
     ap.add_argument("--fetch", action="store_true", help="hent manglende ticker-dage fra IBKR")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7497)
@@ -404,7 +488,8 @@ def main():
     emit("=" * 78)
     emit(f"Backend: {backend}")
     base = dict(lookback=args.lookback, min_runup=args.min_runup,
-                washout=args.washout, target=args.target, stop_pct=args.stop_pct)
+                washout=args.washout, target=args.target, stop_pct=args.stop_pct,
+                target_r=args.target_r, bounce=None)
     emit(f"Parametre: lookback={base['lookback']}m  min_runup={base['min_runup']}%  "
          f"washout={base['washout']}%  target="
          f"{'EOD' if base['target'] is None else str(base['target'])+'%'}  "
@@ -454,6 +539,33 @@ def main():
         emit("─" * 78)
         emit(f"  PERIODE: {label}")
         emit("─" * 78)
+
+        if args.bounce_sweep:
+            # Hvad skal der til, foer et dyk regnes for vendt? Alt andet holdes fast.
+            varianter = [
+                Bounce("original (close>forrige)"),
+                Bounce("+ groen bar",                 green=True),
+                Bounce("+ groen + close_pos 0,50",    green=True, close_pos=0.50),
+                Bounce("+ groen + close_pos 0,60",    green=True, close_pos=0.60),
+                Bounce("+ groen + close_pos 0,75",    green=True, close_pos=0.75),
+                Bounce("+ groen + volumen 1,5x",      green=True, vol_mult=1.5),
+                Bounce("+ groen + volumen 2,0x",      green=True, vol_mult=2.0),
+                Bounce("+ groen + reclaim 25%",       green=True, reclaim=0.25),
+                Bounce("+ groen + reclaim 50%",       green=True, reclaim=0.50),
+                Bounce("+ to groenne bars",           green=True, two_bars=True),
+                Bounce("groen+pos0,60+vol1,5x",       green=True, close_pos=0.60, vol_mult=1.5),
+            ]
+            emit(f"  {'bounce-krav':<28}{'n':>5}{'WR%':>7}{'snit%':>8}"
+                 f"{'sum%':>9}{'PF':>7}{'værst%':>9}")
+            emit(f"  {'-'*28}{'-'*5}{'-'*7}{'-'*8}{'-'*9}{'-'*7}{'-'*9}")
+            for bo in varianter:
+                p = dict(base, bounce=bo)
+                trs, _, _ = run_universe(backend, data, p, 1.0, lambda *_: None)
+                a = aggregate([t["pnl_pct"] for t in trs])
+                emit(f"  {bo.navn:<28}{a['n']:>5}{a['wr']:>7.0f}{a['avg']:>8.2f}"
+                     f"{a['sum']:>9.1f}{fmt_pf(a['pf']):>7}{a['worst']:>9.1f}")
+            emit("")
+            continue
 
         if args.sweep:
             emit(f"  {'lookbk':>7}{'wash%':>7}{'target':>8}{'n':>5}{'WR%':>7}"
