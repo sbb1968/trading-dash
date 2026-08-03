@@ -29,6 +29,11 @@ Setuppet aflæses på færdige 1-minuts candles i tre trin:
 2. **Dip** — prisen falder mindst 1,5 % tilbage fra vinduets top. Det er tilbagefaldet
    vi vil købe.
 3. **Bounce** — når faldet vender, køber strategien ved bounce-candlens lukkekurs.
+   Men det er ikke nok at prisen bare tikker op: candlen skal også *lukke grønt*
+   (over sin egen åbning) og handles på **mindst halvanden gang så meget volumen**
+   som de foregående 20 minutter. Uden det volumen-krav er der ingen rigtige købere
+   bag vendingen — bare støj. Findes volumen ikke på den første candle, kasseres
+   opsætningen ikke; strategien venter blot på den candle hvor volumen dukker op.
 
 Nye handler åbnes **fra åbningen og frem til middag** — mellem 09:30 og 12:00
 amerikansk tid. Langt de fleste muligheder opstår i den første time, hvor
@@ -62,6 +67,14 @@ andre strategier på kontoen.
 BuyTheDip blev valideret på historiske data som K2's komplement — den ramte ikke de
 samme tabsdage. Sizing-tallene (100 dollar risiko / 1.000 dollar notionel) er
 deploy-valg der finjusteres på paper, ikke tal fra backtesten (som var procent-baseret).
+
+Ved revisionen i august 2026 testede vi elleve forskellige måder at afgøre om et dyk
+er vendt. Kun volumen-kravet virkede, og det virkede i begge de måneder vi testede —
+alle de andre (grøn candle alene, hvor højt i candlen der lukkes, hvor meget af
+dykket der er vundet tilbage, to grønne candles i træk) faldt fra hinanden i den ene
+eller den anden måned. Kanten er ægte, men **tynd**: omkring 5 % overskud per
+risikeret krone i den svageste af de to måneder. Det er nok til at fortsætte på
+paper — ikke i nærheden af nok til rigtige penge.
 
 Strategien kører **udelukkende paper trading** (Ibens konto). På handelsserveren
 starter den **automatisk** kort før den amerikanske børsåbning; på Sørens egen maskine

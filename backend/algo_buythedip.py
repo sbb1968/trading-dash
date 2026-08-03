@@ -84,6 +84,27 @@ FORCE_CLOSE_ET = dtime(15, 30)   # tvangsluk-backstop — 30 min før 16:00-lukn
 LOOKBACK      = 20
 MIN_RUNUP_PCT = 3.0    # impuls: (ref_high−ref_low)/ref_low ≥ dette
 DIP_PCT   = 1.5    # dip: bar.low ≤ ref_high·(1−dette/100)
+
+# Bounce-bekraeftelse (revision 1, 3/8-2026). Det oprindelige krav var alene
+# "close > forrige close" — altsaa ét grønt tick. Bounce-sweep paa et univers
+# der matcher live-screeneren (Perf 1W ≥ 6 %) viste at det krav er utilstraekkeligt:
+#
+#   bounce-krav          april PF        maj PF      (2 cent slippage, target 2R)
+#   ------------------   ---------       ---------
+#   original             0,86            1,04
+#   + groen bar          0,95 (1 cent)   1,17 (1 cent)
+#   + groen + vol 1,5x   1,05            1,18     <- valgt
+#   + groen + vol 2,0x   1,04            1,53
+#   + groen + reclaim50  1,02            1,34
+#
+# Volumen er det eneste filter der er positivt i BEGGE maaneder. 1,5x foretraekkes
+# frem for 2,0x: praktisk uafgjort i april, men mindre vaerste-fald (−7,5 % mod
+# −8,8 %) og mindre afhaengig af én god maaned. Antal setups falder IKKE af
+# filteret (n = 157/171 uanset) — det UDSKYDER blot entry til volumen bekraefter,
+# hvilket giver en bedre entry-pris.
+BOUNCE_REQUIRE_GREEN = True    # bounce-baren skal lukke over sin egen open
+BOUNCE_VOL_MULT      = 1.5     # og have ≥ dette × snit-volumen. 0/None = fra
+BOUNCE_VOL_LEN       = 20      # antal forudgaaende bars i volumen-snittet
 # Target er R-BASERET fra 3/8-2026 (revision 1). Var faste +2,0 % af entry.
 #
 # Problemet med en fast procent er at stoppet IKKE er fast: det er dip_low raat,
@@ -698,9 +719,20 @@ class BuyTheDipLive(BaseStrategy):
             }
             self._diag_setups += 1
             return None   # bounce er en SENERE bar
-        # Dip afventer bounce: første grønne bar (close > forrige close).
+        # Dip afventer bounce. Kravet er skaerpet 3/8-2026: det gamle
+        # "close > forrige close" alene taber penge ved realistisk slippage
+        # (april-26: PF 0,86 ved 2 cent). Volumen-bekraeftelsen er det ENESTE
+        # bounce-filter der er positivt i BEGGE testede maaneder.
         if len(hist) < 2 or bar.close <= hist[-2].close:
             return None
+        if BOUNCE_REQUIRE_GREEN and bar.close <= bar.open:
+            return None
+        if BOUNCE_VOL_MULT:
+            prev = [b.volume for b in hist[-(BOUNCE_VOL_LEN + 1):-1] if b.volume]
+            if not prev:
+                return None
+            if bar.volume < BOUNCE_VOL_MULT * (sum(prev) / len(prev)):
+                return None
         setup = dict(wo)            # dip_low, ref_high, dip_depth
         return (ticker, setup, bar)
 

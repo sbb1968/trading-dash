@@ -468,6 +468,8 @@ def main():
                     help="sweep bounce-definitionen (hvad skal til foer et dyk er vendt)")
     ap.add_argument("--target-r", type=float, default=None,
                     help="R-baseret target (som live siden 3/8-2026). Uden: fast --target%%")
+    ap.add_argument("--slippage-cents", type=float, default=1.0,
+                    help="slippage pr. fyld i cent under sweeps (default 1)")
     ap.add_argument("--fetch", action="store_true", help="hent manglende ticker-dage fra IBKR")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7497)
@@ -560,7 +562,7 @@ def main():
             emit(f"  {'-'*28}{'-'*5}{'-'*7}{'-'*8}{'-'*9}{'-'*7}{'-'*9}")
             for bo in varianter:
                 p = dict(base, bounce=bo)
-                trs, _, _ = run_universe(backend, data, p, 1.0, lambda *_: None)
+                trs, _, _ = run_universe(backend, data, p, args.slippage_cents, lambda *_: None)
                 a = aggregate([t["pnl_pct"] for t in trs])
                 emit(f"  {bo.navn:<28}{a['n']:>5}{a['wr']:>7.0f}{a['avg']:>8.2f}"
                      f"{a['sum']:>9.1f}{fmt_pf(a['pf']):>7}{a['worst']:>9.1f}")

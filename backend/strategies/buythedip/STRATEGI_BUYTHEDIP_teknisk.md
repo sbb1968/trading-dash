@@ -26,9 +26,25 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
 |---|---|---|
 | **Impuls** | Run-up i vinduet: `(ref_high − ref_low) / ref_low ≥ MIN_RUNUP_PCT` | `MIN_RUNUP_PCT = 3.0 %` |
 | **Dip** | `bar.low ≤ ref_high × (1 − DIP_PCT/100)` | `DIP_PCT = 1.5 %` |
-| **Bounce** | Dip vender → entry på bounce-barens `close` | — |
+| **Bounce** | `close > forrige close` **og** `close > open` **og** `volume ≥ BOUNCE_VOL_MULT × snit(20 foregående bars)` → entry på bounce-barens `close` | `BOUNCE_REQUIRE_GREEN = True`, `BOUNCE_VOL_MULT = 1.5`, `BOUNCE_VOL_LEN = 20` |
 
 - **Entry-pris** = `bar.close` (færdig bar).
+- **Bounce-kravet er skærpet 3/8-2026 (revision 1).** Tidligere var kravet alene
+  `close > forrige close` — ét grønt tick. Bounce-sweep på et rekonstrueret univers
+  der matcher live-screeneren (inkl. `Perf 1W ≥ 6 %`) viste at det krav ikke bærer
+  ved realistisk slippage: PF 0,86 (april-26) / 1,04 (maj-26) ved 2 ¢. Volumen-
+  bekræftelsen er det eneste af 11 testede bounce-filtre der er positivt i **begge**
+  måneder: 1,05 / 1,18 ved 1,5× og 1,04 / 1,53 ved 2,0×. 1,5× er valgt — praktisk
+  uafgjort i april, mindre værste-fald (−7,5 % mod −8,8 %), mindre afhængig af
+  én god måned. Antallet af setups falder **ikke** af filteret (n = 157/171 uanset);
+  det udskyder blot entry til volumen bekræfter, hvilket giver en bedre entry-pris.
+  Dip-state bevares mens der ventes, så et setup aldrig kasseres af filteret.
+- **Backtestens forbehold:** universet er rekonstrueret point-in-time fra daglige bars
+  (`reconstruct_midcap_universe.py --perf-w-min 6.0`) ud fra en fast pulje på 98 navne.
+  Pris/volumen/Perf 1W er eksakt genskabt; TradingViews `Volatility.M` kan kun
+  tilnærmes af en daglig range-proxy, og **markedsværdi kan slet ikke rekonstrueres**
+  uden historiske fundamentals. Stikprøve på det gamle univers: 84 % af navnene lå
+  inden for det nye market cap-filter (300 mio.–10 mia.), median $7,5 mia.
 - **dip_low** = laveste low i vinduet → bruges som stop.
 - **Side:** altid `long`.
 - **Entry-vindue:** kun `SESSION_START (09:30) … OPEN_UNTIL_ET (12:00)` ET. Ingen nye

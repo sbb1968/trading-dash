@@ -48,7 +48,8 @@ from pathlib import Path
 CACHE_DIRNAME = "bar_cache"
 
 DEFAULTS = dict(top_n=25, price_min=5.0, price_max=50.0, min_avg_vol=500_000,
-                vol_lookback=14, liq_lookback=30, min_history=20)
+                vol_lookback=14, liq_lookback=30, min_history=20,
+                perf_w_min=None, perf_w_days=5)
 
 
 # ── cache-stier ───────────────────────────────────────────────────────────────
@@ -178,6 +179,23 @@ def select_for_day(daily: dict[date_cls, dict], sorted_dates: list[date_cls],
     if avg_vol <= p["min_avg_vol"]:
         return False, None
 
+    # Perf 1W — ugens afkast, maalt paa dage STRENGT FOER d (intet look-ahead).
+    # Live-screeneren kraever Perf.W > 6 %; uden dette filter handlede backtesten
+    # ogsaa navne i nedtrend, hvor "koeb dykket" bliver "grib den faldende kniv".
+    # Det er den ENESTE af de nye screener-betingelser der kan reproduceres
+    # eksakt fra daglige bars — market cap kraever fundamentals, og TradingViews
+    # Volatility.M kan kun tilnaermes (vol_proxy nedenfor er dags-range, ikke .M).
+    if p.get("perf_w_min") is not None:
+        k = p.get("perf_w_days", 5)
+        if len(prior) < k + 1:
+            return False, None
+        for_close = daily[prior[-(k + 1)]]["close"]
+        if for_close <= 0:
+            return False, None
+        perf_w = (prior_close - for_close) / for_close * 100.0
+        if perf_w < p["perf_w_min"]:
+            return False, None
+
     vol_days = prior[-p["vol_lookback"]:]
     ranges = []
     for dt in vol_days:
@@ -233,6 +251,11 @@ def main() -> int:
     ap.add_argument("--vol-lookback", type=int, default=DEFAULTS["vol_lookback"])
     ap.add_argument("--liq-lookback", type=int, default=DEFAULTS["liq_lookback"])
     ap.add_argument("--min-history", type=int, default=DEFAULTS["min_history"])
+    ap.add_argument("--perf-w-min", type=float, default=DEFAULTS["perf_w_min"],
+                    help="kraev ugens afkast >= dette %% (live-screeneren: 6.0). "
+                         "Udeladt = intet Perf-filter, som foer 3/8-2026")
+    ap.add_argument("--perf-w-days", type=int, default=DEFAULTS["perf_w_days"],
+                    help="handelsdage i 'en uge' (default 5)")
     args = ap.parse_args()
 
     cache_dir = Path(args.bar_cache)
@@ -245,7 +268,8 @@ def main() -> int:
     end = date_cls.fromisoformat(args.end)
     p = dict(top_n=args.top_n, price_min=args.price_min, price_max=args.price_max,
              min_avg_vol=args.min_avg_vol, vol_lookback=args.vol_lookback,
-             liq_lookback=args.liq_lookback, min_history=args.min_history)
+             liq_lookback=args.liq_lookback, min_history=args.min_history,
+             perf_w_min=args.perf_w_min, perf_w_days=args.perf_w_days)
 
     files = cached_tickers(cache_dir, start, end)
     if not files:

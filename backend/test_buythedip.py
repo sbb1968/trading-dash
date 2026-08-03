@@ -12,7 +12,7 @@ Sektioner:
   D — exit (stop / target / force-close)
   E — univers (eget TV-volatility-scan, adskilt fra K2)
   F — isolation (scoped reconcile + fill-verifikation)
-  G — vindue (ingen entry efter 10:30 ET)
+  G — vindue (ingen entry efter OPEN_UNTIL_ET)
   H — forensik-emission (bar_evaluation + trade_forensics)
 
 Stil: PASS/FAIL-print, raise SystemExit(1) ved fejl, ALLE TESTS BESTÅET til sidst.
@@ -198,8 +198,9 @@ def section_A():
     a._bar_history["X"].append(red)
     check("A3 rød bar → ingen setup (venter)", a._detect("X", red) is None)
 
-    # A4: GRØN bar → SETUP med korrekte værdier
-    green = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9)  # close > forrige (101.2)
+    # A4: GRØN bar m. volumen → SETUP med korrekte værdier
+    green = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9,  # close > forrige (101.2)
+               v=20000)                                                    # 2× snit
     a._bar_history["X"].append(green)
     r = a._detect("X", green)
     check("A4 grøn bar → SETUP", r is not None)
@@ -209,6 +210,39 @@ def section_A():
     check("A4 entry = grøn bars LUK", bar.close == 101.9, bar.close)
     check("A4 stop = dip_low", setup["dip_low"] == win_low, setup["dip_low"])
     check("A4 dip_depth korrekt", abs(setup["dip_depth"] - exp_depth) < 1e-9, setup["dip_depth"])
+
+    # A6: bounce-bar UDEN volumen-surge → INGEN entry (revision 1, 3/8-2026).
+    # Samme bar som A4 bortset fra volumen: 10.000 mod et snit paa 10.000 → 1,0×
+    # er under BOUNCE_VOL_MULT (1,5×), saa bouncen regnes ikke for bekraeftet.
+    a6 = make_algo(MockConn(), MockJournal())
+    a6._bar_history["X"] = runup_hist("X", base) + [dipbar]
+    a6._detect("X", dipbar)
+    a6._bar_history["X"].append(red)
+    a6._detect("X", red)
+    tyndt = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9, v=10000)
+    a6._bar_history["X"].append(tyndt)
+    check("A6 grøn bounce u. volumen (1,0×) → INGEN setup",
+          a6._detect("X", tyndt) is None)
+
+    # A7: dip-state OVERLEVER en afvist bounce — den venter bare paa naeste bar
+    # med volumen. Ellers ville filteret smide setuppet vaek i stedet for at udskyde det.
+    check("A7 dip-state bevaret efter afvist bounce", "X" in a6._dip_state)
+    sen = mk(base + timedelta(minutes=23), 101.85, 102.4, 101.8, 102.3, v=20000)
+    a6._bar_history["X"].append(sen)
+    r7 = a6._detect("X", sen)
+    check("A7 senere bar MED volumen → setup", r7 is not None)
+    if r7:
+        check("A7 entry = den SENERE bars luk", r7[2].close == 102.3, r7[2].close)
+
+    # A8: RØD bar (close < open) med masser af volumen → stadig ingen entry
+    a8 = make_algo(MockConn(), MockJournal())
+    a8._bar_history["X"] = runup_hist("X", base) + [dipbar]
+    a8._detect("X", dipbar)
+    # close 101.9 > forrige close (101.6) men UNDER egen open (102.5) → doji/roed krop
+    krop = mk(base + timedelta(minutes=21), 102.5, 102.6, 101.5, 101.9, v=50000)
+    a8._bar_history["X"].append(krop)
+    check("A8 close>forrige men close<open + høj volumen → INGEN setup",
+          a8._detect("X", krop) is None)
 
     # A5: efter entry → ingen ny entry samme ticker samme dag (_check_ticker-gate)
     a = make_algo(MockConn(), MockJournal())
@@ -232,7 +266,7 @@ def _ready_setup(a, sym, base, dip_low, ref_high):
     a._dip_state[sym] = {"dip_low": dip_low, "ref_high": ref_high, "dip_depth": depth}
     hist = runup_hist(sym, base, n=btd.LOOKBACK)          # 20 bars
     green = mk(base + timedelta(minutes=btd.LOOKBACK),    # close > forrige bar → bounce
-               103.9, 104.2, 103.8, 104.1)
+               103.9, 104.2, 103.8, 104.1, v=20000)       # 2× snit → volumen-gaten aabner
     a._bar_history[sym] = hist + [green]
     return a._detect(sym, green)
 
@@ -506,7 +540,7 @@ async def _ret(x):
 
 # ── G — vindue ─────────────────────────────────────────────────
 def section_G():
-    print("\nSektion G — vindue (ingen entry efter 10:30 ET)")
+    print("\nSektion G — vindue (ingen entry efter OPEN_UNTIL_ET)")
     base = ET.localize(datetime(2026, 6, 16, 10, 0))
     a = make_algo(MockConn(), MockJournal())
     a._dip_state["X"] = {"dip_low": 100.0, "ref_high": 104.0, "dip_depth": 3.8}
@@ -516,7 +550,7 @@ def section_G():
     a._fetch_latest_bar = lambda t: _ret_bar(green)
     # allow_entries=False (vindue lukket) → ingen kandidat
     res_closed = asyncio.run(a._check_ticker("X", allow_entries=False))
-    check("G1 efter 10:30 (allow_entries=False) → ingen entry", res_closed is None)
+    check("G1 efter cutoff (allow_entries=False) → ingen entry", res_closed is None)
 
 
 # ── H — forensik-emission ──────────────────────────────────────
