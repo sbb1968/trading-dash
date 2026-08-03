@@ -80,23 +80,32 @@ def read_pool(args) -> set:
     return syms
 
 
-def cached_tickers(cache_dir: Path, start: date_cls, end: date_cls) -> dict[str, Path]:
-    """Tickere med en periode-cache-fil (≥5 dage) der overlapper [start,end]."""
-    out: dict[str, Path] = {}
+def cached_tickers(cache_dir: Path) -> dict[str, list[Path]]:
+    """Ticker → ALLE dens periode-cache-filer (≥5 dage).
+
+    Rettet 3/8-2026. Foer returnerede den ÉN fil pr. ticker, valgt som den
+    foerste glob'en stoedte paa, og kun filer der overlappede [start,end].
+    Begge dele var forkerte:
+
+      * bar_cache har flere filer pr. ticker (fx ABSI_2026-03-20_2026-04-30 og
+        ABSI_2026-04-17_2026-05-29). Resten blev tavst smidt vaek, saa dagene
+        i de oevrige filer fandtes ikke.
+      * Udvaelgelsen SKAL bruge historik FOER start (min_history=20 dage,
+        liq_lookback=30). Overlap-filteret sorterede netop den historik fra, saa
+        de foerste uger af enhver periode blev bygget paa amputeret lookback.
+
+    Nu returneres alt; load_daily_bars fletter og de-dublerer paa timestamp.
+    """
+    out: dict[str, list[Path]] = {}
     if not cache_dir.exists():
         return out
-    for p in cache_dir.glob("*_1min.csv"):
+    for p in sorted(cache_dir.glob("*_1min.csv")):
         if p.stat().st_size <= 40:
             continue
         pr = _parse_cache_range(p.name)
         if not pr or (pr[2] - pr[1]).days < 5:
             continue
-        t, s, e = pr
-        if e < start or s > end:
-            continue
-        # foretræk den fil der dækker bredest hvis flere
-        if t not in out:
-            out[t] = p
+        out.setdefault(pr[0], []).append(p)
     return out
 
 
@@ -109,26 +118,43 @@ def _find_col(headers, *names):
     return None
 
 
-def load_daily_bars(path: Path) -> dict[date_cls, dict]:
-    """1-min CSV → {date: {open,high,low,close,volume}} (RTH-dags-aggregat)."""
-    rows_by_date: dict[str, list] = defaultdict(list)
-    with path.open(newline="") as f:
-        rdr = csv.DictReader(f)
-        if not rdr.fieldnames:
-            return {}
-        tcol = _find_col(rdr.fieldnames, "timestamp", "date", "datetime", "time")
-        ocol = _find_col(rdr.fieldnames, "open")
-        hcol = _find_col(rdr.fieldnames, "high")
-        lcol = _find_col(rdr.fieldnames, "low")
-        ccol = _find_col(rdr.fieldnames, "close")
-        vcol = _find_col(rdr.fieldnames, "volume", "vol")
-        if not all([tcol, ocol, hcol, lcol, ccol]):
-            return {}
-        for r in rdr:
-            ts = (r.get(tcol) or "").strip()
-            if len(ts) < 10:
+def load_daily_bars(paths) -> dict[date_cls, dict]:
+    """1-min CSV'er → {date: {open,high,low,close,volume}} (RTH-dags-aggregat).
+
+    Tager én sti eller en liste. Filer for samme ticker overlapper hinanden i tid,
+    saa raekkerne de-dubleres paa timestamp foer aggregering — ellers ville
+    dagsvolumen blive talt dobbelt paa overlaps-dagene.
+    """
+    if isinstance(paths, Path):
+        paths = [paths]
+    rows_by_ts: dict[str, dict] = {}
+    for path in paths:
+        with path.open(newline="") as f:
+            rdr = csv.DictReader(f)
+            if not rdr.fieldnames:
                 continue
-            rows_by_date[ts[:10]].append((ts, r))
+            tcol = _find_col(rdr.fieldnames, "timestamp", "date", "datetime", "time")
+            ocol = _find_col(rdr.fieldnames, "open")
+            hcol = _find_col(rdr.fieldnames, "high")
+            lcol = _find_col(rdr.fieldnames, "low")
+            ccol = _find_col(rdr.fieldnames, "close")
+            vcol = _find_col(rdr.fieldnames, "volume", "vol")
+            if not all([tcol, ocol, hcol, lcol, ccol]):
+                continue
+            for r in rdr:
+                ts = (r.get(tcol) or "").strip()
+                if len(ts) < 10:
+                    continue
+                rows_by_ts[ts] = {"open": r.get(ocol), "high": r.get(hcol),
+                                  "low": r.get(lcol), "close": r.get(ccol),
+                                  "volume": r.get(vcol) if vcol else None}
+    if not rows_by_ts:
+        return {}
+    ocol, hcol, lcol, ccol, vcol = "open", "high", "low", "close", "volume"
+
+    rows_by_date: dict[str, list] = defaultdict(list)
+    for ts, r in rows_by_ts.items():
+        rows_by_date[ts[:10]].append((ts, r))
 
     daily: dict[date_cls, dict] = {}
     for dstr, rows in rows_by_date.items():
@@ -271,9 +297,9 @@ def main() -> int:
              liq_lookback=args.liq_lookback, min_history=args.min_history,
              perf_w_min=args.perf_w_min, perf_w_days=args.perf_w_days)
 
-    files = cached_tickers(cache_dir, start, end)
+    files = cached_tickers(cache_dir)
     if not files:
-        print(f"Ingen periode-cache-filer i {cache_dir} der overlapper {start}..{end}.")
+        print(f"Ingen periode-cache-filer i {cache_dir}.")
         return 1
 
     pool = read_pool(args)
@@ -296,8 +322,8 @@ def main() -> int:
 
     print(f"Indlæser {len(files)} tickere fra {cache_dir} ...")
     tickers_daily: dict[str, dict] = {}
-    for t, path in sorted(files.items()):
-        daily = load_daily_bars(path)
+    for t, paths in sorted(files.items()):
+        daily = load_daily_bars(paths)
         if daily:
             tickers_daily[t] = daily
     print(f"  {len(tickers_daily)} tickere med brugbare daglige bars.\n")

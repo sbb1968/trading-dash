@@ -26,25 +26,42 @@ Setup detekteres på hver færdig 1-min bar i et glidende vindue (`LOOKBACK = 20
 |---|---|---|
 | **Impuls** | Run-up i vinduet: `(ref_high − ref_low) / ref_low ≥ MIN_RUNUP_PCT` | `MIN_RUNUP_PCT = 3.0 %` |
 | **Dip** | `bar.low ≤ ref_high × (1 − DIP_PCT/100)` | `DIP_PCT = 1.5 %` |
-| **Bounce** | `close > forrige close` **og** `close > open` **og** `volume ≥ BOUNCE_VOL_MULT × snit(20 foregående bars)` → entry på bounce-barens `close` | `BOUNCE_REQUIRE_GREEN = True`, `BOUNCE_VOL_MULT = 1.5`, `BOUNCE_VOL_LEN = 20` |
+| **Bounce** | `close > forrige close` **og** `close > open` **og** `volume ≥ BOUNCE_VOL_MULT × snit(20 foregående bars)` → entry på bounce-barens `close` | `BOUNCE_REQUIRE_GREEN = True`, `BOUNCE_VOL_MULT = 2.5`, `BOUNCE_VOL_LEN = 20` |
 
 - **Entry-pris** = `bar.close` (færdig bar).
 - **Bounce-kravet er skærpet 3/8-2026 (revision 1).** Tidligere var kravet alene
-  `close > forrige close` — ét grønt tick. Bounce-sweep på et rekonstrueret univers
-  der matcher live-screeneren (inkl. `Perf 1W ≥ 6 %`) viste at det krav ikke bærer
-  ved realistisk slippage: PF 0,86 (april-26) / 1,04 (maj-26) ved 2 ¢. Volumen-
-  bekræftelsen er det eneste af 11 testede bounce-filtre der er positivt i **begge**
-  måneder: 1,05 / 1,18 ved 1,5× og 1,04 / 1,53 ved 2,0×. 1,5× er valgt — praktisk
-  uafgjort i april, mindre værste-fald (−7,5 % mod −8,8 %), mindre afhængig af
-  én god måned. Antallet af setups falder **ikke** af filteret (n = 157/171 uanset);
-  det udskyder blot entry til volumen bekræfter, hvilket giver en bedre entry-pris.
-  Dip-state bevares mens der ventes, så et setup aldrig kasseres af filteret.
+  `close > forrige close` — ét grønt tick, uden krav om at nogen faktisk købte.
+  Målt på et rekonstrueret univers der matcher live-screeneren (inkl. `Perf 1W ≥ 6 %`),
+  tre måneder, target 2R, 2 ¢ slippage:
+
+  | bounce-krav | april | maj | juni | poolet (451 handler) |
+  |---|---|---|---|---|
+  | original | 0,86 | 1,04 | 0,70 | **0,89** — taber penge |
+  | + grøn + vol 1,5× | 1,05 | 1,18 | 0,80 | 1,03 |
+  | + grøn + vol 2,0× | 1,04 | 1,53 | 0,84 | 1,15 |
+  | + grøn + vol 2,25× | 0,95 | 1,77 | 1,02 | 1,24 |
+  | **+ grøn + vol 2,5×** | **1,03** | **1,65** | **1,04** | **1,24** ← valgt |
+  | + grøn + vol 2,75× | 1,01 | 1,82 | 1,11 | 1,29 |
+  | + grøn + vol 3,0× | 1,02 | 1,92 | 0,87 | 1,23 |
+
+  Kravet er et bredt **plateau** fra 2,25× til 3,0× — ikke en spids — hvilket taler
+  for at effekten er ægte. 2,5× er valgt som plateauets **midte** frem for toppen
+  (2,75×): forskellen er støj, og at vælge sweepets maksimum er præcis den måde man
+  overfitter på. 2,5× og 2,75× er de eneste to varianter over 1,0 i alle tre måneder.
+  Filteret fjerner næsten ingen setups (n = 451 → 444); det udskyder entry til volumen
+  bekræfter. Dip-state bevares imens, så et setup aldrig kasseres (test A7).
+- **Kanten er tynd og hviler på maj.** April 1,03 og juni 1,04 er praktisk talt nul,
+  og ved 3 ¢ slippage falder april til 0,89. Ingen af de øvrige 10 testede
+  bounce-filtre (close-position, reclaim-andel, to grønne bars) er positive i alle
+  tre måneder overhovedet.
 - **Backtestens forbehold:** universet er rekonstrueret point-in-time fra daglige bars
   (`reconstruct_midcap_universe.py --perf-w-min 6.0`) ud fra en fast pulje på 98 navne.
   Pris/volumen/Perf 1W er eksakt genskabt; TradingViews `Volatility.M` kan kun
   tilnærmes af en daglig range-proxy, og **markedsværdi kan slet ikke rekonstrueres**
   uden historiske fundamentals. Stikprøve på det gamle univers: 84 % af navnene lå
   inden for det nye market cap-filter (300 mio.–10 mia.), median $7,5 mia.
+  Marts-26 kan ikke bruges: cachen starter 2. marts, og `min_history = 20` gør den
+  første udvælgelsesdag til ~30. marts.
 - **dip_low** = laveste low i vinduet → bruges som stop.
 - **Side:** altid `long`.
 - **Entry-vindue:** kun `SESSION_START (09:30) … OPEN_UNTIL_ET (12:00)` ET. Ingen nye

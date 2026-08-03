@@ -86,24 +86,36 @@ MIN_RUNUP_PCT = 3.0    # impuls: (ref_high−ref_low)/ref_low ≥ dette
 DIP_PCT   = 1.5    # dip: bar.low ≤ ref_high·(1−dette/100)
 
 # Bounce-bekraeftelse (revision 1, 3/8-2026). Det oprindelige krav var alene
-# "close > forrige close" — altsaa ét grønt tick. Bounce-sweep paa et univers
-# der matcher live-screeneren (Perf 1W ≥ 6 %) viste at det krav er utilstraekkeligt:
+# "close > forrige close" — ét grønt tick, uden krav om at nogen faktisk koebte.
 #
-#   bounce-krav          april PF        maj PF      (2 cent slippage, target 2R)
-#   ------------------   ---------       ---------
-#   original             0,86            1,04
-#   + groen bar          0,95 (1 cent)   1,17 (1 cent)
-#   + groen + vol 1,5x   1,05            1,18     <- valgt
-#   + groen + vol 2,0x   1,04            1,53
-#   + groen + reclaim50  1,02            1,34
+# Maalt paa et rekonstrueret univers der matcher live-screeneren (Perf 1W >= 6 %),
+# tre maaneder, target 2R, 2 cent slippage. PF pr. maaned + poolet:
 #
-# Volumen er det eneste filter der er positivt i BEGGE maaneder. 1,5x foretraekkes
-# frem for 2,0x: praktisk uafgjort i april, men mindre vaerste-fald (−7,5 % mod
-# −8,8 %) og mindre afhaengig af én god maaned. Antal setups falder IKKE af
-# filteret (n = 157/171 uanset) — det UDSKYDER blot entry til volumen bekraefter,
-# hvilket giver en bedre entry-pris.
+#   bounce-krav        april    maj   juni  |  poolet PF (451 handler)
+#   ----------------   -----   ----   ----  |  ----------
+#   original            0,86   1,04   0,70  |     0,89    <- taber penge
+#   + groen + vol 1,5x  1,05   1,18   0,80  |     1,03
+#   + groen + vol 2,0x  1,04   1,53   0,84  |     1,15
+#   + groen + vol 2,25x 0,95   1,77   1,02  |     1,24
+#   + groen + vol 2,5x  1,03   1,65   1,04  |     1,24   <- valgt
+#   + groen + vol 2,75x 1,01   1,82   1,11  |     1,29
+#   + groen + vol 3,0x  1,02   1,92   0,87  |     1,23
+#
+# Kravet er et bredt PLATEAU fra 2,25x til 3,0x — ikke en spids — hvilket taler
+# for at effekten er aegte og ikke tilpasset ét tal. 2,5x er valgt som plateauets
+# MIDTE frem for toppen (2,75x); forskellen mellem de to er stoej, og at vaelge
+# sweepets maksimum er praecis den maade man overfitter paa. 2,5x og 2,75x er de
+# eneste to varianter der er over 1,0 i ALLE tre maaneder.
+#
+# Filteret fjerner naesten ingen setups (n = 451 -> 444) — det UDSKYDER entry til
+# volumen bekraefter, hvilket giver en bedre entry-pris. Dip-state bevares imens,
+# saa et setup aldrig kasseres af filteret (test A7).
+#
+# ADVARSEL: kanten er tynd og hviler paa maj. April 1,03 og juni 1,04 er
+# praktisk talt nul, og ved 3 cent slippage falder april til 0,89. Det er nok
+# til at fortsaette paa paper — ikke i naerheden af nok til rigtige penge.
 BOUNCE_REQUIRE_GREEN = True    # bounce-baren skal lukke over sin egen open
-BOUNCE_VOL_MULT      = 1.5     # og have ≥ dette × snit-volumen. 0/None = fra
+BOUNCE_VOL_MULT      = 2.5     # og have ≥ dette × snit-volumen. 0/None = fra
 BOUNCE_VOL_LEN       = 20      # antal forudgaaende bars i volumen-snittet
 # Target er R-BASERET fra 3/8-2026 (revision 1). Var faste +2,0 % af entry.
 #

@@ -200,7 +200,7 @@ def section_A():
 
     # A4: GRØN bar m. volumen → SETUP med korrekte værdier
     green = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9,  # close > forrige (101.2)
-               v=20000)                                                    # 2× snit
+               v=30000)                                                    # 3× snit
     a._bar_history["X"].append(green)
     r = a._detect("X", green)
     check("A4 grøn bar → SETUP", r is not None)
@@ -219,15 +219,15 @@ def section_A():
     a6._detect("X", dipbar)
     a6._bar_history["X"].append(red)
     a6._detect("X", red)
-    tyndt = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9, v=10000)
+    tyndt = mk(base + timedelta(minutes=22), 101.3, 102.0, 101.25, 101.9, v=20000)
     a6._bar_history["X"].append(tyndt)
-    check("A6 grøn bounce u. volumen (1,0×) → INGEN setup",
+    check("A6 grøn bounce m. for lidt volumen (2,0×) → INGEN setup",
           a6._detect("X", tyndt) is None)
 
     # A7: dip-state OVERLEVER en afvist bounce — den venter bare paa naeste bar
     # med volumen. Ellers ville filteret smide setuppet vaek i stedet for at udskyde det.
     check("A7 dip-state bevaret efter afvist bounce", "X" in a6._dip_state)
-    sen = mk(base + timedelta(minutes=23), 101.85, 102.4, 101.8, 102.3, v=20000)
+    sen = mk(base + timedelta(minutes=23), 101.85, 102.4, 101.8, 102.3, v=30000)
     a6._bar_history["X"].append(sen)
     r7 = a6._detect("X", sen)
     check("A7 senere bar MED volumen → setup", r7 is not None)
@@ -266,7 +266,7 @@ def _ready_setup(a, sym, base, dip_low, ref_high):
     a._dip_state[sym] = {"dip_low": dip_low, "ref_high": ref_high, "dip_depth": depth}
     hist = runup_hist(sym, base, n=btd.LOOKBACK)          # 20 bars
     green = mk(base + timedelta(minutes=btd.LOOKBACK),    # close > forrige bar → bounce
-               103.9, 104.2, 103.8, 104.1, v=20000)       # 2× snit → volumen-gaten aabner
+               103.9, 104.2, 103.8, 104.1, v=30000)       # 3× snit → volumen-gaten aabner
     a._bar_history[sym] = hist + [green]
     return a._detect(sym, green)
 

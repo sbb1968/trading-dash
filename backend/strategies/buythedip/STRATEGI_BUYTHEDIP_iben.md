@@ -30,7 +30,7 @@ Setuppet aflæses på færdige 1-minuts candles i tre trin:
    vi vil købe.
 3. **Bounce** — når faldet vender, køber strategien ved bounce-candlens lukkekurs.
    Men det er ikke nok at prisen bare tikker op: candlen skal også *lukke grønt*
-   (over sin egen åbning) og handles på **mindst halvanden gang så meget volumen**
+   (over sin egen åbning) og handles på **mindst to en halv gang så meget volumen**
    som de foregående 20 minutter. Uden det volumen-krav er der ingen rigtige købere
    bag vendingen — bare støj. Findes volumen ikke på den første candle, kasseres
    opsætningen ikke; strategien venter blot på den candle hvor volumen dukker op.
@@ -69,12 +69,23 @@ samme tabsdage. Sizing-tallene (100 dollar risiko / 1.000 dollar notionel) er
 deploy-valg der finjusteres på paper, ikke tal fra backtesten (som var procent-baseret).
 
 Ved revisionen i august 2026 testede vi elleve forskellige måder at afgøre om et dyk
-er vendt. Kun volumen-kravet virkede, og det virkede i begge de måneder vi testede —
-alle de andre (grøn candle alene, hvor højt i candlen der lukkes, hvor meget af
-dykket der er vundet tilbage, to grønne candles i træk) faldt fra hinanden i den ene
-eller den anden måned. Kanten er ægte, men **tynd**: omkring 5 % overskud per
-risikeret krone i den svageste af de to måneder. Det er nok til at fortsætte på
-paper — ikke i nærheden af nok til rigtige penge.
+er vendt, over tre måneder. Kun volumen-kravet virkede. Alle de andre (grøn candle
+alene, hvor højt i candlen der lukkes, hvor meget af dykket der er vundet tilbage, to
+grønne candles i træk) tabte penge i mindst én af månederne.
+
+Og der er to ting man skal vide om det resultat:
+
+**Det oprindelige krav tabte penge.** Sådan som strategien var sat op indtil nu —
+hvor det var nok at prisen tikkede op — ville den have tabt over de tre måneder,
+når man regner handelsomkostninger med. Det var ikke et lille problem vi rettede;
+det var forskellen på at tabe og ikke at tabe.
+
+**Kanten er tynd, og den hviler på én måned.** Med volumen-kravet er resultatet
+omkring 24 % overskud per risikeret krone samlet — men det tal kommer næsten helt
+fra maj. April og juni ligger begge omkring nul (3-4 %), og bliver
+handelsomkostningerne bare lidt større, går april i minus. Vi ved altså at
+volumen-kravet gør strategien *bedre*, men vi ved ikke om den er *god*. Det kræver
+flere måneders paper-handel at afgøre. Rigtige penge er ikke på tale.
 
 Strategien kører **udelukkende paper trading** (Ibens konto). På handelsserveren
 starter den **automatisk** kort før den amerikanske børsåbning; på Sørens egen maskine
