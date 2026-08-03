@@ -51,7 +51,19 @@ FORCE_CLOSE_ET = dtime(15, 55)   # tvangsluk-backstop før 16:00-lukning
 LOOKBACK      = 20
 MIN_RUNUP_PCT = 3.0    # impuls: (ref_high−ref_low)/ref_low ≥ dette
 DIP_PCT   = 1.5    # dip: bar.low ≤ ref_high·(1−dette/100)
-TARGET_PCT    = 2.0    # target = entry × (1 + dette/100)
+# Target er R-BASERET fra 3/8-2026 (revision 1). Var faste +2,0 % af entry.
+#
+# Problemet med en fast procent er at stoppet IKKE er fast: det er dip_low raat,
+# uden ATR-gulv, saa afstanden svinger vildt. I juli 2026:
+#     UMC   stop 0,10 % under entry  ->  risiko 0,10 % for 2,0 %  =  1:20
+#     RIVN  stop 3,10 % under entry  ->  risiko 3,10 % for 2,0 %  =  1:0,6
+# Med 17 % win rate er RIVN-forholdet matematisk haabloest. Og et mere volatilt
+# univers (se ovenfor) goer dykkene dybere — altsaa forholdet endnu skaevere.
+#
+# target = entry + TARGET_R × R,  hvor R = entry − dip_low.
+# Saa foelger gevinstmaalet med stoppet, og forholdet er ENS paa tvaers af
+# handler uanset hvor dybt dykket var.
+TARGET_R      = 2.0    # target = entry + dette × R
 
 # ── Sizing (DEPLOY-valg — backtesten var %-baseret; TUN på paper) ──
 RISK_BUDGET_USD  = 100.0    # risiko (entry−stop) pr. handel
@@ -69,13 +81,36 @@ RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før
 #    egne parametre, eget scan, INTET forbrug af K2's publicerede univers. Total
 #    strategi-adskillelse (på nær globalt tabsmax). Tuner du her, rører det ikke K2.
 #    Værdierne spejler p.t. K2's, men er BuyTheDips egne at justere uafhængigt. ──
+# OMLAGT 3/8-2026 (revision 1), samme retning som K2 fik 1/8. Eksekveringen er
+# uaendret paa naer target'et (se TARGET_R); det var universet der sultede den.
+#
+#   market cap   $5B-$1T  ->  $300M-$10B    large cap -> small/mid cap
+#   ATR%(1W) >5  fjernet                    erstattet af de to nedenfor
+#   Volatility 1M         NY   5-50 %       maanedens udsving
+#   Perf 1W               NY   > 6 %        dyk i en OPTREND, ikke i et frit fald
+#
+# BEGRUNDELSEN er staerkere for BuyTheDip end for K2. Strategien kraever en
+# 3 %-bevaegelse inden for 20 minutter — det sker sjaeldent i et $5 mia.-navn, og
+# juli viste konsekvensen: 29 handler paa en hel maaned mod backtestens 299.
+# Og Perf 1W > 6 % er selve definitionen paa "koeb dykket": et dyk i en optrend.
+# Uden det koeber man lige saa gerne et dyk i et frit fald.
+#
+# Backtesten (washout_reclaim_output, maj 2026, samme regel) peger samme vej:
+#   bredt univers     n=1587  WR 57%  snit +0,278%  PF 1,40
+#   midcap, volatilt  n= 299  WR 52%  snit +0,378%  PF 1,75
+# Faerre men bedre handler. Win rate falder, gennemsnittet pr. handel stiger.
+#
+# BEMAERK at boerser og type IKKE er aendret her (K2 fik 2 boerser og kun 'stock').
+# Soeren bad om de to filter-aendringer, ikke om de oevrige — de staar aabne.
 UNIVERSE_TOP_N        = 25
 UNIVERSE_PRICE_MIN    = 5.0
 UNIVERSE_PRICE_MAX    = 50.0
-UNIVERSE_MKT_CAP_MIN  = 5_000_000_000        # 5 B
-UNIVERSE_MKT_CAP_MAX  = 1_000_000_000_000    # 1 T
+UNIVERSE_MKT_CAP_MIN  = 300_000_000          # 300 M — small cap-gulvet
+UNIVERSE_MKT_CAP_MAX  = 10_000_000_000       # 10 B — mid cap-loftet
 UNIVERSE_MIN_VOLUME   = 500_000              # 30-dages gennemsnitsvolumen
-UNIVERSE_ATR_PCT_MIN  = 5.0                  # ATR(14) 1W > 5%
+UNIVERSE_VOL_M_MIN    = 5.0                  # Volatility 1M, nedre (%)
+UNIVERSE_VOL_M_MAX    = 50.0                 # Volatility 1M, oevre (%)
+UNIVERSE_PERF_W_MIN   = 6.0                  # Perf 1W > 6 %
 UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE", "AMEX", "CBOE"]  # AMEX = TV's "NYSE Arca"
 MIN_UNIVERSE_SIZE     = 3                    # færre end dette → fallback/advarsel
 SCAN_TIMEOUT_SEC      = 15                   # TV-screener timeout pr. forsøg
@@ -424,8 +459,12 @@ class BuyTheDipLive(BaseStrategy):
                 "rows":       getattr(self, "_last_scan_rows", []),
                 "filters":    {
                     "mkt_cap_min": UNIVERSE_MKT_CAP_MIN,
+                    "mkt_cap_max": UNIVERSE_MKT_CAP_MAX,
                     "min_avg_vol": UNIVERSE_MIN_VOLUME,
-                    "atrp_1w_min": UNIVERSE_ATR_PCT_MIN,
+                    "exchanges":   UNIVERSE_EXCHANGES,
+                    "vol_m_min":   UNIVERSE_VOL_M_MIN,
+                    "vol_m_max":   UNIVERSE_VOL_M_MAX,
+                    "perf_w_min":  UNIVERSE_PERF_W_MIN,
                 },
             },
         )
@@ -445,7 +484,10 @@ class BuyTheDipLive(BaseStrategy):
             mkt_cap_min = UNIVERSE_MKT_CAP_MIN,
             mkt_cap_max = UNIVERSE_MKT_CAP_MAX,
             min_avg_vol = UNIVERSE_MIN_VOLUME,
-            atr_pct_min = UNIVERSE_ATR_PCT_MIN,
+            # atr_pct_min sendes IKKE laengere — ATR%(1W)-filteret er erstattet.
+            vol_m_min   = UNIVERSE_VOL_M_MIN,
+            vol_m_max   = UNIVERSE_VOL_M_MAX,
+            perf_w_min  = UNIVERSE_PERF_W_MIN,
             exchanges   = UNIVERSE_EXCHANGES,
             timeout     = SCAN_TIMEOUT_SEC,
             log_tag     = "BuyTheDip",
@@ -660,7 +702,19 @@ class BuyTheDipLive(BaseStrategy):
         fill = result.get("avg_fill")
         if fill and fill > 0:
             entry = fill
-        target = entry * (1 + TARGET_PCT / 100.0)
+        # R genberegnes med den FAKTISKE fyldpris. risk_per_share ovenfor blev
+        # udregnet paa bar.close (foer ordren) og bruges kun til sizing; target'et
+        # skal afspejle den risiko vi rent faktisk loeb.
+        R = entry - stop
+        if R <= 0:
+            # Fyldte vi under dip_low, er der ingen risiko at gange op. Falder
+            # tilbage paa det gamle faste target frem for at saette et meningsloest.
+            target = entry * 1.02
+            await self._log(
+                f"⚠ {ticker}: fyld ${entry:.2f} paa/under stop ${stop:.2f} — "
+                f"R er ikke positiv, bruger fast +2 % target", level="warning")
+        else:
+            target = entry + TARGET_R * R
         entry_time = datetime.now(ET)
 
         # OrdersTracker

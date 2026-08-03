@@ -143,6 +143,14 @@ def make_algo(conn, journal, max_open=3):
     async def _log(m, level="info"):
         return None
     a._log = _log
+    # Pin risiko-inputtet. Uden dette laeser _resolve_risk risk_config.py, som er
+    # PR. KONTO og aendrer sig naar Soeren justerer i Konfiguratoren — og saa skifter
+    # de forventede antal i sektion C. Det skete 15/7-2026 (c532414), hvor
+    # position_size/notional_cap gik til $250; C1-C3 har fejlet siden, uden at der
+    # var noget galt med strategien. None her betyder at _open falder tilbage paa
+    # modulets egne konstanter (RISK_BUDGET_USD=100, NOTIONAL_CAP_USD=1000), som er
+    # dem testens tal er skrevet imod.
+    a._resolve_risk = lambda key: None
     return a
 
 
@@ -296,6 +304,37 @@ def section_C():
           pos and pos["shares"])
 
 
+# ── C2 — target (R-baseret, revision 1 den 3/8-2026) ───────────
+def section_C_target():
+    print("\nSektion C2 — target = entry + TARGET_R x R")
+    import algo_buythedip as m
+
+    # Dybt dyk: entry 100, stop 96 -> R=4 -> target 108 (ikke 102 som fast +2%)
+    a, _ = _open_with(100.0, 96.0)
+    pos = a._positions.get("S")
+    check("C2a dybt dyk (R=4) -> target 108",
+          pos and abs(pos["target"] - 108.0) < 1e-9, pos and pos.get("target"))
+
+    # Lavt dyk: entry 100, stop 99.5 -> R=0.5 -> target 101 (ikke 102)
+    a, _ = _open_with(100.0, 99.5)
+    pos = a._positions.get("S")
+    check("C2b lavt dyk (R=0,5) -> target 101",
+          pos and abs(pos["target"] - 101.0) < 1e-9, pos and pos.get("target"))
+
+    # KERNEN i aendringen: forholdet risiko:gevinst er ENS uanset dybden. Med det
+    # gamle faste +2 %-target var det 1:0,5 ved et 4 %-dyk og 1:4 ved et 0,5 %-dyk.
+    for entry, stop in ((100.0, 96.0), (100.0, 99.5), (50.0, 48.0)):
+        a, _ = _open_with(entry, stop)
+        pos = a._positions.get("S")
+        if not pos:
+            check(f"C2c forhold ved stop {stop}", False, "ingen position")
+            continue
+        R = pos["entry_price"] - pos["stop"]
+        forhold = (pos["target"] - pos["entry_price"]) / R if R > 0 else 0
+        check(f"C2c entry {entry}/stop {stop} -> forhold {forhold:.2f}:1 (= TARGET_R)",
+              abs(forhold - m.TARGET_R) < 1e-9, forhold)
+
+
 # ── D — exit ───────────────────────────────────────────────────
 def _algo_with_pos(stop=100.0, target=104.0, entry=102.0, shares=5, order_ret=None):
     base = ET.localize(datetime(2026, 6, 16, 10, 0))
@@ -398,18 +437,38 @@ def section_F():
     o, c = asyncio.run(run_reconcile([], [{"ticker": "ZZZ", "position": 50.0}]))
     check("F2 fremmed → 0 ordrer", o == [], o)
 
-    # F3: force-close fill-verifikation — ufyldt → bevares åben, INGEN close
+    # F3: fill-verifikation ved luk. Udfaldet afhaenger nu af hvad IBKR siger —
+    # over-sell-vagten fra 31/7-2026 (48bff37). Foer blev en ubekraeftet ordre
+    # ALTID regnet for fejlet, positionen holdt aaben, og naeste bar sendte en ny
+    # SELL; fyldte den oprindelige alligevel, blev der solgt to gange.
     base = ET.localize(datetime(2026, 6, 16, 10, 0))
-    conn = MockConn(order_ret={"filled": 0, "status": "Submitted"})  # aldrig fyldt
-    a = make_algo(conn, MockJournal())
-    a._positions["S"] = {"side": "long", "entry_price": 102, "shares": 5, "stop": 100,
-                         "target": 104, "entry_time": base, "trade_id": "t1",
-                         "dip_depth": 3, "ref_high": 104, "dip_low": 100}
-    a.stats.open_positions = 1
-    a._mfe["S"] = 102; a._mae["S"] = 102
+    UNFILLED = {"filled": 0, "status": "Submitted"}
+    HOLDT = [{"ticker": "S", "position": 5.0, "avg_cost": 102.0}]
+
+    def _pos_algo(positions):
+        conn = MockConn(order_ret=UNFILLED, positions=positions)
+        a = make_algo(conn, MockJournal())
+        a._positions["S"] = {"side": "long", "entry_price": 102, "shares": 5, "stop": 100,
+                             "target": 104, "entry_time": base, "trade_id": "t1",
+                             "dip_depth": 3, "ref_high": 104, "dip_low": 100}
+        a.stats.open_positions = 1
+        a._mfe["S"] = 102; a._mae["S"] = 102
+        return a, conn
+
+    # F3a ufyldt + IBKR HOLDER stadig -> aegte ufyldt: behold + genforsoeg
+    a, conn = _pos_algo(HOLDT)
     asyncio.run(a._close("S", 100.0, "stop"))
-    check("F3 ufyldt → STADIG åben", "S" in a._positions, list(a._positions))
-    check("F3 ufyldt → INGEN log_trade_close", a._journal.closes == [], a._journal.closes)
+    check("F3a ufyldt + IBKR holder → STADIG åben", "S" in a._positions, list(a._positions))
+    check("F3a ufyldt + IBKR holder → INGEN log_trade_close",
+          a._journal.closes == [], a._journal.closes)
+
+    # F3b ufyldt + IBKR FLAD -> ordren fyldte alligevel: bogfoer, gen-afgiv ALDRIG
+    a, conn = _pos_algo([])
+    asyncio.run(a._close("S", 100.0, "stop"))
+    check("F3b ufyldt + IBKR flad → lukket (ordren fyldte alligevel)",
+          "S" not in a._positions, list(a._positions))
+    check("F3b ufyldt + IBKR flad → KUN 1 ordre (ingen over-sell)",
+          len(conn.orders) == 1, conn.orders)
 
     # F4: reconcile-close UFYLDT (ghost-match men lukke-ordren fylder ikke) → SELL
     #     forsøgt, men INGEN reconcile_flatten (journal-row forbliver åben). Lås for
@@ -497,6 +556,7 @@ if __name__ == "__main__":
     section_A()
     section_B()
     section_C()
+    section_C_target()
     section_D()
     section_E()
     section_F()
