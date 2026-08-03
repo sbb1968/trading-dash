@@ -641,6 +641,7 @@ class IBKRConnection:
         source:         str   = "",
         await_fill_sec: float = 0,
         order_ref:      Optional[str] = None,
+        tif:            Optional[str] = None,   # "DAY"/"GTC"/... None = TWS' eget preset
     ) -> Optional[dict]:
         """Sender en ordre til paper trading kontoen.
 
@@ -667,6 +668,13 @@ class IBKRConnection:
             _ref = order_ref or source
             if _ref:
                 order.orderRef = _ref
+            # Eksplicit TIF slaar TWS' order preset. Uden den kan et preset tvinge
+            # TIF til GTC — og en MARKEDSORDRE med GTC er ugyldig hos IBKR (den skal
+            # jo fylde straks), saa ordren annulleres med fejl 10349. Det ramte
+            # oprydningen 3/8-2026: alle otte ordrer Cancelled uden en eneste fill.
+            # None = roer den ikke (uaendret adfaerd for alle strategier).
+            if tif:
+                order.tif = tif
             trade = self.ib.placeOrder(contract, order)
 
             # await_fill_sec=0 (default): bevarer hidtidig adfærd — vent 1 sek

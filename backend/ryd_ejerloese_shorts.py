@@ -144,6 +144,7 @@ async def run(execute: bool, force: bool, db_path: str) -> int:
 
         print("\n  Sender daekningsordrer ...")
         sent = 0
+        doede = 0
         for p in orphans:
             sym = p["ticker"]
             qty = abs(int(p["position"]))
@@ -152,8 +153,12 @@ async def run(execute: bool, force: bool, db_path: str) -> int:
                 # await_fill_sec=0: vi VENTER ikke og gen-afgiver ALDRIG. Det var
                 # netop gen-afgivelsen paa en ubekraeftet ordre der skabte disse
                 # positioner. Én ordre pr. symbol, punktum.
+                #
+                # tif="DAY" er IKKE valgfrit. Uden den tvang TWS' order preset
+                # TIF til GTC, og en MARKEDSORDRE med GTC er ugyldig hos IBKR —
+                # alle otte ordrer blev annulleret med fejl 10349 (3/8-2026).
                 res = await conn.place_paper_order(
-                    sym, "BUY", qty, source="cleanup", order_ref=ref)
+                    sym, "BUY", qty, source="cleanup", order_ref=ref, tif="DAY")
             except Exception as e:
                 print(f"    ❌ {sym}: undtagelse — {e}")
                 continue
@@ -162,18 +167,31 @@ async def run(execute: bool, force: bool, db_path: str) -> int:
                 print(f"    ❌ {sym}: ordren kunne IKKE sendes")
                 continue
 
-            sent += 1
+            status = str(res.get("status") or "")
             why = res.get("reject_reason")
-            print(f"    ✅ {sym}: BUY {qty} sendt  (id={res.get('order_id')}, "
-                  f"status={res.get('status')}, filled={res.get('filled')})"
+            # En ordre der er annulleret eller afvist er IKKE afgivet. Foer
+            # rapporterede scriptet "sendt" alene fordi der kom et svar tilbage —
+            # og pyntede dermed over otte annullerede ordrer.
+            if status in ("Cancelled", "ApiCancelled", "Inactive"):
+                doede += 1
+                print(f"    ❌ {sym}: ordren blev {status} — INGEN daekning"
+                      + (f"  ({why})" if why else ""))
+                continue
+
+            sent += 1
+            print(f"    ✅ {sym}: BUY {qty} afgivet  (id={res.get('order_id')}, "
+                  f"status={status or '?'}, filled={res.get('filled')})"
                   + (f"  IBKR: {why}" if why else ""))
 
-        print(f"\n  {sent}/{len(orphans)} ordrer afgivet.")
-        print("  Er markedet lukket, staar de som Inactive/PreSubmitted til "
-              "aabningen mandag — det er forventet.")
-        print("  VERIFICÉR MANDAG at kontoen er flad paa disse symboler, og "
-              "slet derefter dette script.")
-        return 0
+        print(f"\n  {sent}/{len(orphans)} ordrer lever · {doede} annulleret/afvist.")
+        if doede:
+            print("  ⚠ De annullerede daekker INTET. Se fejlkoden ovenfor.")
+        if sent:
+            print("  Er markedet lukket, staar de levende som PreSubmitted til "
+                  "aabningen — det er forventet.")
+        print("  VERIFICÉR at kontoen er flad paa disse symboler, og slet "
+              "derefter dette script.")
+        return 0 if not doede else 1
     finally:
         conn.disconnect()
 
