@@ -158,6 +158,7 @@ UNIVERSE_EXCHANGES    = ["NASDAQ", "NYSE"]   # AMEX + CBOE fjernet 3/8 — ens m
 # en 3 %-impuls OG et efterfoelgende dyk. Volatilitet siger noget om hvad navnet
 # PLEJER at goere; dagsaendring kun hvad det allerede har gjort.
 UNIVERSE_ORDER_BY     = "Volatility.M"
+UNIVERSE_TYPES        = ["stock"]            # ingen depotbeviser ('dr') — ens med K2
 MIN_UNIVERSE_SIZE     = 3                    # færre end dette → fallback/advarsel
 SCAN_TIMEOUT_SEC      = 15                   # TV-screener timeout pr. forsøg
 FALLBACK_UNIVERSE: list[str] = []            # tom = ingen handel hvis scan fejler
@@ -511,6 +512,7 @@ class BuyTheDipLive(BaseStrategy):
                     "vol_m_min":   UNIVERSE_VOL_M_MIN,
                     "vol_m_max":   UNIVERSE_VOL_M_MAX,
                     "perf_w_min":  UNIVERSE_PERF_W_MIN,
+                    "types":       UNIVERSE_TYPES,
                     "order_by":    UNIVERSE_ORDER_BY,
                 },
             },
@@ -535,6 +537,7 @@ class BuyTheDipLive(BaseStrategy):
             vol_m_min   = UNIVERSE_VOL_M_MIN,
             vol_m_max   = UNIVERSE_VOL_M_MAX,
             perf_w_min  = UNIVERSE_PERF_W_MIN,
+            types       = UNIVERSE_TYPES,
             order_by    = UNIVERSE_ORDER_BY,
             exchanges   = UNIVERSE_EXCHANGES,
             timeout     = SCAN_TIMEOUT_SEC,
