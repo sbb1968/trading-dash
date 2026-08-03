@@ -19,6 +19,7 @@ Sentiment-heuristik:
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable
 import aiohttp
@@ -42,28 +43,94 @@ COMPANY_TICKERS = [
 ]
 
 # Heuristik for sentiment baseret på keywords
+# Udvidet 3/8-2026. Den oprindelige liste var skrevet til mega-cap-nyheder
+# ("beats", "upgrade", "buyback") og ramte naesten aldrig de katalysatorer der
+# faktisk driver de micro/small-cap-gappere Trend Join Long jagter — hvor
+# nyheden typisk er en FDA-clearance, en kontrakt-tildeling eller en
+# fase-3-aflaesning. "NuWellis Announces FDA Clearance of Aquadex" scorede
+# neutralt, fordi "clearance" ikke stod paa listen.
+#
+# Bearish-siden er udvidet med det micro-caps oftest gapper paa i den DAARLIGE
+# retning: kapitaludvidelse. En "public offering"/"pricing of" er praecis den
+# slags gap der fader — som er hele begrundelsen for at kraeve en katalysator.
 BULLISH_WORDS = [
-    "beats", "beat", "surge", "surges", "soars", "soared", "rally", "rallies",
-    "upgrade", "upgraded", "buy rating", "raises guidance", "record high",
-    "outperform", "approval", "approved", "wins", "won", "contract",
-    "partnership", "acquires", "acquired", "buyback", "dividend increase",
-    "breakthrough", "exceeds", "exceeded", "strong", "growth",
+    # regulatorisk / biotek
+    "approval", "approved", "approves", "clearance", "cleared", "clears",
+    "breakthrough", "fast track", "orphan drug", "priority review",
+    "designation", "granted", "grants", "patent",
+    "positive results", "positive data", "positive topline", "topline",
+    "primary endpoint", "met endpoint", "successful trial",
+    # aftaler / selskabshandlinger
+    "acquires", "acquired", "acquisition", "merger", "merges", "takeover",
+    "buyout", "tender offer", "partnership", "partners", "collaboration",
+    "agreement", "signs", "signed", "secures", "secured",
+    "contract", "award", "awards", "awarded", "wins", "selected",
+    "investment", "funding", "milestone", "stake",
+    # regnskab / guidance
+    "beat", "beats", "exceeds", "exceeded", "tops", "surpasses",
+    "raises guidance", "raises outlook", "raises forecast",
+    "upgrade", "upgraded", "buy rating", "outperform",
+    "record high", "record revenue", "record quarter",
+    "strong", "growth", "profitable", "profitability",
+    # kapitalretur / notering
+    "buyback", "repurchase", "dividend increase", "authorization", "authorized",
+    "uplisting", "uplists", "index inclusion",
+    # produkt / momentum
+    "launch", "launches", "unveils", "expands", "expansion",
+    "surge", "surges", "soars", "soared", "rally", "rallies", "jumps", "spikes",
 ]
 BEARISH_WORDS = [
-    "miss", "misses", "missed", "plunge", "plunges", "falls", "fell",
-    "downgrade", "downgraded", "sell rating", "cuts guidance", "lawsuit",
-    "underperform", "rejected", "loses", "lost", "warns", "warning",
-    "delays", "delayed", "recall", "fraud", "investigation", "probe",
-    "bankruptcy", "loss", "losses", "weak", "decline", "declined",
-    "halt", "halted", "subpoena",
+    # udvanding — den hyppigste micro-cap-gap uden reelt indhold
+    "offering", "pricing of", "priced", "dilution", "dilutive",
+    "reverse split", "reverse stock split", "at-the-market", "registered direct",
+    "warrants", "shelf registration",
+    # regnskab / guidance
+    "miss", "misses", "missed", "cuts guidance", "cuts outlook", "lowers guidance",
+    "downgrade", "downgraded", "sell rating", "underperform",
+    "weak", "decline", "declined", "loss", "losses",
+    # juridisk / regulatorisk
+    "lawsuit", "class action", "fraud", "investigation", "probe", "subpoena",
+    "rejected", "rejection", "complete response letter",
+    "delisting", "delisted", "noncompliance", "non-compliance", "deficiency",
+    "restatement",
+    # drift / selskab
+    "resigns", "resignation", "steps down", "terminates", "terminated",
+    "discontinues", "discontinued", "withdraws", "withdrawn",
+    "bankruptcy", "chapter 11", "going concern",
+    "loses", "lost", "warns", "warning", "delays", "delayed", "recall",
+    # kursbevaegelse
+    "plunge", "plunges", "falls", "fell", "drops", "sinks",
+    # ⚠ "halt"/"halted" er BEVIDST UDELADT. De stod paa den gamle bearish-liste,
+    # men en LULD-halt ledsager lige saa ofte de STOERSTE opture — praecis dem
+    # TJL jagter. Med bull > bear-reglen kunne en enkelt halt-overskrift
+    # nulstille en aegte katalysator. De nye afvisningsbeskeder viser bull/bear
+    # + overskrifterne, saa det kan afgoeres paa data hvis det bliver aktuelt.
 ]
+
+# Ordgraenser, ikke raa substring. Den gamle matcher brugte `word in lower`, saa
+# "won" ramte "Wonder Group", "beat" ramte "beaten" og "loss" ramte "Glossier".
+# Laengste foerst, saa "reverse stock split" vinder over "reverse split".
+def _byg(ord_liste):
+    return re.compile(
+        "|".join(rf"(?<!\w){re.escape(w)}(?!\w)"
+                 for w in sorted(ord_liste, key=len, reverse=True)),
+        re.IGNORECASE,
+    )
+
+
+_BULL_RE = _byg(BULLISH_WORDS)
+_BEAR_RE = _byg(BEARISH_WORDS)
 
 
 def _guess_sentiment(headline: str) -> str:
-    """Simpel keyword-baseret sentiment. Returnerer bullish/bearish/neutral."""
-    lower = headline.lower()
-    bull_hits = sum(1 for word in BULLISH_WORDS if word in lower)
-    bear_hits = sum(1 for word in BEARISH_WORDS if word in lower)
+    """Keyword-baseret sentiment paa ordgraenser. Returnerer bullish/bearish/neutral.
+
+    Taeller DISTINKTE traeftermer (ikke forekomster), saa en overskrift der
+    gentager samme ord ikke vejer tungere end én der rammer flere signaler.
+    """
+    h = headline or ""
+    bull_hits = len({m.lower() for m in _BULL_RE.findall(h)})
+    bear_hits = len({m.lower() for m in _BEAR_RE.findall(h)})
 
     if bull_hits > bear_hits:
         return "bullish"

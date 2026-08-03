@@ -211,7 +211,11 @@ async def check_positive_catalyst(
         return False, (f"tidsstempel kunne ikke laeses paa {ts_fejl}/{len(news)} "
                        f"nyheder — PARSE-FEJL, ikke datamangel"), 0.0
     if bull > 0:
-        return False, f"blandet/negativ (bull={bull} bear={bear})", 0.0
+        # Vis ogsaa overskrifterne her — ellers kan man ikke se HVILKET ord der
+        # vetoede en ellers gyldig katalysator (fx en LULD-halt eller en
+        # samtidig kapitaludvidelse).
+        smag_b = " | ".join(h[:70] for h in friske[:3])
+        return False, f"blandet/negativ (bull={bull} bear={bear}): {smag_b}", 0.0
     if not friske:
         return False, (f"{len(news)} nyheder, men ingen friskere end "
                        f"{NEWS_MAX_AGE_HOURS}t"), 0.0
