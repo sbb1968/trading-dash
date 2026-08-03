@@ -45,7 +45,21 @@ logger = logging.getLogger(__name__)
 ET            = pytz.timezone("America/New_York")
 SESSION_START = dtime(9, 30)     # US RTH-åbning
 OPEN_UNTIL_ET = dtime(10, 30)    # ingen nye entries efter dette (kun åbningen)
-FORCE_CLOSE_ET = dtime(15, 55)   # tvangsluk-backstop før 16:00-lukning
+# RYKKET 3/8-2026 (revision 1) fra 15:55 til 15:30 — en HALV time før lukningen
+# i stedet for fem minutter.
+#
+# Ved 15:55 havde force-close kun fem minutter til at lykkes. Fyldes en lukkeordre
+# ikke, genforsøger _close_all fire gange med fire sekunders mellemrum — og hvert
+# genforsøg efter 16:00 rammer et LUKKET marked, hvor en markedsordre ikke kan
+# fylde. Det er præcis den situation der efterlader en position åben til næste
+# dags reconcile, som så bogfører den som fantom med pnl = 0.
+#
+# Med 15:30 sker alle genforsøg mens markedet er åbent.
+#
+# Prisen er nul: BuyTheDip åbner kun frem til 10:30, og på tværs af HELE
+# journalens levetid er der ikke én eneste exit efter 15:30 ET. Den seneste
+# nogensinde var 14:16. Ændringen ville ikke have rørt en eneste handel.
+FORCE_CLOSE_ET = dtime(15, 30)   # tvangsluk-backstop — 30 min før 16:00-lukningen
 
 # ── Validerede strategi-parametre (june_correlation DEFAULTS) ──
 LOOKBACK      = 20
