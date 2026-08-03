@@ -23,7 +23,7 @@ start.
 - **Frisk positiv nyhedskatalysator** (via IBKR).
 - **Trigger:** prisen bryder til **ny dagshøjde over premarket-toppen**.
 
-Kun i vinduet **10:05–15:30** amerikansk tid.
+Kun i vinduet **10:05–15:00** amerikansk tid.
 
 ## Sælger når (flertrins — låser gevinst undervejs)
 
@@ -31,7 +31,7 @@ Kun i vinduet **10:05–15:30** amerikansk tid.
 - **Delvis gevinst:** sælger 1/3 ved 0,75R.
 - **Breakeven:** flytter stoppet op til købskursen ved 1,0R (kan herefter ikke tabe).
 - **Trailing:** trailer stoppet under 5-minutters swing-lavpunkter.
-- **Force-close kl. 15:51** amerikansk tid: alt lukkes, intet natten over.
+- **Force-close kl. 15:30** amerikansk tid: alt lukkes, intet natten over.
 
 ## Penge pr. handel
 

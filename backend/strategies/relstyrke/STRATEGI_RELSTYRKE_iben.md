@@ -55,7 +55,7 @@ præcis samme kurser som backtesten gjorde. Der er ingen jagt resten af dagen �
 
 ## Hvornår sælger den
 
-Positionerne holdes hele dagen og lukkes samlet ved **force-close kl. 15:51** amerikansk
+Positionerne holdes hele dagen og lukkes samlet ved **force-close kl. 15:30** amerikansk
 tid. Der er bevidst **ingen** target eller stop undervejs — det var netop den simple
 "hold-til-lukketid"-regel der virkede i valideringen, og live skal matche den. Beskyttelsen
 ligger i det daglige tabs-loft, ikke i en kurs-stop.
@@ -87,6 +87,6 @@ kort før beslutningstidspunktet, og startes manuelt på Sørens maskine.
 ## Kort sagt
 
 Relativ Styrke rangerer dagens likvide amerikanske aktier efter morgen-styrke kl. 09:45,
-køber de tre stærkeste med lige vægt, holder til lukketid og lukker alt kl. 15:51. Dens
+køber de tre stærkeste med lige vægt, holder til lukketid og lukker alt kl. 15:30. Dens
 fordel er at vælge de rigtige navne — målt som selection alpha — og den er stadig i
 paper-test-fasen.

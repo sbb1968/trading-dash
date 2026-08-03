@@ -23,7 +23,7 @@ præcis samme kurs som i backtesten.
 
 ## Sælger når
 
-- **Force-close kl. 15:51** amerikansk tid: alle positioner lukkes. Intet natten over.
+- **Force-close kl. 15:30** amerikansk tid: alle positioner lukkes. Intet natten over.
 - Ingen target eller stop undervejs — positionerne holdes hele dagen og lukkes samlet.
 
 ## Penge pr. handel

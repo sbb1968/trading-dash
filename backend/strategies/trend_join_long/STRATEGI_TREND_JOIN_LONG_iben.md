@@ -42,7 +42,8 @@ En handel kræver flere ting på plads samtidig:
 - En **frisk positiv nyhed** som katalysator.
 
 Selve entry sker når aktien laver **ny dagshøjde over premarket-toppen** — altså når
-momentum bekræftes — mellem kl. 10:05 og 15:30 amerikansk tid.
+momentum bekræftes — mellem kl. 10:05 og 15:00 amerikansk tid (rykket fra 15:30 den 3/8-2026, da
+tvangsluk kom ned paa 15:30 — ellers kunne en handel aabnes og lukkes samme minut).
 
 ## Hvornår sælger den (flertrins)
 
@@ -54,7 +55,7 @@ Trend Join Long styrer ud i flere trin, så gevinst sikres undervejs:
   længere tabe.
 - **Trailing:** derefter trailes stoppet under 5-minutters swing-lavpunkter, så gevinst
   låses mens trenden løber.
-- **Force-close:** alt lukkes senest kl. 15:51 — aldrig over natten.
+- **Force-close:** alt lukkes senest kl. 15:30 — aldrig over natten.
 
 ## Hvor mange penge per handel
 

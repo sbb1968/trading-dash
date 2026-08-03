@@ -47,8 +47,13 @@ logger = logging.getLogger(__name__)
 ET             = pytz.timezone("America/New_York")
 SESSION_START  = dtime(9, 30)     # US RTH-åbning (premarket-high låses her)
 ENTRY_EARLIEST = dtime(10, 5)     # earliest_entry_et
-ENTRY_LATEST   = dtime(15, 30)    # latest_entry_et — ingen nye entries efter
-FORCE_CLOSE_ET = dtime(15, 51)    # force_close_et — holder ALDRIG over natten
+ENTRY_LATEST   = dtime(15, 0)     # latest_entry_et — ingen nye entries efter
+FORCE_CLOSE_ET = dtime(15, 30)    # tvangsluk — 30 min foer 16:00-lukningen
+# Begge rykket 3/8-2026 (Soeren): alle US-strategier lukker en halv time foer
+# markedet, saa et genforsoeg naar at ske mens der stadig er likviditet.
+# ENTRY_LATEST MAATTE med ned: den stod paa 15:30, altsaa praecis det nye
+# tvangsluk — en handel kunne vaere aabnet og lukket i samme minut. 15:00 giver
+# en halv time til at virke, samme rummelighed som BuyTheDip.
 
 # ── Regel-parametre (rules.json) ────────────────────────────────
 MIN_GAP_PCT     = 3.0    # D3: pris ≥ dette % over forrige luk (intradag-mover)

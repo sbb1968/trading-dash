@@ -33,7 +33,7 @@ Køb sker ved candlens **lukkekurs**. Ingen nye handler efter **kl. 15:00** amer
 
 - **Stop:** prisen falder til bunden af impuls-candlen (bevægelsen fejlede) — stoppet har
   et **gulv**, så det ikke ligger urimeligt tæt på købskursen.
-- **Dagens lukning kl. 15:45** amerikansk tid: alt lukkes, intet bæres natten over.
+- **Dagens lukning kl. 15:30** amerikansk tid: alt lukkes, intet bæres natten over.
 
 ## Penge pr. handel
 

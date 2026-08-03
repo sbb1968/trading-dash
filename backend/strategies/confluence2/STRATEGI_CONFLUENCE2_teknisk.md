@@ -75,7 +75,7 @@ med et ATR-gulv på stoppet.
 Hvor `R = entry − impulse_low` (risiko per aktie).
 
 **Backstop for alle varianter:** session-luk når `bar.time_et ≥
-force_close_hhmm = 15:45 ET` → exit til `bar.close`, reason `session_close`.
+force_close_hhmm = 15:30 ET` → exit til `bar.close`, reason `session_close`.
 
 **Live-sti** (`check_exit_live`) er bevidst konservativ — kun pris/tid, ingen
 intrabar candle-mønstre: stop ved `impulse_low`, evt. target, og session-luk.
@@ -120,7 +120,7 @@ Volatility"-screener (`fetch_tv_intraday_volatility`):
 | `SESSION_START_HHMM` | 09:30 ET |
 | `SESSION_END_HHMM` | 16:00 ET |
 | `entry_cutoff_hhmm` | 15:00 ET |
-| `force_close_hhmm` | 15:45 ET |
+| `force_close_hhmm` | 15:30 ET |
 | `min_warmup_bars` | 25 |
 | `MINTICK` | 0.01 |
 

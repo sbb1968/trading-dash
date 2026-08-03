@@ -91,7 +91,7 @@ SESSION_END   = dtime(*SESSION_END_HHMM)
 
 # Force-close-backstop (sættes pr. instans ud fra variantens force_close_hhmm i
 # __init__; dette er default hvis varianten ikke angiver et tidspunkt).
-MARKET_CLOSE = dtime(15, 45)
+MARKET_CLOSE = dtime(15, 30)   # 3/8-2026: 15:45 -> 15:30 (30 min foer lukning)
 
 # Genforbinding
 MAX_CONNECT_RETRIES = 3

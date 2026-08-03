@@ -42,7 +42,7 @@ lukkekurs. Der åbnes ikke nye handler efter kl. 15:00 amerikansk tid.
 ## Hvornår sælger den
 
 Konfluens 2 sælger i to tilfælde: hvis prisen falder ned til strategiens stop
-(bevægelsen fejlede), eller ved dagens lukning kl. 15:45 amerikansk tid, hvor
+(bevægelsen fejlede), eller ved dagens lukning kl. 15:30 amerikansk tid, hvor
 alle positioner lukkes så intet bæres natten over.
 
 Stoppet lægges som udgangspunkt lige under bunden af den candle der udløste

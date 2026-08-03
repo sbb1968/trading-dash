@@ -50,7 +50,7 @@ Alle betingelser skal være opfyldt (rules.json):
 **over premarket-high** (I1) — join af fortsat momentum. Premarket-high låses ved
 `SESSION_START = 09:30 ET`. (D2 + katalysator er allerede vettet i watchlist-rescanet.)
 
-**Entry-vindue:** `ENTRY_EARLIEST = 10:05 ET` … `ENTRY_LATEST = 15:30 ET`. Ingen nye
+**Entry-vindue:** `ENTRY_EARLIEST = 10:05 ET` … `ENTRY_LATEST = 15:00 ET`. Ingen nye
 entries uden for vinduet. Bars: 5-min (`BAR_SIZE = "5 mins"`).
 
 ---
@@ -63,7 +63,7 @@ entries uden for vinduet. Bars: 5-min (`BAR_SIZE = "5 mins"`).
 | **Partial** | Sælg `PARTIAL_FRAC` ved `PARTIAL_R` | `1/3 @ 0.75R` |
 | **Breakeven** | Flyt stop til entry ved `BE_R` | `1.0R` |
 | **Trail** | Post-breakeven: 5-min swing-low (`swing_low_5m_2_2`) | `SWING_LEFT/RIGHT = 2/2` |
-| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET` | `15:51 ET` |
+| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET` | `15:30 ET` |
 
 Hvor `R = entry − initial_stop`. Force-close er bekræftet (op til
 `FORCE_CLOSE_MAX_ATTEMPTS = 4` genforsøg) — holder aldrig over natten.
@@ -96,8 +96,8 @@ Det globale dagstab deles med de øvrige strategier.
 |---|---|
 | `SESSION_START` | 09:30 ET (premarket-high låses) |
 | `ENTRY_EARLIEST` | 10:05 ET |
-| `ENTRY_LATEST` | 15:30 ET |
-| `FORCE_CLOSE_ET` | 15:51 ET |
+| `ENTRY_LATEST` | 15:00 ET |
+| `FORCE_CLOSE_ET` | 15:30 ET |
 | `RESCAN_INTERVAL_SEC` | 1800 (30 min) |
 | `BAR_SIZE` / `BAR_DURATION` | 5 min / 7200 s pr. fetch |
 | `NEWS_MAX_AGE_HOURS` | 20 |

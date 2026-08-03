@@ -60,7 +60,13 @@ class Confluence2VariantConfig:
 
     # ── Rammer ─────────────────────────────────────────────────
     entry_cutoff_hhmm: tuple[int, int] = (15, 0)   # ingen nye entries efter dette (ET)
-    force_close_hhmm: tuple[int, int] = (15, 45)   # luk alt (matcher K1/ORB)
+    # Rykket 15:45 -> 15:30 den 3/8-2026 (Soeren): ALLE US-strategier skal lukke
+    # en halv time foer markedet, saa et genforsoeg naar at ske mens der stadig er
+    # likviditet. Var 15:45 for at matche K1/ORB. Bemaerk konsekvensen i
+    # impulse_low-modet UDEN trailing: dér er klokken den eneste udgang en vinder
+    # har, saa de vindere faar nu 15 minutter mindre. Live-varianten koerer med
+    # trailing take-profit slaaet til (T_trail_2_0), saa den rammes mindst.
+    force_close_hhmm: tuple[int, int] = (15, 30)   # luk alt — 30 min foer 16:00
     min_warmup_bars: int = 25      # færre 1-min bars end dette → spring over
 
     # ── Trailing take-profit (tilføjet 1/8-2026) ───────────────

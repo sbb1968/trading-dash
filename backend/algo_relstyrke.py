@@ -59,7 +59,20 @@ DECISION_ET       = dtime(9, 45)  # beslutningstid T — score-cutoff: early_rs 
 # (divergerede paa 16/43 dage). Vi fyrer derfor beslutningen naar 09:45-baren er komplet (09:46), saa
 # _early_rs (filter <= 09:45) faar 09:45-close == backtesten. AENDRER IKKE T/K/score/exit — kun bar-timing.
 DECISION_FIRE_ET  = dtime(9, 46)  # fyrings-tid: efter 09:45-baren er lukket (== backtest-paritet)
-FORCE_CLOSE_ET    = dtime(15, 51) # tvangsluk-backstop (aldrig over natten)
+FORCE_CLOSE_ET    = dtime(15, 30) # tvangsluk — 30 min foer 16:00-lukningen
+# ⚠ RYKKET 15:51 -> 15:30 den 3/8-2026 (Soeren, bevidst valg) — og det BRYDER
+# PARITETEN MED BACKTESTEN. cross_sectional_rs_backtest.EOD_FORCE er dtime(15, 51),
+# altsaa praecis det live koerte foer. "exit=eod" er én af de FIRE frosne
+# plateau-parametre (T=09:45, K=3, score=early_rs, exit=eod), og "eod" betyder
+# 15:51 her. Vi exit'er nu 21 minutter tidligere end det der bestod den
+# praeregistrerede test.
+#
+# Det er IKKE overfitting — der er ikke sweepet mod et bedre tal; det er en
+# operationel beslutning om at alle US-strategier skal vaere ude en halv time foer
+# lukningen. Men konsekvensen skal staa her: selection alpha maalt live efter
+# 3/8-2026 kan ikke sammenlignes 1:1 med backtestens tal, og shadow-eval
+# (der bruger EOD_FORCE=15:51) maaler nu en anden exit end den vi handler.
+# Vil man have paritet tilbage, er det denne linje der skal til 15:51.
 TOP_K             = 3
 SCORE             = "early_rs"     # (pris_ved_T - open_0930) / open_0930
 

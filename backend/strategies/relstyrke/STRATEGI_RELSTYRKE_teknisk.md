@@ -64,7 +64,7 @@ ikke fra den validerede regel; en beskyttende stop skulle backtestes for sig):
 
 | Exit | Betingelse |
 |---|---|
-| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET = 15:51 ET` → luk alt |
+| **Force-close** | `bar.time_et ≥ FORCE_CLOSE_ET = 15:30 ET` → luk alt |
 
 Force-close er robust: bekræftet fyldning med op til `FORCE_CLOSE_MAX_ATTEMPTS = 4`
 genforsøg (`FORCE_CLOSE_RETRY_DELAY = 4 s`). Ulukkede positioner bevares åbne og fanges
@@ -103,7 +103,7 @@ small-cap-beta; edgen er selection alpha (måles i shadow-eval), ikke det rå af
 |---|---|
 | `SESSION_START` | 09:30 ET |
 | `DECISION_ET` / `DECISION_FIRE_ET` | 09:45 / 09:46 ET |
-| `FORCE_CLOSE_ET` | 15:51 ET |
+| `FORCE_CLOSE_ET` | 15:30 ET |
 | `UNIVERSE_PRICE_MIN … MAX` | $5 … $50 |
 | `UNIVERSE_MKT_CAP_MIN … MAX` | 300 mio. … 10 mia. (small + mid) |
 | `UNIVERSE_MIN_VOLUME` | 500.000 |
@@ -113,8 +113,32 @@ small-cap-beta; edgen er selection alpha (måles i shadow-eval), ikke det rå af
 | `UNIVERSE_TOP_N` | 25 |
 | `LOOP_SLEEP_SECONDS` | 15 |
 
-De fire plateau-parametre (T=09:45, K=3, score=early_rs, exit=eod) er **frosne** — ændres
-ALDRIG uden en ny backtest.
+De tre plateau-parametre **T=09:45, K=3, score=early_rs** er **frosne** — ændres ALDRIG uden
+en ny backtest. Den fjerde, `exit=eod`, er brudt bevidst 3/8-2026; se nedenfor.
+
+### ⚠ Force-close 15:51 → 15:30 bryder backtest-pariteten (3/8-2026)
+
+Søren indførte en fælles regel: **alle** US-strategier skal have lukket en halv time før
+markedet, så et genforsøg når at ske mens der stadig er likviditet. Relativ Styrke lå på
+15:51 og er rykket til 15:30.
+
+Det er ikke gratis her. `cross_sectional_rs_backtest.EOD_FORCE` er `dtime(15, 51)` — altså
+præcis det live kørte før. `exit=eod` var én af de fire frosne plateau-parametre, og "eod"
+*betyder* 15:51 i denne strategi. Vi exit'er nu **21 minutter tidligere** end det der bestod
+den præregistrerede test.
+
+Det er **ikke** overfitting — der er ikke sweepet mod et bedre tal; det er en operationel
+risiko-beslutning truffet på tværs af alle strategier. Men konsekvenserne skal være kendte:
+
+- Selection alpha målt live efter 3/8-2026 kan **ikke** sammenlignes 1:1 med backtestens tal.
+- `relstyrke_shadow_eval.py` bruger fortsat `EOD_FORCE = 15:51` og måler dermed nu en **anden
+  exit end den vi faktisk handler**. Vil man have shadow-eval til at afspejle live, skal
+  `EOD_FORCE` følge med — men så divergerer den fra det tal backtesten bestod på. Vælg
+  bevidst hvilken af de to serier der skal være sammenlignelig.
+- Vil man have pariteten tilbage, er det `FORCE_CLOSE_ET` i `algo_relstyrke.py` der skal til
+  15:51.
+
+`test_force_close_policy.py` låser den fælles 15:30-regel på tværs af alle fem US-strategier.
 
 ### Universet blev bragt i overensstemmelse 3/8-2026
 
