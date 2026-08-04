@@ -298,10 +298,14 @@ def stabilitetsmaal(motor_fn, serie: np.ndarray, basisvindue: int = 252) -> dict
 # og vol_kalibreringslog.md. Vaerdien staar her som konstant saa den er frosset og
 # versionsstyret; genkoer kalibreringen hvis fiksturerne aendres.
 #
-# Kalibreret 2026-08-04 over 8 syntetiske serier:
-#     ren motor, VAERSTE variant       :  9,13 pp   (spredning 4,37-9,13)
-#     skroebelig motor, BEDSTE variant : 51,60 pp   (spredning 51,60-54,17)
-#     geometrisk midtpunkt             : 21,7 pp — 2,38x til begge sider
+# Kalibreret 2026-08-04 over 50 syntetiske serier:
+#     ren motor, VAERSTE variant       :  9,13 pp   (min 3,57 · median 6,15 · p95 8,55)
+#     skroebelig motor, BEDSTE variant : 51,60 pp   (median 53,78 · max 55,07)
+#     geometrisk midtpunkt             : 21,7 pp — 2,38x til begge sider, 5,7x adskillelse
+#
+# Maksimum for den rene motor stabiliserer sig: 9,13 blev naaet inden for de foerste
+# otte traekninger og er aldrig overskredet over 50. Midtpunktet paa 50 seeds er
+# identisk med det paa 8 — men det kunne vi ikke vide uden at koere flere.
 #
 # Et foerste gaet paa 11,0 blev forkastet: det laa kun 1,2x over den vaerste rene
 # serie, og en enkelt uheldig seed ville have dumpet en korrekt motor.

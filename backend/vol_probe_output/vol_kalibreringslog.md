@@ -73,3 +73,35 @@ den rapporteres som kontekst, og `stabilitetsdiagnose()` oversætter kombination
 | ustabil | — | målet er parameterafhængigt → **målet** skal laves om |
 | stabil | ustabil | grænserne ligger uheldigt → **beslutningslaget** skal have hysterese; måleklodsen fejler ikke |
 | stabil | stabil | ingen handling |
+
+
+---
+
+## Post 2 — bekræftelse af tærsklen på 50 seeds, 2026-08-04
+
+**Hvad blev efterprøvet:** om den rene motors øvre hale var underestimeret med kun 8
+serier. Post 1 satte tærsklen ud fra et observeret maksimum på 9,13 pp, hvor de
+øvrige syv lå 4,4–6,8 — altså et enligt yderpunkt, og dermed et usikkert estimat.
+
+**Resultat, 50 uafhængige serier:**
+
+| motor | min | median | p95 | max |
+|---|---|---|---|---|
+| ren | 3.57 | 6.15 | 8.55 | **9.13** |
+| skrøbelig | **51.60** | 53.78 | — | 55.07 |
+
+**Maksimum stabiliserer sig.** Løbende maksimum for den rene motor efter
+8/16/25/32/40/50 seeds: 9.13/9.13/9.13/9.13/9.13/9.13 pp.
+Værdien blev nået inden for de første otte trækninger og er aldrig overskredet siden.
+
+Med p95 på 8.55 og median 6.15 er 9,13 desuden
+ikke et vildt udfald, men toppen af en forholdsvis stram fordeling — spændet er
+3.57–9.13 pp over alle 50.
+
+**Tærsklen forbliver 21.7 pp.** Det geometriske
+midtpunkt på 50 seeds er identisk med værdien fra 8. Adskillelsen mellem værste rene
+og bedste skrøbelige er **5.7×**.
+
+**Hvad øvelsen faktisk viste.** Otte seeds gav det rigtige tal — men det kunne vi
+ikke vide uden at køre flere. Forskellen mellem "estimatet var rigtigt" og "estimatet
+var efterprøvet" er hele grunden til at posten står her.

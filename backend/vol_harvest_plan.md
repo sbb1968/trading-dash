@@ -16,14 +16,38 @@ graensen ligger mellem 22,5 og 25,5 maaneder efter udloeb.** 202409 lever ved
 22,5 mdr; 202406 er vaek ved 25,5 mdr; 202403 er vaek ved 28,5 mdr. Identisk paa MES,
 M2K, ES og RTY — det er en systemgraense hos IBKR, ikke noget kontraktspecifikt.
 
-**202409 er den aeldste kontrakt der stadig kan reddes.** Med 22,5 maaneder paa bagen
-og graensen mellem 22,5 og 25,5 er vinduet **1-3 maaneder** — ikke uger, som tidligere
-anslaaet, men heller ikke noget der taaler at vente et kvartal.
+### ⚠ HVAD DER FAKTISK STAAR PAA SPIL — laes dette foer du planlaegger efter D1
 
-ES og RTY er aldrig hoestet, i noget kvartal. MES og M2K har vi frem til 2026-06-30.
-Kvartalskoerslen fandt **16 udloebne kontrakter der lever og mangler at blive hoestet**
-— ES og RTY for hvert kvartal fra 202409 til 202606, hvoraf otte er over
-tolvmaaneders-maalsaetningen.
+D1 beskriver opgaven som "red det der stadig lever". **For MES og M2K er den opgave
+allerede loest, og var det foer specen blev skrevet.** `mes_m2k_clean` indeholder
+hver eneste kontrakt fra 202409 til 202609 for begge symboler — altsaa alt hvad der
+overhovedet kan kvalificeres. Kvartalskoerslen bekraeftede det: de 16 uhoestede
+kontrakter den fandt, var **udelukkende ES og RTY**.
+
+Det aendrer risikobilledet, og min egen tidligere formulering overdrev det:
+
+| | status |
+|---|---|
+| MES/M2K per kontrakt, 1-min | **komplet** — 9 kontrakter × 2 symboler, intet at redde |
+| MES/M2K stitched | komplet 2024-06-21 → 2026-06-30, 507/507 sessioner |
+| ES/RTY 1-min | **findes ikke** — 0 filer |
+| ES/RTY 15-min | kun 2025-08-22 → 2026-06-08 |
+| ES/RTY dagligt | 2022-03-22 → 2026-06-05 |
+
+**Vi kan altsaa ikke miste data vi har.** Det eneste med en udloebsdato er muligheden
+for at ANSKAFFE ES/RTY-intradag for 2024-2026 — data vi aldrig har haft. Mister vi
+det vindue, mister vi ikke et datasaet, men svaret paa et V2-spoergsmaal: hvilken
+serie maaler natten renest (E3). Det er en reel omkostning, men en anden slags end
+den D1 beskriver.
+
+**Vinduet:** 202409 lever ved 22,5 maaneder, graensen ligger mellem 22,5 og 25,5 —
+altsaa **1-3 maaneder**.
+
+### De fem uger er noget andet end redningen
+
+Den stitchede serie stopper 2026-06-30. Det er ikke en redning, men en fremskrivning:
+uden den kan motoren ikke koere live paa aktuelle data. **Det er den eneste del der er
+noedvendig uanset hvad der besluttes om ES/RTY**, og den tager minutter.
 
 ### Koer i denne raekkefoelge
 
