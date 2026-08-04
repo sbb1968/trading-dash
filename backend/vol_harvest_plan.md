@@ -230,6 +230,7 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | B4 | Referencestart | besluttet: 2009-08-17; 18-aars kvalitetskoersel udestaar |
 | F1 | Uforanderlige filer beskyttes | bygget, testet |
 | F2 | Beslutningsprotokoller i git | gjort — se nedenfor |
+| G | Falsifikationskrav paa alle kontroller | `vol_falsifikation.py` + kontrollernes fejlveje koert |
 | C2/C3 | Outputkontrakt + provenans | hoerer til V2, ikke paabegyndt |
 | — | Datagab 2026-06-30 → i dag | lukkes af trin 1 |
 

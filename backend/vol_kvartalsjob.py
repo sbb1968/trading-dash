@@ -101,21 +101,29 @@ async def kan_kvalificeres(ib, symbol: str, ym: str) -> tuple[bool, str]:
     return False, "ingen kontraktdefinition"
 
 
-async def kortlaeg(args, emit) -> dict:
-    from ib_async import IB
+async def kortlaeg(args, emit, ib=None) -> dict:
+    """Kortlaeg hvilke kontrakter der stadig kan kvalificeres.
+
+    `ib` kan injiceres. Det er ikke bekvemmelighed: uden den kan KONTROLFIKSTURETS
+    kasseringsvej ikke afproeves uden en levende TWS — og en kontrol hvis fejlvej
+    aldrig er koert, er ikke en kontrol (Revision G). Se test_vol_kontroller.py.
+    """
     i_dag = date.today()
     fra = i_dag - timedelta(days=int(PROBE_MAANEDER_TILBAGE * 30.44))
     ym_liste = kvartalsmaaneder(fra, i_dag + timedelta(days=200))
     symboler = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
 
-    ib = IB()
-    emit(f"Forbinder TWS {HOST}:{args.port} (clientId={args.client_id}) …")
-    try:
-        await ib.connectAsync(HOST, args.port, clientId=args.client_id, timeout=20)
-    except Exception as e:
-        emit(f"KUNNE IKKE FORBINDE: {e}")
-        return {}
-    emit("Forbundet.\n")
+    egen_forbindelse = ib is None
+    if egen_forbindelse:
+        from ib_async import IB
+        ib = IB()
+        emit(f"Forbinder TWS {HOST}:{args.port} (clientId={args.client_id}) …")
+        try:
+            await ib.connectAsync(HOST, args.port, clientId=args.client_id, timeout=20)
+        except Exception as e:
+            emit(f"KUNNE IKKE FORBINDE: {e}")
+            return {}
+        emit("Forbundet.\n")
 
     resultat: dict[str, dict[str, bool]] = {}
     kontrol_ok = True
@@ -144,10 +152,11 @@ async def kortlaeg(args, emit) -> dict:
                     emit(f"   {ym}  {'LEVER' if lever else 'purget'}   ({naar})")
                 emit("")
     finally:
-        try:
-            ib.disconnect()
-        except Exception:
-            pass
+        if egen_forbindelse:
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
     return resultat if kontrol_ok else {}
 
 
@@ -210,9 +219,20 @@ def skriv_log(rod: Path, resultat: dict, mangler: list, arkiv_status: str,
     else:
         L.append(f"Aeldste kontrakt der stadig lever: **{aeldste}** · "
                  f"yngste der er purget: **{yngste}**\n\n")
+        # Graensen er et INTERVAL, ikke et tal. Den aeldste levende kontrakts alder er
+        # en NEDRE graense (saa laenge lever de mindst), den yngste purgedes alder en
+        # OEVRE. At skrive ét tal ville give en praecision maalingen ikke har — og et
+        # for lavt tal ville faa redningsvinduet til at se kortere ud end det er.
         if aeldste:
-            a = maaneder_mellem(date(int(aeldste[:4]), int(aeldste[4:]), 20), date.today())
-            L.append(f"Graensen ligger dermed omkring **{a:.0f} maaneder** efter udloeb.\n\n")
+            ned = maaneder_mellem(date(int(aeldste[:4]), int(aeldste[4:]), 20), date.today())
+            if yngste:
+                op = maaneder_mellem(date(int(yngste[:4]), int(yngste[4:]), 20), date.today())
+                L.append(f"Purge-graensen ligger dermed mellem **{ned:.1f} og {op:.1f} "
+                         f"maaneder** efter udloeb: {aeldste} lever ved {ned:.1f} mdr, "
+                         f"mens {yngste} er vaek ved {op:.1f} mdr.\n\n")
+            else:
+                L.append(f"Ingen purget kontrakt fundet i vinduet, saa graensen er kun "
+                         f"kendt som **over {ned:.1f} maaneder** efter udloeb.\n\n")
         L.append("| symbol | " + " | ".join(sorted(next(iter(resultat.values())))) + " |\n")
         L.append("|---" * (1 + len(next(iter(resultat.values())))) + "|\n")
         for sym, pr in sorted(resultat.items()):
