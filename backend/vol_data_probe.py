@@ -77,6 +77,23 @@ SKIVE = {
 KVALITET_VARIGHED = "15 Y"   # 20 Y timede ud for VIX/VIX3M/SPY/RVX/VX (3/8-2026)
 KVALITET_TIMEOUT  = 180      # egen, laengere timeout — én stor hentning pr. instrument
 KVALITET_BRUGT: dict[str, str] = {}   # instrument -> varighed der virkede
+# Stige nedad hvis den oenskede varighed timer ud. Et kortere revideret vindue er
+# bedre end intet — men det SKAL fremgaa hvilket vindue der faktisk blev revideret,
+# ellers laeser en 15-aars revision som om den daekkede de 18 der blev bedt om.
+KVALITETS_STIGE = ["20 Y", "18 Y", "15 Y", "10 Y", "5 Y", "3 Y", "1 Y"]
+
+
+def _kvalitets_stige(oensket: str) -> list[str]:
+    """Den oenskede varighed foerst, derefter kortere trin fra stigen."""
+    ud = [oensket]
+    naaet = False
+    for v in KVALITETS_STIGE:
+        if v == oensket:
+            naaet = True
+            continue
+        if naaet:
+            ud.append(v)
+    return ud or [oensket]
 
 # ── Instrumenter ────────────────────────────────────────────────────────────────
 # niveau: A = kerne (uden disse er byggeklodsen umulig)
@@ -498,8 +515,11 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
         return None
     # ContFuture er langsom paa lange varigheder og timede ud paa 15 Y (VX, 3/8-2026).
     # Den har alligevel kun faa aars sammensat historik, saa vi gaar stigen ned.
+    # For alt andet gaas ogsaa en stige, saa en for ambitioes varighed giver et
+    # kortere resultat i stedet for ingenting — hvad der faktisk lykkedes, staar i
+    # KVALITET_BRUGT og kommer med i rapporten.
     varigheder = (["5 Y", "3 Y", "2 Y", "1 Y"] if inst["art"] == "contfut"
-                  else [KVALITET_VARIGHED])
+                  else _kvalitets_stige(KVALITET_VARIGHED))
     n = 0
     for _v in varigheder:
         n, foerste, sidste, fejl = await hent_skive(
@@ -579,6 +599,10 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
     return {
         "navn": inst["navn"],
         "n_dage": len(raekker),
+        # Hvilket vindue der FAKTISK blev revideret. Uden dette felt laeser en
+        # revision der faldt tilbage til 10 aar som om den daekkede de 18 der blev
+        # bedt om — og saa staar en percentilreference paa uverificeret historik.
+        "revideret_varighed": KVALITET_BRUGT.get(inst["navn"], KVALITET_VARIGHED),
         "foerste": datoer[0].isoformat(),
         "sidste": datoer[-1].isoformat(),
         "stillestaaende_loeb": stille[:10],
@@ -629,17 +653,22 @@ def skriv_md(res: dict, sti: Path) -> None:
 
     if res.get("kvalitet"):
         a("\n## V0.2 — kvalitet paa dagsserien\n")
-        a("| instrument | dage | foerste | sidste | stille-loeb | absurde | halve dage | "
-          "range% p50 | p90 | p99 | p99 u. marts-2020 |\n")
-        a("|---|---|---|---|---|---|---|---|---|---|---|\n")
+        a("| instrument | bedt om | dage | foerste | sidste | stille-loeb | absurde | "
+          "halve dage | range% p50 | p90 | p99 | p99 u. marts-2020 |\n")
+        a("|---|---|---|---|---|---|---|---|---|---|---|---|\n")
         for k in res["kvalitet"]:
             if k.get("fejl"):
-                a(f"| {k['navn']} | — | — | — | — | — | — | — | — | — | {k['fejl'][:40]} |\n")
+                a(f"| {k['navn']} | — | — | — | — | — | — | — | — | — | — | "
+                  f"{k['fejl'][:40]} |\n")
                 continue
-            a(f"| {k['navn']} | {k['n_dage']} | {k['foerste']} | {k['sidste']} | "
+            a(f"| {k['navn']} | {k.get('revideret_varighed','?')} | {k['n_dage']} | "
+              f"{k['foerste']} | {k['sidste']} | "
               f"{k['n_stillestaaende_loeb']} | {k['n_absurde']} | {k['n_halve_dage']} | "
               f"{k['range_pct_p50']} | {k['range_pct_p90']} | {k['range_pct_p99']} | "
               f"{k['range_pct_p99_uden_marts2020']} |\n")
+        a("\n**Kolonnen 'bedt om'** er den varighed der faktisk lykkedes. Timede den "
+          "oenskede ud, gik proben stigen ned — og saa daekker revisionen et kortere "
+          "vindue end der blev bedt om. `foerste` viser hvor langt den naaede.\n")
         a("\n**Marts-2020-foelsomhed:** forskellen mellem `p99` og `p99 u. marts-2020` viser "
           "hvor meget én periode dominerer percentilreferencen. Er forskellen stor, skal "
           "referencevinduet i V2 vaelges med det for oeje.\n")
@@ -813,6 +842,7 @@ def omklassificer(json_sti: Path, emit) -> int:
 
 
 def main():
+    global KVALITET_VARIGHED
     ap = argparse.ArgumentParser(
         description="FASE V0 — probe af IBKR-raekkevidde og datakvalitet til volatilitets-byggeklodsen")
     ap.add_argument("--niveau", choices=["A", "AB", "ALL"], default="A",
@@ -828,11 +858,17 @@ def main():
                     help="ignorer tidligere resultater og maal alt igen")
     ap.add_argument("--spring-kvalitet", action="store_true",
                     help="spring V0.2 over (kun raekkevidde)")
+    ap.add_argument("--kvalitet-varighed", dest="kvalitet_varighed",
+                    default=KVALITET_VARIGHED,
+                    help=f"hvor dybt kvalitetsrevisionen skal gaa (default "
+                         f"{KVALITET_VARIGHED}). Timer den ud, gaas stigen ned, og "
+                         f"den varighed der faktisk lykkedes staar i rapporten.")
     ap.add_argument("--vent-pacing", type=int, default=PACING_WAIT)
     ap.add_argument("--omklassificer", action="store_true",
                     help="genudled aarsags-klassifikationen fra gemte tal — "
                          "ingen IBKR-kontakt. Brug efter en taksonomi-aendring.")
     args = ap.parse_args()
+    KVALITET_VARIGHED = args.kvalitet_varighed
 
     def emit(s=""):
         print(s, flush=True)

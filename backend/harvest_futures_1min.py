@@ -63,8 +63,13 @@ SLEEP_BETWEEN = 0.8
 PACING_WAIT   = 60
 HARVEST_DIR   = Path("data_harvest")
 
-# CME-micro-boerser (samme kilde som ibkr_connect.FUTURES_EXCHANGE)
-EXCHANGE = {"MES": "CME", "M2K": "CME"}
+# CME-boerser (samme kilde som ibkr_connect.FUTURES_EXCHANGE).
+# ES og RTY er de fulde kontrakter bag MES og M2K. De hoestes fordi de har markant
+# dybere likviditet, isaer om natten — og natten er praecis hvad regime-lag 2 skal
+# maale. Micro-kontrakternes tyndere overnight-volumen kan give en stoejende
+# range-maaling netop dér hvor signalet skal vaere rent. Hvilken serie der er bedst
+# at MAALE paa, er et aabent spoergsmaal; vi handler micro'erne uanset.
+EXCHANGE = {"MES": "CME", "M2K": "CME", "ES": "CME", "RTY": "CME"}
 QUARTERLY_MONTHS = (3, 6, 9, 12)       # mar/jun/sep/dec
 FRONT_MONTH_MAX_DAYS = 95              # en kontrakt er front-maaned ~ét kvartal foer udloeb;
                                        # datoer laengere foer dens udloeb hoerer til en TIDLIGERE
