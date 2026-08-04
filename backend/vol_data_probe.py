@@ -74,7 +74,8 @@ SKIVE = {
 }
 
 # Kvalitetstjek paa dagsbarer: én stor hentning pr. instrument (billigt).
-KVALITET_VARIGHED = "20 Y"
+KVALITET_VARIGHED = "15 Y"   # 20 Y timede ud for VIX/VIX3M/SPY/RVX/VX (3/8-2026)
+KVALITET_TIMEOUT  = 180      # egen, laengere timeout — én stor hentning pr. instrument
 
 # ── Instrumenter ────────────────────────────────────────────────────────────────
 # niveau: A = kerne (uden disse er byggeklodsen umulig)
@@ -455,7 +456,7 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
             ib.reqHistoricalDataAsync(contract, endDateTime="",
                                       durationStr=KVALITET_VARIGHED, barSizeSetting="1 day",
                                       whatToShow=what, useRTH=False, formatDate=2),
-            timeout=REQ_TIMEOUT)
+            timeout=KVALITET_TIMEOUT)
     except Exception as e:
         return {"navn": inst["navn"], "fejl": f"{type(e).__name__}: {e}"}
     await asyncio.sleep(SLEEP_BETWEEN)
@@ -638,7 +639,19 @@ async def koer(args, emit):
          f"(pacing-venligt med vilje).\n")
 
     # Kontrolgruppe foerst: SPY's dagsdybde afgoer om andres graenser er retention.
+    #
+    # RETTET 3/8-2026: den blev KUN sat naar SPY blev maalt i DENNE koersel. Ved
+    # genoptagelse (niveau AB oven paa et A-resultat) laa SPY i `tidligere` og blev
+    # sprunget over, saa kontrol_aeldste forblev None — og alle niveau B-instrumenter
+    # blev klassificeret uden kontrolgruppe. Det gav VIX9D maerkatet
+    # "IBKR-RETENTION" selvom SPY naar 33 aar tilbage; korrekt er KONTRAKTLEVETID
+    # (indekset/dataene fandtes ikke foer 2018). Nu laeses den ogsaa fra tidligere.
     kontrol_aeldste = None
+    _spy = tidligere.get("SPY")
+    if _spy:
+        _dag = next((s for s in _spy.get("serier", []) if s["bar"] == "1 day"), None)
+        if _dag and _dag.get("bekraeftet_aeldste"):
+            kontrol_aeldste = datetime.fromisoformat(_dag["bekraeftet_aeldste"])
     resultater = []
     rest = [i for i in valgte if i["navn"] not in tidligere]
     rest.sort(key=lambda i: (i["navn"] != "SPY", i["niveau"], i["navn"]))

@@ -427,8 +427,9 @@ async def run(args):
     print(f"{BOLD}{'='*88}{RESET}\n")
 
     ib = IB()
-    logger.info(f"Forbinder IBKR 127.0.0.1:{PORT} (clientId={CLIENT_ID})...")
-    await ib.connectAsync("127.0.0.1", PORT, clientId=CLIENT_ID, timeout=TIMEOUT)
+    cid = getattr(args, "client_id", None) or CLIENT_ID
+    logger.info(f"Forbinder IBKR 127.0.0.1:{PORT} (clientId={cid})...")
+    await ib.connectAsync("127.0.0.1", PORT, clientId=cid, timeout=TIMEOUT)
     logger.info("✓ Forbundet")
     strategy = Confluence2Strategy()
 
@@ -569,6 +570,9 @@ def main():
     p.add_argument("--universe", choices=["journal", "tickers", "file"], default="journal")
     p.add_argument("--tickers", type=str, help="Kommasepareret liste (for --universe tickers)")
     p.add_argument("--universe-file", type=str, help="JSON-fil fra build_historical_universe.py (for --universe file)")
+    p.add_argument("--client-id", type=int, default=None,
+                   help="IBKR clientId (default 15). Brug et andet hvis 15 er optaget af en "
+                        "afbrudt koersel — TWS frigiver id'et foerst efter et stykke tid.")
     p.add_argument("--date", type=str)
     p.add_argument("--start", type=str)
     p.add_argument("--end", type=str)
