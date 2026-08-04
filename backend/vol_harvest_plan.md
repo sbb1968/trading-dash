@@ -1,12 +1,45 @@
 # Harvest-plan for volatilitets-byggeklodsen (fase V1)
 
-Skrevet 2026-08-04. Daekker Revision D1 (redning, arkiv, kvartalsjob), B2, B3 og B4.
-Dette er den fil der skal aabnes naar nogen spoerger "hvor ligger arkivet" eller
-"hvad mangler at blive hentet".
+Skrevet 2026-08-04, senest opdateret efter Revision J. Daekker D1 (arkiv,
+kvartalsjob), B2, B3, B4 og J. Dette er den fil der skal aabnes naar nogen spoerger
+**"hvor ligger data"** eller "hvad mangler at blive hentet".
 
 ---
 
-## 1. Redningen — kontrakter der doer inden for maaneder
+## 0. HVOR LIGGER DATA — de to steder, og hvad de hver isaer er
+
+Der findes nu **to** kopier af MES/M2K-futuresdata, og de har forskellig rolle. Blandes
+de sammen, arbejder man enten paa en kopi der ikke opdateres, eller overskriver den
+kopi der skulle vaere sikkerheden.
+
+| | sti | rolle | opdateres |
+|---|---|---|---|
+| **Arbejdskopi** | `C:\Projects\trading_dash\backend\data_harvest\` | **Den der laeses af kode.** Al analyse, alle backtests og alle scripts peger her. | af `harvest_futures_1min.py` |
+| **Arkiv** | `H:\trading_dash_arkiv\` (ekstern disk "Elements") | **Sikkerhedskopi med bevis.** sha256-manifest, gendannelsestestet. Roeres kun af `arkiv_futures.py`. | af `arkiv_futures.py kopier --fuld` |
+
+**Arbejdskopien er kilden, arkivet er kopien** — aldrig omvendt. `arkiv_futures.py`
+kopierer altid fra `data_harvest/` til `H:`, og `--reparer` henter fra
+arbejdskopien. Skulle arbejdskopien gaa tabt, gendannes den fra arkivet manuelt (og
+saa boer gendannelsen verificeres foer der arbejdes videre).
+
+**Indhold, begge steder (2026-08-04):**
+
+| mappe | indhold | stoerrelse |
+|---|---|---|
+| `data_harvest/mes_m2k_clean/` | 90 filer — MES+M2K × 9 kontrakter (202409→202609) × 5 barstoerrelser | 142 MB |
+| `data_harvest/mes_m2k_stitched/` | 10 serier + revisionsrapport — MES+M2K × 5 barstoerrelser, 2024-06-21 → 2026-06-30 | 142 MB |
+| `data_harvest/` (roden) | ES/RTY 15-min og dagligt, plus oevrige instrumenter fra andre spor | — |
+| `H:\trading_dash_arkiv\` | spejling af de to foerste, 102 filer + `manifest.json` | 282 MB |
+
+Andre MES/M2K-data i `data_harvest/`-roden (`MES_15min.csv`, `MES_1day.csv` m.fl.)
+stammer fra **andre** spor og er hverken 1-min eller kontraktopdelte. De arkiveres
+ikke og indgaar ikke i regime-arbejdet.
+
+**Status: arkivet er ajour med arbejdskopien**, gendannelsestest bestaaet 2026-08-04.
+
+---
+
+## 1. Hvad der mangler at blive hentet
 
 IBKR purger kontrakt**definitionen** efter udloeb. Derefter kan man ikke engang
 spoerge om barerne.
@@ -43,11 +76,11 @@ den D1 beskriver.
 **Vinduet:** 202409 lever ved 22,5 maaneder, graensen ligger mellem 22,5 og 25,5 —
 altsaa **1-3 maaneder**.
 
-### De fem uger er noget andet end redningen
+### De fem uger er vedligehold, ikke redning
 
-Den stitchede serie stopper 2026-06-30. Det er ikke en redning, men en fremskrivning:
-uden den kan motoren ikke koere live paa aktuelle data. **Det er den eneste del der er
-noedvendig uanset hvad der besluttes om ES/RTY**, og den tager minutter.
+Den stitchede serie stopper 2026-06-30. Uden de sidste uger kan motoren ikke koere
+live paa aktuelle data. **Det er den eneste del der er noedvendig uanset hvad der
+besluttes om ES/RTY**, og den tager minutter.
 
 ### Koer i denne raekkefoelge
 
@@ -62,28 +95,44 @@ Lukker de fem ugers datagab frem til i dag. Overlappet paa faa dage er med vilje
 scriptet dedupliker paa bar-tidsstempel, saa en overlappende hentning koster ingenting
 og fjerner risikoen for et hul i soemmen.
 
-**Trin 2 — 202409 for baade ES og RTY. Den mest udsatte kontrakt, foerst.**
+**Trin 2 — RTY 202409. Den mest udsatte kontrakt paa det symbol der betyder mest.**
 
 ```
-python harvest_futures_1min.py --symbols ES  --start 2024-06-21 --end 2024-09-30 --client-id 75
 python harvest_futures_1min.py --symbols RTY --start 2024-06-21 --end 2024-09-30 --client-id 75
 ```
+
+**RTY foer ES** (Revision J3). Argumentet er markant staerkere for Russell: **M2K er
+den tyndeste af de fire om natten**, small-cap-vol er en dimension specen eksplicit
+gaar op i (det er derfor RVX er med), og Russell-benet er altsaa baade dér hvor
+maalingen er svagest og dér hvor vi bryder os mest om den. MES er rimeligt likvid og
+arbitreret taet mod ES, saa dér er gevinsten mere marginal.
 
 **Startdato 2024-06-21, ikke 1. august.** 202409 blev forreste kontrakt ved
 juni-rullet, og den eksisterende `mes_m2k_clean` starter netop dér. Asymmetrien er
 entydig: at spoerge for tidligt koster ingenting — kaldet returnerer bare tomt —
-mens at spoerge for sent koster data permanent.
+mens at spoerge for sent koster muligheden permanent.
 
-**Trin 3 — resten, kronologisk stigende.**
+**Trin 3 — resten af RTY, kronologisk stigende.**
 
 ```
-python harvest_futures_1min.py --symbols ES  --start 2024-09-01 --end 2026-08-04 --client-id 75
 python harvest_futures_1min.py --symbols RTY --start 2024-09-01 --end 2026-08-04 --client-id 75
 ```
 
-Hvorfor ét symbol ad gangen frem for `--symbols ES,RTY`: scriptet tager symbolerne i
-raekkefoelge, saa en samlet koersel ville lade RTY's 202409 — den mest udsatte fil i
-hele operationen — vente til allersidst. Delt op lander det udsatte foerst, jf. E3.
+**Trin 4 — ES, hvis timerne er der.** Samme opdeling, aeldste foerst:
+
+```
+python harvest_futures_1min.py --symbols ES --start 2024-06-21 --end 2024-09-30 --client-id 75
+python harvest_futures_1min.py --symbols ES --start 2024-09-01 --end 2026-08-04 --client-id 75
+```
+
+Hvorfor ét symbol ad gangen frem for `--symbols RTY,ES`: scriptet tager symbolerne i
+raekkefoelge, saa en samlet koersel ville lade det ene symbols 202409 vente til
+allersidst. Delt op lander det mest udsatte foerst, og hentningen kan afbrydes naar
+som helst uden at noget er spildt (jf. E3, J3).
+
+**Hentes ES og RTY ikke** — helt eller delvist — skal det skrives ind her som en
+truffet beslutning med begrundelse, ikke efterlades som en aaben opgave. Et aabent
+punkt ingen naar, er vaerre end et lukket punkt med en grund.
 
 **Foerudsaetninger:** TWS/Gateway aabent, clientId 75 (ledig; backend=?, harvest=48,
 asian=47). Trin 1 tager minutter, trin 2 en halv time pr. symbol, trin 3 flere timer
@@ -256,7 +305,9 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 
 | # | Punkt | Status |
 |---|---|---|
-| D1.1 | Redningen (afsnit 1) | **afventer koersel — haster, 202409 doer om uger** |
+| D1.1 | MES/M2K komplet — intet at redde (J1) | **lukket** |
+| J3 | ES/RTY: RTY foerst, ES hvis timerne er der | **afventer beslutning + koersel** |
+| J4 | Praeregistreret valg af maaleinstrument | bygget + falsificeret; koerer naar ES/RTY findes |
 | D1.2 | Arkiv paa H: | bygget og verificeret; foerste rigtige `kopier` afventer trin 1-3 |
 | D1.3 | Kvartalsjob | bygget; koeres efter naeste udloeb (2026-09) |
 | B2 | Assert paa barantal | bygget, testet |
