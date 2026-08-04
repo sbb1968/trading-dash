@@ -6,14 +6,24 @@ Dette er den fil der skal aabnes naar nogen spoerger "hvor ligger arkivet" eller
 
 ---
 
-## 1. Redningen — kontrakter der doer inden for uger
+## 1. Redningen — kontrakter der doer inden for maaneder
 
-IBKR purger kontrakt**definitionen** ca. **24 maaneder efter udloeb**. Derefter kan
-man ikke engang spoerge om barerne. Graensen er indrammet af to observationer
-(2026-08-04): 202409 svarer ved ~23 mdr., 202406 er vaek ved ~25,5 mdr.
+IBKR purger kontrakt**definitionen** efter udloeb. Derefter kan man ikke engang
+spoerge om barerne.
 
-**202409 er den aeldste kontrakt der stadig kan reddes, og den doer inden for uger.**
-ES og RTY er aldrig hoestet. MES og M2K har vi frem til 2026-06-30.
+**Maalt paa alle fire symboler i den foerste rigtige kvartalskoersel (2026-08-04):
+graensen ligger mellem 22,5 og 25,5 maaneder efter udloeb.** 202409 lever ved
+22,5 mdr; 202406 er vaek ved 25,5 mdr; 202403 er vaek ved 28,5 mdr. Identisk paa MES,
+M2K, ES og RTY — det er en systemgraense hos IBKR, ikke noget kontraktspecifikt.
+
+**202409 er den aeldste kontrakt der stadig kan reddes.** Med 22,5 maaneder paa bagen
+og graensen mellem 22,5 og 25,5 er vinduet **1-3 maaneder** — ikke uger, som tidligere
+anslaaet, men heller ikke noget der taaler at vente et kvartal.
+
+ES og RTY er aldrig hoestet, i noget kvartal. MES og M2K har vi frem til 2026-06-30.
+Kvartalskoerslen fandt **16 udloebne kontrakter der lever og mangler at blive hoestet**
+— ES og RTY for hvert kvartal fra 202409 til 202606, hvoraf otte er over
+tolvmaaneders-maalsaetningen.
 
 ### Koer i denne raekkefoelge
 
@@ -231,6 +241,8 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | F1 | Uforanderlige filer beskyttes | bygget, testet |
 | F2 | Beslutningsprotokoller i git | gjort — se nedenfor |
 | G | Falsifikationskrav paa alle kontroller | `vol_falsifikation.py` + kontrollernes fejlveje koert |
+| H1 | Nulfikstur pr. egenskab, ikke universelt | taksonomi i kode; forkert valg AFVISES |
+| H2 | Shuffl raavaren, ikke det glattede | `shufflet_via_underliggende` + demonstration |
 | C2/C3 | Outputkontrakt + provenans | hoerer til V2, ikke paabegyndt |
 | — | Datagab 2026-06-30 → i dag | lukkes af trin 1 |
 

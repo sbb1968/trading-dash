@@ -17,11 +17,16 @@ DETTE MODUL ER REGLEN GJORT TIL KODE. Ingen V-test maa koeres foerste gang foer 
 er registreret her med et konkret input der faar den til at DUMPE — og det input
 skal vaere koert, ikke bare beskrevet.
 
-    from vol_falsifikation import Falsifikationsregister, hvid_stoej_serie
+    from vol_falsifikation import Falsifikationsregister
     reg = Falsifikationsregister()
-    reg.kraev("V-test 1", vtest1, dumper_paa=hvid_stoej_serie(500),
-              bestaar_paa=klynget_serie(500))
+    reg.kraev_egenskab("V-test 1", vtest1, egenskab="prediktiv")   # fiksturet vaelges FOR dig
     reg.rapport()          # skriver vol_falsifikation.md — og raiser hvis noget mangler
+
+NAVNGIV EGENSKABEN, VAELG IKKE FIKSTURET (H1). Der findes ingen universel nulserie:
+hvid stoej, random walk, shufflet og konstant er negative for FORSKELLIGE egenskaber.
+En random walk er fx staerkt PREDIKTIV (maalt autokorr +0,995) og ville faa en
+fuldstaendig korrekt V-test 1 til at se defekt ud. Registret vaelger derfor selv, og
+afviser et haandplukket fikstur der ikke er nul for den navngivne egenskab.
 
 ⚠ TO RETNINGER, ALTID. Et input der faar kontrollen til at dumpe beviser at den KAN
 fejle. Et input der faar den til at bestaa beviser at den ikke bare altid dumper.
@@ -113,6 +118,47 @@ def vaerdiloest_maal(n: int, seed: int = SEED_STOEJ + 1) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# H2 — SHUFFL MAALET, IKKE DEN VINDUESBEREGNEDE PRAEDIKTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+def shufflet_via_underliggende(afkast: np.ndarray, vindue_fn, seed: int = SEED_SHUFFLE):
+    """Shuffl de UNDERLIGGENDE afkast og koer dem gennem samme vinduesberegning.
+
+    ⚠ DETTE ER IKKE DET SAMME som at shuffle den faerdige, vinduesberegnede serie,
+    og forskellen er den der slog det forrige projekt ihjel.
+
+    En 30-dages rullende beregning med dagligt skridt deler 29 af 30 observationer
+    mellem to nabodage. Serien er derfor MEKANISK ekstremt glat — helt uafhaengigt af
+    om markedet har regimer. Shuffler man den faerdige serie, oedelaegger man
+    udglatningen OG regimestrukturen paa én gang, og resultatet kan ikke sige hvilken
+    af de to der bar signalet. Det var praecis dén sammenblanding der fik den forrige
+    motor til at konkludere at m7 var anti-persistent; konklusionen var formentlig et
+    artefakt af metoden og ikke et fund om markedet.
+
+    Her shuffles i stedet raavaren. Udglatningen genopstaar identisk gennem
+    `vindue_fn`, mens tidsstrukturen i markedet er vaek. Det er det rene nul for en
+    vinduesberegnet praediktor.
+
+    HOVEDREGEL ALLIGEVEL: for V-test 1, hvor maalet er en ren dagsvaerdi og
+    praediktoren er vinduesberegnet, **shuffl maalserien**. Det er enklere og
+    entydigt. Denne funktion er til det tilfaelde hvor en enkelt vinduesberegnet
+    KOMPONENT skal nulstilles for sig.
+    """
+    rng = np.random.default_rng(seed)
+    blandet = np.asarray(afkast, float).copy()
+    rng.shuffle(blandet)
+    return vindue_fn(blandet)
+
+
+def rullende_middel(x: np.ndarray, vindue: int = 30) -> np.ndarray:
+    """Simpel rullende beregning — bruges til at demonstrere H2's pointe konkret."""
+    x = np.asarray(x, float)
+    if len(x) < vindue:
+        return np.array([])
+    kerne = np.ones(vindue) / vindue
+    return np.convolve(x, kerne, mode="valid")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Kendt-POSITIV fikstur — en serie der beviseligt HAR det vi maaler efter
 # ═══════════════════════════════════════════════════════════════════════════════
 def klynget_serie(n: int, seed: int = SEED_KLYNGE, persistens: float = 0.94,
@@ -184,6 +230,7 @@ class Registrering:
     bestaa_beskrivelse: str
     dumpede: bool
     bestod: bool
+    egenskab: str | None = None
     dumpe_detalje: str = ""
     bestaa_detalje: str = ""
 
@@ -197,6 +244,140 @@ class Falsifikationskrav(Exception):
     """Rejses naar en kontrol ikke har vist at den kan fejle."""
 
 
+class Fikstuurfejl(Exception):
+    """Rejses naar et fikstur bruges som nul for en egenskab det ikke er nul for."""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# H1 — HVILKEN EGENSKAB ER FIKSTURET NUL FOR?
+# ═══════════════════════════════════════════════════════════════════════════════
+# Der findes ikke én universel nulserie. Hvid stoej, random walk, shufflet og
+# konstant er negative for FORSKELLIGE egenskaber, og at traekke en tilfaeldig af dem
+# ned fra hylden er en fejl der ser omhyggelig ud.
+#
+# Den dyre variant: en random walk har lag-1-autokorrelation taet paa 1, fordi
+# niveauet knap flytter sig. Bruges den som kendt-negativ i en PREDIKTIV test, vil en
+# fuldstaendig korrekt test BESTAA paa den — og man kasserer noget der virker. Den
+# fejl peger den forkerte vej, og det er den farligste slags.
+#
+# Derfor er taksonomien kode og ikke en note: registret vaelger selv fiksturet ud fra
+# den egenskab kontrollen maaler, og AFVISER et haandplukket fikstur der ikke er nul
+# for netop den egenskab.
+
+EGENSKABER = {
+    "prediktiv": "Kan gaarsdagens vaerdi forudsige morgendagens? (lag-1 rangkorrelation) "
+                 "— dette er V-test 1's egenskab",
+    "regimeophold": "Findes der vedvarende tilstande med skift imellem, ud over "
+                    "mekanisk glathed?",
+    "fordeling": "Adskiller fordelingen sig fra den tilfaeldige?",
+}
+
+# For hvert fikstur: hvilke egenskaber er det NUL for, og hvilke HAR det.
+# `maalt` er den observerede lag-1-autokorrelation — tallet der afgoer sagen, saa
+# ingen behoever tage taksonomien paa mit ord.
+FIKSTUUR_TAKSONOMI: dict[str, dict] = {
+    "hvid_stoej": {
+        "funktion": None,               # udfyldes nedenfor
+        "nul_for": {"prediktiv", "regimeophold"},
+        "har": set(),
+        "maalt_autokorr": -0.012,
+        "note": "uafhaengige traekninger — nul for alt vi maaler, men aendrer ogsaa "
+                "fordelingen, saa den er svagere end en shufflet serie",
+    },
+    "shufflet_klynget": {
+        "funktion": None,
+        "nul_for": {"prediktiv", "regimeophold"},
+        "har": {"fordeling"},
+        "maalt_autokorr": 0.000,
+        "note": "DEN SKARPESTE kendt-negative: samme fordeling som den aegte serie, "
+                "tidsstruktur fjernet. Det rette nul for V-test 1.",
+    },
+    "random_walk": {
+        "funktion": None,
+        "nul_for": {"regimeophold"},
+        # ⚠ DEN AFGOERENDE LINJE. En random walk ER prediktiv — trivielt, via
+        # niveaupersistens. Bruges den som nul for "prediktiv", kasserer man en
+        # korrekt test.
+        "har": {"prediktiv", "fordeling"},
+        "maalt_autokorr": 0.995,
+        "note": "glathed UDEN regimer. Haard mod opholdstids-paastande, FORBUDT som "
+                "nul for prediktive tests.",
+    },
+    "konstant": {
+        "funktion": None,
+        "nul_for": {"prediktiv", "regimeophold", "fordeling"},
+        "har": set(),
+        "maalt_autokorr": float("nan"),
+        "note": "degenereret. Brugbar til kantsager, ubrugelig som hovedfikstur — en "
+                "kontrol kan dumpe her uden at kunne dumpe paa noget realistisk.",
+    },
+    "klynget": {
+        "funktion": None,
+        "nul_for": set(),
+        "har": {"prediktiv", "regimeophold", "fordeling"},
+        "maalt_autokorr": 0.806,
+        "note": "KENDT-POSITIV. Aegte volatilitetsklyngning. Dumper en V-test her, er "
+                "testen for stram — ikke markedet der mangler struktur.",
+    },
+}
+
+
+def _fyld_taksonomi(n: int = 1200) -> None:
+    FIKSTUUR_TAKSONOMI["hvid_stoej"]["funktion"] = lambda: hvid_stoej_serie(n)
+    FIKSTUUR_TAKSONOMI["shufflet_klynget"]["funktion"] = lambda: shufflet(klynget_serie(n))
+    FIKSTUUR_TAKSONOMI["random_walk"]["funktion"] = lambda: random_walk_serie(n)
+    FIKSTUUR_TAKSONOMI["konstant"]["funktion"] = lambda: konstant_serie(n)
+    FIKSTUUR_TAKSONOMI["klynget"]["funktion"] = lambda: klynget_serie(n)
+
+
+def nul_fikstur(egenskab: str, n: int = 1200) -> tuple[str, np.ndarray]:
+    """Det RETTE nulfikstur for en given egenskab. Vaelg ikke selv — spoerg her."""
+    if egenskab not in EGENSKABER:
+        raise Fikstuurfejl(f"ukendt egenskab {egenskab!r}; vaelg blandt {sorted(EGENSKABER)}")
+    _fyld_taksonomi(n)
+    # Foretraek det fikstur der bevarer flest andre egenskaber — jo mere der er
+    # uroert, jo skarpere er nullet.
+    kandidater = [(navn, sp) for navn, sp in FIKSTUUR_TAKSONOMI.items()
+                  if egenskab in sp["nul_for"] and navn != "konstant"]
+    kandidater.sort(key=lambda t: -len(t[1]["har"]))
+    navn, spec = kandidater[0]
+    return navn, spec["funktion"]()
+
+
+def positiv_fikstur(egenskab: str, n: int = 1200) -> tuple[str, np.ndarray]:
+    """Et fikstur der beviseligt HAR egenskaben. Uden det er en dumpet kontrol tom."""
+    if egenskab not in EGENSKABER:
+        raise Fikstuurfejl(f"ukendt egenskab {egenskab!r}; vaelg blandt {sorted(EGENSKABER)}")
+    _fyld_taksonomi(n)
+    for navn, spec in FIKSTUUR_TAKSONOMI.items():
+        if egenskab in spec["har"] and not spec["nul_for"]:
+            return navn, spec["funktion"]()
+    raise Fikstuurfejl(f"intet kendt-positivt fikstur for {egenskab!r}")
+
+
+def bekraeft_nul(fikstuurnavn: str, egenskab: str) -> None:
+    """Er dette fikstur overhovedet nul for den egenskab? Rejser hvis ikke.
+
+    Dette er H1 som kode. Kaldet er det der goer at random_walk ikke kan snige sig
+    ind som nul for en prediktiv test — hverken ved uopmaerksomhed eller ved at nogen
+    om et aar husker reglen forkert.
+    """
+    spec = FIKSTUUR_TAKSONOMI.get(fikstuurnavn)
+    if spec is None:
+        raise Fikstuurfejl(f"ukendt fikstur {fikstuurnavn!r}")
+    if egenskab in spec["har"]:
+        raise Fikstuurfejl(
+            f"{fikstuurnavn!r} HAR egenskaben {egenskab!r} (maalt autokorrelation "
+            f"{spec['maalt_autokorr']:+.3f}) og kan derfor ikke vaere nulfikstur for "
+            f"den. {spec['note']} Brug i stedet "
+            f"{nul_fikstur(egenskab)[0]!r}.")
+    if egenskab not in spec["nul_for"]:
+        raise Fikstuurfejl(
+            f"{fikstuurnavn!r} er ikke erklaeret nul for {egenskab!r}. "
+            f"Er det nul, saa skriv det i FIKSTUUR_TAKSONOMI med det maalte tal — "
+            f"ikke i hovedet paa den der laeser koden.")
+
+
 class Falsifikationsregister:
     """Enhver V-test registreres her FOER den koeres paa rigtige data.
 
@@ -207,14 +388,46 @@ class Falsifikationsregister:
     def __init__(self) -> None:
         self.poster: list[Registrering] = []
 
+    def kraev_egenskab(self, navn: str, kontrol: Callable[..., bool], egenskab: str,
+                       n: int = 1200) -> Registrering:
+        """DEN FORETRUKNE VEJ (H1): navngiv egenskaben, saa vaelges fiksturet for dig.
+
+        Kalderen kan ikke gribe forkert ned paa hylden, fordi kalderen ikke vaelger.
+        `egenskab` skal staa i EGENSKABER; for V-test 1 er den "prediktiv".
+        """
+        nul_navn, nul_data = nul_fikstur(egenskab, n)
+        pos_navn, pos_data = positiv_fikstur(egenskab, n)
+        return self.kraev(
+            navn, kontrol, dumper_paa=nul_data, bestaar_paa=pos_data,
+            dumpe_beskrivelse=f"{nul_navn} — nul for '{egenskab}' "
+                              f"(autokorr {FIKSTUUR_TAKSONOMI[nul_navn]['maalt_autokorr']:+.3f})",
+            bestaa_beskrivelse=f"{pos_navn} — har '{egenskab}' "
+                               f"(autokorr {FIKSTUUR_TAKSONOMI[pos_navn]['maalt_autokorr']:+.3f})",
+            egenskab=egenskab)
+
     def kraev(self, navn: str, kontrol: Callable[..., bool], dumper_paa, bestaar_paa,
-              dumpe_beskrivelse: str = "", bestaa_beskrivelse: str = "") -> Registrering:
+              dumpe_beskrivelse: str = "", bestaa_beskrivelse: str = "",
+              egenskab: str | None = None, nul_fikstuurnavn: str | None = None,
+              begrundelse: str = "") -> Registrering:
         """`kontrol(data) -> bool` hvor True = bestaaet.
 
         `dumper_paa` skal give False, `bestaar_paa` skal give True. Sker det ikke,
         er kontrollen ikke brugbar, og det siges hoejt her frem for at blive opdaget
         naar resultatet allerede er rapporteret.
+
+        Vaelger man selv fikstur (`nul_fikstuurnavn`), verificeres det mod
+        taksonomien — et fikstur der HAR egenskaben afvises. Ligger valget helt uden
+        for taksonomien, kraeves en skreven `begrundelse`; en afvigelse maa gerne
+        forekomme, men ikke i tavshed.
         """
+        if nul_fikstuurnavn and egenskab:
+            bekraeft_nul(nul_fikstuurnavn, egenskab)     # H1: rejser ved forkert valg
+        elif egenskab is None and not begrundelse:
+            raise Fikstuurfejl(
+                f"{navn!r}: angiv enten `egenskab` (saa vaelges fiksturet korrekt) "
+                f"eller en skreven `begrundelse` for hvorfor valget ligger uden for "
+                f"taksonomien. Et uargumenteret nulfikstur er praecis den fejl H1 "
+                f"handler om.")
         try:
             dumpe_resultat = bool(kontrol(dumper_paa))
             d_detalje = "kontrollen returnerede " + ("BESTAAET" if dumpe_resultat else "DUMPET")
@@ -227,7 +440,7 @@ class Falsifikationsregister:
             bestaa_resultat, b_detalje = False, f"kontrollen rejste {type(e).__name__}: {e}"
 
         post = Registrering(
-            navn=navn,
+            navn=navn, egenskab=egenskab,
             dumpe_beskrivelse=dumpe_beskrivelse or "kendt-negativt input",
             bestaa_beskrivelse=bestaa_beskrivelse or "kendt-positivt input",
             dumpede=not dumpe_resultat, bestod=bestaa_resultat,

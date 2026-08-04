@@ -66,7 +66,8 @@ p = reg.kraev("prediktiv kontrol (rigtig)", prediktiv_kontrol,
               dumper_paa=shufflet(klynget_serie(1200)),
               bestaar_paa=klynget_serie(1200),
               dumpe_beskrivelse="shufflet klynget serie — samme fordeling, nul tidsstruktur",
-              bestaa_beskrivelse="klynget serie med aegte volatilitetsklyngning")
+              bestaa_beskrivelse="klynget serie med aegte volatilitetsklyngning",
+              egenskab="prediktiv", nul_fikstuurnavn="shufflet_klynget")
 paastand(p.dumpede, "dumper paa den shufflede serie")
 paastand(p.bestod, "bestaar paa den klyngede serie")
 paastand(p.gyldig, "registreres som BRUGBAR")
@@ -83,14 +84,16 @@ p = reg.kraev("'≥30 % over median' (kan ikke fejle)", altid_bestaaet,
               dumper_paa=shufflet(klynget_serie(1200)),
               bestaar_paa=klynget_serie(1200),
               dumpe_beskrivelse="shufflet klynget serie",
-              bestaa_beskrivelse="klynget serie")
+              bestaa_beskrivelse="klynget serie",
+              egenskab="prediktiv", nul_fikstuurnavn="shufflet_klynget")
 paastand(not p.dumpede, "den bestod paa den kendt-negative — som forudset")
 paastand(not p.gyldig, "og registreres derfor som IKKE brugbar")
 
 print("\n[4] Registret afviser ogsaa en kontrol der altid dumper")
 p = reg.kraev("'altid falsk' (kan ikke bestaa)", lambda s: False,
               dumper_paa=shufflet(klynget_serie(500)),
-              bestaar_paa=klynget_serie(500))
+              bestaar_paa=klynget_serie(500),
+              egenskab="prediktiv", nul_fikstuurnavn="shufflet_klynget")
 paastand(p.dumpede and not p.bestod, "den dumpede paa begge")
 paastand(not p.gyldig, "en kontrol der afviser alt er lige saa vaerdiloes")
 
@@ -133,13 +136,85 @@ paastand(np.isnan(spearman([1.0], [2.0])), "for faa punkter = nan")
 
 print("\n[9] Registret godkender naar alt er i orden")
 ren = Falsifikationsregister()
-ren.kraev("prediktiv kontrol", prediktiv_kontrol,
-          dumper_paa=shufflet(klynget_serie(1200)), bestaar_paa=klynget_serie(1200))
+ren.kraev_egenskab("prediktiv kontrol", prediktiv_kontrol, egenskab="prediktiv")
 try:
     tekst = ren.rapport(rejs=True)
     paastand("| ja |" in tekst, "rapporten markerer kontrollen som brugbar")
 except Falsifikationskrav:
     paastand(False, "et rent register maa ikke rejse")
+
+print("\n[10] H1 — fiksturet skal vaere nul for DEN EGENSKAB kontrollen maaler")
+import vol_falsifikation as vf
+
+paastand(vf.nul_fikstur("prediktiv")[0] == "shufflet_klynget",
+         "nul for 'prediktiv' er den shufflede serie — ikke en random walk")
+paastand(vf.nul_fikstur("regimeophold")[0] == "random_walk",
+         "nul for 'regimeophold' ER random walk — glathed uden regimer")
+paastand(vf.positiv_fikstur("prediktiv")[0] == "klynget",
+         "kendt-positiv for 'prediktiv' er den klyngede serie")
+
+# DEN DYRE FEJL, gjort umulig: en random walk som nul for en prediktiv test ville
+# faa en fuldstaendig korrekt test til at se defekt ud.
+try:
+    vf.bekraeft_nul("random_walk", "prediktiv")
+    paastand(False, "random_walk afvises som nul for 'prediktiv'")
+except vf.Fikstuurfejl as ex:
+    paastand("+0.995" in str(ex) and "shufflet_klynget" in str(ex),
+             "afvist MED det maalte tal og med anvisning paa det rette fikstur")
+
+# Og den modsatte retning: random walk ER et gyldigt nul for regimepaastande.
+try:
+    vf.bekraeft_nul("random_walk", "regimeophold")
+    paastand(True, "random_walk accepteres som nul for 'regimeophold'")
+except vf.Fikstuurfejl:
+    paastand(False, "random_walk accepteres som nul for 'regimeophold'")
+
+paastand(vf.nul_fikstur("prediktiv")[0] != vf.nul_fikstur("regimeophold")[0],
+         "de to egenskaber faar FORSKELLIGE nulserier — der findes ingen universel")
+
+print("\n[10b] Registret vaelger selv, saa kalderen ikke kan gribe forkert")
+reg2 = Falsifikationsregister()
+p = reg2.kraev_egenskab("V-test 1 (form)", prediktiv_kontrol, egenskab="prediktiv")
+paastand(p.gyldig, "kraev_egenskab gav en brugbar registrering uden at kalderen valgte")
+paastand("shufflet_klynget" in p.dumpe_beskrivelse,
+         "og den valgte det rette nul af sig selv")
+
+try:
+    reg2.kraev("uargumenteret", prediktiv_kontrol,
+               dumper_paa=random_walk_serie(500), bestaar_paa=klynget_serie(500))
+    paastand(False, "et fikstur uden egenskab eller begrundelse afvises")
+except vf.Fikstuurfejl as ex:
+    paastand("begrundelse" in str(ex), "afvist — et uargumenteret nulfikstur er H1's fejl")
+
+
+print("\n[11] H2 — shuffl raavaren, ikke den vinduesberegnede serie")
+# Pointen der slog det forrige projekt ihjel, vist med tal.
+rng = np.random.default_rng(4242)
+afkast = rng.normal(0, 1, 1500)                     # iid — INGEN struktur overhovedet
+
+vinduesberegnet = vf.rullende_middel(afkast, 30)
+naiv = shufflet(vinduesberegnet)                    # den FORKERTE maade
+korrekt = vf.shufflet_via_underliggende(afkast, lambda x: vf.rullende_middel(x, 30))
+
+ac_orig = spearman(vinduesberegnet[:-1], vinduesberegnet[1:])
+ac_naiv = spearman(naiv[:-1], naiv[1:])
+ac_korrekt = spearman(korrekt[:-1], korrekt[1:])
+print(f"        30-dages rullende middel af IID stoej : {ac_orig:+.3f}")
+print(f"        naivt shufflet (forkert)              : {ac_naiv:+.3f}")
+print(f"        shufflet via raavaren (rigtigt)       : {ac_korrekt:+.3f}")
+
+paastand(ac_orig > 0.9,
+         f"et rullende vindue paa REN STOEJ er mekanisk glat ({ac_orig:+.3f}) — "
+         f"glatheden er ikke et fund")
+paastand(abs(ac_naiv) < 0.1,
+         f"naiv shuffling oedelaegger ogsaa udglatningen ({ac_naiv:+.3f})")
+paastand(ac_korrekt > 0.9,
+         f"shuffling via raavaren BEVARER udglatningen ({ac_korrekt:+.3f})")
+paastand(ac_korrekt - ac_naiv > 0.8,
+         "de to metoder giver vidt forskellige nul — de er ikke ombyttelige")
+
+print("        -> Sammenlignes en vinduesberegnet praediktor med et naivt shufflet nul,")
+print("          maaler man udglatningen og ikke markedet. Det var m7-konklusionen.")
 
 print("\n" + "=" * 70)
 if FEJL:
