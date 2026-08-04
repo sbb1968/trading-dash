@@ -1,0 +1,162 @@
+{
+  "skema_version": "1.0",
+  "opdateret": "2026-08-04T13:34:33+00:00",
+  "reference_start": "2009-08-17",
+  "intradag_start": "2012-01-01",
+  "serier": [
+    {
+      "instrument": "IWM",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 3 udviklingsproxy for M2K (A8) — Russell-benet",
+      "fil": "vol_cache\\IWM_1dag.csv",
+      "ibkr": {
+        "art": "stk",
+        "boers": "SMART",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 9579970
+      },
+      "barer": 4277,
+      "barer_foer": 0,
+      "nye_barer": 4277,
+      "hentede_svar": 4277,
+      "foerste": "2009-08-03",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:31:31+00:00"
+    },
+    {
+      "instrument": "RVX",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 1 small-cap-vol (A2) — den population vi handler i",
+      "fil": "vol_cache\\RVX_1dag.csv",
+      "ibkr": {
+        "art": "ind",
+        "boers": "CBOE",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 41492901
+      },
+      "barer": 4276,
+      "barer_foer": 0,
+      "nye_barer": 4276,
+      "hentede_svar": 4276,
+      "foerste": "2009-08-03",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:33:33+00:00"
+    },
+    {
+      "instrument": "SPY",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 1 realiseret vol (ingen roll-gap) + lag 3 udviklingsproxy for MES",
+      "fil": "vol_cache\\SPY_1dag.csv",
+      "ibkr": {
+        "art": "stk",
+        "boers": "SMART",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 756733
+      },
+      "barer": 4277,
+      "barer_foer": 0,
+      "nye_barer": 4277,
+      "hentede_svar": 4277,
+      "foerste": "2009-08-03",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:31:02+00:00"
+    },
+    {
+      "instrument": "VIX",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 1 implicit vol-niveau + lag 3",
+      "fil": "vol_cache\\VIX_1dag.csv",
+      "ibkr": {
+        "art": "ind",
+        "boers": "CBOE",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 13455763
+      },
+      "barer": 4276,
+      "barer_foer": 0,
+      "nye_barer": 4276,
+      "hentede_svar": 4276,
+      "foerste": "2009-08-03",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:32:01+00:00"
+    },
+    {
+      "instrument": "VIX3M",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 1 terminsstruktur sammen med VIX",
+      "fil": "vol_cache\\VIX3M_1dag.csv",
+      "ibkr": {
+        "art": "ind",
+        "boers": "CBOE",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 47511905
+      },
+      "barer": 4269,
+      "barer_foer": 0,
+      "nye_barer": 4269,
+      "hentede_svar": 4269,
+      "foerste": "2009-08-12",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:32:29+00:00"
+    },
+    {
+      "instrument": "VIX9D",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 2 kort ende — begivenhedsrisiko",
+      "fil": "vol_cache\\VIX9D_1dag.csv",
+      "ibkr": {
+        "art": "ind",
+        "boers": "CBOE",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "1 Y",
+        "conId": 322592334
+      },
+      "barer": 2039,
+      "barer_foer": 0,
+      "nye_barer": 2039,
+      "hentede_svar": 2039,
+      "foerste": "2018-06-22",
+      "sidste": "2026-08-04",
+      "what_to_show": "TRADES",
+      "hentet": "2026-08-04T13:33:02+00:00"
+    },
+    {
+      "instrument": "VX",
+      "barstoerrelse": "1 day",
+      "hvorfor": "lag 2 FRISK implicit vol — spot-VIX opdaterer kun i RTH",
+      "fil": "vol_cache\\VX_1dag.csv",
+      "ibkr": {
+        "art": "contfut",
+        "boers": "CFE",
+        "useRTH": false,
+        "formatDate": 2,
+        "varighed_pr_kald": "5 Y",
+        "conId": 833649190,
+        "endDateTime": "(tom — ContFuture afviser den, fejl 10339)"
+      },
+      "what_to_show": "TRADES",
+      "barer": 677,
+      "barer_foer": 0,
+      "nye_barer": 677,
+      "foerste": "2023-11-24",
+      "sidste": "2026-08-04",
+      "hentet": "2026-08-04T13:34:33+00:00"
+    }
+  ]
+}
