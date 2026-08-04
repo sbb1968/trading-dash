@@ -75,7 +75,8 @@ SKIVE = {
 
 # Kvalitetstjek paa dagsbarer: én stor hentning pr. instrument (billigt).
 KVALITET_VARIGHED = "15 Y"   # 20 Y timede ud for VIX/VIX3M/SPY/RVX/VX (3/8-2026)
-KVALITET_TIMEOUT  = 180      # egen, laengere timeout — én stor hentning pr. instrument
+KVALITET_TIMEOUT  = 180
+KVALITET_BRUGT: dict[str, str] = {}   # instrument -> varighed der virkede      # egen, laengere timeout — én stor hentning pr. instrument
 
 # ── Instrumenter ────────────────────────────────────────────────────────────────
 # niveau: A = kerne (uden disse er byggeklodsen umulig)
@@ -295,15 +296,63 @@ async def find_faktisk_aeldste(ib, contract, bar, what, emit, navn):
     return None, forrige_tom, kald
 
 
+# Instrumenternes FAKTISKE lanceringsdato. Uden den kan man ikke skelne
+# "instrumentet fandtes ikke" fra "IBKR begyndte foerst at foere det da".
+# Tilfoejet med Revision A, punkt A9: VIX9D har eksisteret siden 2011, men IBKR's
+# serie starter 2018 — det er hverken retention eller instrumentets levetid, det er
+# VENDOR-ONBOARDING. Den opfoerer sig som en haard graense (kan ikke koebes) men har
+# intet med markedet at goere, og den maa ikke forveksles med de andre tre.
+LANCERET = {
+    "VIX":   date_cls(2003, 9, 22),   # nuvaerende SPX-baserede metode (den IBKR foerer)
+    "VIX3M": date_cls(2002, 12, 1),   # tidl. VXV
+    "VIX9D": date_cls(2011, 1, 1),
+    "RVX":   date_cls(2004, 1, 1),
+    "VXN":   date_cls(2001, 1, 1),
+    "VVIX":  date_cls(2012, 1, 1),
+    "SPY":   date_cls(1993, 1, 22),
+    "IWM":   date_cls(2000, 5, 22),
+    "HYG":   date_cls(2007, 4, 4),
+    "LQD":   date_cls(2002, 7, 22),
+    "TLT":   date_cls(2002, 7, 22),
+    "UUP":   date_cls(2007, 2, 20),
+    "GLD":   date_cls(2004, 11, 18),
+}
+# Hvor meget senere end lanceringen en serie maa starte, foer vi kalder det
+# vendor-onboarding frem for instrumentets egen levetid.
+ONBOARDING_MARGIN_DAGE = 400
+
+
 def klassificer(bar: str, bekraeftet_aeldste: datetime | None,
-                head: datetime | None, kontrol_aeldste: datetime | None) -> str:
-    """Hvorfor stopper historikken her? De tre aarsager forveksles konstant."""
+                head: datetime | None, kontrol_aeldste: datetime | None,
+                navn: str | None = None) -> str:
+    """Hvorfor stopper historikken her? FIRE aarsager, som konstant forveksles.
+
+    Den fjerde — VENDOR-ONBOARDING — kom med Revision A. Den opfoerer sig som en
+    haard graense (kan ikke koebes) men skyldes at IBKR foerst begyndte at foere
+    symbolet, ikke at markedet eller instrumentet manglede. Uden lanceringsdatoer
+    kan den ikke skelnes fra instrumentets egen levetid.
+    """
     if bekraeftet_aeldste is None:
         return "INGEN DATA — hverken headstamp eller verifikation gav bars"
     alder_dage = (datetime.now() - bekraeftet_aeldste).days
     if bar == "1 day":
+        lanceret = LANCERET.get((navn or "").upper())
+        starter_meget_senere = (
+            lanceret is not None
+            and bekraeftet_aeldste.date() > lanceret + timedelta(days=ONBOARDING_MARGIN_DAGE))
+        # Vendor-onboarding tjekkes FOER dybde-reglen: en serie kan sagtens vaere
+        # dyb OG stadig starte lang tid efter instrumentet blev lanceret.
+        if starter_meget_senere:
+            aar_efter = (bekraeftet_aeldste.date() - lanceret).days / 365.25
+            return (f"VENDOR-ONBOARDING — instrumentet blev lanceret {lanceret.year}, "
+                    f"men IBKR's serie starter {aar_efter:.0f} aar senere. Hverken "
+                    f"retention eller instrumentets levetid; IBKR begyndte foerst "
+                    f"at foere symbolet da. Kan ikke skaffes.")
         if alder_dage > 3650:
             return "HARVEST-PARAMETER — dyb dagshistorik findes, vi skal bare bede om den"
+        if lanceret is not None:
+            return (f"INSTRUMENT-LEVETID — serien starter ved instrumentets egen "
+                    f"lancering ({lanceret.year}); der ER ikke mere.")
         if kontrol_aeldste and bekraeftet_aeldste > kontrol_aeldste + timedelta(days=365):
             return ("KONTRAKTLEVETID — kontrolgruppen (SPY) naar laengere tilbage, "
                     "saa graensen er instrumentets egen alder")
@@ -409,7 +458,7 @@ async def probe_instrument(ib, inst, bars, kontrol_aeldste, emit, ventet):
             if fundet is not None:
                 bekraeftet = fundet
 
-        aarsag = klassificer(bar, bekraeftet or head, head, kontrol_aeldste)
+        aarsag = klassificer(bar, bekraeftet or head, head, kontrol_aeldste, inst["navn"])
         aar = None
         if bekraeftet or head:
             aar = round((datetime.now() - (bekraeftet or head)).days / 365.25, 1)
@@ -445,8 +494,18 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
     contract, _f = await kvalificer(ib, inst)
     if contract is None:
         return None
-    n, foerste, sidste, fejl = await hent_skive(
-        ib, contract, "1 day", None, what, False, KVALITET_VARIGHED)
+    # ContFuture er langsom paa lange varigheder og timede ud paa 15 Y (VX, 3/8-2026).
+    # Den har alligevel kun faa aars sammensat historik, saa vi gaar stigen ned.
+    varigheder = (["5 Y", "3 Y", "2 Y", "1 Y"] if inst["art"] == "contfut"
+                  else [KVALITET_VARIGHED])
+    n = 0
+    for _v in varigheder:
+        n, foerste, sidste, fejl = await hent_skive(
+            ib, contract, "1 day", None, what, False, _v)
+        await asyncio.sleep(SLEEP_BETWEEN)
+        if n > 0:
+            KVALITET_BRUGT[inst["navn"]] = _v
+            break
     await asyncio.sleep(SLEEP_BETWEEN)
     if fejl or n == 0:
         return {"navn": inst["navn"], "fejl": fejl or "tom"}
@@ -454,7 +513,8 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
     try:
         bars = await asyncio.wait_for(
             ib.reqHistoricalDataAsync(contract, endDateTime="",
-                                      durationStr=KVALITET_VARIGHED, barSizeSetting="1 day",
+                                      durationStr=KVALITET_BRUGT.get(inst["navn"], KVALITET_VARIGHED),
+                                      barSizeSetting="1 day",
                                       whatToShow=what, useRTH=False, formatDate=2),
             timeout=KVALITET_TIMEOUT)
     except Exception as e:
@@ -711,6 +771,44 @@ async def koer(args, emit):
     return 0
 
 
+def omklassificer(json_sti: Path, emit) -> int:
+    """Genudled `aarsag` for ALLE gemte serier — uden at roere IBKR.
+
+    Klassifikationen er en REN funktion af felter der allerede staar i JSON'en
+    (bar, bekraeftet_aeldste, instrumentnavn) plus kontrolgruppen. Da Revision A
+    tilfoejede en fjerde kategori (vendor-onboarding), beholdt alle ikke-genmaalte
+    instrumenter deres gamle maerkat — VIX, RVX og VXN stod stadig som
+    HARVEST-PARAMETER selvom de er onboardet aar efter deres lancering.
+
+    En taksonomi-aendring skal ikke koste en ny datahentning. Derfor denne.
+    """
+    d = json.loads(json_sti.read_text(encoding="utf-8"))
+    kontrol = None
+    for i in d.get("instrumenter", []):
+        if i["navn"] == "SPY":
+            dag = next((x for x in i.get("serier", []) if x["bar"] == "1 day"), None)
+            if dag and dag.get("bekraeftet_aeldste"):
+                kontrol = datetime.fromisoformat(dag["bekraeftet_aeldste"])
+    aendret = 0
+    for i in d.get("instrumenter", []):
+        for s_ in i.get("serier", []):
+            if i["art"] == "contfut":
+                continue          # futures har egen aarsagstekst, sat ved maaling
+            gl_aarsag = s_.get("aarsag")
+            b = s_.get("bekraeftet_aeldste")
+            ny_aarsag = klassificer(
+                s_["bar"], datetime.fromisoformat(b) if b else None,
+                None, kontrol, i["navn"])
+            if ny_aarsag != gl_aarsag:
+                s_["aarsag"] = ny_aarsag
+                aendret += 1
+                emit(f"  {i['navn']:<7}{s_['bar']:<9}{ny_aarsag[:66]}")
+    json_sti.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+    skriv_md(d, json_sti.parent / "vol_data_probe.md")
+    emit(f"\n{aendret} serier omklassificeret. JSON + MD opdateret.")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="FASE V0 — probe af IBKR-raekkevidde og datakvalitet til volatilitets-byggeklodsen")
@@ -728,10 +826,20 @@ def main():
     ap.add_argument("--spring-kvalitet", action="store_true",
                     help="spring V0.2 over (kun raekkevidde)")
     ap.add_argument("--vent-pacing", type=int, default=PACING_WAIT)
+    ap.add_argument("--omklassificer", action="store_true",
+                    help="genudled aarsags-klassifikationen fra gemte tal — "
+                         "ingen IBKR-kontakt. Brug efter en taksonomi-aendring.")
     args = ap.parse_args()
 
     def emit(s=""):
         print(s, flush=True)
+
+    if args.omklassificer:
+        sti = Path(__file__).resolve().parent / OUT_DIRNAME / "vol_data_probe.json"
+        if not sti.exists():
+            emit(f"Findes ikke: {sti}")
+            sys.exit(1)
+        sys.exit(omklassificer(sti, emit))
 
     try:
         sys.exit(asyncio.run(koer(args, emit)))
