@@ -103,9 +103,23 @@ def exit_reason(side: str, z: float,
                 exit_z: float = EXIT_Z, stop_z: float = STOP_Z) -> Optional[str]:
     """
     Exit-årsag for en åben position, eller None.
-      'revert' — tilbage mod middel (|z| ≤ exit_z)
+      'revert' — reversionen er indtruffet
       'stop'   — stræk fortsætter (|z| ≥ stop_z)
     Revert tjekkes før stop (samme rækkefølge som den validerede backtest).
+
+    ⚠ REVERT-BETINGELSEN ER ENSIDET, IKKE ET BÅND. For en long er den z ≥ −exit_z,
+    altså opfyldt af ALT fra −0,5 og opefter — også z = +3. Ikke |z| ≤ exit_z.
+
+    Det er med vilje. Var den et bånd, ville et spring fra z = −1,6 til +3 IKKE
+    udløse exit, og vi ville sidde med en long og vente på at prisen kom tilbage ned
+    i båndet — stik imod hensigten. Reglen siger "ud så snart reversionen er
+    indtruffet", ikke "ud hvis vi lander præcis på midten".
+
+    Konsekvensen i praksis: exit sker ofte på den ANDEN side af gennemsnittet, fordi
+    algoritmen kun handler på færdige 15-min bars. Eksempel fra 2026-08-04 (long
+    åbnet 11:30 dansk ved z = −2,75): sidste bar før exit lukkede på z = −1,61, den
+    næste på z = +0,33 — prisen gik 7,25 point på ét kvarter og sprang hele zonen
+    mellem −0,5 og 0 over. Der fandtes aldrig en bar at sælge på ved z = −0,5.
     """
     if side == "long":
         if z >= -exit_z:
