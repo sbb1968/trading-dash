@@ -172,7 +172,8 @@ async def kvalificer(ib, inst):
     c = byg_kontrakt(inst)
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=QUALIFY_TIMEOUT)
-        return (q[0] if q else None), None
+        # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+        return (q[0] if (q and getattr(q[0], "conId", 0)) else None), None
     except Exception as e:
         return None, f"{type(e).__name__}: {str(e)[:100]}"
 

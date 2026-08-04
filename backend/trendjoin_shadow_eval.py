@@ -147,7 +147,8 @@ async def reconstruct(ib, sym, day, end_dt):
     from ib_async import Stock
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(Stock(sym, "SMART", "USD")), timeout=15)
-        contract = q[0] if q else None
+        # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+        contract = q[0] if (q and getattr(q[0], "conId", 0)) else None
     except Exception:
         contract = None
     if contract is None:

@@ -146,7 +146,8 @@ async def fetch_ticker(ib, ticker, start_date, end_date, window_days, sleep_s, e
         q = await asyncio.wait_for(ib.qualifyContractsAsync(Stock(ticker, "SMART", "USD")), timeout=15)
     except Exception as e:
         return None, f"qualify-fejl: {e}"
-    if not q:
+    # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+    if not q or not getattr(q[0], "conId", 0):
         return None, "kunne ikke kvalificeres"
     contract = q[0]
 

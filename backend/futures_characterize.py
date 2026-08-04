@@ -189,7 +189,8 @@ async def qualify_future(ib, symbol, exchange, expiry, local_symbol):
     c = Future(localSymbol=local_symbol, exchange=exchange, currency="USD")
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=10)
-        if q:
+        # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+        if q and getattr(q[0], "conId", 0):
             return q[0]
     except Exception:
         pass
@@ -197,7 +198,8 @@ async def qualify_future(ib, symbol, exchange, expiry, local_symbol):
     c = Future(symbol=symbol, lastTradeDateOrContractMonth=expiry, exchange=exchange, currency="USD")
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=10)
-        if q:
+        # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+        if q and getattr(q[0], "conId", 0):
             return q[0]
     except Exception:
         pass

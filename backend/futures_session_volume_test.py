@@ -93,7 +93,8 @@ async def resolve_contract(ib, kwargs):
     if "localSymbol" in kwargs:
         try:
             q = await asyncio.wait_for(ib.qualifyContractsAsync(Future(**kwargs)), timeout=10)
-            return q[0] if q else None
+            # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+            return q[0] if (q and getattr(q[0], "conId", 0)) else None
         except Exception:
             return None
     try:

@@ -167,7 +167,12 @@ async def qualify_front(ib, emit):
     exp, det = cands[0]
     c = det.contract
     q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=15)
-    c = q[0] if q else c
+    # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl — en tom skal
+    # med conId=0 ville ellers glide videre og give 'ingen data' i stedet for
+    # 'kontrakten findes ikke'. Se ibkr_kvalificer.
+    c = q[0] if (q and getattr(q[0], "conId", 0)) else c
+    if not getattr(c, "conId", 0):
+        raise RuntimeError(f"kontrakten kunne ikke kvalificeres (conId=0): {c}")
     emit(f"   KVALIFICERING: {c.localSymbol}  conId={c.conId}  udloeb {c.lastTradeDateOrContractMonth}"
          f"  mult={c.multiplier}  {c.currency}  minTick={det.minTick}  ({c.exchange})")
     return c, exp

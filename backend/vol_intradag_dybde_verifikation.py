@@ -123,7 +123,8 @@ async def koer(args, emit):
             c = byg_kontrakt(sym, spec)
             try:
                 q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=20)
-                c = q[0] if q else None
+                # conId-tjek — se ibkr_kvalificer
+                c = q[0] if (q and getattr(q[0], "conId", 0)) else None
             except Exception as e:
                 emit(f"  {sym}: kunne ikke kvalificeres — {e}")
                 c = None

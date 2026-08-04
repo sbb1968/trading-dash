@@ -137,7 +137,8 @@ async def reconnect(ib, host, port, client_id, emit, attempts=3, delay=8):
 async def qualify_stock(ib, ticker, emit):
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(Stock(ticker, "SMART", "USD")), timeout=15)
-        return q[0] if q else None
+        # conId-tjek: qualifyContractsAsync er truthy ogsaa ved fejl (se ibkr_kvalificer)
+        return q[0] if (q and getattr(q[0], "conId", 0)) else None
     except Exception as e:
         emit(f"   kvalificering fejlede: {type(e).__name__}: {e}")
         return None

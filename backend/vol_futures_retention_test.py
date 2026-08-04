@@ -80,7 +80,9 @@ async def probe_kontrakt(ib, sym: str, boers: str, maaned: str, midt: datetime, 
                exchange=boers, currency="USD", includeExpired=True)
     try:
         q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=25)
-        c = q[0] if q else None
+        # conId-tjek — se ibkr_kvalificer. Uden det er en purget kontrakt ikke til
+        # at skelne fra en levende, og hele testen giver falske positiver.
+        c = q[0] if (q and getattr(q[0], "conId", 0)) else None
     except Exception as e:
         return dict(symbol=sym, maaned=maaned, kvalificeret=False,
                     fejl=f"kvalificering: {type(e).__name__}: {str(e)[:80]}", n=0)
