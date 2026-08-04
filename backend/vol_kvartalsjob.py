@@ -254,8 +254,13 @@ def skriv_log(rod: Path, resultat: dict, mangler: list, arkiv_status: str,
     return sti
 
 
-def koer_arkiv(rod: Path, dest: str | None, emit) -> str:
-    """Verificér arkivet og reparér hvad der kan reddes. Bitroed ses kun her."""
+def koer_arkiv(rod: Path, dest: str | None, emit) -> tuple[str, bool]:
+    """Verificér arkivet og reparér hvad der kan reddes. Bitroed ses kun her.
+
+    Returnerer (statustekst, ok). ⚠ K1: arkivet ligger paa en EKSTERN disk der ikke
+    altid er tilsluttet. Er den ikke det, SKAL jobbet ende med en haard fejl — ikke
+    en logpost der ser groen ud fordi der ikke var noget at kontrollere.
+    """
     # --fuld paa kopier: hash hver kildefil frem for at stole paa mtime. Bitroed i
     # KILDEN aendrer ikke mtime, saa hurtigstien ville springe den over — og en
     # raadden kilde er praecis hvad der ikke maa naa arkivet.
@@ -265,11 +270,15 @@ def koer_arkiv(rod: Path, dest: str | None, emit) -> str:
     try:
         p = subprocess.run(cmd, cwd=rod, capture_output=True, text=True, timeout=1800)
     except Exception as e:
-        emit(f"Arkivverifikation kunne ikke koeres: {e}")
-        return f"kunne ikke koeres ({e})"
+        emit(f"ARKIVVERIFIKATION KUNNE IKKE KOERES: {e}")
+        return f"**FEJL** — kunne ikke koeres ({e})", False
     emit(p.stdout.strip() or p.stderr.strip())
     sidste = [l for l in (p.stdout or "").splitlines() if l.strip()]
-    return (sidste[-1] if sidste else "intet output") + f"  (exit {p.returncode})"
+    tekst = (sidste[-1] if sidste else "intet output") + f"  (exit {p.returncode})"
+    if p.returncode != 0:
+        emit("\n!! ARKIVET ER IKKE VERIFICERET. Er den eksterne disk tilsluttet?")
+        return "**FEJL** — " + tekst, False
+    return tekst, True
 
 
 def main() -> int:
@@ -324,11 +333,16 @@ def main() -> int:
     emit("\n" + "=" * 70)
     emit("3) Arkivets tilstand")
     emit("=" * 70)
-    arkiv_status = koer_arkiv(rod, args.dest, emit)
+    arkiv_status, arkiv_ok = koer_arkiv(rod, args.dest, emit)
 
     sti = skriv_log(rod, resultat, mangler, arkiv_status,
                     kortlagt=not args.uden_ibkr)
     emit(f"\nLogpost skrevet: {sti}")
+    if not arkiv_ok:
+        # K1: jobbet maa ikke afslutte groent naar arkivet ikke kunne verificeres.
+        # Koeres det som en planlagt opgave, er exit-koden det eneste nogen ser.
+        emit("\nKVARTALSJOBBET AFSLUTTES MED FEJL: arkivet kunne ikke verificeres.")
+        return 1
     return 0
 
 

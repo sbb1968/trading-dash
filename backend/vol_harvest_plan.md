@@ -134,6 +134,29 @@ som helst uden at noget er spildt (jf. E3, J3).
 truffet beslutning med begrundelse, ikke efterlades som en aaben opgave. Et aabent
 punkt ingen naar, er vaerre end et lukket punkt med en grund.
 
+### Hvornaar E3-spoergsmaalet genaabnes (Revision K2)
+
+Overlappet mellem ES/RTY (fra 2024-06-21) og designperiodens slut (2024-12-31) er
+**134 handelsdage**. Det er rigeligt til trin 2 i `vol_maaleinstrument_test.py` —
+rangkorrelationen mellem de to percentilserier, som formentlig afgoer sagen alene.
+Det er tyndere til trin 4, hvor to naesten identiske praediktorer skal skilles ad.
+
+Testen skelner derfor tre udfald, og **de to sidste maa ikke forveksles**:
+
+| konklusionstype | betyder |
+|---|---|
+| `POSITIVT_FUND` | trin 2 afgjorde det: serierne **er** maalt udskiftelige. Sagen er lukket. |
+| `AFGJORT` | trin 4 gav et smalt interval: forskellen er reelt lille (eller reelt til stede). |
+| `UAFKLARET` | trin 4 gav et **bredt** interval om nul: **vi ved det ikke.** Ikke et bevis for aekvivalens. |
+
+**Ender vi paa `UAFKLARET`, genaabnes spoergsmaalet — det staar ikke bare hen.**
+Grundlaget raekker naar spor 3 har akkumuleret lige saa mange fremadrettede dage som
+designoverlappet, altsaa **134 handelsdage efter frysningsdatoen** (~6,5 maaneder).
+Fryses motoren fx i september 2026, kan testen koeres igen omkring **marts 2027**.
+
+Skriv den faktiske dato ind her naar frysningsdatoen er kendt. Uden en dato bliver
+"vi ved det ikke" stiltiende til "det betyder ikke noget".
+
 **Foerudsaetninger:** TWS/Gateway aabent, clientId 75 (ledig; backend=?, harvest=48,
 asian=47). Trin 1 tager minutter, trin 2 en halv time pr. symbol, trin 3 flere timer
 pr. symbol. Scriptet er resumerbart pr. fil — en afbrydelse koster ikke arbejdet, koer
@@ -308,6 +331,8 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | D1.1 | MES/M2K komplet — intet at redde (J1) | **lukket** |
 | J3 | ES/RTY: RTY foerst, ES hvis timerne er der | **afventer beslutning + koersel** |
 | J4 | Praeregistreret valg af maaleinstrument | bygget + falsificeret; koerer naar ES/RTY findes |
+| K1 | Tomt/utilgaengeligt arkiv fejler haardt | hul fundet og lukket; kvartalsjob returnerer 1 |
+| K2 | Uafklaret != aekvivalens | KI-bredde + konklusionstype; graense rettet 250 -> 100 |
 | D1.2 | Arkiv paa H: | bygget og verificeret; foerste rigtige `kopier` afventer trin 1-3 |
 | D1.3 | Kvartalsjob | bygget; koeres efter naeste udloeb (2026-09) |
 | B2 | Assert paa barantal | bygget, testet |

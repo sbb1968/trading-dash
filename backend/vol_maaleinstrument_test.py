@@ -61,8 +61,23 @@ from vol_falsifikation import bootstrap_forskel, spearman
 # ── PRAEREGISTREREDE KRITERIER — bundet foer data findes ───────────────────────
 UDSKIFTELIG_SPEARMAN = 0.98   # >= dette: serierne er udskiftelige, vaelg det vi handler
 PCT_VINDUE = 252              # bagudrettet percentilreference, kun dage FOER
-MIN_FAELLES_SESSIONER = 250   # under dette er sammenligningen ikke meningsfuld
 BOOTSTRAP_N = 1000
+
+# ⚠ K2: OVERLAPPET ER KORT, OG DE TO TRIN TAALER DET FORSKELLIGT.
+# ES/RTY starter 2024-06-21, designperioden slutter 2024-12-31 — **134 handelsdage**.
+#   · Trin 2 (rangkorrelation mellem to serier) er rigeligt daekket af 134 dage.
+#   · Trin 4 (skelne to naesten identiske praediktorer) er tyndt daekket. Parret
+#     bootstrap hjaelper — samme dage indgaar i begge, saa FORSKELLEN maales praecist
+#     selvom hver enkelt korrelation er usikker — men grundlaget er stadig kort.
+# Derfor to graenser frem for én. En faelles graense paa 250 ville have faaet testen
+# til at svare UAFGJORT uden overhovedet at naa trin 2, hvor svaret formentlig ligger.
+MIN_SESSIONER_TRIN2 = 100
+MIN_SESSIONER_TRIN4 = 100
+
+# Et KI bredere end dette kaldes "uafklaret" frem for "ingen forskel". Se K2:
+# at intervallet rummer nul er IKKE et bevis for aekvivalens naar det ogsaa rummer
+# en stor forskel i begge retninger.
+BREDT_KI = 0.20
 
 # Sessionsgraenser i ET. Overnight = fra RTH-luk til naeste RTH-aabning.
 RTH_AABEN = time(9, 30)
@@ -166,12 +181,14 @@ def afgoer(a_navn: str, b_navn: str, pa: dict, pb: dict,
     faelles = [d for d in faelles if d <= DESIGN_SLUT]
     res = {"a": a_navn, "b": b_navn, "n_faelles": len(faelles)}
 
-    if len(faelles) < MIN_FAELLES_SESSIONER:
+    if len(faelles) < MIN_SESSIONER_TRIN2:
         res["konklusion"] = "UAFGJORT — for faa faelles sessioner"
         res["afgjort_paa"] = "trin 0"
+        res["konklusionstype"] = "UAFKLARET"
         emit(f"Kun {len(faelles)} faelles sessioner i designperioden "
-             f"(kraever {MIN_FAELLES_SESSIONER}). Testen udtaler sig ikke.")
+             f"(kraever {MIN_SESSIONER_TRIN2}). Testen udtaler sig ikke.")
         return res
+    emit(f"{len(faelles)} faelles sessioner i designperioden.")
 
     # ── Trin 2: er de udskiftelige? ───────────────────────────────────────────
     va = [pa[d] for d in faelles]
@@ -183,6 +200,8 @@ def afgoer(a_navn: str, b_navn: str, pa: dict, pb: dict,
     if r >= UDSKIFTELIG_SPEARMAN:
         res["konklusion"] = f"BRUG {a_navn} — serierne er udskiftelige"
         res["afgjort_paa"] = "trin 2"
+        # POSITIVT FUND, ikke et fravaer af fund. Vi har MAALT at de er ens.
+        res["konklusionstype"] = "POSITIVT_FUND"
         emit(f"  -> Udskiftelige. Vaelg det vi HANDLER: {a_navn}. Sagen er lukket, "
              f"og det er et lige saa brugbart svar som det modsatte.")
         return res
@@ -221,13 +240,35 @@ def afgoer(a_navn: str, b_navn: str, pa: dict, pb: dict,
     emit(f"   forskel ({b_navn} - {a_navn}) {forskel:+.4f}  "
          f"95 %-KI [{lav_ki:+.4f}, {hoej_ki:+.4f}]")
 
+    bredde = hoej_ki - lav_ki
+    res["ki_bredde"] = bredde
+    emit(f"   KI-BREDDE {bredde:.4f}   (n={len(faelles)} sessioner)")
+    if len(faelles) < MIN_SESSIONER_TRIN4:
+        emit(f"   ⚠ under {MIN_SESSIONER_TRIN4} sessioner — trin 4 er tyndt daekket.")
+
     if lav_ki > 0:
         res["konklusion"] = f"MAAL PAA {b_navn} — slaar {a_navn} uden for KI"
+        res["konklusionstype"] = "AFGJORT"
         emit(f"  -> {b_navn} slaar {a_navn}, og KI'et udelukker nul. Maal paa {b_navn}.")
+    elif bredde > BREDT_KI:
+        # ⚠ K2: DETTE ER IKKE ET BEVIS FOR AEKVIVALENS.
+        # At intervallet rummer nul betyder ikke at forskellen ER nul — her rummer
+        # det ogsaa en stor forskel i begge retninger. Vi VED DET IKKE. Formuleringen
+        # maa ikke antyde andet, for saa bliver "vi ved det ikke" stiltiende til
+        # "det betyder ikke noget".
+        res["konklusion"] = (f"UAFKLARET — grundlaget kan ikke skelne {a_navn} fra "
+                             f"{b_navn} (KI-bredde {bredde:.3f}). Brug {a_navn} "
+                             f"indtil videre.")
+        res["konklusionstype"] = "UAFKLARET"
+        emit(f"  -> KI'et rummer nul, MEN det er bredt ({bredde:.3f}). Det er IKKE "
+             f"et bevis for at de er ens — det er for lidt data til at skelne.")
+        emit(f"     Brug {a_navn} indtil videre, og GENAABN spoergsmaalet naar spor 3 "
+             f"har akkumuleret nok fremadrettede dage (se vol_harvest_plan.md).")
     else:
-        res["konklusion"] = f"BRUG {a_navn} — {b_navn} slaar den ikke overbevisende"
-        emit(f"  -> KI'et udelukker ikke nul. Praeregistreringen siger da {a_navn} "
-             f"(det vi handler). Ingen efterrationalisering.")
+        res["konklusion"] = f"BRUG {a_navn} — {b_navn} slaar den ikke, og KI'et er smalt"
+        res["konklusionstype"] = "AFGJORT"
+        emit(f"  -> KI'et udelukker ikke nul, og det er smalt ({bredde:.3f}) — "
+             f"forskellen er reelt lille. Praeregistreringen siger {a_navn}.")
     res["afgjort_paa"] = "trin 4"
     return res
 

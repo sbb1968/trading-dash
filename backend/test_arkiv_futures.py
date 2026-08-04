@@ -152,6 +152,30 @@ try:
     kode, ud = koer(rod, dest, "verificer", "--reparer")
     paastand(kode == 0 and "repareret" in ud, "og --reparer henter den gode fra kilden")
 
+    print("\n[9] K1 — et TOMT eller utilgaengeligt arkiv maa ALDRIG melde groent")
+    # Arkivet ligger paa en ekstern disk der ikke altid er tilsluttet. Uden dette
+    # tjek ville "0 filer, 0 fejl" ende i "Arkivet er intakt" og exit 0 — en kontrol
+    # hvis udfald var afgjort af at der ikke var noget at kontrollere.
+    tomt = tmp / "tomt_arkiv"
+    tomt.mkdir(parents=True, exist_ok=True)
+    (tomt / "manifest.json").write_text('{"skema_version":"1.0","filer":{}}',
+                                        encoding="utf-8")
+    kode, ud = koer(rod, tomt, "verificer")
+    paastand(kode == 1, f"tomt manifest -> exit 1 (fik {kode})")
+    paastand("UTILGAENGELIGT ELLER TOMT" in ud, "og meldingen siger hvad der er galt")
+    paastand("intakt" not in ud, "ordet 'intakt' optraeder IKKE")
+
+    print("\n[9b] Et drev der slet ikke findes")
+    kode, ud = koer(rod, Path("Z:/findes_slet_ikke"), "verificer")
+    paastand(kode == 1, f"ikke-eksisterende drev -> exit 1 (fik {kode})")
+    paastand("findes ikke" in ud and "tilsluttet" in ud,
+             "meldingen spoerger om disken er tilsluttet")
+
+    print("\n[9c] Gendannelsestest paa tomt arkiv fejler ogsaa")
+    kode, ud = koer(rod, tomt, "gendan-test")
+    paastand(kode == 1 and "BESTAAET" not in ud,
+             "gendan-test kan ikke bestaa paa et tomt arkiv")
+
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

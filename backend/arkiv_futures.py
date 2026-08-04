@@ -361,6 +361,20 @@ def cmd_verificer(args, rod: Path) -> int:
         return 1
     man = laes_manifest(dest)
 
+    # ⚠ K1: ET TOMT ARKIV MAA ALDRIG MELDE GROENT.
+    # Arkivet ligger paa en EKSTERN disk der ikke altid er tilsluttet. Uden dette
+    # tjek ville "0 filer i manifestet · 0 mangler · 0 hasher forkert" ende i
+    # "Arkivet er intakt" og exit 0 — en kontrol hvis udfald var afgjort paa
+    # forhaand, her af at der ikke var noget at kontrollere. Det ville vaere en
+    # soergelig maade at miste et arkiv paa: at sikkerhedskopieringen rapporterede
+    # groent i to aar, fordi ingen havde sat stikket i.
+    if not man.get("filer"):
+        print(f"ARKIV UTILGAENGELIGT ELLER TOMT: {dest}")
+        print("Manifestet indeholder nul filer. Det er IKKE 'ingen fejl fundet' — "
+              "det er 'intet at verificere'.")
+        print("Er den eksterne disk tilsluttet, og er det det rigtige drev?")
+        return 1
+
     # Manifestet selv foerst.
     sig = dest / (MANIFEST_NAVN + ".sha256")
     if sig.exists():
