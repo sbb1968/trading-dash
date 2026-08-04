@@ -75,8 +75,8 @@ SKIVE = {
 
 # Kvalitetstjek paa dagsbarer: én stor hentning pr. instrument (billigt).
 KVALITET_VARIGHED = "15 Y"   # 20 Y timede ud for VIX/VIX3M/SPY/RVX/VX (3/8-2026)
-KVALITET_TIMEOUT  = 180
-KVALITET_BRUGT: dict[str, str] = {}   # instrument -> varighed der virkede      # egen, laengere timeout — én stor hentning pr. instrument
+KVALITET_TIMEOUT  = 180      # egen, laengere timeout — én stor hentning pr. instrument
+KVALITET_BRUGT: dict[str, str] = {}   # instrument -> varighed der virkede
 
 # ── Instrumenter ────────────────────────────────────────────────────────────────
 # niveau: A = kerne (uden disse er byggeklodsen umulig)
@@ -196,7 +196,8 @@ async def hent_head(ib, contract, what: str):
 
 
 async def hent_skive(ib, contract, bar: str, slut: datetime | None, what: str,
-                     rth: bool, varighed: str | None = None):
+                     rth: bool, varighed: str | None = None,
+                     timeout: float | None = None):
     """Lille hentning. Returnerer (antal_bars, foerste_dt, sidste_dt, fejl)."""
     v = varighed or SKIVE.get(bar, "2 D")
     end = ""
@@ -207,7 +208,7 @@ async def hent_skive(ib, contract, bar: str, slut: datetime | None, what: str,
             ib.reqHistoricalDataAsync(
                 contract, endDateTime=end, durationStr=v, barSizeSetting=bar,
                 whatToShow=what, useRTH=rth, formatDate=2),
-            timeout=REQ_TIMEOUT)
+            timeout=timeout or REQ_TIMEOUT)
     except asyncio.TimeoutError:
         return 0, None, None, "timeout"
     except Exception as e:
@@ -501,7 +502,8 @@ async def kvalitet_dagsserie(ib, inst, what, emit):
     n = 0
     for _v in varigheder:
         n, foerste, sidste, fejl = await hent_skive(
-            ib, contract, "1 day", None, what, False, _v)
+            ib, contract, "1 day", None, what, False, _v,
+            timeout=KVALITET_TIMEOUT)
         await asyncio.sleep(SLEEP_BETWEEN)
         if n > 0:
             KVALITET_BRUGT[inst["navn"]] = _v
