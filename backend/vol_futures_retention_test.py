@@ -119,6 +119,90 @@ async def probe_kontrakt(ib, sym: str, boers: str, maaned: str, midt: datetime, 
                 spurgt_om=midt.date().isoformat())
 
 
+
+# ── D1/D2: kortlaeg hvilke kontrakter der STADIG kan kvalificeres ──────────────
+def kvartalsmaaneder(fra_aar: int, til_aar: int) -> list[str]:
+    """H/M/U/Z — de kvartalsmaaneder ES/MES/RTY/M2K ruller i."""
+    ud = []
+    for a in range(fra_aar, til_aar + 1):
+        for m in ("03", "06", "09", "12"):
+            ud.append(f"{a}{m}")
+    return ud
+
+
+async def kortlaeg_overlevende(ib, symboler, emit):
+    """Hvilke kontrakter lever endnu i IBKR's database?
+
+    Kun kvalificering — ingen barhentning. Det er hurtigt og giver baade
+    purge-graensen OG den liste der skal reddes (Revision D, punkt D1).
+
+    D2-KONTROL: den nyeste kontrakt SKAL kunne kvalificeres. Kan den ikke, er
+    noget galt med opsaetningen, og et nulresultat laengere tilbage betyder
+    ingenting. Et nulresultat er ikke et fund foer det er holdt op mod et
+    tilfaelde der beviseligt burde virke.
+    """
+    from ib_async import Future
+    from datetime import date as _d
+    i_aar = _d.today().year
+    maaneder = kvartalsmaaneder(i_aar - 4, i_aar + 1)
+    ud = {}
+    for sym in symboler:
+        boers = SYMBOLER.get(sym, "CME")
+        levende, doede = [], []
+        for ym in maaneder:
+            c = Future(symbol=sym, lastTradeDateOrContractMonth=ym,
+                       exchange=boers, currency="USD", includeExpired=True)
+            # ⚠ qualifyContractsAsync returnerer en TRUTHY liste OGSAA naar
+            # kvalificeringen mislykkedes — den lægger bare den ukvalificerede
+            # kontrakt i den (conId forbliver 0). En test paa `if q:` giver derfor
+            # "alle lever" for samtlige kontrakter. Fanget 4/8-2026 da en
+            # kortlaegning paastod at kontrakter tilbage til 2022 var i live,
+            # mens en rigtig barhentning for 202406 fejlede med
+            # "No security definition". conId er det eneste paalidelige signal.
+            try:
+                q = await asyncio.wait_for(ib.qualifyContractsAsync(c), timeout=20)
+                cc = q[0] if q else None
+                (levende if (cc is not None and getattr(cc, "conId", 0)) else doede).append(ym)
+            except Exception:
+                doede.append(ym)
+            await asyncio.sleep(0.4)
+        ud[sym] = dict(levende=levende, doede=doede)
+        if levende:
+            emit(f"  {sym:<5} lever: {levende[0]} .. {levende[-1]}  ({len(levende)} kontrakter)")
+            emit(f"        doede: {len([d for d in doede if d < levende[0]])} aeldre")
+        else:
+            emit(f"  {sym:<5} INGEN kontrakter kunne kvalificeres")
+    # D2-KONTROL, begge veje. Et NULresultat skal holdes op mod noget der
+    # beviseligt burde virke — og et POSITIVT resultat mod noget der beviseligt
+    # IKKE burde. Uden den anden retning saa kortlaegningen "alle lever" ud som
+    # et fund frem for som en API-detalje.
+    from ib_async import Future as _F
+    _neg = _F(symbol=symboler[0], lastTradeDateOrContractMonth="201503",
+              exchange=SYMBOLER.get(symboler[0], "CME"), currency="USD",
+              includeExpired=True)
+    try:
+        _q = await asyncio.wait_for(ib.qualifyContractsAsync(_neg), timeout=20)
+        _cc = _q[0] if _q else None
+        _neg_lever = bool(_cc is not None and getattr(_cc, "conId", 0))
+    except Exception:
+        _neg_lever = False
+    if _neg_lever:
+        emit("\n  ⚠ KENDT-NEGATIV KONTROL FEJLEDE: en kontrakt fra 2015 blev")
+        emit("    kvalificeret. Metoden skelner ikke, og resultatet kasseres.")
+        return None
+    emit("  kendt-negativ kontrol OK: 201503 afvist som forventet")
+
+    alle_levende = [v for s in ud.values() for v in s["levende"]]
+    if not alle_levende:
+        emit("\n  ⚠ D2-KONTROL FEJLEDE: ikke én kontrakt kunne kvalificeres paa noget")
+        emit("    symbol. Det er en opsaetningsfejl, ikke et datafund. Resultatet")
+        emit("    kasseres.")
+        return None
+    emit(f"\n  D2-kontrol OK: {len(alle_levende)} kontrakter kvalificeret i alt —")
+    emit("  nulresultaterne laengere tilbage er derfor aegte purge, ikke opsaetning.")
+    return ud
+
+
 async def koer(args, emit):
     from ib_async import IB
     ud_dir = Path(__file__).resolve().parent / OUT_DIRNAME
@@ -135,6 +219,22 @@ async def koer(args, emit):
     emit("Forbundet.\n")
     emit("Kontraktlevetid er ELIMINERET som forklaring: hver kontrakt eksisterede")
     emit("beviseligt paa den dato vi spoerger om.\n")
+
+    if args.kortlaeg:
+        emit("KORTLAEGNING — hvilke kontrakter lever endnu? (kun kvalificering)\n")
+        try:
+            ud = await kortlaeg_overlevende(ib, symboler, emit)
+        finally:
+            try:
+                ib.disconnect()
+            except Exception:
+                pass
+        if ud is None:
+            return 1
+        sti = ud_dir / "vol_futures_overlevende.json"
+        sti.write_text(json.dumps(ud, ensure_ascii=False, indent=2), encoding="utf-8")
+        emit(f"\nSkrevet: {sti}")
+        return 0
 
     res = []
     try:
@@ -208,6 +308,9 @@ async def koer(args, emit):
 def main():
     ap = argparse.ArgumentParser(description="B1: futures-retention testet paa udloebne kontrakter")
     ap.add_argument("--symboler", default="MES,M2K,ES")
+    ap.add_argument("--kortlaeg", action="store_true",
+                    help="kortlaeg hvilke kontrakter der stadig kan kvalificeres "
+                         "(kun kvalificering, ingen barhentning) — Revision D, D1")
     ap.add_argument("--port", type=int, default=IBKR_PORT)
     ap.add_argument("--client-id", type=int, default=CLIENT_ID)
     args = ap.parse_args()
