@@ -144,6 +144,7 @@ backend/*_output/
 backend/vol_probe_output/*
 !backend/vol_probe_output/vol_kontamineringslog.md
 !backend/vol_probe_output/vol_arkiv_log.md
+!backend/vol_probe_output/vol_kalibreringslog.md
 !backend/vol_probe_output/vol_data_probe.md
 !backend/vol_probe_output/vol_futures_retention.md
 !backend/vol_probe_output/vol_intradag_dybde.md

@@ -244,6 +244,9 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | H1 | Nulfikstur pr. egenskab, ikke universelt | taksonomi i kode; forkert valg AFVISES |
 | H2 | Shuffl raavaren, ikke det glattede | `shufflet_via_underliggende` + demonstration |
 | H3 | Defekte MOTORER som fikstur til look-ahead/stabilitet | bygget; begge defekter fanges af hver sin test |
+| I1 | `regimeophold` maales af ingen V-test her | markeret i taksonomien; V-test 3+4 staar som egenskabsloese |
+| I2 | V-test 3 bestaar paa SCOREN, ikke klassen | `stabilitetsdiagnose()` skelner de to aarsager |
+| I3 | Taerskel sat empirisk fra fiksturerne | 21,7 pp, 2,4x margin begge veje; vol_kalibreringslog.md |
 | C2/C3 | Outputkontrakt + provenans | hoerer til V2, ikke paabegyndt |
 | — | Datagab 2026-06-30 → i dag | lukkes af trin 1 |
 

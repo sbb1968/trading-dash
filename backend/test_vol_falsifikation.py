@@ -275,6 +275,51 @@ paastand(v126["andel_af_skift_naer_graense"] > 0.7,
 print("        -> Et kriterium paa KLASSESKIFT maaler diskretiseringen, ikke robustheden.")
 print("           Laeg bestaa-kriteriet paa scoren; rapportér klasseskiftet som kontekst.")
 
+print("\n[14] I1 — 'regimeophold' maales af INGEN V-test i denne byggeklods")
+paastand("MAALES IKKE" in vf.EGENSKABER["regimeophold"],
+         "taksonomien siger det selv — egenskaben er arvet fra den forrige motors V4")
+paastand("V-test 1 OG V-test 2" in vf.EGENSKABER["prediktiv"],
+         "'prediktiv' daekker baade V-test 1 og 2")
+paastand(set(vf.EGENSKABSLOESE_TESTS) == {"V-test 3 (stabilitet)",
+                                          "V-test 4 (realtidsgyldighed)"},
+         "V-test 3 OG 4 staar som egenskabsloese — begge kraever en defekt motor")
+
+print("\n[15] I2 — de to tal diagnosticerer HVER SIN aarsag")
+diag_ren, _ = vf.stabilitetsdiagnose(vf.stabilitetsmaal(vf.motor_uden_laek, serie_h3))
+diag_skr, gor_skr = vf.stabilitetsdiagnose(vf.stabilitetsmaal(vf.skroebelig_motor, serie_h3))
+print(f"        ren       -> {diag_ren}")
+print(f"        skroebelig-> {diag_skr}")
+paastand(diag_ren == "STABIL SCORE, USTABIL KLASSE",
+         "den rene motor: stabil score, ustabil klasse")
+paastand("BESLUTNINGSLAGET" in vf.stabilitetsdiagnose(
+             vf.stabilitetsmaal(vf.motor_uden_laek, serie_h3))[1],
+         "… og diagnosen peger paa beslutningslaget, ikke paa maaleklodsen")
+paastand(diag_skr == "USTABIL SCORE" and "MAALET" in gor_skr,
+         "den skroebelige motor: ustabil score -> MAALET skal laves om")
+paastand(diag_ren != diag_skr,
+         "de to tilfaelde giver FORSKELLIG diagnose — ellers var skelnen tom")
+
+print("\n[16] I3 — taersklen er sat empirisk, ikke som et rundt tal")
+k = vf.kalibrer_stabilitetstaerskel(n_serier=4)
+print(f"        ren, vaerst      : {k['ren_vaerst']:.2f} pp")
+print(f"        skroebelig, bedst: {k['skroebelig_bedst']:.2f} pp")
+print(f"        gaeldende taerskel: {k['gaeldende_pp']} pp")
+paastand(k["ren_vaerst"] < vf.STABILITET_TAERSKEL_PP < k["skroebelig_bedst"],
+         "taersklen ligger MELLEM den vaerste rene og den bedste skroebelige")
+paastand(vf.STABILITET_TAERSKEL_PP / k["ren_vaerst"] > 2.0,
+         f"mindst 2x margin ned til den vaerste rene "
+         f"({vf.STABILITET_TAERSKEL_PP / k['ren_vaerst']:.1f}x)")
+paastand(k["skroebelig_bedst"] / vf.STABILITET_TAERSKEL_PP > 2.0,
+         f"mindst 2x margin op til den bedste skroebelige "
+         f"({k['skroebelig_bedst'] / vf.STABILITET_TAERSKEL_PP:.1f}x)")
+paastand(vf.STABILITET_TAERSKEL_PP % 5 != 0,
+         f"{vf.STABILITET_TAERSKEL_PP} er ikke et rundt tal — den er maalt frem")
+
+print("\n[17] Stabilitetsgitteret daekker ±50 % OG de tre percentilreferencer")
+varianter = set(vf.stabilitetsmaal(vf.motor_uden_laek, serie_h3)["varianter"])
+paastand({126, 378, 504, vf.EKSPANDERENDE} <= varianter,
+         f"varianter: ±50 % (126/378), 504 og ekspanderende")
+
 print("\n" + "=" * 70)
 if FEJL:
     print(f"DUMPET — {len(FEJL)} fejl:")

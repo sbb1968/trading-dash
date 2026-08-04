@@ -53,6 +53,10 @@ SEED_WALK = 20260805
 SEED_KLYNGE = 20260806
 SEED_SHUFFLE = 20260807
 
+# 'Ekspanderende' percentilreference = hele den hidtidige historik. Repraesenteret
+# som et vindue stoerre end nogen serie, saa motoren ikke behoever en saerskilt sti.
+EKSPANDERENDE = 10**9
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Kendt-negative fikstuer — serier UDEN den struktur vi paastaar at maale
@@ -270,7 +274,11 @@ def stabilitetsmaal(motor_fn, serie: np.ndarray, basisvindue: int = 252) -> dict
     basis = np.array([motor_fn(serie, i, basisvindue) for i in dage])
     basis_kl = [klassificer_percentil(x) for x in basis]
     ud = {"basisvindue": basisvindue, "varianter": {}}
-    for vindue in (int(basisvindue * 0.5), int(basisvindue * 1.5)):
+    # ±50 % vinduesvariation OG de tre percentilreferencer specen kraever:
+    # 252 (basis), 504, og ekspanderende (hele historikken = et vindue stoerre end
+    # serien). EKSPANDERENDE er repraesenteret som et meget stort vindue, saa
+    # motoren ikke behoever en saerskilt kodesti.
+    for vindue in (int(basisvindue * 0.5), int(basisvindue * 1.5), 504, EKSPANDERENDE):
         variant = np.array([motor_fn(serie, i, vindue) for i in dage])
         variant_kl = [klassificer_percentil(x) for x in variant]
         flip = sum(1 for a, b in zip(basis_kl, variant_kl) if a != b) / max(1, len(dage))
@@ -286,12 +294,88 @@ def stabilitetsmaal(motor_fn, serie: np.ndarray, basisvindue: int = 252) -> dict
     return ud
 
 
+# Sat EMPIRISK, ikke valgt som et rundt tal — se `kalibrer_stabilitetstaerskel`
+# og vol_kalibreringslog.md. Vaerdien staar her som konstant saa den er frosset og
+# versionsstyret; genkoer kalibreringen hvis fiksturerne aendres.
+#
+# Kalibreret 2026-08-04 over 8 syntetiske serier:
+#     ren motor, VAERSTE variant       :  9,13 pp   (spredning 4,37-9,13)
+#     skroebelig motor, BEDSTE variant : 51,60 pp   (spredning 51,60-54,17)
+#     geometrisk midtpunkt             : 21,7 pp — 2,38x til begge sider
+#
+# Et foerste gaet paa 11,0 blev forkastet: det laa kun 1,2x over den vaerste rene
+# serie, og en enkelt uheldig seed ville have dumpet en korrekt motor.
+STABILITET_TAERSKEL_PP = 21.7
+
+
 def stabilitetstest(motor_fn, serie: np.ndarray, basisvindue: int = 252,
-                    maks_score_aendring_pp: float = 10.0) -> bool:
-    """V-test 3's form. Bestaar hvis SCOREN flytter sig under graensen ved ±50 % vindue."""
+                    maks_score_aendring_pp: float = STABILITET_TAERSKEL_PP) -> bool:
+    """V-test 3's form. Bestaar hvis SCOREN flytter sig under graensen.
+
+    Bemaerk hvad der IKKE er bestaa-kriterium: klasseskiftraten. Den rapporteres,
+    men et hoejt tal dér betyder noget andet end et hoejt tal paa scoren — se
+    `stabilitetsdiagnose`.
+    """
     m = stabilitetsmaal(motor_fn, serie, basisvindue)
     return all(v["median_score_aendring_pp"] < maks_score_aendring_pp
                for v in m["varianter"].values())
+
+
+def stabilitetsdiagnose(maal: dict,
+                        taerskel_pp: float = STABILITET_TAERSKEL_PP) -> tuple[str, str]:
+    """De to tal peger paa HVER SIN aarsag. Returnerer (konklusion, hvad_der_skal_goeres).
+
+    ⚠ Uden denne skelnen er den naerliggende reaktion paa et hoejt klasseskifttal at
+    rette i motoren — altsaa at fjerne noget der virker, for at tilfredsstille et
+    kriterium der maalte noget andet end det troede.
+    """
+    maks_score = max(v["median_score_aendring_pp"] for v in maal["varianter"].values())
+    maks_klasse = max(v["klasseskift_andel"] for v in maal["varianter"].values())
+    if maks_score >= taerskel_pp:
+        return ("USTABIL SCORE",
+                "Maalet er parameterafhaengigt. MAALET skal laves om — det er en "
+                "aegte dump af V-test 3.")
+    if maks_klasse >= 0.15:
+        return ("STABIL SCORE, USTABIL KLASSE",
+                "Graenserne ligger uheldigt i forhold til hvor data er taet. "
+                "BESLUTNINGSLAGET skal have hysterese eller doedzoner. "
+                "Maaleklodsen fejler IKKE.")
+    return ("STABIL", "Ingen handling.")
+
+
+def kalibrer_stabilitetstaerskel(n_serier: int = 8, n: int = 1200) -> dict:
+    """Sæt taersklen fra den RENE og den SKROEBELIGE motor — ikke fra et rundt tal.
+
+    ⚠ DETTE ER IKKE KONTAMINERING (Revision I3). Kontaminationsreglen forbyder at
+    kalibrere mod RESULTATET — mod strategiafkast eller mod holdout. Her kalibreres
+    et instrument mod en kendt-god og en kendt-daarlig standard, begge syntetiske og
+    begge konstrueret foer maaledata er set. Det er samme slags handling som at
+    nulstille en vaegt med et lod af kendt masse.
+
+    Flere seeds, saa taersklen ikke er tilpasset ét traek.
+    """
+    rene, skroebelige = [], []
+    for k in range(n_serier):
+        s = klynget_serie(n, seed=SEED_KLYNGE + k)
+        for motor, kurv in ((motor_uden_laek, rene), (skroebelig_motor, skroebelige)):
+            m = stabilitetsmaal(motor, s)
+            kurv.append(max(v["median_score_aendring_pp"] for v in m["varianter"].values()))
+    vaerst_ren = max(rene)
+    bedst_skroebelig = min(skroebelige)
+    # Geometrisk midtpunkt: ligger relativt lige langt fra begge, saa marginen er
+    # symmetrisk i forholdstal frem for i absolutte point.
+    forslag = float(np.sqrt(vaerst_ren * bedst_skroebelig))
+    return {
+        "n_serier": n_serier,
+        "ren_vaerst": float(vaerst_ren),
+        "ren_alle": [round(x, 2) for x in rene],
+        "skroebelig_bedst": float(bedst_skroebelig),
+        "skroebelig_alle": [round(x, 2) for x in skroebelige],
+        "forslag_pp": round(forslag, 1),
+        "margin_ned": round(forslag / vaerst_ren, 2),
+        "margin_op": round(bedst_skroebelig / forslag, 2),
+        "gaeldende_pp": STABILITET_TAERSKEL_PP,
+    }
 
 
 def skroebelig_motor(serie: np.ndarray, i: int, vindue: int = 252) -> float:
@@ -413,10 +497,25 @@ class Fikstuurfejl(Exception):
 
 EGENSKABER = {
     "prediktiv": "Kan gaarsdagens vaerdi forudsige morgendagens? (lag-1 rangkorrelation) "
-                 "— dette er V-test 1's egenskab",
+                 "— V-test 1 OG V-test 2 maaler denne egenskab",
+    # ⚠ INGEN V-TEST I DENNE BYGGEKLODS MAALER 'regimeophold' (Revision I1).
+    # Egenskaben stammer fra den FORRIGE regime-motors V4 (opholdstid, skiftfrekvens)
+    # og blev slaebt med herover ved en fejl. Volatilitetsspecen har ingen
+    # opholdstidstest, og opholdstid indfoeres bevidst IKKE som kriterium her:
+    # hysterese hoerer til beslutningslaget hos meta-strategien, ikke til
+    # maaleklodsen (jf. C1). Fiksturet beholdes fordi taksonomien skal kunne sige
+    # hvad random_walk ER nul for — men registrerer nogen en V-test mod denne
+    # egenskab, er det en fejl der skal fanges her og ikke i rapporten.
     "regimeophold": "Findes der vedvarende tilstande med skift imellem, ud over "
-                    "mekanisk glathed?",
+                    "mekanisk glathed? — MAALES IKKE af nogen V-test i byggeklods 1",
     "fordeling": "Adskiller fordelingen sig fra den tilfaeldige?",
+}
+
+# V-test 3 og 4 sammenligner MOTOREN MED SIG SELV og kan derfor ikke falsificeres
+# med en nulserie. De kraever hver sin defekte motor — se afsnittet om H3 nedenfor.
+EGENSKABSLOESE_TESTS = {
+    "V-test 3 (stabilitet)": "kraever en PARAMETERFOELSOM motor som fikstur",
+    "V-test 4 (realtidsgyldighed)": "kraever en LAEKKENDE motor som fikstur",
 }
 
 # For hvert fikstur: hvilke egenskaber er det NUL for, og hvilke HAR det.
