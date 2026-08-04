@@ -150,7 +150,7 @@ def _pr_session(tider, vindue) -> dict[date, int]:
 
 
 def forventede_barer(d: date, vindue: tuple[time, time],
-                     marked: str = "aktier") -> int:
+                     marked: str = "aktier", fast: int | None = None) -> int:
     """Hvor mange 1-min-barer en KOMPLET session paa denne dato boer give i vinduet.
 
     En halv dag lukker 13:00 ET (13:15 for CME's equity-index-futures), saa et
@@ -160,6 +160,11 @@ def forventede_barer(d: date, vindue: tuple[time, time],
     sess = forventede_rth_minutter(d, marked)
     if sess == 0:
         return 0
+    # DAGSSERIER: én bar pr. handelsdag, uanset hvor mange minutter sessionen har.
+    # Uden dette ville hver eneste dagsbar blive flaget som "ufuldstaendig" (1 mod
+    # 390 forventede minutter) — en kontrol der raaber paa alt, siger intet.
+    if fast is not None:
+        return fast
     if vindue is None:
         return sess
     # Vinduets overlap med selve sessionen (09:30 -> 16:00 eller 13:00).
@@ -174,7 +179,8 @@ def forventede_barer(d: date, vindue: tuple[time, time],
 # ═══════════════════════════════════════════════════════════════════════════════
 def tjek_konstant_barantal(tider, vindue: tuple[time, time] = RTH_VINDUE,
                            navn: str = "serie", rejs: bool = True,
-                           marked: str = "aktier") -> dict:
+                           marked: str = "aktier",
+                           forventede_pr_session: int | None = None) -> dict:
     """Verificér at barantallet pr. session er konstant hen over hele historikken.
 
     Rejser `SessionsBrud` ved strukturbrud. Returnerer en rapport-dict uanset
@@ -199,7 +205,7 @@ def tjek_konstant_barantal(tider, vindue: tuple[time, time] = RTH_VINDUE,
     #     blandet i samme serie, eller stempler i en anden tidszone end antaget.
     for_mange = []
     for d, n in sorted(n_pr_dag.items()):
-        f = forventede_barer(d, vindue, marked)
+        f = forventede_barer(d, vindue, marked, forventede_pr_session)
         if f and n > f:
             for_mange.append(f"{d}: {n}>{f}")
     if for_mange:
@@ -288,7 +294,8 @@ def fuldstaendighedsrevision(tider, navn: str = "serie",
                              vindue: tuple[time, time] | None = RTH_VINDUE,
                              start: date | None = None,
                              slut: date | None = None,
-                             marked: str = "aktier") -> Fuldstaendighed:
+                             marked: str = "aktier",
+                             forventede_pr_session: int | None = None) -> Fuldstaendighed:
     """Taell sessioner fundet mod forventet, list de manglende, og find effektiv start."""
     rap = Fuldstaendighed(navn=navn)
     n_pr_dag = _pr_session(tider, vindue)
@@ -313,7 +320,7 @@ def fuldstaendighedsrevision(tider, navn: str = "serie",
         for d in forventede:
             if d not in har:
                 continue
-            f = forventede_barer(d, vindue, marked)
+            f = forventede_barer(d, vindue, marked, forventede_pr_session)
             if f and n_pr_dag[d] < f * (1.0 - MAKS_MANGLENDE_ANDEL):
                 rap.ufuldstaendige.append((d, n_pr_dag[d], f))
 
@@ -378,7 +385,8 @@ def skriv_rapport(rapporter: list[Fuldstaendighed], b2: list[dict], sti: Path) -
     L.append("\n## B2 — barantal pr. session konstant?\n\n")
     L.append("| serie | vindue | sessioner | median | status |\n|---|---|---|---|---|\n")
     for r in b2:
-        status = "OK" if r["ok"] else "**BRUD**"
+        status = ("ikke relevant (dagsserie)" if r.get("sprunget")
+                  else ("OK" if r["ok"] else "**BRUD**"))
         L.append(f"| {r['navn']} | {r.get('vindue','')} | {r.get('sessioner',0)} | "
                  f"{r.get('median',0)} | {status} |\n")
     for r in b2:
@@ -399,6 +407,8 @@ def main() -> int:
     ap.add_argument("--ud", default=None, help="rapportsti (.md); JSON skrives ved siden af")
     ap.add_argument("--marked", default="aktier", choices=["aktier", "futures"],
                     help="futures = CME equity-index (halve dage lukker 13:15, ikke 13:00)")
+    ap.add_argument("--barer-pr-session", dest="barer_pr_session", type=int, default=None,
+                    help="fast antal barer pr. handelsdag (brug 1 til DAGSSERIER)")
     ap.add_argument("--streng", action="store_true",
                     help="afslut med fejlkode hvis B2 finder brud")
     args = ap.parse_args()
@@ -420,14 +430,26 @@ def main() -> int:
         tider = laes_tider(f)
         navn = f.stem
         print(f"[{navn}] {len(tider)} barer …")
-        r = fuldstaendighedsrevision(tider, navn=navn, vindue=vindue, marked=args.marked)
+        r = fuldstaendighedsrevision(tider, navn=navn, vindue=vindue,
+                                     marked=args.marked,
+                                     forventede_pr_session=args.barer_pr_session)
         rapporter.append(r)
-        b = tjek_konstant_barantal(tider, vindue=vindue or RTH_VINDUE, navn=navn,
-                                   rejs=False, marked=args.marked)
+        if args.barer_pr_session == 1:
+            # DAGSSERIER: B2 handler om tid-paa-dagen-profiler, og dem findes der
+            # ikke paa dagsbarer. Vinduet 09:30-16:00 fanger nul barer (dagsbarer
+            # stemples ved midnat), saa kontrollen ville melde BRUD hvor den slet
+            # ikke gaelder. En kontrol der raaber hvor den ikke er relevant,
+            # drukner den der er.
+            b = {"navn": navn, "ok": True, "brud": [], "sprunget": True,
+                 "vindue": "—", "sessioner": r.sessioner_fundet, "median": 1}
+        else:
+            b = tjek_konstant_barantal(tider, vindue=vindue or RTH_VINDUE, navn=navn,
+                                       rejs=False, marked=args.marked,
+                                       forventede_pr_session=args.barer_pr_session)
         b2.append(b)
         print(f"   {r.sessioner_fundet}/{r.sessioner_forventet} sessioner "
               f"({r.daekning:.1%}) · effektiv start {r.effektiv_start} · "
-              f"B2 {'OK' if b['ok'] else 'BRUD'}")
+              f"B2 {'ikke relevant' if b.get('sprunget') else ('OK' if b['ok'] else 'BRUD')}")
         for x in b["brud"]:
             print(f"   !! {x}")
 

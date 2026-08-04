@@ -68,23 +68,44 @@ REQ_TIMEOUT = 90
 REFERENCE_START = date(2009, 8, 17)
 INTRADAG_START = date(2012, 1, 1)
 
+# `forvent_fra` er den foerste bar V0 MAALTE at IBKR har. Ligger den faktisk hentede
+# start markant senere, er hentningen afkortet — og det skal raabes op om frem for at
+# ende i manifestet som et tal ingen ser paa. Se `for_kort()`.
 SERIER = [
     # navn, art, boers, barstoerrelser, hvorfor
     dict(navn="SPY",   art="stk", boers="SMART", bars=["1 day", "1 min"],
+         forvent_fra=REFERENCE_START,
          hvorfor="lag 1 realiseret vol (ingen roll-gap) + lag 3 udviklingsproxy for MES"),
     dict(navn="IWM",   art="stk", boers="SMART", bars=["1 day", "1 min"],
+         forvent_fra=REFERENCE_START,
          hvorfor="lag 3 udviklingsproxy for M2K (A8) — Russell-benet"),
     dict(navn="VIX",   art="ind", boers="CBOE",  bars=["1 day", "1 min"],
+         forvent_fra=REFERENCE_START,
          hvorfor="lag 1 implicit vol-niveau + lag 3"),
     dict(navn="VIX3M", art="ind", boers="CBOE",  bars=["1 day"],
+         forvent_fra=REFERENCE_START,
          hvorfor="lag 1 terminsstruktur sammen med VIX"),
     dict(navn="VIX9D", art="ind", boers="CBOE",  bars=["1 day"],
+         forvent_fra=date(2018, 6, 22),   # V0: vendor-onboarding, ikke retention
          hvorfor="lag 2 kort ende — begivenhedsrisiko"),
     dict(navn="RVX",   art="ind", boers="CBOE",  bars=["1 day"],
+         forvent_fra=REFERENCE_START,
          hvorfor="lag 1 small-cap-vol (A2) — den population vi handler i"),
     dict(navn="VX",    art="contfut", sym="VIX", boers="CFE", bars=["1 day"],
+         forvent_fra=date(2023, 11, 24),  # V0: ContFuture-graensen
          hvorfor="lag 2 FRISK implicit vol — spot-VIX opdaterer kun i RTH"),
 ]
+
+# En serie der starter mere end saa mange dage efter det forventede, regnes som
+# afkortet. Rundt tal med vilje: helligdagsklynger og rul flytter en start nogle uger.
+AFKORTET_TOLERANCE_DAGE = 45
+
+# ⚠ CONTFUTURE AFVISER endDateTime (IBKR-fejl 10339). Den bagudgaaende gang der virker
+# for alt andet, giver derfor kun det FOERSTE vindue — og resten falder stille paa
+# gulvet. Fundet 2026-08-04, da VX kom hjem med 252 barer i stedet for ~677.
+# Loesningen er en varighedsstige med TOM endDateTime: bed om det laengste der virker,
+# i én forespoergsel.
+CONTFUT_STIGE = ["5 Y", "3 Y", "2 Y", "1 Y", "6 M"]
 
 # whatToShow pr. art. Indeks har ingen volumen; TRADES virker for CBOE-indeksene
 # (verificeret i V0), ellers falder vi tilbage paa MIDPOINT.
@@ -257,11 +278,41 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
         return post
     post["ibkr"]["conId"] = getattr(c, "conId", 0)
 
+    # ── ContFuture: ÉN forespoergsel, aldrig endDateTime (se CONTFUT_STIGE) ────
+    if spec["art"] == "contfut":
+        brugt = None
+        for varighed in CONTFUT_STIGE:
+            got = []
+            for what in WHAT["contfut"]:
+                got = await hent_skive(ib, c, "", bar, what, varighed)
+                if got:
+                    post["what_to_show"] = what
+                    break
+            await asyncio.sleep(SLEEP)
+            if got:
+                brugt = varighed
+                for b in got:
+                    r = som_raekke(b)
+                    if r:
+                        by_ts[r[0]] = r[1]
+                break
+        post["ibkr"]["varighed_pr_kald"] = brugt or "(ingen virkede)"
+        post["ibkr"]["endDateTime"] = "(tom — ContFuture afviser den, fejl 10339)"
+        skriv_cache(p, by_ts)
+        s0, s1 = (min(by_ts) if by_ts else None), (max(by_ts) if by_ts else None)
+        post.update(barer=len(by_ts), barer_foer=foer, nye_barer=len(by_ts) - foer,
+                    foerste=s0, sidste=s1,
+                    hentet=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        emit(f"   [{spec['navn']} {bar}] {len(by_ts)} barer (+{len(by_ts) - foer} nye) "
+             f"· {str(s0)[:10]} .. {str(s1)[:10]} · varighed {brugt}")
+        return post
+
     varighed = CHUNK.get(bar, "1 Y")
     what_valgt = None
     slut = ""            # tom = 'nu'; vi gaar BAGUD indtil vi rammer `fra`
     tomme_i_traek = 0
     hentede = 0
+    forrige_aeldste = None
 
     while True:
         got = []
@@ -297,7 +348,16 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
             break
         if aeldste.date() <= fra:
             break
-        slut = aeldste - timedelta(minutes=1)
+        # ⚠ SOEMMEN SKAL OVERLAPPE, IKKE STOEDE OP.
+        # Foerste udgave satte `aeldste - 1 minut`, og saa faldt dagsbaren PAA
+        # graensen i sprækken: SPY og IWM manglede praecis én dag hvert aar, altid
+        # den foerste handelsdag i august — dér hvor 1-aars-vinduerne moedtes.
+        # Et bevidst overlap er gratis (dedup paa tidsstempel) og fjerner hele
+        # klassen af soem-fejl. Fremskridtet sikres i stedet af `forrige_aeldste`.
+        if forrige_aeldste is not None and aeldste >= forrige_aeldste:
+            break                      # ingen fremdrift — undgaa evig loekke
+        forrige_aeldste = aeldste
+        slut = aeldste
         if hentede and hentede % 20000 == 0:
             skriv_cache(p, by_ts)      # loebende, saa en afbrydelse ikke koster alt
 
@@ -310,6 +370,29 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
     emit(f"   [{spec['navn']} {bar}] {len(by_ts)} barer "
          f"(+{len(by_ts) - foer} nye) · {str(s0)[:10]} .. {str(s1)[:10]}")
     return post
+
+
+def for_kort(post: dict, forvent_fra: date) -> str | None:
+    """Startede serien markant senere end V0 maalte at den kunne? Returnér grunden.
+
+    ⚠ DEN KONTROL DER MANGLEDE. Ved foerste koersel kom VX hjem med 252 barer i
+    stedet for ~677, fordi ContFuture afviser endDateTime — og hoesten meldte exit 0.
+    Et afkortet resultat der rapporterer som faerdigt, er samme sygdom som et tomt
+    arkiv der melder "intakt": udfaldet var afgjort af noget andet end det man troede
+    man maalte. Uden dette tjek ville tallet vaere endt i manifestet og ingen havde
+    set paa det foer lag 2 gav noget vroevl.
+    """
+    if post.get("fejl") or not post.get("foerste"):
+        return "ingen barer hentet"
+    try:
+        faktisk = datetime.fromisoformat(post["foerste"]).date()
+    except ValueError:
+        return None
+    slup = (faktisk - forvent_fra).days
+    if slup > AFKORTET_TOLERANCE_DAGE:
+        return (f"starter {faktisk} men V0 maalte at data findes fra {forvent_fra} "
+                f"— {slup} dage for sent, altsaa AFKORTET")
+    return None
 
 
 def skriv_manifest(rod: Path, poster: list[dict]) -> Path:
@@ -382,10 +465,27 @@ async def koer(args, emit) -> int:
         except Exception:
             pass
 
+    # ── Afkortnings-tjek FOER manifestet skrives ──────────────────────────────
+    afkortede = []
+    for (s, bar), post in zip(valgte, poster):
+        grund = for_kort(post, s["forvent_fra"])
+        if grund:
+            post["advarsel"] = grund
+            afkortede.append((s["navn"], bar, grund))
+
     p = skriv_manifest(rod, poster)
     emit(f"\nManifest: {p}")
     nye = sum(x.get("nye_barer", 0) for x in poster)
     emit(f"{nye} nye barer i alt denne koersel.")
+
+    if afkortede:
+        emit(f"\n!! {len(afkortede)} SERIER ER AFKORTEDE — koerslen er IKKE faerdig:")
+        for navn, bar, grund in afkortede:
+            emit(f"   {navn} {bar}: {grund}")
+        emit("\nEn afkortet serie der rapporterer som faerdig, er vaerre end en der")
+        emit("fejler: den ender i manifestet som et tal ingen ser paa igen.")
+        return 1
+
     emit("\nNaeste skridt — fuldstaendighedsrevision (B3):")
     emit("   python sessions_revision.py --mappe vol_cache --moenster \"*_1min.csv\" --streng")
     return 0

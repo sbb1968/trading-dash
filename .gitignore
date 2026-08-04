@@ -149,6 +149,15 @@ backend/vol_probe_output/*
 !backend/vol_probe_output/vol_futures_retention.md
 !backend/vol_probe_output/vol_intradag_dybde.md
 
+# vol_cache: selve markedsdata er et mellemresultat der kan hentes igen (modsat
+# futures-arkivet, som IKKE kan). Men MANIFESTET er provenans — hvad hentede vi,
+# hvornaar, med hvilke IBKR-parametre — og fuldstaendighedsrapporten fastlaegger den
+# effektive udviklingsstart pr. serie (C4, punkt 5). Begge er protokol og skal kunne
+# laeses sammen med valideringsrapporten om seks maaneder.
+backend/vol_cache/*
+!backend/vol_cache/manifest.json
+!backend/vol_cache/fuldstaendighed_*.md
+
 backend/Claude_screener_*.csv
 backend/account.yaml.backup_*
 backend/account_yaml.txt

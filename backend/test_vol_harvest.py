@@ -161,7 +161,28 @@ try:
     ok = asyncio.run(vh.kontrolfikstur(IBmedSvar(dage), tavs))
     paastand(ok is False, "et umuligt symbol kvalificerer -> KASSERET")
 
-    print("\n[6] Serie-udvalget daekker det laaste saet fra Revision A")
+    print("\n[6] En AFKORTET serie maa ikke passere som faerdig")
+    # Den faktiske fejl fra foerste koersel: ContFuture afviser endDateTime (fejl
+    # 10339), saa kun det foerste vindue kom med — og hoesten meldte exit 0.
+    grund = vh.for_kort({"foerste": "2025-08-04", "barer": 252}, date(2023, 11, 24))
+    paastand(grund is not None and "AFKORTET" in grund,
+             "VX med 252 barer fra 2025 -> fanget som afkortet")
+    paastand("619 dage" in grund, f"og siger HVOR meget: {grund[-30:]}")
+    paastand(vh.for_kort({"foerste": "2023-11-24"}, date(2023, 11, 24)) is None,
+             "en HEL serie giver ingen advarsel — kontrollen raaber ikke bare altid")
+    paastand(vh.for_kort({"foerste": "2009-09-15"}, date(2009, 8, 17)) is None,
+             "nogle ugers slup tolereres (helligdagsklynger, rul)")
+    paastand(vh.for_kort({"fejl": "ikke kvalificeret"}, date(2009, 8, 17))
+             == "ingen barer hentet", "en serie uden barer fanges ogsaa")
+
+    print("\n[6b] ContFuture bruger en varighedsstige, ALDRIG endDateTime")
+    paastand(vh.CONTFUT_STIGE[0] == "5 Y" and len(vh.CONTFUT_STIGE) >= 4,
+             f"stige fra langt mod kort: {vh.CONTFUT_STIGE}")
+    vx = next(s for s in vh.SERIER if s["navn"] == "VX")
+    paastand(vx["art"] == "contfut" and vx["forvent_fra"] == date(2023, 11, 24),
+             "VX forventes fra V0's maalte ContFuture-graense")
+
+    print("\n[7] Serie-udvalget daekker det laaste saet fra Revision A")
     navne = {s["navn"] for s in vh.SERIER}
     paastand(navne == {"SPY", "IWM", "VIX", "VIX3M", "VIX9D", "RVX", "VX"},
              f"syv serier: {', '.join(sorted(navne))}")
