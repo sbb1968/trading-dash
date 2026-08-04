@@ -73,7 +73,7 @@ paa niveau med kildekoden.
 
 ```
 python arkiv_futures.py status          # hvad er nyt siden sidst
-python arkiv_futures.py kopier          # kopiér + skriv manifest med sha256
+python arkiv_futures.py kopier --fuld   # kopiér + skriv manifest med sha256
 python arkiv_futures.py gendan-test     # gendan FRA arkivet og verificér
 ```
 
@@ -81,15 +81,44 @@ python arkiv_futures.py gendan-test     # gendan FRA arkivet og verificér
 en formodning, ikke en sikkerhedskopi. Kommandoen kopierer tilbage til en temp-mappe,
 hasher hver fil mod manifestet og tjekker at CSV-hovedet stadig kan laeses.
 
-**Arbejdsdelingen mellem kommandoerne — vaerd at kende:** `kopier` sammenligner
-KILDEN med manifestet og ser ikke paa arkivfilerne selv. Bliver en arkiveret fil
-beskadiget paa disken, melder `kopier` derfor "uaendret". Bitroed opdages **kun** af
-`verificer`, og repareres kun af `verificer --reparer`. Kvartalsjobbet goer det
-automatisk.
+### Tre begraensninger der skal vaere kendt paa forhaand
 
-Verificeret 2026-08-04: 102 filer kopieret, manifest skrevet, gendannelsestest
-bestaaet, én-byte-korruption opdaget af baade `verificer` og `gendan-test` og
-repareret fra kilden.
+**1. `kopier` ser ikke paa arkivfilerne.** Den sammenligner KILDEN med manifestet.
+Bliver en arkiveret fil beskadiget paa disken, melder `kopier` derfor "uaendret".
+Bitroed i arkivet opdages **kun** af `verificer`, og repareres kun af
+`verificer --reparer`. Kvartalsjobbet goer det automatisk.
+
+**2. Uden `--fuld` ser `kopier` heller ikke bitroed i KILDEN.** Hurtigstien stoler
+paa stoerrelse + tidsstempel, og aegte bitroed aendrer ikke mtime — disken taber en
+bit, filsystemet ved intet. Brug `--fuld` naar det betyder noget; den hasher hver
+kildefil og koster faa sekunder paa 282 MB.
+
+**3. Arkivet er ikke selvhelbredende.** `--reparer` henter fra kilden. Er kilden vaek
+eller beskadiget, kan et beskadiget arkiv ikke repareres — de to kopier er koblet.
+Acceptabelt med én ekstern disk, men oenskes reel uafhaengighed, er svaret en kopi
+mere paa en anden disk (`--dest`), ikke en ny mekanisme.
+
+### Foranderlige og uforanderlige filer (Revision F1)
+
+Manifestet markerer hver fil. **Barer fra en udloebet kontrakt aendrer sig aldrig** —
+en hash-aendring dér kan kun vaere korruption, aldrig en opdatering. Saadanne filer
+overskrives ALDRIG automatisk. Uden det skel kunne en raadden KILDEfil skrives hen
+over en intakt arkivkopi, hvorefter manifestet opdateres og verifikationen melder
+alt i orden: en selvbekraeftende fejl der oedelaegger data frem for blot at overse
+skade.
+
+Pr. 2026-08-04: **80 uforanderlige** (udloebne kontrakter), **22 foranderlige**
+(202609-front-maaneden og de stitchede serier). Markeringen genberegnes ved hver
+skrivning — en kontrakt der var front-maaned da den blev kopieret, er uforanderlig
+et kvartal senere.
+
+Skal en udloebet kontrakts fil alligevel opdateres — fordi en senere hoest fyldte et
+hul — kraever det `--accepter-vaekst`, og selv da kun hvis kilden er en **verificeret
+ren udvidelse**: hver eneste allerede arkiveret bar skal staa uaendret i kilden.
+Korruption slipper ikke igennem den doer.
+
+Verificeret 2026-08-04 med 24 testpaastande i `test_arkiv_futures.py`: begge
+raadne-retninger, aegte udvidelse, foranderlig opdatering, gendannelse og reparation.
 
 ---
 
@@ -199,5 +228,31 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | B2 | Assert paa barantal | bygget, testet |
 | B3 | Fuldstaendighedsrevision | bygget, testet, koert paa futures |
 | B4 | Referencestart | besluttet: 2009-08-17; 18-aars kvalitetskoersel udestaar |
+| F1 | Uforanderlige filer beskyttes | bygget, testet |
+| F2 | Beslutningsprotokoller i git | gjort — se nedenfor |
 | C2/C3 | Outputkontrakt + provenans | hoerer til V2, ikke paabegyndt |
 | — | Datagab 2026-06-30 → i dag | lukkes af trin 1 |
+
+---
+
+## 7. Hvad der versionsstyres, og hvorfor (Revision F2)
+
+Skillelinjen er ikke filtype, men funktion: **kan filen bruges til at bedoemme om vi
+arbejdede aerligt, skal den i git.** Er den blot et mellemresultat der kan genskabes,
+skal den ikke.
+
+Kontamineringsloggens hele vaerdi er at den om seks maaneder kan laeses sammen med
+valideringsrapporten og *troes*. En fil der kun findes lokalt kan redigeres eller
+forsvinde sporloest — saa er den en paastand, ikke et bevis. En kontamineringslog man
+kan rette i stilhed er vaerdiloes.
+
+| i git | ignoreret |
+|---|---|
+| `vol_kontamineringslog.md` | `vol_data_probe.json` |
+| `vol_arkiv_log.md` | `vol_futures_retention.json` |
+| `vol_data_probe.md` | `vol_futures_overlevende.json` |
+| `vol_futures_retention.md` | `vol_intradag_dybde.json` |
+| `vol_intradag_dybde.md` | `kvalitet_vx.log` |
+
+Implementeret med negationsmoenstre i `.gitignore` frem for at aabne hele mappen, saa
+nye raa dumps forbliver ignoreret som standard.

@@ -34,16 +34,35 @@ Bliver en arkiveret fil beskadiget paa disken, melder `kopier` derfor "uaendret"
 gaar videre. Det er en bevidst afvejning (den maa ikke hashe 280 MB ved hver koersel),
 men det betyder at bitroeddet KUN opdages af `verificer`, og kun repareres af
 `verificer --reparer`. Koer den med jaevne mellemrum — kvartalsjobbet goer det.
+
+⚠ DEN SPEJLVENDTE FEJL, OG HVORFOR FILER MARKERES SOM UFORANDERLIGE
+Raadner en KILDEfil, aendrer dens hash sig. Uden modtraek ville `kopier` se
+"filen er aendret", skrive den beskadigede udgave hen over den intakte arkivkopi og
+opdatere manifestet. Verifikationen bagefter melder alt i orden, for arkiv og
+manifest stemmer nu overens. Fejlen er SELVBEKRAEFTENDE, og den oedelaegger data
+frem for blot at overse skade.
+
+Modtraekket er at skelne foranderligt fra uforanderligt. Barer fra en udloebet
+kontrakt aendrer sig aldrig; en hash-aendring dér kan kun vaere korruption. Saadanne
+filer overskrives ALDRIG automatisk — se `er_uforanderlig` og `--accepter-vaekst`.
+
+⚠ ARKIVET ER IKKE SELVHELBREDENDE
+`--reparer` henter fra KILDEN. Er kilden vaek eller beskadiget, kan et beskadiget
+arkiv ikke repareres — de to kopier er koblet. Det er en acceptabel begraensning med
+én ekstern disk, men den skal vaere kendt paa forhaand og ikke opdages den dag den
+bider. Oenskes reel uafhaengighed, er svaret en kopi mere paa en anden disk; det er
+en ren tilfoejelse til KILDER/`--dest`-mekanikken.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
@@ -58,6 +77,75 @@ KILDER = [
     "data_harvest/mes_m2k_stitched",
 ]
 MOENSTRE = ("*.csv", "*.json", "*.md")
+
+
+# En kontrakt regnes som faerdig — og dens barer dermed uforanderlige — naar der er
+# gaaet saa lang tid efter udloeb at en afsluttende hoest er naaet i hus.
+UFORANDERLIG_EFTER_UDLOEB_DAGE = 10
+
+
+def er_uforanderlig(r: str, i_dag: date | None = None) -> bool:
+    """Kan denne fils indhold stadig lovligt aendre sig?
+
+    Barer fra en UDLOEBET kontrakt aendrer sig aldrig — de er faerdige i det oejeblik
+    de er skrevet. En hash-aendring dér kan kun vaere korruption, aldrig en
+    opdatering. `mes_m2k_stitched/` derimod vokser loebende og skal kunne opdateres,
+    og det samme gaelder den kontrakt der lige nu er front-maaned.
+
+    Skelnen er hele pointen i F1: uden den er en raadden KILDEfil nok til at
+    overskrive en intakt arkivkopi, hvorefter manifestet opdateres og
+    verifikationen melder alt i orden. Den fejl er selvbekraeftende.
+    """
+    i_dag = i_dag or date.today()
+    navn = Path(r).name
+    if "mes_m2k_clean" not in r:
+        return False                      # stitched og alt andet vokser
+    dele = navn.split("_")
+    if len(dele) < 3 or not (len(dele[1]) == 6 and dele[1].isdigit()):
+        return False                      # ukendt navneform — vaer konservativ
+    ym = dele[1]
+    try:
+        udloeb = date(int(ym[:4]), int(ym[4:]), 20)
+    except ValueError:
+        return False
+    return (i_dag - udloeb).days > UFORANDERLIG_EFTER_UDLOEB_DAGE
+
+
+def _csv_raekker(sti: Path) -> dict[str, str] | None:
+    """Læs en CSV som {tidsstempel: hele raekken}. None hvis den ikke kan laeses."""
+    try:
+        ud: dict[str, str] = {}
+        with sti.open(newline="", encoding="utf-8") as f:
+            r = csv.reader(f)
+            next(r, None)                 # hoved
+            for raekke in r:
+                if raekke:
+                    ud[raekke[0]] = ",".join(raekke)
+        return ud
+    except Exception:
+        return None
+
+
+def er_ren_udvidelse(arkiv: Path, kilde: Path) -> tuple[bool, str]:
+    """Er kilden den arkiverede fil PLUS flere barer — uden at nogen bar er aendret?
+
+    Det er den ene lovlige grund til at en uforanderlig fils hash kan afvige: en
+    senere hoest har fyldt huller ud. Alt andet er korruption. Testen er ikke
+    "kilden er stoerre" — den er "hver eneste arkiveret bar staar uaendret i kilden",
+    hvilket er noget helt andet og det eneste der er godt nok her.
+    """
+    a, k = _csv_raekker(arkiv), _csv_raekker(kilde)
+    if a is None or k is None:
+        return False, "en af filerne kunne ikke laeses som CSV"
+    if len(k) < len(a):
+        return False, f"kilden har FAERRE barer ({len(k)} mod {len(a)})"
+    aendrede = [ts for ts, raekke in a.items() if k.get(ts) != raekke]
+    if aendrede:
+        return False, (f"{len(aendrede)} allerede arkiverede barer er AENDRET i kilden "
+                       f"(foerste: {aendrede[0]})")
+    if len(k) == len(a):
+        return False, "samme barer, men filen hasher anderledes (formatering? korruption?)"
+    return True, f"ren udvidelse: {len(k) - len(a)} nye barer, ingen aendrede"
 
 
 def sha256(sti: Path) -> str:
@@ -95,6 +183,11 @@ def laes_manifest(dest: Path) -> dict:
 
 
 def skriv_manifest(dest: Path, man: dict) -> None:
+    # Foranderlighed genberegnes ved hver skrivning frem for at fryses ved
+    # arkiveringen: en kontrakt der var front-maaned da den blev kopieret, er
+    # uforanderlig et kvartal senere. Et felt der ikke foelger med, ville lyve.
+    for r, post in man["filer"].items():
+        post["foranderlig"] = not er_uforanderlig(r)
     man["opdateret"] = nu()
     man["antal_filer"] = len(man["filer"])
     man["bytes_i_alt"] = sum(f["bytes"] for f in man["filer"].values())
@@ -176,13 +269,19 @@ def cmd_kopier(args, rod: Path) -> int:
         return 2
 
     kopieret = sprunget = erstattet = 0
+    blokeret: list[tuple[str, str]] = []
     for src in filer:
         r = rel(src, rod)
         maal = dest / r
         st = src.stat()
         tidligere = man["filer"].get(r)
 
-        if (tidligere and maal.exists()
+        # Hurtigsti: samme stoerrelse og samme tidsstempel = antag uaendret.
+        # ⚠ Bitroed paa kildedisken aendrer typisk IKKE mtime, saa den slags glider
+        # igennem her. Det er ufarligt for arkivet (intet bliver overskrevet), men
+        # betyder at en raadden KILDE kan staa uopdaget. `--fuld` hasher alt og
+        # fanger den; kvartalsjobbet boer bruge den.
+        if (not args.fuld and tidligere and maal.exists()
                 and tidligere["bytes"] == st.st_size
                 and tidligere.get("kilde_mtime") == int(st.st_mtime)):
             sprunget += 1
@@ -194,6 +293,25 @@ def cmd_kopier(args, rod: Path) -> int:
             tidligere["kilde_mtime"] = int(st.st_mtime)
             sprunget += 1
             continue
+
+        # ── F1: en uforanderlig fil maa ALDRIG overskrives blindt ────────────
+        # Raadner en KILDEfil, aendrer dens hash sig. Uden dette tjek ser
+        # `kopier` blot "filen er aendret" og skriver den beskadigede udgave hen
+        # over den intakte arkivkopi. Manifestet opdateres, verifikationen melder
+        # alt i orden — og den gode version er vaek. Fejlen er selvbekraeftende,
+        # og det er praecis derfor den skal stoppes her frem for opdages senere.
+        if tidligere and maal.exists() and er_uforanderlig(r):
+            ok, hvorfor = er_ren_udvidelse(maal, src)
+            if not ok:
+                blokeret.append((r, hvorfor))
+                print(f"   BLOKERET  {r}\n              {hvorfor}")
+                continue
+            if not args.accepter_vaekst:
+                blokeret.append((r, hvorfor + " — kraever --accepter-vaekst"))
+                print(f"   BLOKERET  {r}\n              {hvorfor}\n"
+                      f"              lovlig udvidelse, men kraever --accepter-vaekst")
+                continue
+            print(f"   udvider   {r}  ({hvorfor})")
 
         maal.parent.mkdir(parents=True, exist_ok=True)
         if maal.exists():
@@ -215,13 +333,23 @@ def cmd_kopier(args, rod: Path) -> int:
         print(f"   + {r}  ({mb(st.st_size)})")
 
     skriv_manifest(dest, man)
-    print(f"\n{kopieret} kopieret, {sprunget} uaendret, {erstattet} erstattet "
-          f"(gammel udgave gemt under _tidligere/).")
+    print(f"\n{kopieret} kopieret, {sprunget} uaendret" +
+          (f", {erstattet} erstattet (gammel udgave gemt under _tidligere/)"
+           if erstattet else "") +
+          (f", {len(blokeret)} BLOKERET" if blokeret else "") + ".")
     print(f"Manifest: {dest/MANIFEST_NAVN}")
+    if blokeret:
+        print(f"\n{len(blokeret)} uforanderlige filer blev IKKE overskrevet:")
+        for r, hvorfor in blokeret:
+            print(f"   {r}: {hvorfor}")
+        print("\nEn udloebet kontrakts barer kan ikke aendre sig lovligt. Enten er "
+              "kilden\nbeskadiget — og saa er ARKIVKOPIEN den gode — eller ogsaa er "
+              "der hoestet\nnye barer til den, og saa er --accepter-vaekst svaret. "
+              "Undersoeg foer du vaelger.")
     if kopieret:
         print("\nKoer nu:  python arkiv_futures.py gendan-test")
         print("En kopi der ikke er gendannet er en formodning, ikke en sikkerhedskopi.")
-    return 0
+    return 1 if blokeret else 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -369,13 +497,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Arkivér futures-intradag der ikke kan hentes igen")
     ap.add_argument("kommando", choices=["status", "kopier", "verificer", "gendan-test"])
     ap.add_argument("--dest", default=str(ARKIV_ROD), help=f"arkivrod (default {ARKIV_ROD})")
+    ap.add_argument("--kilde", default=None,
+                    help="kilderod (default: mappen hvor dette script ligger)")
     ap.add_argument("--stikproeve", type=int, default=0,
                     help="gendan-test: test kun N filer (0 = alle)")
     ap.add_argument("--reparer", action="store_true",
                     help="verificer: hent beskadigede filer fra kilden igen")
+    ap.add_argument("--fuld", action="store_true",
+                    help="kopier: hash hver kildefil frem for at stole paa stoerrelse "
+                         "+ tidsstempel. Fanger bitroed i KILDEN, som ikke aendrer mtime.")
+    ap.add_argument("--accepter-vaekst", dest="accepter_vaekst", action="store_true",
+                    help="kopier: tillad at en UFORANDERLIG fil opdateres, men kun hvis "
+                         "kilden er en verificeret ren udvidelse (alle arkiverede barer "
+                         "staar uaendret i kilden). Korruption slipper ikke igennem.")
     args = ap.parse_args()
 
-    rod = Path(__file__).resolve().parent
+    rod = Path(args.kilde).resolve() if args.kilde else Path(__file__).resolve().parent
     return {"status": cmd_status, "kopier": cmd_kopier,
             "verificer": cmd_verificer, "gendan-test": cmd_gendan_test}[args.kommando](args, rod)
 

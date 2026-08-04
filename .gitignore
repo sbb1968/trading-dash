@@ -126,6 +126,28 @@ backend/velocity_universe_data/
 # Swing-værktøjets daglige OHLCV-cache (genereret on-demand)
 backend/data_swing_cache/
 backend/*_output/
+
+# --- BESLUTNINGSPROTOKOLLER: skal versionsstyres (Revision F2) ---
+# Skillelinjen er ikke filtype, men funktion: kan filen bruges til at bedoemme OM VI
+# ARBEJDEDE AERLIGT, skal den i git. Er den blot et mellemresultat der kan genskabes,
+# skal den ikke.
+#
+# Kontamineringsloggens hele vaerdi er at den om seks maaneder kan laeses sammen med
+# valideringsrapporten og TROES. En fil der kun findes lokalt kan redigeres eller
+# forsvinde sporloest — saa er den en paastand, ikke et bevis. Versionsstyring giver
+# den praecis den egenskab: enhver senere aendring staar i historikken. En
+# kontamineringslog man kan rette i stilhed er vaerdiloes.
+#
+# Raa probe-output (json-dumps, bartaellinger, mellemresultater) forbliver ignoreret.
+# Det er data, ikke protokol, og det fylder uden at bevise noget.
+!backend/vol_probe_output/
+backend/vol_probe_output/*
+!backend/vol_probe_output/vol_kontamineringslog.md
+!backend/vol_probe_output/vol_arkiv_log.md
+!backend/vol_probe_output/vol_data_probe.md
+!backend/vol_probe_output/vol_futures_retention.md
+!backend/vol_probe_output/vol_intradag_dybde.md
+
 backend/Claude_screener_*.csv
 backend/account.yaml.backup_*
 backend/account_yaml.txt

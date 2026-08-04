@@ -236,6 +236,9 @@ def skriv_log(rod: Path, resultat: dict, mangler: list, arkiv_status: str,
 
 def koer_arkiv(rod: Path, dest: str | None, emit) -> str:
     """Verificér arkivet og reparér hvad der kan reddes. Bitroed ses kun her."""
+    # --fuld paa kopier: hash hver kildefil frem for at stole paa mtime. Bitroed i
+    # KILDEN aendrer ikke mtime, saa hurtigstien ville springe den over — og en
+    # raadden kilde er praecis hvad der ikke maa naa arkivet.
     cmd = [sys.executable, str(rod / "arkiv_futures.py"), "verificer", "--reparer"]
     if dest:
         cmd += ["--dest", dest]
