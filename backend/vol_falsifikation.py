@@ -177,6 +177,153 @@ def klynget_serie(n: int, seed: int = SEED_KLYNGE, persistens: float = 0.94,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# H3 — DE TESTS DER IKKE KAN FALSIFICERES MED EN NULSERIE
+# ═══════════════════════════════════════════════════════════════════════════════
+# Egenskabstaksonomien ovenfor daekker de tests der sammenligner et SIGNAL med STOEJ.
+# To af V-testene goer noget andet: de sammenligner MOTOREN MED SIG SELV.
+#
+#   · realtidsgyldighed (look-ahead): genberegn med haardt trunkerede input og kraev
+#     identiske vaerdier
+#   · stabilitet: aendrer klassifikationen sig lidt naar parametrene rykkes?
+#
+# Fodrer man dem en nulserie, BESTAAR de stadig — trunkering og genberegning virker
+# lige godt paa stoej, og en parametervariation flytter lige lidt uanset input. De er
+# altsaa ikke daekket af kravet i Revision G ad den vej.
+#
+# Kravet gaelder alligevel, men maaden er en anden: byg en motor der beviseligt ER
+# defekt, og vis at testen fanger den. Den defekte motor gemmes som fikstur paa linje
+# med nulserierne, saa demonstrationen kan gentages efter enhver aendring.
+#
+# Det er praecis det hul der ville vaere dyrest at have: et look-ahead-laek goer ALLE
+# oevrige resultater for gode, og realtidstesten er det eneste vaern imod det. Et vaern
+# der aldrig er set fyre, er ikke et vaern.
+
+
+def motor_uden_laek(serie: np.ndarray, i: int, vindue: int = 252) -> float:
+    """Percentil af dag i, maalt KUN mod dage FOER i. Den korrekte beregning."""
+    serie = np.asarray(serie, float)
+    start = max(0, i - vindue)
+    historik = serie[start:i]
+    if len(historik) < 20:
+        return float("nan")
+    return float((historik < serie[i]).mean() * 100.0)
+
+
+def motor_med_laek(serie: np.ndarray, i: int, vindue: int = 252) -> float:
+    """⚠ BEVIDST DEFEKT: percentil maalt mod HELE serien, ogsaa fremtiden.
+
+    Den klassiske look-ahead: referencefordelingen indeholder dage der endnu ikke er
+    sket. Den er svaer at se i kode og goer alle resultater for gode — praecis derfor
+    skal realtidstesten kunne fange den, og praecis derfor ligger den her som fikstur
+    frem for kun at blive beskrevet.
+    """
+    serie = np.asarray(serie, float)
+    if len(serie) < 20:
+        return float("nan")
+    return float((serie < serie[i]).mean() * 100.0)
+
+
+def realtidstest(motor_fn, serie: np.ndarray, dage: list[int] | None = None,
+                 vindue: int = 252) -> bool:
+    """V-test 4's form: giver motoren samme svar naar fremtiden er hugget af?
+
+    For hver proevedag beregnes scoren to gange — én gang med hele serien til
+    raadighed, én gang med input haardt trunkeret ved netop den dag. Er de ikke
+    identiske, laeser motoren fremtiden.
+
+    Bestaar = ALLE proevedage identiske. 19 af 20 er ikke bestaaet; det er en fejl
+    der skal findes.
+    """
+    serie = np.asarray(serie, float)
+    if dage is None:
+        dage = list(range(300, len(serie), max(1, (len(serie) - 300) // 20)))[:20]
+    for i in dage:
+        fuld = motor_fn(serie, i, vindue)
+        trunkeret = motor_fn(serie[:i + 1], i, vindue)
+        if np.isnan(fuld) and np.isnan(trunkeret):
+            continue
+        if not np.isclose(fuld, trunkeret, equal_nan=False):
+            return False
+    return True
+
+
+def klassificer_percentil(p: float) -> int:
+    """Fire klasser ud fra en percentil. Graenserne er fordelingsmaessige, ikke absolutte."""
+    if np.isnan(p):
+        return -1
+    return 0 if p < 25 else 1 if p < 50 else 2 if p < 75 else 3
+
+
+def stabilitetsmaal(motor_fn, serie: np.ndarray, basisvindue: int = 252) -> dict:
+    """Maal hvor meget baade SCOREN og KLASSEN flytter sig naar vinduet rykkes ±50 %.
+
+    ⚠ MAAL PAA SCOREN, IKKE KUN PAA KLASSEN — et fund fra 2026-08-04 der er vaerd at
+    kende foer V-test 3 skrives. En KORREKT rangpercentil flytter sig kun 2-4
+    percentilpoint naar vinduet halveres, men 21 % af dagene skifter alligevel klasse.
+    Af de skift laa 83-97 % under ti point fra en klassegraense. Klasseskiftraten
+    maaler altsaa overvejende diskretiseringen taet paa graenserne, ikke om maalet er
+    robust — og et kriterium paa 15 % klasseskift dumper en motor der er fuldstaendig
+    stabil. Rapportér begge tal; laeg bestaa-kriteriet paa scoren.
+    """
+    serie = np.asarray(serie, float)
+    dage = list(range(300, len(serie)))
+    basis = np.array([motor_fn(serie, i, basisvindue) for i in dage])
+    basis_kl = [klassificer_percentil(x) for x in basis]
+    ud = {"basisvindue": basisvindue, "varianter": {}}
+    for vindue in (int(basisvindue * 0.5), int(basisvindue * 1.5)):
+        variant = np.array([motor_fn(serie, i, vindue) for i in dage])
+        variant_kl = [klassificer_percentil(x) for x in variant]
+        flip = sum(1 for a, b in zip(basis_kl, variant_kl) if a != b) / max(1, len(dage))
+        naer_graense = sum(
+            1 for a, b, sc in zip(basis_kl, variant_kl, basis)
+            if a != b and not np.isnan(sc)
+            and min(abs(sc - 25), abs(sc - 50), abs(sc - 75)) < 10)
+        ud["varianter"][vindue] = {
+            "median_score_aendring_pp": float(np.nanmedian(np.abs(variant - basis))),
+            "klasseskift_andel": float(flip),
+            "andel_af_skift_naer_graense": float(naer_graense / max(1, flip * len(dage))),
+        }
+    return ud
+
+
+def stabilitetstest(motor_fn, serie: np.ndarray, basisvindue: int = 252,
+                    maks_score_aendring_pp: float = 10.0) -> bool:
+    """V-test 3's form. Bestaar hvis SCOREN flytter sig under graensen ved ±50 % vindue."""
+    m = stabilitetsmaal(motor_fn, serie, basisvindue)
+    return all(v["median_score_aendring_pp"] < maks_score_aendring_pp
+               for v in m["varianter"].values())
+
+
+def skroebelig_motor(serie: np.ndarray, i: int, vindue: int = 252) -> float:
+    """⚠ BEVIDST PARAMETERFOELSOM: scoren skaleres med vinduets laengde.
+
+    Ikke look-ahead — den ser kun bagud og bestaar realtidstesten. Defekten er en
+    skaleringsfaktor der afhaenger af tilbagekigets laengde, formet som en
+    "annualisering" nogen kunne finde paa at skrive. Den ser plausibel ud i koden og
+    goer scoren staerkt afhaengig af et parametervalg der burde vaere ligegyldigt.
+
+    Findes for at vise at stabilitetstesten KAN fejle. Uden den er "stabilitetstesten
+    bestod" lige saa intetsigende som enhver anden kontrol der aldrig er set dumpe.
+    """
+    serie = np.asarray(serie, float)
+    start = max(0, i - vindue)
+    historik = serie[start:i]
+    if len(historik) < 20:
+        return float("nan")
+    sd = historik.std()
+    if sd <= 0:
+        return float("nan")
+    z = (serie[i] - historik.mean()) / sd
+    # DEN DEFEKTE LINJE: vinduets laengde siver ind i selve scoren som et niveauskift.
+    # Defekten er med vilje GROV. Et fikstur skal demonstrere UTVETYDIGT at testen kan
+    # fejle; det skal ikke efterligne en subtil fejl. En foerste, mere realistisk
+    # udgave (z skaleret med sqrt(vindue/252)) blev forkastet fordi klipningen til
+    # 0-100 aad forskellen — fiksturet BESTOD dermed stabilitetstesten og var altsaa
+    # selv en kontrol der ikke kunne fejle.
+    return float(np.clip(50.0 + z * 12.0 + (vindue - 252) / 6.0, 0, 100))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Maaleredskaber som V-testene deler
 # ═══════════════════════════════════════════════════════════════════════════════
 def spearman(x, y) -> float:

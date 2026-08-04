@@ -243,6 +243,7 @@ vi har givet halvandet aars historik for at kunne staa inde for kvaliteten.
 | G | Falsifikationskrav paa alle kontroller | `vol_falsifikation.py` + kontrollernes fejlveje koert |
 | H1 | Nulfikstur pr. egenskab, ikke universelt | taksonomi i kode; forkert valg AFVISES |
 | H2 | Shuffl raavaren, ikke det glattede | `shufflet_via_underliggende` + demonstration |
+| H3 | Defekte MOTORER som fikstur til look-ahead/stabilitet | bygget; begge defekter fanges af hver sin test |
 | C2/C3 | Outputkontrakt + provenans | hoerer til V2, ikke paabegyndt |
 | — | Datagab 2026-06-30 → i dag | lukkes af trin 1 |
 

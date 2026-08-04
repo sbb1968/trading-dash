@@ -216,6 +216,65 @@ paastand(ac_korrekt - ac_naiv > 0.8,
 print("        -> Sammenlignes en vinduesberegnet praediktor med et naivt shufflet nul,")
 print("          maaler man udglatningen og ikke markedet. Det var m7-konklusionen.")
 
+print("\n[12] H3 — de tests der ikke kan falsificeres med en nulserie")
+# Realtids- og stabilitetstesten sammenligner MOTOREN MED SIG SELV, ikke signal med
+# stoej. En nulserie falsificerer dem ikke: trunkering og genberegning virker lige
+# godt paa stoej. Derfor bygges defekte MOTORER som fikstur i stedet.
+serie_h3 = klynget_serie(1200)
+
+print("        motor        stabilitet   realtid")
+matrix = {}
+for navn, motor in [("ren", vf.motor_uden_laek),
+                    ("laekkende", vf.motor_med_laek),
+                    ("skroebelig", vf.skroebelig_motor)]:
+    stab = vf.stabilitetstest(motor, serie_h3)
+    real = vf.realtidstest(motor, serie_h3)
+    matrix[navn] = (stab, real)
+    print(f"        {navn:11s}  {'BESTAAET' if stab else 'DUMPET  '}   "
+          f"{'BESTAAET' if real else 'DUMPET'}")
+
+paastand(matrix["ren"] == (True, True),
+         "den rene motor bestaar BEGGE — ellers er testene for stramme")
+paastand(matrix["laekkende"][1] is False,
+         "realtidstesten FANGER en motor der maaler percentil mod hele serien")
+paastand(matrix["skroebelig"][0] is False,
+         "stabilitetstesten FANGER en motor hvis score afhaenger af vinduets laengde")
+
+# At hver defekt kun fanges af SIN test er ikke pynt: det viser at de to tests er
+# uafhaengige og at ingen af dem er en stedfortraeder for den anden.
+paastand(matrix["laekkende"][0] is True,
+         "den laekkende motor er STABIL — look-ahead ses ikke af stabilitetstesten")
+paastand(matrix["skroebelig"][1] is True,
+         "den skroebelige motor laeser IKKE fremtiden — ses ikke af realtidstesten")
+
+print("\n[12b] Registret optager motor-fikstuerne — med skreven begrundelse")
+reg3 = Falsifikationsregister()
+p = reg3.kraev("realtidsgyldighed (look-ahead)",
+               lambda motor: vf.realtidstest(motor, serie_h3),
+               dumper_paa=vf.motor_med_laek, bestaar_paa=vf.motor_uden_laek,
+               dumpe_beskrivelse="motor der maaler percentil mod HELE serien",
+               bestaa_beskrivelse="motor der kun ser bagud",
+               begrundelse="look-ahead kan ikke falsificeres med en nulserie — "
+                           "trunkering virker lige godt paa stoej. Fiksturet er en "
+                           "defekt MOTOR, ikke en defekt serie (H3).")
+paastand(p.gyldig, "registreret som brugbar via begrundelses-undtagelsen")
+
+print("\n[13] Et fund om V-test 3's bestaa-kriterium, vaerd at kende foer den skrives")
+m = vf.stabilitetsmaal(vf.motor_uden_laek, serie_h3)
+for v, x in m["varianter"].items():
+    print(f"        vindue {v:3d}: score flytter {x['median_score_aendring_pp']:4.1f} pp, "
+          f"men {x['klasseskift_andel']:.0%} skifter KLASSE "
+          f"({x['andel_af_skift_naer_graense']:.0%} af dem laa <10 pp fra en graense)")
+v126 = m["varianter"][126]
+paastand(v126["median_score_aendring_pp"] < 6,
+         f"en KORREKT rangpercentil er meget score-stabil ({v126['median_score_aendring_pp']:.1f} pp)")
+paastand(v126["klasseskift_andel"] > 0.15,
+         f"… men dumper et 15 %-klasseskift-kriterium ({v126['klasseskift_andel']:.0%})")
+paastand(v126["andel_af_skift_naer_graense"] > 0.7,
+         "og hovedparten af skiftene er dage taet paa en klassegraense")
+print("        -> Et kriterium paa KLASSESKIFT maaler diskretiseringen, ikke robustheden.")
+print("           Laeg bestaa-kriteriet paa scoren; rapportér klasseskiftet som kontekst.")
+
 print("\n" + "=" * 70)
 if FEJL:
     print(f"DUMPET — {len(FEJL)} fejl:")
