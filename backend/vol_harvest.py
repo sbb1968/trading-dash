@@ -100,6 +100,11 @@ SERIER = [
 # afkortet. Rundt tal med vilje: helligdagsklynger og rul flytter en start nogle uger.
 AFKORTET_TOLERANCE_DAGE = 45
 
+# Barer pr. aar en DAGSSERIE mindst skal have. NYSE har ~252 handelsdage;
+# 230 giver luft til helligdagsklynger og enkelte hul-dage uden at
+# acceptere en serie der er tynd inde i perioden.
+MIN_DAGSBARER_PR_AAR = 230
+
 # ⚠ CONTFUTURE AFVISER endDateTime (IBKR-fejl 10339). Den bagudgaaende gang der virker
 # for alt andet, giver derfor kun det FOERSTE vindue — og resten falder stille paa
 # gulvet. Fundet 2026-08-04, da VX kom hjem med 252 barer i stedet for ~677.
@@ -372,8 +377,18 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
     return post
 
 
-def for_kort(post: dict, forvent_fra: date) -> str | None:
-    """Startede serien markant senere end V0 maalte at den kunne? Returnér grunden.
+def for_kort(post: dict, forvent_fra: date, min_barer_pr_aar: int | None = None) -> str | None:
+    """Holder serien hvad V0 MAALTE? Returnér grunden hvis ikke.
+
+    ⚠ L3: V0's MAALINGER SKAL VAERE V1'S ASSERTIONS.
+    VX-fejlen opstod fordi jeg kendte ContFuture-begraensningen — den staar i
+    V0-rapporten — og alligevel byggede en hoester der forudsatte det modsatte. Det
+    sker naar viden staar i prosa frem for i kode. En probe der kun producerer en
+    rapport, beskytter ingenting mod at naeste script antager noget andet.
+
+    Derfor tjekkes to ting her, begge maalt i V0:
+      · foerste tilgaengelige bar   (fangede VX: 2025-08 mod 2023-11)
+      · barer pr. aar               (fanger den halve fejl: rigtig start, tynd serie)
 
     ⚠ DEN KONTROL DER MANGLEDE. Ved foerste koersel kom VX hjem med 252 barer i
     stedet for ~677, fordi ContFuture afviser endDateTime — og hoesten meldte exit 0.
@@ -392,6 +407,18 @@ def for_kort(post: dict, forvent_fra: date) -> str | None:
     if slup > AFKORTET_TOLERANCE_DAGE:
         return (f"starter {faktisk} men V0 maalte at data findes fra {forvent_fra} "
                 f"— {slup} dage for sent, altsaa AFKORTET")
+
+    # Rigtig start, men tynd serie: hullerne ligger inde i perioden frem for i enden.
+    if min_barer_pr_aar and post.get("sidste") and post.get("barer"):
+        try:
+            sidst = datetime.fromisoformat(post["sidste"]).date()
+        except ValueError:
+            return None
+        aar = max((sidst - faktisk).days / 365.25, 0.1)
+        pr_aar = post["barer"] / aar
+        if pr_aar < min_barer_pr_aar:
+            return (f"{post['barer']} barer over {aar:.1f} aar = {pr_aar:.0f} pr. aar, "
+                    f"men V0 maalte mindst {min_barer_pr_aar} — serien er TYND")
     return None
 
 
@@ -468,7 +495,8 @@ async def koer(args, emit) -> int:
     # ── Afkortnings-tjek FOER manifestet skrives ──────────────────────────────
     afkortede = []
     for (s, bar), post in zip(valgte, poster):
-        grund = for_kort(post, s["forvent_fra"])
+        grund = for_kort(post, s["forvent_fra"],
+                         MIN_DAGSBARER_PR_AAR if bar == "1 day" else None)
         if grund:
             post["advarsel"] = grund
             afkortede.append((s["navn"], bar, grund))
