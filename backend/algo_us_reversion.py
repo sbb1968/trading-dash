@@ -845,9 +845,66 @@ class UsReversionLive(BaseStrategy):
             cmf_prev  = self._cmf_prev.get(sym),
         )
         if not ok:
+            await self._log_entry_afvist(sym, bar, z, detaljer)
             return
 
         await self._open(sym, bar, z, detaljer)
+
+    async def _log_entry_afvist(self, sym: str, bar: Bar, z, detaljer: dict) -> None:
+        """Hvorfor gik den ARMEREDE strategi ikke ind paa denne bar?
+
+        `bar_evaluation` siger kun "z15=-2,45 armeret". Naar den saa IKKE handler,
+        kan man ikke se hvilket af de tre bekraeftelses-kriterier der holdt igen —
+        og saa kan man heller ikke skelne "den venter fornuftigt paa vendingen" fra
+        "et kriterium er saa stramt at det aldrig opfyldes".
+
+        check_entry regner allerede detaljerne ud (og dens egen docstring siger at
+        de er til netop dette); de blev bare kasseret af `if not ok: return`.
+
+        EGEN event_type frem for en rigere bar_evaluation-tekst: den tidlige
+        bar_evaluation stiller watchdog-uret, saa den maa hverken flyttes eller
+        udsendes to gange. Fyrer KUN naar armeret og afvist — ingen stoej paa de
+        bars hvor der intet er at forklare.
+
+        Best-effort: en manglende logline maa aldrig kunne vaelte handelsflowet.
+        """
+        if not self._journal:
+            return
+        try:
+            def flag(navn, ok_):
+                return f"{navn}{'✓' if ok_ else '✗'}"
+            r  = detaljer.get("rise_pct")
+            kr = detaljer.get("rise_krav")
+            # rise_pct er None naar de to 5m-bars IKKE begge er groenne — ikke naar
+            # maalingen fejlede. "n/a" ville skjule netop den oplysning man leder
+            # efter: at vendingen slet ikke er begyndt endnu.
+            stigning = (f"stigning {r:.3f}%/{kr:.2f}%" if r is not None
+                        else "ikke to groenne 5m-bars")
+            tekst = " · ".join([
+                stigning,
+                flag("macd", detaljer.get("ok_macd")),
+                flag("cmf",  detaljer.get("ok_cmf")),
+            ])
+            mangler = [n for n, k in (("stigning", "ok_rise"), ("macd", "ok_macd"),
+                                      ("cmf", "ok_cmf")) if not detaljer.get(k)]
+            await self._journal.log_event(
+                source     = self.name,
+                event_type = "entry_afvist",
+                symbol     = sym,
+                payload    = {
+                    "bar_time_et": bar.timestamp.astimezone(ET).strftime("%H:%M"),
+                    "z15":         round(z, 2) if z is not None else None,
+                    "mangler":     mangler,       # hvilke kriterier der holdt igen
+                    "kort":        tekst,         # menneskelaesbar én-linjer
+                    **detaljer,                   # de raa tal, til senere analyse
+                },
+            )
+        except Exception as e:
+            # ⚠ IKKE self.name her. Den er en property der slaar op i self._strategy,
+            # og findes den ikke, kaster fejlhaandteringen selv — saa en best-effort
+            # logline kan vaelte bar-evalueringen. Fanget af testen, som bygger sin
+            # double med __new__.
+            logger.warning(f"[US-reversion] kunne ikke logge entry_afvist for {sym}: {e}")
 
     # -------------------------------------------------------------
     # Sizing — altid præcis 1 kontrakt
