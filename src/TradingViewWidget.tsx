@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { tvSymbol } from "./futures";
 
 interface Props {
   ticker: string;
@@ -47,7 +48,11 @@ export function TradingViewWidget({ ticker, timeframe }: Props) {
       autosize: false,
       width: w,
       height: h,
-      symbol: ticker,
+      // ⚠ IKKE det bare `ticker`. TradingView vaelger selv boers for et
+      // ukvalificeret symbol, og for "MES" finder den GETTEX:MES (Mitsubishi
+      // Estate) foer CME. Charten viste da et japansk ejendomsselskab under
+      // titlen "MES · MICRO E-MINI S&P 500". tvSymbol() giver CME_MINI:MES1!.
+      symbol: tvSymbol(ticker),
       interval: TIMEFRAME_MAP[timeframe] || "5",
       timezone: "America/New_York",
       theme: "dark",

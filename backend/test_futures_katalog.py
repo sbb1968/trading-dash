@@ -2,11 +2,12 @@
 test_futures_katalog.py — kataloget er ÉN sandhedskilde, og det skal kunne bevises
 ═══════════════════════════════════════════════════════════════════════════════════
 Backend-siden er nu udledt af kataloget, saa dér KAN de ikke divergere. Frontenden
-kan: `src/App.tsx` har sin egen hardkodede liste, fordi et fetch der fejler paa en
+kan: `src/futures.ts` har sin egen hardkodede liste, fordi et fetch der fejler paa en
 handelsdag ville vaere vaerre end en liste der skal opdateres.
 
 Prisen for det valg er at nogen kan glemme frontenden. Denne test er betalingen:
-den laeser App.tsx som tekst og fejler hvis listerne ikke er enige.
+den laeser futures.ts som tekst og fejler hvis listerne ikke er enige — baade
+symbolerne og TradingView-symbolerne.
 
 Koeres: python test_futures_katalog.py
 """
@@ -32,16 +33,29 @@ def kraev(betingelse, besked):
         FEJL.append(besked)
 
 
+FRONTEND = Path(__file__).parent.parent / "src" / "futures.ts"
+
+
 def frontend_symboler() -> set[str] | None:
-    """Pil FUTURES_SYMBOLS ud af App.tsx. None hvis filen/linjen ikke findes."""
-    app = Path(__file__).parent.parent / "src" / "App.tsx"
-    if not app.exists():
+    """Pil FUTURES_SYMBOLS ud af src/futures.ts. None hvis filen/linjen ikke findes."""
+    if not FRONTEND.exists():
         return None
-    m = re.search(r"const\s+FUTURES_SYMBOLS\s*=\s*new\s+Set\(\[([^\]]*)\]\)",
-                  app.read_text(encoding="utf-8"))
+    m = re.search(r"FUTURES_SYMBOLS\s*=\s*new\s+Set\(\[([^\]]*)\]\)",
+                  FRONTEND.read_text(encoding="utf-8"))
     if not m:
         return None
     return set(re.findall(r'"([^"]+)"', m.group(1)))
+
+
+def frontend_tv() -> dict[str, str] | None:
+    """Pil TV_SYMBOL-tabellen ud af src/futures.ts."""
+    if not FRONTEND.exists():
+        return None
+    m = re.search(r"TV_SYMBOL\s*:\s*Record<string,\s*string>\s*=\s*\{([^}]*)\}",
+                  FRONTEND.read_text(encoding="utf-8"))
+    if not m:
+        return None
+    return dict(re.findall(r'(\w+)\s*:\s*"([^"]+)"', m.group(1)))
 
 
 print("\n1. Kataloget er internt konsistent")
@@ -64,17 +78,39 @@ kraev(all(MULTIPLIER[s] == KATALOG[s].multiplier for s in KATALOG),
 print("\n3. Frontendens liste er enig — DET er den der kan glemmes")
 fe = frontend_symboler()
 if fe is None:
-    kraev(False, "FUTURES_SYMBOLS kunne ikke laeses af src/App.tsx "
+    kraev(False, "FUTURES_SYMBOLS kunne ikke laeses af src/futures.ts "
                  "(er linjen omskrevet? saa skal denne test foelge med)")
 else:
     manglende = set(KATALOG) - fe
     ekstra = fe - set(KATALOG)
     kraev(not manglende,
-          f"App.tsx mangler ikke symboler fra kataloget "
+          f"futures.ts mangler ikke symboler fra kataloget "
           f"{'— mangler: ' + str(sorted(manglende)) if manglende else ''}")
     kraev(not ekstra,
-          f"App.tsx har ingen symboler kataloget ikke kender "
+          f"futures.ts har ingen symboler kataloget ikke kender "
           f"{'— ekstra: ' + str(sorted(ekstra)) if ekstra else ''}")
+
+print("\n3b. TradingView-symbolet — det maa IKKE vaere det bare symbol")
+# Chartvinduet viste "Mitsubishi Estate Company · GETTEX" under titlen
+# "MES · MICRO E-MINI S&P 500", fordi widget'en fik det ukvalificerede "MES".
+# Et ukvalificeret symbol er ikke bare uprae cist — det rammer et ANDET papir.
+for sym, inst in KATALOG.items():
+    kraev(":" in inst.tradingview,
+          f"{sym}: TradingView-symbolet er boers-kvalificeret "
+          f"({inst.tradingview})")
+    kraev(inst.tradingview != sym,
+          f"{sym}: TradingView-symbolet er ikke bare '{sym}'")
+
+tv = frontend_tv()
+if tv is None:
+    kraev(False, "TV_SYMBOL kunne ikke laeses af src/futures.ts")
+else:
+    for sym, inst in KATALOG.items():
+        kraev(tv.get(sym) == inst.tradingview,
+              f"{sym}: futures.ts har '{tv.get(sym)}', kataloget har "
+              f"'{inst.tradingview}'")
+    kraev(set(tv) == set(KATALOG),
+          f"TV_SYMBOL daekker praecis kataloget ({sorted(tv)})")
 
 print("\n4. Opslag taaler skidt input (watchlist-indtastning er ikke ren)")
 kraev(is_future_symbol(" mes ") is True, "' mes ' genkendes som future")

@@ -32,16 +32,26 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class FuturesInstrument:
     symbol: str          # det RENE symbol — det er dét der skrives i watchlist
-    exchange: str
+    exchange: str        # IBKR-boers, til kontrakt-kvalificering
     multiplier: float    # $ pr. prispoint
     navn: str
+    tradingview: str     # TradingViews symbol — se noten nedenfor
 
 
-# Multiplikatorerne er bekraeftet live mod reqPositions-avgCost (= pris x multiplier).
+# Multiplikatorerne er bekraeftet live mod reqPositions-avgCost (= pris x multiplier)
+# OG mod IBKRs egen kontrakt-spec (MESU6 har multiplier='5').
+#
+# TradingView-symbolet SKAL vaere boers-kvalificeret. Widget'en fik tidligere det bare
+# "MES", og TradingView vaelger da selv boers: den fandt GETTEX:MES (Mitsubishi Estate
+# Company, japansk ejendom) foer CME. Charten viste et helt andet papir under titlen
+# "MES · MICRO E-MINI S&P 500" — forkert paa den farlige maade, for den saa rigtig ud.
+# "1!" er TradingViews kontinuerte front-maaned.
 KATALOG: dict[str, FuturesInstrument] = {
     i.symbol: i for i in [
-        FuturesInstrument("MES", "CME", 5.0, "Micro E-mini S&P 500"),
-        FuturesInstrument("M2K", "CME", 5.0, "Micro E-mini Russell 2000"),
+        FuturesInstrument("MES", "CME", 5.0, "Micro E-mini S&P 500",
+                          "CME_MINI:MES1!"),
+        FuturesInstrument("M2K", "CME", 5.0, "Micro E-mini Russell 2000",
+                          "CME_MINI:M2K1!"),
     ]
 }
 

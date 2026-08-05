@@ -6,6 +6,7 @@ import type { StockData, IbkrOrderResult } from "./useMarketData";
 import { TradingViewWidget } from "./TradingViewWidget";
 import { FloatingWindow, getNextZ } from "./FloatingWindow";
 import { Menubar } from "./Menubar";
+import { isFutureSymbol } from "./futures";
 import {
   Layout, WindowConfig, WindowId, WINDOW_LABELS,
   loadLayouts, saveLayouts, getActiveLayoutId, setActiveLayoutId,
@@ -137,23 +138,11 @@ function getMarketStatus(): "open" | "pre" | "after" | "closed" {
 // pause 17:00-18:00 ET. Uden dette blev MES spaerret af aktie-gaten det meste
 // af det doegn hvor den faktisk kan handles.
 //
-// Symbol-listen spejler backend/futures_katalog.py, som er ÉN sandhedskilde for
-// symbol, boers og multiplikator. Listen staar hardkodet HER med vilje: et fetch
-// der fejler paa en handelsdag ville spaerre futures-handel, og listen af symboler
-// aendrer sig ikke midt i en session.
-//
-// Prisen for det valg er at den kan glemmes. Betalingen er
-// backend/test_futures_katalog.py, som laeser denne linje og FEJLER hvis den ikke
-// stemmer med kataloget. Tilfoej derfor i kataloget foerst, koer testen, ret her.
-//
-// Kontrakt-MAANEDEN staar der bevidst intet om: den vaelges af qualify_future, som
-// tager den mest handlede kontrakt — ikke bare den naermeste ikke-udloebne. Man
-// skriver altid det rene symbol: "MES", aldrig "MESU6".
-const FUTURES_SYMBOLS = new Set(["MES", "M2K"]);
-
-export function isFutureSymbol(ticker: string): boolean {
-  return FUTURES_SYMBOLS.has(ticker.toUpperCase().trim());
-}
+// Symbol-listen og TradingView-symbolerne bor i src/futures.ts — se den fil for
+// hvorfor det er en spejling af backend/futures_katalog.py og ikke et fetch.
+// Genekporteres her, saa eksisterende importoerer af isFutureSymbol fra App
+// stadig virker.
+export { isFutureSymbol } from "./futures";
 
 // open = handelbar · break = daglig vedligeholdelsespause · closed = weekend
 function getFuturesStatus(): "open" | "break" | "closed" {
