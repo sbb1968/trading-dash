@@ -80,15 +80,40 @@ BAR_PARAMS_BY_SOURCE: dict[str, dict] = {
     "Konfluens 2":      {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
     "Trend Join Long":  {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "5 mins",  "bar_minutes": 5},
     "Europa-reversion": {"what_to_show": "TRADES", "use_rth": False, "bar_size": "15 mins", "bar_minutes": 15},
-    # Manuelle handler fra watchlist-vinduet. Aktier i RTH — samme oploesning som
-    # de oevrige aktie-algoer, saa charten ser ens ud uanset hvem der trykkede.
+    # Manuelle handler fra watchlist-vinduet paa AKTIER.
     "manual":           {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
 }
+
+# ⚠ MANUELLE HANDLER PAA FUTURES SKAL HAVE useRTH=False.
+# Watchlist-vinduet kan handle MES og M2K, og de handler naesten doegnet rundt.
+# Med useRTH=True returnerer IBKR kun bars inden for 09:30-16:00 ET — saa en handel
+# lagt kl. 14:00 dansk (08:00 ET) ville faa NUL bars, og Handels-charten ville staa
+# tom uden en eneste fejlmeddelelse.
+#
+# Det er praecis den faelde Europa-reversion allerede har en kommentar om ovenfor
+# ("europaeisk session 02-08 ET ligger UDEN for US RTH"). Jeg registrerede alligevel
+# "manual" med aktie-parametre — fordi jeg taenkte paa watchlist som et aktievindue.
+# Bar-stoerrelsen bliver 1 min (ikke Europa-reversions 15) fordi et menneske
+# typisk holder kortere, og MES er likvid nok til at 1-min er laesbart.
+_MANUAL_FUTURES = {"what_to_show": "TRADES", "use_rth": False, "bar_size": "1 min", "bar_minutes": 1}
 # Fallback for ukendt/aeldre source — 1-min RTH TRADES (de fleste aktie-algoer).
 _DEFAULT_PARAMS = {"what_to_show": "TRADES", "use_rth": True, "bar_size": "1 min", "bar_minutes": 1}
 
 
-def params_for(source: str) -> dict:
+def params_for(source: str, symbol: str | None = None) -> dict:
+    """Bar-parametre for en handel.
+
+    `symbol` er valgfrit for bagudkompatibilitet, men SKAL sendes med for manuelle
+    handler: dér afgoer instrumentet om useRTH må vaere True. Algoerne handler kun
+    én instrumenttype hver, saa for dem er source nok.
+    """
+    if source == "manual" and symbol:
+        try:
+            from ibkr_connect import is_future_symbol
+            if is_future_symbol(symbol.upper().strip()):
+                return _MANUAL_FUTURES
+        except Exception:
+            pass
     return BAR_PARAMS_BY_SOURCE.get(source, _DEFAULT_PARAMS)
 
 
@@ -286,7 +311,7 @@ async def fetch_trade_bars(conn, symbol: str, source: str,
     INDEX (robust mod overnight-gaps i RTH). Tom DataFrame ved fejl/ingen data."""
     if conn is None or not getattr(conn, "connected", False):
         return pd.DataFrame()
-    p = params_for(source)
+    p = params_for(source, symbol)
     bar_min = p["bar_minutes"]
 
     # Vindue: fra (entry - before) til (exit + after), + buffer. endDateTime = exit + buffer.
@@ -543,7 +568,7 @@ def render_trade_png(df: pd.DataFrame, trade: dict, provenance: str = "refetch")
 
     pnl_s = f"${pnl:+,.2f}" if isinstance(pnl, (int, float)) else "?"
     dato = entry_et.strftime("%Y-%m-%d")
-    p = params_for(source)
+    p = params_for(source, symbol)
     if provenance == "snapshot":
         kilde, kilde_col = "øjebliksbillede (præcis)", "#2e7d32"
     else:

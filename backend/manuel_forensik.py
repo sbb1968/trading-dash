@@ -229,9 +229,19 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
     exit_time = datetime.now(et_tz)
 
     # P&L paa det antal der FAKTISK blev lukket.
+    #
+    # ⚠ MULTIPLIKATOREN. Watchlist-vinduet kan handle MES og M2K, og en future
+    # afregnes i $ PR. PRISPOINT — ikke i $ pr. aktie. MES er $5/point, saa 2
+    # kontrakter der bevaeger sig 6,50 point giver 65 USD, ikke 13.
+    #
+    # Foerste udgave regnede (exit-entry) x antal og gav 13. Tallet ser rimeligt ud,
+    # journalen ville have set rigtig ud, og fejlen var foerst dukket op naar Ibens
+    # kontoudtog ikke stemte med hendes egen handelsjournal. Europa-reversion har
+    # formlen rigtigt (algo_europa_reversion.py:1031) — manuel havde den ikke.
     lukket = min(shares, entry_antal) if entry_antal else shares
     retning = 1.0 if side.lower() in ("long", "buy") else -1.0
-    pnl = (fill_pris - entry_pris) * lukket * retning
+    mult = _multiplikator(symbol)
+    pnl = (fill_pris - entry_pris) * lukket * retning * mult
 
     payload: dict[str, Any] = {
         "ibkr_order_id_exit": ordre_id,
@@ -288,6 +298,21 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
             payload={"fase": "exit", "trade_id": trade_id, "fejl": str(e)},
         )
     return trade_id
+
+
+def _multiplikator(symbol: str) -> float:
+    """$ pr. prispoint. 1,0 for aktier, kontraktens multiplier for futures.
+
+    Hentes fra Europa-reversions config, som er den eksisterende sandhedskilde for
+    MES/M2K (og som er bekraeftet live mod reqPositions-avgCost). At laese den dér
+    frem for at skrive tallet op igen betyder at en fremtidig aendring kun skal ét
+    sted hen.
+    """
+    try:
+        from strategies.europa_reversion.config import MULTIPLIER
+        return float(MULTIPLIER.get(symbol.upper().strip(), 1.0))
+    except Exception:
+        return 1.0
 
 
 def _som_utc(v) -> datetime:

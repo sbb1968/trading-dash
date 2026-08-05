@@ -357,7 +357,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     return () => clearInterval(id);
   }, []);
 
-  function getShares(ticker: string): string { return orderShares[ticker] ?? "100"; }
+  // Standardantal. 100 giver mening for en aktie — men IKKE for en future:
+  // 100 MES-kontrakter er ca. 3,8 mio. USD i nominel eksponering (7.650 x 5 x 100).
+  // IBKR ville afvise det paa margin, men feltet skal ikke staa og friste med et
+  // tal der er hundrede gange for stort. Futures starter derfor paa 1.
+  function getShares(ticker: string): string {
+    return orderShares[ticker] ?? (isFutureSymbol(ticker) ? "1" : "100");
+  }
   function setShares(ticker: string, value: string) {
     setOrderShares(prev => ({ ...prev, [ticker]: value.replace(/\D/g, "").slice(0, 6) }));
   }

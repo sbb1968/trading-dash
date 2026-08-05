@@ -211,7 +211,29 @@ async def koer():
         paastand(abs(r[0] - 400.0) < 1e-6,
                  f"P&L beregnet paa de 40 der faktisk blev solgt: {r[0]}")
 
-        print("\n[8] FIFO naar der er to aabne paa samme ticker")
+        print("\n[8] FUTURES: MES afregnes i $ PR. PRISPOINT, ikke pr. aktie")
+        # Ibens scenarie: 2 MES, 6,50 point gevinst. MES er $5/point -> 65 USD.
+        import trade_chart as tc
+        paastand(tc.params_for("manual", "MES")["use_rth"] is False,
+                 "MES-charten henter UDEN RTH-filter — ellers tom uden for 09:30-16:00")
+        paastand(tc.params_for("manual", "AAPL")["use_rth"] is True,
+                 "en aktie beholder RTH-filteret")
+
+        m = await manuel_forensik.registrer_entry(
+            j, ibkr, symbol="MES", side="long", shares=2, fill_pris=7645.25,
+            ordre_id=9001, ordre_status="Filled", et_tz=ET)
+        await manuel_forensik.registrer_exit(
+            j, ibkr, symbol="MES", shares=2, fill_pris=7651.75,
+            ordre_id=9002, ordre_status="Filled", et_tz=ET)
+        async with j.db.execute(
+                "SELECT pnl FROM trades WHERE trade_id = ?", (m,)) as c:
+            pnl_mes = (await c.fetchone())[0]
+        paastand(abs(pnl_mes - 65.0) < 1e-6,
+                 f"P&L = {pnl_mes} = 6,50 point × 2 kontrakter × multiplier 5")
+        paastand(abs(pnl_mes - 13.0) > 1,
+                 "og IKKE 13 — det var fejlen før multiplikatoren kom med")
+
+        print("\n[9] FIFO naar der er to aabne paa samme ticker")
         a = await manuel_forensik.registrer_entry(
             j, ibkr, symbol="NVDA", side="LONG", shares=10, fill_pris=100.0,
             ordre_id=6000, ordre_status="Filled", et_tz=ET)
