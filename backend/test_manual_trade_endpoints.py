@@ -65,15 +65,43 @@ class FakeIBKR:
 # ─────────────────────────────────────────────────────────────────
 
 async def run_tests():
-    # Importér main først — det initialiserer FastAPI app, journal osv.
+    # ⚠ ISOLÉR FØR NOGET SKRIVES. Denne test skrev tidligere i den RIGTIGE
+    # ordre-log og den RIGTIGE database, og ryddede op til sidst. Det holdt kun
+    # saa laenge testen naaede til sidst.
+    #
+    # 5. august 2026 fejlede en koersel undervejs. Tilbage stod fire spoegelses-
+    # ordrer i Ordrer-vinduet ("4 aabne", som aldrig fyldes fordi IBKR ikke kender
+    # dem) og EN AABEN handel i journalen paa 100 CLOV som ingen position svarer
+    # til. Det blev opdaget paa den maskine der skulle handle samme eftermiddag.
+    #
+    # En test maa ikke kunne efterlade spor i produktionsdata — heller ikke naar
+    # den fejler. Derfor peger baade ordre-log og database nu paa en temp-mappe.
+    import shutil
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="manual_endpoints_"))
+
+    # Ordre-loggen: stien laeses ved FOERSTE get_tracker(), saa den skal saettes
+    # foer main importeres — og singletonen nulstilles, hvis noget allerede har
+    # bygget en tracker mod den rigtige sti.
+    import orders_tracker
+    orders_tracker.ORDERS_LOG = tmp / "orders_log.json"
+    orders_tracker._tracker   = None
+
+    # Importér main — det initialiserer FastAPI app, journal osv.
     import main
     from fastapi.testclient import TestClient
     import trade_queries
     import journal as journal_module
 
-    # Initialisér journal (det sker normalt i startup-event)
-    if main.journal._db is None:
-        await main.journal.init()
+    # Databasen: main.journal bygges ved import med "trading_dash.db", men
+    # forbindelsen aabnes foerst i init(). Vi naar altsaa at pege den vaek.
+    # _resolve_db uden arkiv giver netop denne instans, saa BAADE laesning og
+    # skrivning i endpointsene rammer temp-databasen.
+    assert main.journal._db is None, (
+        "journal er allerede initialiseret — testen ville skrive i produktions-db")
+    main.journal.db_path = str(tmp / "test_manual_endpoints.db")
+    await main.journal.init()
 
     # ── Saml trade_ids vi opretter, så vi kan rydde op til sidst ──
     created_trade_ids = []
@@ -231,16 +259,14 @@ async def run_tests():
         assert our_pnl == 22.50    # 12.50 + 10.00
         print(f"    ✓ 2 af vores trades er lukket, samlet P&L: ${our_pnl}")
 
-    # ── Cleanup: slet test-trades ────────────────────────────
-    print("\n[Cleanup] Sletter test-trades fra DB")
-    for tid in created_trade_ids:
-        await main.journal.db.execute(
-            "DELETE FROM trades WHERE trade_id = ?", (tid,)
-        )
-    await main.journal.db.commit()
-    print(f"    ✓ {len(created_trade_ids)} test-trades slettet")
-
+    # ── Oprydning ────────────────────────────────────────────
+    # Hele temp-mappen ryger — baade db og ordre-log. Den gamle "slet de
+    # trade_ids vi oprettede" er unoedvendig nu, men beholdes ikke som
+    # sikkerhedsnet: et net der kun holder naar testen naar hertil, er netop
+    # det der svigtede. Isolationen er sikkerheden.
     await main.journal.close()
+    shutil.rmtree(tmp, ignore_errors=True)
+    print(f"\n[Oprydning] temp-mappe fjernet ({len(created_trade_ids)} test-trades)")
 
     print("\n✓ Alle 10 manual-trade endpoint-tests bestået")
 
