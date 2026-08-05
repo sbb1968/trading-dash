@@ -272,6 +272,21 @@ class IBKRConnection:
             self.ib.qualifyContractsAsync(contract),
             timeout=10.0,
         )
+        # ⚠ KVALIFICERING BEVISER INGENTING — kun conId goer.
+        # qualifyContractsAsync muterer kontrakten in-place og kaster ikke naar
+        # symbolet ikke findes; den efterlader blot conId = 0. Uden dette tjek blev
+        # en ukendt ticker returneret som en tom skal, og ordren gik videre til
+        # placeOrder paa en kontrakt uden identitet.
+        #
+        # Konkret: skriver man kontraktkoden "MESU6" i watchlist i stedet for "MES",
+        # genkendes den ikke som future (kun MES/M2K staar i FUTURES_EXCHANGE), saa
+        # den falder herned som en aktie — og IBKR svarer "No security definition".
+        # Nu fejler den her, med et navn i beskeden, frem for nede i ordrestien.
+        if not getattr(contract, "conId", 0):
+            raise ValueError(
+                f"Ukendt ticker '{ticker}' — IBKR har ingen kontrakt med det symbol. "
+                f"Futures handles med det RENE symbol (MES, M2K), ikke med "
+                f"kontraktkoden (MESU6).")
         return contract
 
     async def qualify_future_asof(self, symbol: str, asof):
