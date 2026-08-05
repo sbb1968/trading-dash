@@ -2546,8 +2546,17 @@
             const winRate     = summary.win_rate    || 0;
 
             const todaysTrades = today.trades || [];
-            const closedTrades = todaysTrades.filter(t => t.pnl != null);
-            const recentTrades = closedTrades.slice(-5).reverse();  // nyeste først, max 5
+            // ⚠ Listen og tallet foroven ("14H") SKAL taelle det samme.
+            //
+            // To ting gjorde dem uenige:
+            //  1. slice(-5) — tallet sagde 14, listen viste 5. Sammen med
+            //     positions-kortene lignede det 6-8 poster, saa det saa ud som om
+            //     nogle handler manglede tilfaeldigt frem for at vaere skaaret fra.
+            //  2. filter(pnl != null) — summary taeller LUKKEDE (exit_time_utc IS
+            //     NOT NULL). En lukket handel uden pnl (fx lukket via reconcile)
+            //     ville taelle foroven og forsvinde fra listen. Samme definition
+            //     bruges nu begge steder.
+            const closedTrades = todaysTrades.filter(t => t.exit_time_utc != null);
 
             // ── Realiseret P&L blok ──────────────────────────
             const realClass = totalPnl > 0 ? "positive"
@@ -2622,7 +2631,12 @@
             // Alle felter fra journalen. Sorteret nyest SOLGTE først.
             const closedSorted = [...closedTrades].sort((a, b) =>
                 (b.exit_time_et || "").localeCompare(a.exit_time_et || ""));
-            const recent = closedSorted.slice(0, 8);
+            // ⚠ INGEN slice. Her stod slice(0, 8): toppen sagde "14H", listen viste 8,
+            // og der var intet der fortalte at resten var skaaret fra — det lignede
+            // manglende data. Vil man se faerre, ruller man bare mindre; vil man se
+            // alle, SKAL de vaere der. Antallet staar nu ogsaa i overskriften, saa
+            // listen og tallet foroven kan sammenlignes med oejnene.
+            const recent = closedSorted;
 
             const tradeCards = recent.length === 0
                 ? `<div class="empty" style="padding:16px; font-size:13px;">Ingen lukkede handler i dag</div>`
@@ -2690,7 +2704,7 @@
                         ${positionCards}
                     </div>
 
-                    <div class="section-title" style="margin-top:18px;">Seneste handler</div>
+                    <div class="section-title" style="margin-top:18px;">Dagens handler (${recent.length})</div>
                     <div class="mobile-pos-list">
                         ${tradeCards}
                     </div>
