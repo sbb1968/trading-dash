@@ -53,10 +53,25 @@ class IBKRConnection:
     Alle metoder er async og skal kaldes med await.
     """
 
-    def __init__(self, paper_trading: bool = True):
+    def __init__(self, paper_trading: bool = True, account: str = ""):
         self.ib        = IB()
         self.port      = TWS_PORT_PAPER if paper_trading else TWS_PORT_LIVE
         self.paper     = paper_trading
+
+        # IBKR-kontokode ordrer, saldi og positioner skal gaelde (fx "DUQ441063").
+        #
+        # Tom streng = adfaerd som hidtil: ordrer uden account-felt, saldi og
+        # positioner ufiltreret. Det er korrekt saa laenge loginet kun har ÉN konto.
+        #
+        # Har loginet TO konti — som Ibens, hvor konto 2 er DUQ441063 — bliver alt
+        # tvetydigt paa én gang: ordrer uden `account` ved IBKR ikke hvor de hoerer
+        # hjemme, accountValues() leverer BEGGE kontis noegler saa den ene
+        # overskriver den anden i en dict, og positions() blander dem.
+        # Ingen af delene fejler hoejlydt — de giver bare forkerte tal.
+        #
+        # Saettes ved connect() kun hvis IBKR faktisk melder kontoen som managed;
+        # ellers nulstilles den med en fejl i loggen. Se _verificer_konto.
+        self.account   = (account or "").strip().upper()
         # Internt flag: True når vi HAR forsøgt/opnået en forbindelse.
         # Den offentlige `connected`-property kombinerer dette med
         # ib.isConnected() så vi aldrig rapporterer en stale forbindelse
@@ -176,11 +191,48 @@ class IBKRConnection:
             kind = "PAPER" if self.paper else "LIVE"
             logger.info(f"✅ Forbundet til IBKR ({kind}) på port {self.port}")
             logger.info(f"   Konto: {self.ib.managedAccounts()}")
+            self._verificer_konto()
             return True
         except Exception as e:
             self._connect_attempted = False
             logger.error(f"❌ Forbindelsesfejl: {e}")
             return False
+
+    def _verificer_konto(self) -> None:
+        """Er den konfigurerede konto faktisk én TWS styrer?
+
+        Vi FEJLER IKKE forbindelsen ved uoverensstemmelse. En algoserver der nægter
+        at forbinde midt paa dagen er vaerre end en der koerer videre som hidtil.
+        Men vi nulstiller `self.account`, saa vi ikke filtrerer saldi ned til
+        ingenting eller staempler ordrer med en konto IBKR ikke kender — og vi
+        raaber tydeligt op i loggen.
+        """
+        if not self.account:
+            return
+        styrede = [a.strip().upper() for a in (self.ib.managedAccounts() or [])]
+        if self.account in styrede:
+            logger.info(f"   Ordrer og saldi bindes til konto {self.account}")
+            if len(styrede) > 1:
+                logger.info(f"   (loginet styrer {len(styrede)} konti: {styrede})")
+            return
+        logger.error(
+            f"KONTO-UOVERENSSTEMMELSE: account.yaml siger {self.account}, men TWS "
+            f"styrer {styrede or '[]'}. Er der logget ind med det rigtige IBKR-login? "
+            f"Koerer videre UDEN konto-binding (som hidtil) — men med ÉT login og "
+            f"FLERE konti er ordrer, saldi og positioner tvetydige indtil det er rettet.")
+        self.account = ""
+
+    def _konto_filter(self, poster, felt: str = "account"):
+        """Behold kun poster for vores konto. Uden konfigureret konto: alt, som hidtil.
+
+        getattr paa self.account: test-doubles bygges med __new__ og har feltet slet
+        ikke — og et opslag af saldi maa ikke kunne kaste.
+        """
+        konto = getattr(self, "account", "")
+        if not konto:
+            return list(poster)
+        return [p for p in poster
+                if (getattr(p, felt, "") or "").strip().upper() == konto]
 
     def disconnect(self):
         if self.ib.isConnected():
@@ -440,8 +492,14 @@ class IBKRConnection:
 
     # ── Konto ─────────────────────────────────────────────────
     def get_account_summary(self) -> dict:
-        """Henter konto-oversigt fra cached data."""
-        values  = self.ib.accountValues()
+        """Henter konto-oversigt fra cached data.
+
+        ⚠ Filtreres paa konto. accountValues() leverer poster for ALLE konti loginet
+        styrer, og `{v.tag: v.value}` lader den sidste vinde. Med to konti fik man
+        derfor den ene kontos NetLiquidation — vilkaarligt hvilken, og uden noget
+        tegn paa at der var to. Sizing og risikogrænser regnede videre paa tallet.
+        """
+        values  = self._konto_filter(self.ib.accountValues())
         summary = {v.tag: v.value for v in values}
         return {
             "net_liquidation":      float(summary.get("NetLiquidation", 0)),
@@ -456,12 +514,12 @@ class IBKRConnection:
         }
 
     def get_positions(self) -> list:
-        """Henter åbne positioner fra cached data."""
+        """Henter åbne positioner fra cached data. Kun vores konto — se _konto_filter."""
         return [{
             "ticker":   p.contract.symbol,
             "position": p.position,
             "avg_cost": p.avgCost,
-        } for p in self.ib.positions()]
+        } for p in self._konto_filter(self.ib.positions())]
 
     async def get_positions_live(self) -> list:
         """Som get_positions, men LIVE. reqPositions' RETURVAERDI er de FAKTISKE aktuelle
@@ -472,6 +530,7 @@ class IBKRConnection:
             poss = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=5)
         except Exception:
             poss = self.ib.positions()
+        poss = self._konto_filter(poss or [])   # reqPositions leverer ALLE kontis positioner
         return [{
             "ticker":     p.contract.symbol,
             "position":   p.position,
@@ -766,6 +825,20 @@ class IBKRConnection:
             _ref = order_ref or source
             if _ref:
                 order.orderRef = _ref
+            # Hvilken konto gaelder ordren? Med ÉT login og ÉN konto udleder IBKR
+            # det selv, og feltet har hidtil staaet tomt. Styrer loginet FLERE konti
+            # — som Ibens, hvor konto 2 er DUQ441063 — er det ikke laengere entydigt,
+            # og IBKR afviser eller gaetter. Saettes kun naar kontoen er bekraeftet
+            # mod managedAccounts() ved connect, saa en forkert vaerdi i account.yaml
+            # ikke kan spaerre ordrestien (se _verificer_konto).
+            # getattr-vaern af samme grund som _order_errors nedenfor: test-doubles
+            # bygges med __new__ og har ingen self.account. Uden vaernet kastede
+            # linjen AttributeError, det ydre except slugte den, og ordren blev
+            # meldt "ikke sendt" — en manglende konto maa aldrig kunne vaelte
+            # ordrestien.
+            _konto = getattr(self, "account", "")
+            if _konto:
+                order.account = _konto
             # TIF saettes EKSPLICIT og er som standard DAY. To grunde:
             #
             # 1. Et TWS order preset kan ellers tvinge TIF til GTC — og en

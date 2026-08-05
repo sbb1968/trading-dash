@@ -79,7 +79,12 @@ class StrategyManager:
             except Exception as e:
                 logger.warning(f"[StrategyManager] Fejl ved oprydning af gammel forbindelse: {e}")
 
-        self.ibkr_conn = IBKRConnection(paper_trading=paper_trading)
+        # Kontoen fra account.yaml bindes til forbindelsen, saa ordrer, saldi og
+        # positioner gaelder PRAECIS den konto — noedvendigt naar ét IBKR-login
+        # styrer flere konti. Bekraeftes mod managedAccounts() i connect().
+        from accounts import identity
+        self.ibkr_conn = IBKRConnection(paper_trading=paper_trading,
+                                        account=identity.ibkr_account)
         ok = await self.ibkr_conn.connect()
         self.ibkr_ready = ok
 
