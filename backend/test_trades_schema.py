@@ -33,8 +33,30 @@ async def main():
     async with aiosqlite.connect(test_db) as db:
         async with db.execute("PRAGMA table_info(trades)") as cur:
             cols = await cur.fetchall()
-    assert len(cols) == 27, f"Forventede 27 kolonner, fik {len(cols)}"
-    print(f"    ✓ trades-tabel har {len(cols)} kolonner")
+    navne = [c[1] for c in cols]
+
+    # ⚠ Her stod `len(cols) == 27`. Da `current_price` blev tilfoejet i 90656ce,
+    # begyndte testen at fejle — uden at sige HVAD der var kommet til. Den stod roed
+    # i maaneder og blev dermed stoej man laerte at overse, hvilket er praecis den
+    # tilstand hvor en ægte fejl glider igennem.
+    #
+    # Et antal fortæller ikke hvad der aendrede sig. En navneliste goer, og den er
+    # lige saa nem at opdatere naar en kolonne bevidst tilfoejes.
+    FORVENTEDE = [
+        "trade_id", "account_id", "instance_id", "ibkr_account",
+        "source", "variant", "symbol", "side", "shares",
+        "entry_time_utc", "entry_time_et", "entry_price", "entry_reason",
+        "exit_time_utc", "exit_time_et", "exit_price", "exit_reason",
+        "pnl", "pnl_pct", "duration_sec", "capital_used",
+        "current_stop", "current_target", "current_stage", "trail_stop",
+        "notes", "payload_json", "current_price",
+    ]
+    mangler = [k for k in FORVENTEDE if k not in navne]
+    nye     = [k for k in navne if k not in FORVENTEDE]
+    assert not mangler and not nye, (
+        f"trades-skemaet er aendret. Mangler: {mangler or 'ingen'}. "
+        f"Nye: {nye or 'ingen'}. Er de nye bevidste, saa tilfoej dem i FORVENTEDE.")
+    print(f"    ✓ trades-tabel har de forventede {len(FORVENTEDE)} kolonner")
 
     # ── Test 2: log_trade_open ──────────────────────────────
     print("\n[2] log_trade_open — opret ny åben trade")
