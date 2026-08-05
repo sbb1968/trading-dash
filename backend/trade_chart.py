@@ -80,6 +80,9 @@ BAR_PARAMS_BY_SOURCE: dict[str, dict] = {
     "Konfluens 2":      {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
     "Trend Join Long":  {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "5 mins",  "bar_minutes": 5},
     "Europa-reversion": {"what_to_show": "TRADES", "use_rth": False, "bar_size": "15 mins", "bar_minutes": 15},
+    # Manuelle handler fra watchlist-vinduet. Aktier i RTH — samme oploesning som
+    # de oevrige aktie-algoer, saa charten ser ens ud uanset hvem der trykkede.
+    "manual":           {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
 }
 # Fallback for ukendt/aeldre source — 1-min RTH TRADES (de fleste aktie-algoer).
 _DEFAULT_PARAMS = {"what_to_show": "TRADES", "use_rth": True, "bar_size": "1 min", "bar_minutes": 1}

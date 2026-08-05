@@ -379,7 +379,15 @@ class Journal:
 
             entry_price, entry_time_utc_str, side, shares, existing_payload_json = row
 
-            # pnl_pct beregning — spejlvendes for short
+            # pnl_pct beregning — spejlvendes for short.
+            # ⚠ NORMALISÉR CASE. Sammenligningen var case-følsom, og en kalder der
+            # sendte "LONG" fik derfor SHORT-formlen: en vindende long kom ud med
+            # negativ pnl_pct mens pnl var positiv. Ingen fejl, intet råb — bare et
+            # forkert fortegn i journalen. Alle nuværende algoer sender "long", så
+            # ingen historiske rækker er ramt (verificeret: nul rækker hvor pnl og
+            # pnl_pct har modsat fortegn), men fælden lå der og bed den første nye
+            # kalder — den manuelle forensik, 2026-08-04.
+            side = (side or "long").strip().lower()
             if side == "long":
                 pnl_pct = (exit_price - entry_price) / entry_price * 100
             else:

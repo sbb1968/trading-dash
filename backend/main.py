@@ -61,6 +61,11 @@ logging.getLogger("uvicorn.access").addFilter(_DropSnapshotAccess())
 # sat i gang og fik jobbet til at melde fejl paa en vellykket koersel.
 logger = logging.getLogger("main")
 
+# Eastern Time. Defineret HER frem for laengere nede, fordi baade WS-stiens manuelle
+# handelsforensik og de manuelle REST-endpoints bruger den.
+import pytz
+ET_TZ = pytz.timezone("America/New_York")
+
 # De bare print()-kald i alle moduler stemples i ét greb (print er en builtin,
 # så dette rammer [Server]/[Watchdog]/[Algo]/[StrategyManager]/... overalt):
 _orig_print = builtins.print
@@ -793,6 +798,51 @@ async def websocket_endpoint(websocket: WebSocket):
                         "avg_fill": result.get("avg_fill"),
                     },
                 )
+
+                # ── SAMME FORENSIK SOM ALGOERNE ──────────────────────────────
+                # Foer dette efterlod en manuel handel kun eventet ovenfor: seks
+                # felter, ingen raekke i `trades`, ingen entry/exit-parring, ingen
+                # P&L, intet chart. Nu gaar den gennem samme journal-funktioner og
+                # samme forensik-buildere som algoerne. Se manuel_forensik.py for
+                # de tre steder hvor manuel er aerligt anderledes.
+                #
+                # Koeres EFTER svaret er sendt til frontend: bar-hentningen tager
+                # sekunder, og et klik maa ikke vente paa den.
+                filled_qty = int(result.get("filled") or 0)
+                fill_pris  = float(result.get("avg_fill") or 0.0)
+                if filled_qty > 0 and fill_pris > 0:
+                    try:
+                        import manuel_forensik
+                        if action == "BUY":
+                            await manuel_forensik.registrer_entry(
+                                journal, ibkr, symbol=ticker, side="long",
+                                shares=filled_qty, fill_pris=fill_pris,
+                                ordre_id=order_id, ordre_status=result.get("status"),
+                                et_tz=ET_TZ)
+                        else:
+                            await manuel_forensik.registrer_exit(
+                                journal, ibkr, symbol=ticker,
+                                shares=filled_qty, fill_pris=fill_pris,
+                                ordre_id=order_id, ordre_status=result.get("status"),
+                                et_tz=ET_TZ)
+                    except Exception as e:
+                        # Ordren er gennemfoert; kun forensikken fejlede. Det maa
+                        # aldrig vaelte WS-loekken, men det skal kunne ses.
+                        logger.error(f"[WS] manuel forensik fejlede for {ticker}: {e}")
+                        await journal.log_event(
+                            source="manual", event_type="forensik_fejl",
+                            symbol=ticker,
+                            payload={"fase": action, "fejl": str(e)})
+                else:
+                    # Ikke fyldt (fx status "Inactive") — ingen handel at logge.
+                    # Det er ikke en fejl, men det skal staa der, saa en manglende
+                    # trades-raekke kan forklares frem for at undre.
+                    await journal.log_event(
+                        source="manual", event_type="ordre_ikke_fyldt",
+                        symbol=ticker,
+                        payload={"action": action, "shares": shares,
+                                 "status": result.get("status"),
+                                 "filled": result.get("filled")})
 
     except WebSocketDisconnect:
         pass  # Normal frakobling
@@ -3131,8 +3181,8 @@ async def journal_update_notes(trade_id: str, req: UpdateNotesRequest):
 #     oprettes først når fill er bekræftet med faktisk fill-pris
 #   - Ingen partial close: en manuel handel åbnes og lukkes komplet
 
-import pytz
-ET_TZ = pytz.timezone("America/New_York")
+# ET_TZ er flyttet op til modul-toppen — den bruges nu ogsaa af WS-stiens manuelle
+# forensik ~2.300 linjer foer dette punkt.
 
 
 class ManualTradeOpenRequest(BaseModel):
