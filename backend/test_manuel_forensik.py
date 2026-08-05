@@ -51,8 +51,13 @@ class FalskeBars:
         for i in range(self.n):
             p = 100.0 + (i % 7) * 0.5          # lidt bevaegelse, ellers er std 0
             idx.append(self.start + timedelta(minutes=i))
-            rows.append({"open": p, "high": p + 0.4, "low": p - 0.4,
-                         "close": p + 0.1, "volume": 1000 + i})
+            # STORT begyndelsesbogstav — praecis som fetch_trade_bars returnerer.
+            # Denne double brugte smaat og var dermed enig med en fejl i _hent_bars
+            # i stedet for med virkeligheden. Den kunne aldrig fange noget.
+            # En test-double skal bygges efter PRODUCENTEN, ikke efter forbrugerens
+            # antagelse om producenten.
+            rows.append({"Open": p, "High": p + 0.4, "Low": p - 0.4,
+                         "Close": p + 0.1, "Volume": 1000 + i})
         return pd.DataFrame(rows, index=pd.DatetimeIndex(idx))
 
 
@@ -257,6 +262,70 @@ async def koer():
 
 
 asyncio.run(koer())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bar-kolonner: fundet paa en RIGTIG handel, ikke af en test
+# ═══════════════════════════════════════════════════════════════════════════════
+# fetch_trade_bars returnerer "Open"/"High"/"Low"/"Close". _hent_bars laeste dem med
+# smaat, fik None, og _byg_bar gjorde None til 0.0. Alle 44 bars blev nul-bars.
+# Indikatorerne regnede paa dem UDEN at klage — rsi_14=100, ema_9=0, macd=0, baand
+# None — og chart_bars blev tom. Ingen fejl nogen steder. Det opdagede vi kun ved at
+# laese forensikken paa en faktisk MES-handel.
+#
+# Testen holder BEGGE ender: rigtige kolonner skal give rigtige tal, og forkerte
+# kolonner skal give INGEN bars (ikke nul-bars, der er den tavse fejl).
+print("\n--- Bar-kolonner (fundet paa en rigtig MES-handel) ---")
+
+import pandas as pd
+from datetime import datetime as _dtm
+_NU = _dtm.now(timezone.utc)
+from datetime import timedelta as _td
+
+
+class _FalskIBKR:
+    def __init__(self, df):
+        self.df = df
+
+
+async def _bars_med(df):
+    """Koer _hent_bars med en fastlagt DataFrame i stedet for IBKR."""
+    import trade_chart
+    aegte = trade_chart.fetch_trade_bars
+
+    async def falsk(*a, **k):
+        return df
+    trade_chart.fetch_trade_bars = falsk
+    try:
+        return await manuel_forensik._hent_bars(
+            _FalskIBKR(df), "MES", _NU, _NU + _td(minutes=1))
+    finally:
+        trade_chart.fetch_trade_bars = aegte
+
+
+def _df(kolonner):
+    idx = pd.to_datetime(["2026-08-05 03:05:00", "2026-08-05 03:06:00"], utc=True)
+    vaerdier = [[7795.0, 7796.5, 7794.75, 7796.5, 137.0],
+                [7796.5, 7797.75, 7796.5, 7797.75, 271.0]]
+    return pd.DataFrame(vaerdier, index=idx, columns=kolonner)
+
+
+rigtige = asyncio.run(_bars_med(_df(["Open", "High", "Low", "Close", "Volume"])))
+paastand(len(rigtige) == 2, f"rigtige kolonner -> 2 bars (fik {len(rigtige)})")
+paastand(all(b.close > 0 for b in rigtige),
+         f"ingen nul-bars — closes: {[b.close for b in rigtige]}")
+paastand(rigtige[-1].close == 7797.75,
+         f"prisen er den RIGTIGE, ikke 0.0 (fik {rigtige[-1].close})")
+paastand(rigtige[-1].volume == 271.0, "volumen kom ogsaa med")
+
+smaat = asyncio.run(_bars_med(_df(["open", "high", "low", "close", "volume"])))
+paastand(smaat == [],
+         f"forkerte kolonner -> INGEN bars, ikke nul-bars (fik {len(smaat)})")
+
+uden_volumen = _df(["Open", "High", "Low", "Close", "Volume"]).drop(columns=["Volume"])
+kun_pris = asyncio.run(_bars_med(uden_volumen))
+paastand(len(kun_pris) == 2 and kun_pris[0].volume == 0.0,
+         "manglende VOLUMEN maa gerne blive 0 — kun priser er kritiske")
 
 print("\n" + "=" * 70)
 if FEJL:

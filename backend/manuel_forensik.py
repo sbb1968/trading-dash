@@ -72,10 +72,23 @@ async def _hent_bars(ibkr, symbol: str, entry_utc: datetime,
         df = await fetch_trade_bars(ibkr, symbol, KILDE, entry_utc, exit_utc)
         if df is None or df.empty:
             return []
+        # fetch_trade_bars returnerer kolonner med STORT begyndelsesbogstav.
+        # Foerste udgave laeste dem med smaat: r.get("open") gav None, og _byg_bar
+        # gjorde None til 0.0. Alle 44 bars blev bygget som nuller. Indikatorerne
+        # regnede paa dem uden at klage (rsi_14=100, ema=0, macd=0) og chart_bars
+        # blev tom. Intet i logfilen, ingen fejl — bare et forkert facit.
+        # Derfor tjekkes kolonnerne nu EKSPLICIT foer vi bygger noget.
+        manglende = [k for k in ("Open", "High", "Low", "Close")
+                     if k not in df.columns]
+        if manglende:
+            logger.error(
+                f"[ManuelForensik] {symbol}: bar-kolonner mangler {manglende} — "
+                f"fik {list(df.columns)}. Bygger INGEN bars frem for nul-bars.")
+            return []
         ud = []
         for ts, r in df.iterrows():
-            ud.append(_byg_bar(ts, r.get("open"), r.get("high"), r.get("low"),
-                               r.get("close"), r.get("volume")))
+            ud.append(_byg_bar(ts, r["Open"], r["High"], r["Low"],
+                               r["Close"], r.get("Volume")))
         return ud
     except Exception as e:
         logger.warning(f"[ManuelForensik] kunne ikke hente bars for {symbol}: {e}")
@@ -92,13 +105,15 @@ def _byg_bar(ts, o, h, l, c, v):
     bare have vaeret tomt, og ingen ville have vidst hvorfor.
 
     Ved at bruge den rigtige dataclass kan feltnavnene ikke divergere igen.
+
+    ⚠ Priser maa IKKE falde tilbage til 0.0. Det gjorde de foer, og da kolonnerne
+    hed "Open" og ikke "open", blev hver eneste bar til en nul-bar som indikatorerne
+    regnede videre paa uden at klage. En manglende pris er en FEJL, ikke et nul —
+    kun volumen maa mangle (nogle feeds giver den ikke).
     """
     from strategies.base import Bar
     return Bar(timestamp=ts,
-               open=float(o) if o is not None else 0.0,
-               high=float(h) if h is not None else 0.0,
-               low=float(l) if l is not None else 0.0,
-               close=float(c) if c is not None else 0.0,
+               open=float(o), high=float(h), low=float(l), close=float(c),
                volume=float(v) if v is not None else 0.0)
 
 
