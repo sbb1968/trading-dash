@@ -214,10 +214,15 @@ async def koer():
         print("\n[8] FUTURES: MES afregnes i $ PR. PRISPOINT, ikke pr. aktie")
         # Ibens scenarie: 2 MES, 6,50 point gevinst. MES er $5/point -> 65 USD.
         import trade_chart as tc
+        # Maalt mod IBKR 2026-08-05: med useRTH=True laa 0 af 148 AAPL-bars i et
+        # pre-market-handelsvindue; med False laa 60 der. MES: 141 bars, korrekt
+        # vindue. Derfor useRTH=False for manuelle handler uanset instrument.
         paastand(tc.params_for("manual", "MES")["use_rth"] is False,
-                 "MES-charten henter UDEN RTH-filter — ellers tom uden for 09:30-16:00")
-        paastand(tc.params_for("manual", "AAPL")["use_rth"] is True,
-                 "en aktie beholder RTH-filteret")
+                 "MES-charten henter UDEN RTH-filter")
+        paastand(tc.params_for("manual", "AAPL")["use_rth"] is False,
+                 "og det goer AKTIER ogsaa — watchlist tillader pre-market")
+        paastand(tc.params_for("Konfluens 2", "AAPL")["use_rth"] is True,
+                 "men algoerne beholder deres eget RTH-filter — kun manual aendres")
 
         m = await manuel_forensik.registrer_entry(
             j, ibkr, symbol="MES", side="long", shares=2, fill_pris=7645.25,

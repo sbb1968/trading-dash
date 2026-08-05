@@ -80,22 +80,23 @@ BAR_PARAMS_BY_SOURCE: dict[str, dict] = {
     "Konfluens 2":      {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
     "Trend Join Long":  {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "5 mins",  "bar_minutes": 5},
     "Europa-reversion": {"what_to_show": "TRADES", "use_rth": False, "bar_size": "15 mins", "bar_minutes": 15},
-    # Manuelle handler fra watchlist-vinduet paa AKTIER.
-    "manual":           {"what_to_show": "TRADES", "use_rth": True,  "bar_size": "1 min",   "bar_minutes": 1},
+    # ⚠ MANUELLE HANDLER: useRTH=False, ALTID — baade futures og aktier.
+    #
+    # Algoerne handler hver kun inden for deres egen session, saa for dem er RTH-
+    # filteret harmloest. Watchlist-vinduet gaar bredere: det tillader futures
+    # (naesten doegnet rundt) OG aktier i PRE-MARKET fra 10:00 dansk. Med useRTH=True
+    # klipper IBKR alt uden for 09:30-16:00 ET vaek — og saa henter charten bars der
+    # slet ikke daekker handlen, uden en eneste fejlmeddelelse.
+    #
+    # Maalt mod IBKR 2026-08-05 paa en AAPL-handel 08:00-09:00 ET (pre-market):
+    #     useRTH=True   148 bars, heraf   0 i handelsvinduet   <- chartet var tomt
+    #     useRTH=False  148 bars, heraf  60 i handelsvinduet
+    # Og MES samme vindue med useRTH=False: 141 bars, 07:20-09:40 ET. Korrekt.
+    #
+    # Prisen er at et normalt RTH-koeb faar lidt pre/post-handel med i kanterne af
+    # chartet. Et travlt chart er bedre end et tomt.
+    "manual":           {"what_to_show": "TRADES", "use_rth": False, "bar_size": "1 min",   "bar_minutes": 1},
 }
-
-# ⚠ MANUELLE HANDLER PAA FUTURES SKAL HAVE useRTH=False.
-# Watchlist-vinduet kan handle MES og M2K, og de handler naesten doegnet rundt.
-# Med useRTH=True returnerer IBKR kun bars inden for 09:30-16:00 ET — saa en handel
-# lagt kl. 14:00 dansk (08:00 ET) ville faa NUL bars, og Handels-charten ville staa
-# tom uden en eneste fejlmeddelelse.
-#
-# Det er praecis den faelde Europa-reversion allerede har en kommentar om ovenfor
-# ("europaeisk session 02-08 ET ligger UDEN for US RTH"). Jeg registrerede alligevel
-# "manual" med aktie-parametre — fordi jeg taenkte paa watchlist som et aktievindue.
-# Bar-stoerrelsen bliver 1 min (ikke Europa-reversions 15) fordi et menneske
-# typisk holder kortere, og MES er likvid nok til at 1-min er laesbart.
-_MANUAL_FUTURES = {"what_to_show": "TRADES", "use_rth": False, "bar_size": "1 min", "bar_minutes": 1}
 # Fallback for ukendt/aeldre source — 1-min RTH TRADES (de fleste aktie-algoer).
 _DEFAULT_PARAMS = {"what_to_show": "TRADES", "use_rth": True, "bar_size": "1 min", "bar_minutes": 1}
 
@@ -103,17 +104,11 @@ _DEFAULT_PARAMS = {"what_to_show": "TRADES", "use_rth": True, "bar_size": "1 min
 def params_for(source: str, symbol: str | None = None) -> dict:
     """Bar-parametre for en handel.
 
-    `symbol` er valgfrit for bagudkompatibilitet, men SKAL sendes med for manuelle
-    handler: dér afgoer instrumentet om useRTH må vaere True. Algoerne handler kun
-    én instrumenttype hver, saa for dem er source nok.
+    `symbol` tages imod for kaldesteders skyld og for fremtidig brug, men bruges ikke
+    laengere til at vaelge: manuelle handler har useRTH=False uanset instrument (se
+    kommentaren ved "manual" ovenfor). En foerste udgave skelnede mellem futures og
+    aktier — indtil maalingen viste at ogsaa aktier handles uden for RTH herfra.
     """
-    if source == "manual" and symbol:
-        try:
-            from ibkr_connect import is_future_symbol
-            if is_future_symbol(symbol.upper().strip()):
-                return _MANUAL_FUTURES
-        except Exception:
-            pass
     return BAR_PARAMS_BY_SOURCE.get(source, _DEFAULT_PARAMS)
 
 
