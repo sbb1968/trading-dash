@@ -303,14 +303,13 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
 def _multiplikator(symbol: str) -> float:
     """$ pr. prispoint. 1,0 for aktier, kontraktens multiplier for futures.
 
-    Hentes fra Europa-reversions config, som er den eksisterende sandhedskilde for
-    MES/M2K (og som er bekraeftet live mod reqPositions-avgCost). At laese den dér
-    frem for at skrive tallet op igen betyder at en fremtidig aendring kun skal ét
-    sted hen.
+    Hentes fra futures_katalog, som er ÉN sandhedskilde for MES/M2K (bekraeftet live
+    mod reqPositions-avgCost). Laeses dér frem for at skrive tallet op igen, saa en
+    fremtidig aendring kun skal ét sted hen.
     """
     try:
-        from strategies.europa_reversion.config import MULTIPLIER
-        return float(MULTIPLIER.get(symbol.upper().strip(), 1.0))
+        from futures_katalog import multiplikator
+        return multiplikator(symbol)
     except Exception:
         return 1.0
 

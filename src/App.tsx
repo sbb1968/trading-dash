@@ -137,9 +137,18 @@ function getMarketStatus(): "open" | "pre" | "after" | "closed" {
 // pause 17:00-18:00 ET. Uden dette blev MES spaerret af aktie-gaten det meste
 // af det doegn hvor den faktisk kan handles.
 //
-// Symbol-listen spejler FUTURES_EXCHANGE i backend/ibkr_connect.py — det er
-// dén der afgoer om en ordre resolves til en Future- eller Stock-kontrakt.
-// Tilfoejes et symbol dér, skal det ogsaa tilfoejes her.
+// Symbol-listen spejler backend/futures_katalog.py, som er ÉN sandhedskilde for
+// symbol, boers og multiplikator. Listen staar hardkodet HER med vilje: et fetch
+// der fejler paa en handelsdag ville spaerre futures-handel, og listen af symboler
+// aendrer sig ikke midt i en session.
+//
+// Prisen for det valg er at den kan glemmes. Betalingen er
+// backend/test_futures_katalog.py, som laeser denne linje og FEJLER hvis den ikke
+// stemmer med kataloget. Tilfoej derfor i kataloget foerst, koer testen, ret her.
+//
+// Kontrakt-MAANEDEN staar der bevidst intet om: den vaelges af qualify_future, som
+// tager den mest handlede kontrakt — ikke bare den naermeste ikke-udloebne. Man
+// skriver altid det rene symbol: "MES", aldrig "MESU6".
 const FUTURES_SYMBOLS = new Set(["MES", "M2K"]);
 
 export function isFutureSymbol(ticker: string): boolean {

@@ -47,12 +47,12 @@ BAR_MINUTES = 15     # afledt af BAR_SIZE — bruges til "er baren færdig?"-tje
 # ── Instrumenter + sizing ─────────────────────────────────────
 INSTRUMENTS = ["MES", "M2K"]   # IKKE MNQ (mean-reverter ikke pålideligt — se SPEC)
 RISK_PCT    = 0.01             # 1% af konto-equity pr. handel
-# Kontrakt-multiplikatorer ($ pr. prispoint). MES og M2K er begge $5/point
-# (CME micro). MES bekræftet live: reqPositions-avgCost = pris × 5.
-MULTIPLIER = {
-    "MES": 5.0,
-    "M2K": 5.0,
-}
+# Kontrakt-multiplikatorer ($ pr. prispoint). Udledes af futures_katalog.py, som er
+# ÉN sandhedskilde for symbol, børs og multiplikator — se den fils docstring for
+# hvorfor. MES bekræftet live: reqPositions-avgCost = pris × 5.
+from futures_katalog import KATALOG as _FUT_KATALOG
+
+MULTIPLIER = {s: i.multiplier for s, i in _FUT_KATALOG.items()}
 # Loft paa antal kontrakter pr. handel. 1 = Ibens lille test-konto (~$1.400) har ikke
 # margin til mere; sammen med gulvet i _size_contracts betyder det ALTID praecis 1
 # kontrakt. Haev naar kontoen kan baere det (saa faar risiko/handel effekt igen).

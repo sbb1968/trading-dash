@@ -2571,6 +2571,48 @@ async def docs_list():
     return {"docs": items}
 
 
+@app.get("/futures/katalog")
+async def futures_katalog_endpoint():
+    """Hvilke futures kender vi, og HVILKEN kontrakt rammer en ordre lige nu?
+
+    Kontraktmaaneden vaelges af maskinen (qualify_future) — det er bevidst IKKE et
+    valg brugeren traeffer, for "den mest handlede kontrakt" er et faktum om
+    markedet, ikke en praeference. Endpointet er derfor OPLYSNING, ikke en vaelger:
+    UI'et kan vise "MES → MESU6 · udloeb 18/9" saa man kan se hvad man rammer.
+
+    Er der ingen IBKR-forbindelse, returneres kataloget alligevel (uden `kontrakt`)
+    — listen af symboler er statisk viden og skal ikke afhaenge af TWS.
+    """
+    import futures_katalog as _fk
+
+    _ib = strategy_manager.get_ibkr()
+    ib = _ib if (_ib is not None and _ib.connected) else None
+    ud = []
+    for sym in _fk.symboler():
+        inst = _fk.KATALOG[sym]
+        post = {
+            "symbol": sym,
+            "navn": inst.navn,
+            "boers": inst.exchange,
+            "multiplikator": inst.multiplier,
+            "kontrakt": None,
+        }
+        if ib:
+            try:
+                k = await ib.qualify_future(sym)
+                if k:
+                    exp = (k.lastTradeDateOrContractMonth or "")[:8]
+                    post["kontrakt"] = {
+                        "local_symbol": k.localSymbol,
+                        "udloeb": exp,
+                        "con_id": k.conId,
+                    }
+            except Exception as e:
+                logger.warning(f"/futures/katalog: {sym}: {e}")
+        ud.append(post)
+    return {"futures": ud, "ibkr_forbundet": bool(ib)}
+
+
 @app.get("/docs/file/{name}")
 async def docs_file(name: str):
     """Serverer EEN PDF fra backend/docs/. Kun filer i mappen, kun .pdf."""

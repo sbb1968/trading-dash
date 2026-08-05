@@ -30,18 +30,21 @@ TWS_PORT_PAPER = 7497
 TWS_PORT_LIVE  = 7496
 
 # ── Futures-understøttelse ────────────────────────────────────
-# Symboler her behandles som Future-kontrakter (front-måned) i stedet for
-# Stock. Tilføj nye futures-instrumenter ved at registrere deres børs her.
-# Multiplikatoren (kontraktstørrelse pr. prispoint) bor i strategien der
-# sizer — connection-laget behøver kun børsen for at kvalificere kontrakten.
-FUTURES_EXCHANGE = {
-    "MES": "CME",   # Micro E-mini S&P 500
-    "M2K": "CME",   # Micro E-mini Russell 2000
-}
+# Symboler her behandles som Future-kontrakter (front-måned) i stedet for Stock.
+#
+# ⚠ TILFØJ IKKE ET SYMBOL HER. Listen udledes nu af futures_katalog.py, som er
+# ÉN sandhedskilde for symbol, børs og multiplikator. Tilføjes et symbol kun her,
+# mangler multiplikatoren, og P&L bliver stille forkert.
+from futures_katalog import KATALOG as _FUT_KATALOG
+
+FUTURES_EXCHANGE = {s: i.exchange for s, i in _FUT_KATALOG.items()}
 
 def is_future_symbol(ticker: str) -> bool:
-    """True hvis ticker skal handles som en Future-kontrakt (ikke Stock)."""
-    return ticker in FUTURES_EXCHANGE
+    """True hvis ticker skal handles som en Future-kontrakt (ikke Stock).
+
+    Normaliserer case og mellemrum — en watchlist-indtastning er ikke altid ren.
+    """
+    return (ticker or "").upper().strip() in FUTURES_EXCHANGE
 
 
 class IBKRConnection:
@@ -245,12 +248,75 @@ class IBKRConnection:
 
         candidates.sort(key=lambda x: x[0])   # nærmeste expiry = front-måned
         front = candidates[0][1]
+
+        # "Nærmeste ikke-udløbne" er IKKE altid "den aktive". I rulleugen flytter
+        # likviditeten til næste måned FØR front udløber — handler man videre på
+        # front, handler man i en udtørrende bog med bredere spread.
+        # Målt 5/8-2026, 43 dage til udløb: MESU6 1.124.192 mod MESZ6 4.988 (faktor
+        # 225). Uden for rullevinduet er svaret altså aldrig i tvivl, og så sparer
+        # vi kaldene. Kun tæt på udløb spørger vi markedet hvem der er aktiv.
+        if len(candidates) > 1 and self._i_rullevindue(candidates[0][0]):
+            front = await self._mest_handlede(symbol, candidates[0][1], candidates[1][1])
+
         self._future_cache[symbol] = front
         logger.info(
             f"qualify_future({symbol}) → front-måned "
             f"{front.lastTradeDateOrContractMonth} "
             f"(localSymbol={front.localSymbol}, conId={front.conId})"
         )
+        return front
+
+    # Dage før udløb hvor vi begynder at spørge markedet hvem der er den aktive
+    # kontrakt. CME's egen roll-konvention for equity-index-futures er ~8 dage før
+    # udløb (torsdagen ugen før); 14 giver margin i begge ender uden at koste kald
+    # på normale dage.
+    RULLEVINDUE_DAGE = 14
+
+    def _i_rullevindue(self, expiry_str: str) -> bool:
+        import datetime as _dt
+        try:
+            udloeb = _dt.datetime.strptime(expiry_str[:8], "%Y%m%d").date()
+        except ValueError:
+            return False        # kan vi ikke læse datoen, ruller vi ikke på et gæt
+        return (udloeb - _dt.date.today()).days <= self.RULLEVINDUE_DAGE
+
+    async def _mest_handlede(self, symbol: str, front, naeste):
+        """Hvilken af de to kontrakter handles der mest i? Returnerer den.
+
+        Markedet afgør rullen — ikke en kalenderregel vi selv har fundet på.
+        Fejler opslaget (timeout, ingen data, tom volumen), returnerer vi FRONT:
+        det er status quo, og en tavs rul til en forkert måned er værre end en
+        rul der kommer en dag for sent.
+        """
+        async def volumen(kontrakt) -> float:
+            try:
+                bars = await asyncio.wait_for(
+                    self.ib.reqHistoricalDataAsync(
+                        kontrakt, endDateTime="", durationStr="2 D",
+                        barSizeSetting="1 hour", whatToShow="TRADES",
+                        useRTH=False, formatDate=2),
+                    timeout=20.0)
+            except Exception as e:
+                logger.warning(f"_mest_handlede({symbol}/{kontrakt.localSymbol}): {e}")
+                return -1.0
+            return sum(b.volume for b in (bars or []) if b.volume and b.volume > 0)
+
+        v_front = await volumen(front)
+        v_naeste = await volumen(naeste)
+        if v_front < 0 or v_naeste < 0:
+            logger.warning(
+                f"_mest_handlede({symbol}): volumen kunne ikke hentes — "
+                f"bliver på front-måneden {front.localSymbol}")
+            return front
+
+        logger.info(
+            f"_mest_handlede({symbol}): {front.localSymbol}={v_front:,.0f} mod "
+            f"{naeste.localSymbol}={v_naeste:,.0f} (sidste 2 døgn)")
+        if v_naeste > v_front:
+            logger.info(
+                f"RUL: {symbol} flytter fra {front.localSymbol} til "
+                f"{naeste.localSymbol} — likviditeten er skiftet")
+            return naeste
         return front
 
     async def _resolve_contract(self, ticker: str):
