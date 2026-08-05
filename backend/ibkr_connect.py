@@ -209,6 +209,16 @@ class IBKRConnection:
         """
         if not self.connected:
             return None
+
+        # Normalisér FØR cache-opslag og før kontrakten bygges. is_future_symbol()
+        # accepterer " mes " (en watchlist-indtastning er ikke ren), så uden dette
+        # slap skidtet igennem gaten og døde først i IBKR-opslaget:
+        # "No security definition ... Future(symbol=' M2K ')". Det ville se ud som
+        # en IBKR-fejl, ikke som vores egen manglende trimning.
+        # Cachen skal også nøgles på det normaliserede symbol — ellers får 'mes' og
+        # 'MES' hver sin post, og en force_refresh ved dagsstart ruller kun den ene.
+        symbol = (symbol or "").upper().strip()
+
         if not force_refresh and symbol in self._future_cache:
             return self._future_cache[symbol]
 
@@ -327,7 +337,13 @@ class IBKRConnection:
         qualify_future; alt andet behandles som en US-aktie (SMART/USD).
         Bruges af get_historical_bars, get_snapshot og place_paper_order så
         futures og aktier deler ét kontrakt-resolutionspunkt.
+
+        Tickeren normaliseres her — dette ER det fælles punkt, så alt nedenunder
+        (både futures- og aktiestien) kan regne med et rent symbol. Gælder også
+        aktier: Stock(" AAPL ") får conId 0 og ville ellers blive afvist som
+        "ukendt ticker", hvilket er et vildledende svar på et mellemrum.
         """
+        ticker = (ticker or "").upper().strip()
         if is_future_symbol(ticker):
             fut = await self.qualify_future(ticker)
             if fut is None:
@@ -373,6 +389,7 @@ class IBKRConnection:
         if not self.connected:
             return None
         from ib_async import Future
+        symbol   = (symbol or "").upper().strip()   # samme grund som i qualify_future
         asof_str = asof.strftime("%Y%m%d")
         q_month  = ((asof.month - 1) // 3) * 3 + 3       # kvartalet der indeholder handelsmaaneden
         q_floor  = asof.year * 100 + q_month

@@ -148,6 +148,56 @@ kraev(_afgoer(1_125_421, None) == "FRONT",
 kraev(_afgoer(0, 0) == "FRONT",
       "ingen volumen nogen af stederne -> bliver paa front")
 
+print("\n8. Skidt input overlever HELE vejen — ikke bare gaten")
+# Denne fandtes live og ikke her, og det er pointen: afsnit 4 beviste at
+# is_future_symbol(' mes ') er True, men IKKE at opslaget bagefter virker.
+# qualify_future byggede Future(symbol=' M2K ') og IBKR svarede "No security
+# definition" — hvilket ligner en IBKR-fejl, ikke vores manglende trimning.
+# En gate der siger ja til noget stien ikke kan bruge, er værre end en gate der
+# siger nej. Derfor testes nu selve stien.
+
+
+class _StubDetaljer:
+    """Efterligner reqContractDetailsAsync — og AFVISER et urent symbol,
+    praecis som IBKR gjorde."""
+
+    def __init__(self):
+        self.set_symboler = []
+
+    async def reqContractDetailsAsync(self, base):
+        self.set_symboler.append(base.symbol)
+        if base.symbol != base.symbol.upper().strip():
+            return []                      # IBKR: "No security definition"
+        return [SimpleNamespace(contract=SimpleNamespace(
+            symbol=base.symbol, localSymbol=f"{base.symbol}U6",
+            lastTradeDateOrContractMonth="20260918", conId=1))]
+
+
+class _FakeForbundet(IBKRConnection):
+    connected = True                       # 'connected' er en property paa basen
+
+
+def _kvalificer(symboler_ind):
+    c = _FakeForbundet.__new__(_FakeForbundet)
+    c.ib = _StubDetaljer()
+    c._future_cache = {}
+    c.RULLEVINDUE_DAGE = -1                # hold rulle-stien uden for denne test
+    ud = [asyncio.run(c.qualify_future(s)) for s in symboler_ind]
+    return ud, c
+
+
+for skriv in (" MES ", "mes", "MES", "Mes\t"):
+    ud, _ = _kvalificer([skriv])
+    kraev(ud[0] is not None and ud[0].localSymbol == "MESU6",
+          f"'{skriv!r}' kvalificerer til MESU6 (ikke None)")
+
+ud, c = _kvalificer([" MES ", "mes", "MES"])
+kraev(sorted(c._future_cache) == ["MES"],
+      f"tre skrivemaader giver ÉN cache-noegle, ikke tre ({sorted(c._future_cache)})")
+kraev(c.ib.set_symboler == ["MES"],
+      f"IBKR spoerges kun ÉN gang — cachen rammer trods skidt input "
+      f"({c.ib.set_symboler})")
+
 print("\n" + "=" * 70)
 if FEJL:
     print(f"{len(FEJL)} FEJL:")
