@@ -366,7 +366,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     setOrderShares(prev => ({ ...prev, [ticker]: value.replace(/\D/g, "").slice(0, 6) }));
   }
 
-  function handleOrder(action: "BUY" | "SELL", stock: any) {
+  async function handleOrder(action: "BUY" | "SELL", stock: any) {
     const ts = tradeStatus(stock.ticker, mkt);
     if (!ts.canTrade) {
       alert(`${stock.ticker} kan ikke handles nu.\n\n${ts.blockMsg}`);
@@ -374,12 +374,37 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     }
     const shares = parseInt(getShares(stock.ticker), 10);
     if (!shares || shares <= 0) { alert(`Angiv en gyldig mængde for ${stock.ticker}`); return; }
-    if (!stock.price || stock.price <= 0) {
-      alert(`Ingen live pris for ${stock.ticker} — kan ikke sende ordre.\n\n` +
-        `• Markedet er lukket · • Tickeren findes ikke · • IBKR-feedet er ikke aktivt for aktien`);
+
+    // ⚠ Her stod `if (!stock.price) return` med beskeden "Ingen live pris".
+    //
+    // Den blokerede paa noget der ikke betyder noget for ordren: prisen sendes
+    // ALDRIG til backenden — ibkrBuy(ticker, shares) laegger en markedsordre, og
+    // prisen bruges kun til bekraeftelses-dialogen.
+    //
+    // Til gengaeld ramte den hver gang: i sekunderne efter opstart har live-feedet
+    // ikke naaet at abonnere, saa stock.price er 0. Foerste tryk paa K gav derfor
+    // en fejl der pegede paa lukket marked eller ukendt ticker — hvoraf intet
+    // passede. Maalt paa Ibens workstation 5/8: foerste tryk afvist, andet virkede.
+    //
+    // Vi skal stadig have BEVIS for at tickeren er rigtig og prissat — men et
+    // levende feed er ikke den eneste kilde til det beviser. Tre trin, faldende
+    // friskhed, alle aegte IBKR-priser:
+    let pris = (stock.price > 0) ? stock.price : 0;
+    if (!pris) pris = meta[stock.ticker]?.addPrice ?? 0;      // frosset /quote-pris
+    if (!pris) {
+      try {                                                    // sidste udvej: spoerg nu
+        const r = await fetch(`http://127.0.0.1:8000/quote/${encodeURIComponent(stock.ticker)}`);
+        const d = await r.json();
+        if (typeof d.price === "number" && d.price > 0) pris = d.price;
+      } catch { /* backend nede — haandteres nedenfor */ }
+    }
+    if (!pris) {
+      alert(`Kan ikke prissætte ${stock.ticker} — ordren er IKKE sendt.\n\n` +
+        `Backenden svarer ikke, eller IBKR kender ikke tickeren.\n` +
+        `Futures handles med det rene symbol (MES, M2K) — ikke kontraktkoden.`);
       return;
     }
-    onRequestOrder(action, stock.ticker, shares, stock.price);
+    onRequestOrder(action, stock.ticker, shares, pris);
   }
 
   async function openCompanySite(ticker: string) {
