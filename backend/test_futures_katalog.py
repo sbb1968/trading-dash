@@ -234,6 +234,53 @@ kraev(c.ib.set_symboler == ["MES"],
       f"IBKR spoerges kun ÉN gang — cachen rammer trods skidt input "
       f"({c.ib.set_symboler})")
 
+print("\n9. Live-feedet abonnerer futures-bevidst")
+# Feedet byggede Stock(sym, "SMART") for ALT. For "MES" gav qualifyContractsAsync
+# ingen fejl, men efterlod conId = 0, og reqMktData kastede saa "can't be hashed".
+# Det blev slugt af feedets per-symbol try/except og endte som EN warning i loggen.
+# Resultatet: MES kom aldrig i feedet, AKTUEL/BEHOLD/UR.P/L stod tomme, og
+# frontendens "ingen live pris"-vagt blokerede koebsordren.
+# PRIS-kolonnen var udfyldt hele tiden (den er den frosne /quote-pris, som ER
+# futures-bevidst) — derfor lignede det et virkende feed.
+import ibkr_live_feed
+
+
+class _StubConn:
+    """Registrerer HVILKE symboler feedet bad om at faa resolvet."""
+
+    connected = True
+
+    def __init__(self):
+        self.resolvet = []
+        self.ib = SimpleNamespace(
+            reqMktData=lambda *a, **k: SimpleNamespace(contract=None))
+
+    async def _resolve_contract(self, ticker):
+        self.resolvet.append(ticker)
+        return SimpleNamespace(localSymbol=f"{ticker}U6", conId=1)
+
+    async def get_historical_bars(self, *a, **k):
+        return []
+
+
+def _abonner(symboler):
+    conn = _StubConn()
+    f = ibkr_live_feed.IBKRLiveFeed(conn, lambda m: asyncio.sleep(0), None)
+    asyncio.run(f.add_symbols(symboler))
+    return conn, f
+
+
+conn, f = _abonner(["MES", "AAPL", "M2K"])
+kraev(conn.resolvet == ["MES", "AAPL", "M2K"],
+      f"feedet resolver ALLE symboler via _resolve_contract ({conn.resolvet})")
+kraev(sorted(f._tickers) == ["AAPL", "M2K", "MES"],
+      f"futures ender i _tickers og ikke kun aktier ({sorted(f._tickers)})")
+
+kilde = Path(ibkr_live_feed.__file__).read_text(encoding="utf-8")
+kode = "\n".join(l for l in kilde.splitlines() if not l.strip().startswith("#"))
+kraev('Stock(' not in kode,
+      "ingen hardkodet Stock(...) tilbage i feedet — det var roden til fejlen")
+
 print("\n" + "=" * 70)
 if FEJL:
     print(f"{len(FEJL)} FEJL:")

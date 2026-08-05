@@ -16,7 +16,6 @@ import math
 from datetime import datetime
 from typing import Awaitable, Callable
 
-from ib_async import Stock
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +121,16 @@ class IBKRLiveFeed:
             if not s or s in self._tickers:
                 continue
             try:
-                contract = Stock(s, "SMART", "USD")
-                await self.conn.ib.qualifyContractsAsync(contract)
+                # ⚠ IKKE Stock(s, "SMART"). Futures har ingen aktie-kontrakt: for "MES"
+                # gav qualifyContractsAsync ingen fejl men efterlod conId = 0, og
+                # reqMktData kastede saa "can't be hashed". Det blev fanget af except
+                # nedenfor og endte som EN linje i loggen — MES kom aldrig i feedet.
+                # Watchlistens PRIS-kolonne stod alligevel udfyldt (den er den frosne
+                # /quote-pris, som ER futures-bevidst), saa det saa ud som om feedet
+                # virkede, mens AKTUEL/BEHOLD/UR.P/L var tomme. Ordren blev derefter
+                # blokeret af frontendens "ingen live pris"-vagt.
+                # _resolve_contract er det faelles punkt der kender begge dele.
+                contract = await self.conn._resolve_contract(s)
                 self._tickers[s] = self.conn.ib.reqMktData(contract, "", False, False)
                 new.append(s)
             except Exception as e:
@@ -135,8 +142,8 @@ class IBKRLiveFeed:
     async def _subscribe(self, symbols: list[str]):
         for sym in symbols:
             try:
-                contract = Stock(sym, "SMART", "USD")
-                await self.conn.ib.qualifyContractsAsync(contract)
+                # Samme grund som i add_symbols: futures-bevidst resolution.
+                contract = await self.conn._resolve_contract(sym)
                 ticker = self.conn.ib.reqMktData(contract, "", False, False)
                 self._tickers[sym] = ticker
             except Exception as e:
