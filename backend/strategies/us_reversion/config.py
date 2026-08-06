@@ -84,6 +84,19 @@ MIN_WARMUP_BAND = LOOKBACK + CMF_LEN   # z OG CMF skal begge være definerede
 # ═══════════════════════════════════════════════════════════════
 #  Instrument og sizing
 # ═══════════════════════════════════════════════════════════════
+# ── Retninger ──────────────────────────────────────────────────
+# Strategien var oprindelig long-only. Short er tilføjet 6/8-2026 som den
+# nøjagtige spejling omkring gennemsnittet: brud OP gennem øvre bånd armerer
+# short, og entry kræver at prisen begynder at vende NED (to røde 5m-bars,
+# faldende MACD, faldende CMF).
+#
+# ⚠ Short er IKKE backtestet. Sweepet fandt ingen edge på long-basis-varianten,
+# og short har ikke engang været igennem den øvelse. Flagene står her, så en
+# side kan slås fra uden kodeændring — og så backtesten kan køre siderne hver
+# for sig når den bliver udvidet.
+TILLAD_LONG   = True
+TILLAD_SHORT  = True
+
 INSTRUMENTS   = ["MES"]        # KUN MES — ikke M2K (modsat EUREVERSION)
 MULTIPLIER    = {"MES": 5.0}   # $ pr. prispoint (CME micro)
 MAX_CONTRACTS = 1              # handler ALTID præcis 1 kontrakt

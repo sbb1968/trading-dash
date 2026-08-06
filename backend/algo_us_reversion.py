@@ -1,8 +1,15 @@
 """
 algo_us_reversion.py
 ────────────────────
-Live-wrapper for US-reversion — long-only mean-reversion på MES i den
+Live-wrapper for US-reversion — mean-reversion BEGGE VEJE på MES i den
 amerikanske session (09:30–15:00 ET = 15:30–21:00 dansk).
+
+Short er tilføjet 6/8-2026 som den nøjagtige spejling af long omkring
+gennemsnittet: brud OP gennem øvre bånd armerer short, og entry kræver at
+prisen begynder at vende NED (to røde 5m-bars, faldende MACD, faldende CMF).
+Retningen er en parameter hele vejen ned i rule.py — ikke en kopi af koden —
+så de to sider ikke kan divergere ved en senere ændring af den ene.
+⚠ Short er IKKE backtestet. Slås fra med TILLAD_SHORT i config.
 
 TO TIDSRAMMER, og det er den strukturelle forskel fra alle øvrige strategier:
   15m  bånd/z (armering), CMF-kriteriet, og Z-exit-varianten
@@ -16,9 +23,10 @@ TILSTANDSMASKINEN er det nye her. EUREVERSION er tilstandsløs: hver færdig bar
 giver et z, og z alene afgør alt. US-reversion har derimod en ARMERING der lever
 mellem bars:
 
-    flad, uarmeret ──(15m close < nedre bånd)──> ARMERET
+    flad, uarmeret ──(15m close uden for bånd)──> ARMERET long ELLER short
     ARMERET ──(15m close tilbage inde i båndet)──> uarmeret
-    ARMERET ──(5m: to grønne + MACD op + CMF op)──> POSITION
+    ARMERET long  ──(5m: to grønne + MACD op + CMF op)──> LONG
+    ARMERET short ──(5m: to røde  + MACD ned + CMF ned)──> SHORT
     POSITION ──(stop / upper_z / trail / sessions-slut)──> flad, uarmeret
 
   Armeringen falder altså bort så snart udvidelsen er ovre. En reversal to timer
@@ -60,6 +68,7 @@ from strategies.us_reversion.config import (
     LOOKBACK, CMF_LEN, MACD_FAST, MACD_SLOW, MACD_SIG,
     MACD_WINDOW, MIN_WARMUP_TRIG, MIN_WARMUP_BAND,
     INSTRUMENTS, MULTIPLIER, MAX_CONTRACTS, LIVE_VARIANT_KEY,
+    TILLAD_LONG, TILLAD_SHORT,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,7 +137,8 @@ class UsReversionLive(BaseStrategy):
         # armed_at:   hvornår (til forensik — hvor længe ventede vi på reversalen?)
         # armed_z:    z på selve brud-baren (til forensik)
         # z / bands:  seneste 15m-værdier, bruges af entry-forensik og Z-exit
-        self._armed:    dict[str, bool] = {}
+        # 0 = uarmeret, rule.LONG / rule.SHORT = armeret i den retning.
+        self._armed:    dict[str, int] = {}
         self._armed_at: dict[str, Optional[datetime]] = {}
         self._armed_z:  dict[str, Optional[float]] = {}
         self._z15:      dict[str, Optional[float]] = {}
@@ -505,7 +515,7 @@ class UsReversionLive(BaseStrategy):
 
             # Armering starter altid FRA. En armering fra i går må ikke overleve
             # natten — bruddet skal ske i dagens session for at gælde.
-            self._armed[sym]    = False
+            self._armed[sym]    = 0
             self._armed_at[sym] = None
             self._armed_z[sym]  = None
 
@@ -590,7 +600,9 @@ class UsReversionLive(BaseStrategy):
                                               StrategyStatus.STOPPED, "done")
                     break
 
-                armed_txt = "ARMERET" if self._armed.get("MES") else "afventer båndbrud"
+                _a = self._armed.get("MES") or 0
+                armed_txt = ("ARMERET LONG" if _a == rule.LONG else
+                             "ARMERET SHORT" if _a == rule.SHORT else "afventer båndbrud")
                 self._status("trading",
                              f"Overvåger MES — {now_et.strftime('%H:%M:%S')} ET | "
                              f"{armed_txt} | Positioner: "
@@ -604,7 +616,9 @@ class UsReversionLive(BaseStrategy):
                         "trades":         len(self.trades),
                         "total_pnl":      round(self.total_pnl, 2),
                         "instruments":    INSTRUMENTS,
-                        "armed":          {s: bool(self._armed.get(s)) for s in INSTRUMENTS},
+                        "armed":          {s: ("long" if (self._armed.get(s) or 0) == rule.LONG
+                                               else "short" if (self._armed.get(s) or 0) == rule.SHORT
+                                               else None) for s in INSTRUMENTS},
                         "z15":            {s: self._z15.get(s) for s in INSTRUMENTS},
                         "variant":        self._variant_key,
                     })
@@ -713,19 +727,33 @@ class UsReversionLive(BaseStrategy):
 
         # En åben position blokerer ikke armerings-logikken, men armeringen er
         # irrelevant mens vi er i markedet — den nulstilles ved exit.
-        was_armed = bool(self._armed.get(sym))
+        #
+        # ⚠ Armeringen bærer nu RETNINGEN, ikke bare ja/nej. Et brud op gennem
+        # øvre bånd armerer SHORT; et brud ned armerer LONG. De to kan aldrig
+        # være armeret samtidig — z kan kun ligge uden for ét af båndene ad gangen.
+        var_armeret = self._armed.get(sym) or 0
 
-        if self._strategy.is_break_below(z):
-            if not was_armed:
-                self._armed[sym]    = True
+        ny = None
+        if TILLAD_LONG and self._strategy.is_break(z, rule.LONG):
+            ny = rule.LONG
+        elif TILLAD_SHORT and self._strategy.is_break(z, rule.SHORT):
+            ny = rule.SHORT
+
+        if ny is not None:
+            if var_armeret != ny:
+                self._armed[sym]    = ny
                 self._armed_at[sym] = bar15.timestamp
                 self._armed_z[sym]  = z
+                side = "LONG" if ny == rule.LONG else "SHORT"
+                baand = "under nedre" if ny == rule.LONG else "over øvre"
+                vej = "reversal op" if ny == rule.LONG else "reversal ned"
                 await self._log(
-                    f"🎯 {sym}: ARMERET — 15m lukkede under nedre bånd "
-                    f"(z={z:+.2f}, close=${bar15.close:.2f}). Venter nu på 5m-reversal.")
-                self._status("trading", f"🎯 {sym}: armeret (z={z:+.2f}) — venter på reversal")
-        elif was_armed and self._strategy.is_back_inside(z):
-            self._armed[sym]    = False
+                    f"🎯 {sym}: ARMERET {side} — 15m lukkede {baand} bånd "
+                    f"(z={z:+.2f}, close=${bar15.close:.2f}). Venter nu på 5m-{vej}.")
+                self._status("trading",
+                             f"🎯 {sym}: armeret {side} (z={z:+.2f}) — venter på reversal")
+        elif var_armeret and self._strategy.is_back_inside(z, var_armeret):
+            self._armed[sym]    = 0
             self._armed_at[sym] = None
             self._armed_z[sym]  = None
             await self._log(
@@ -778,7 +806,8 @@ class UsReversionLive(BaseStrategy):
             bar_time_et = bar.timestamp.astimezone(ET).strftime("%H:%M"),
             status      = "in_session" if in_session else "out_of_session",
             reason      = (f"z15={z:+.2f} " if z is not None else "z15=n/a ")
-                          + ("armeret" if self._armed.get(sym) else "uarmeret"),
+                          + {rule.LONG: "armeret_long", rule.SHORT: "armeret_short"}
+                            .get(self._armed.get(sym) or 0, "uarmeret"),
         )
 
         # ── Åben position: tjek exit ──
@@ -791,7 +820,10 @@ class UsReversionLive(BaseStrategy):
                 self._mae[sym] = min(self._mae[sym], bar.low)
 
             # HH sporer CLOSES (ikke highs) — Sørens specifikation.
-            pos["hh_close"] = rule.update_hh(pos["hh_close"], bar.close)
+            # "hh_close" hedder saadan af historiske grunde; for en short er det
+            # den LAVESTE close siden entry. update_ekstrem kender forskellen.
+            pos["hh_close"] = rule.update_ekstrem(
+                pos["hh_close"], bar.close, pos.get("retning", rule.LONG))
             pos["last_z"] = z
 
             trade_id = pos.get("trade_id")
@@ -804,10 +836,11 @@ class UsReversionLive(BaseStrategy):
                 return
 
             reason = self._strategy.check_exit(
-                entry_price = pos["entry_price"],
-                hh_close    = pos["hh_close"],
-                last_close  = bar.close,
-                z           = z,
+                entry_price   = pos["entry_price"],
+                ekstrem_close = pos["hh_close"],
+                last_close    = bar.close,
+                z             = z,
+                retning       = pos.get("retning", rule.LONG),
             )
             if reason:
                 await self._close(sym, bar.close, reason, z)
@@ -816,7 +849,8 @@ class UsReversionLive(BaseStrategy):
         # ── Flad: vurdér entry ──
         if not in_session:
             return
-        if not self._armed.get(sym):
+        retning = self._armed.get(sym) or 0
+        if not retning:
             return
         # Entry-cutoff: en frisk position tæt på sessions-slut ville blive
         # tvangslukket inden den fik en chance.
@@ -843,12 +877,13 @@ class UsReversionLive(BaseStrategy):
             macd_prev = m_prev.macd if m_prev else None,
             cmf_now   = self._cmf_now.get(sym),
             cmf_prev  = self._cmf_prev.get(sym),
+            retning   = retning,
         )
         if not ok:
             await self._log_entry_afvist(sym, bar, z, detaljer)
             return
 
-        await self._open(sym, bar, z, detaljer)
+        await self._open(sym, bar, z, detaljer, retning)
 
     async def _log_entry_afvist(self, sym: str, bar: Bar, z, detaljer: dict) -> None:
         """Hvorfor gik den ARMEREDE strategi ikke ind paa denne bar?
@@ -927,12 +962,15 @@ class UsReversionLive(BaseStrategy):
     # Open / Close
     # -------------------------------------------------------------
 
-    async def _open(self, sym: str, bar: Bar, z: Optional[float], detaljer: dict):
+    async def _open(self, sym: str, bar: Bar, z: Optional[float], detaljer: dict,
+                    retning: int = rule.LONG):
         if self.stats.open_positions >= self.config.max_open_positions:
             return
 
-        side = "long"          # US-reversion er long-only
-        action = "BUY"
+        # Retningen kommer fra armeringen: brud NED gennem nedre baand giver long,
+        # brud OP gennem oevre giver short. Spejlet regel, samme kriterier.
+        side   = "long" if retning == rule.LONG else "short"
+        action = "BUY"  if retning == rule.LONG else "SELL"
         mult = MULTIPLIER.get(sym, 5.0)
         entry_price = bar.close
 
@@ -971,7 +1009,7 @@ class UsReversionLive(BaseStrategy):
             entry_price = fill
 
         entry_time = datetime.now(ET)
-        stop_price = rule.stop_price(entry_price, self.cfg)
+        stop_price = rule.stop_price(entry_price, self.cfg, retning)
         reserved   = contracts * 10.0
 
         # Stop-trajektorie (fast procent-stop → ét punkt = flad step-linje).
@@ -988,6 +1026,9 @@ class UsReversionLive(BaseStrategy):
             # HH starter ved ENTRY-prisen, ikke ved næste close — et øjeblikkeligt
             # dyk må ikke sænke referencen og gøre trailing-stoppet meningsløst løst.
             "hh_close":    entry_price,
+            # Retningen foelger positionen hele vejen: exit, trailing og
+            # lukke-ordren skal alle vide om vi er long eller short.
+            "retning":     retning,
             "reserved":    reserved,
             "init_margin": init_margin,
             "armed_at":    self._armed_at.get(sym),
@@ -1125,7 +1166,9 @@ class UsReversionLive(BaseStrategy):
         mult      = pos["multiplier"]
         entry     = pos["entry_price"]
 
-        close_action = "SELL"   # long-only
+        # Lukkeordren gaar MODSAT positionen. Stod "SELL # long-only"; en short
+        # ville dermed vaere blevet solgt EN GANG TIL og efterladt dobbelt kort.
+        close_action = "SELL" if side == "long" else "BUY"
 
         # Send luknings-ordren FØR vi bogfører noget.
         result = await self.conn.place_paper_order(
@@ -1173,8 +1216,11 @@ class UsReversionLive(BaseStrategy):
         self._armed_at[sym] = None
         self._armed_z[sym]  = None
 
-        # Dollar-P&L med multiplikator (long-only).
-        pnl = (price - entry) * contracts * mult
+        # Dollar-P&L med multiplikator, retningsbestemt.
+        # Fortegnet foelger siden. Uden `retning` ville en vindende short vaere
+        # bogfoert som et tab af samme stoerrelse — journalen ville se rigtig ud
+        # og vaere forkert, praecis som multiplikator-fejlen ville have vaeret.
+        pnl = (price - entry) * contracts * mult * pos.get("retning", rule.LONG)
 
         self.total_pnl += pnl
         self.stats.trades_today  += 1

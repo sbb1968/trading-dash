@@ -152,7 +152,7 @@ def section_E():
 
     # Ingen exit: prisen staar stille lige over stop og trailing
     check("E1 ingen betingelse ramt -> None",
-          rule.check_exit(entry, hh_close=100.0, last_close=100.0, z=0.0, cfg=BASE) is None)
+          rule.check_exit(entry, ekstrem_close=100.0, last_close=100.0, z=0.0, cfg=BASE) is None)
 
     # Stop: 0.12% under entry = 99.88
     check("E2 close paa stop-niveau -> 'stop'",

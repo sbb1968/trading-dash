@@ -67,18 +67,32 @@ class UsReversionStrategy:
     def bands(self, closes):
         return rule.bands(closes, self.cfg.entry_z)
 
+    # `retning` foeres igennem her, saa wrapperen kun skal kende sin egen
+    # armerings-tilstand og ikke gentage baand-matematikken. Default LONG holder
+    # alle eksisterende kald (backtest, tests) uaendrede.
+    def is_break(self, z, retning=rule.LONG):
+        """Armerer denne retning paa dette z? long: brud ned. short: brud op."""
+        return rule.is_break(z, self.cfg.entry_z, retning)
+
     def is_break_below(self, z):
-        return rule.is_break_below(z, self.cfg.entry_z)
+        """Long-brud. Bevares — backtesten kalder den."""
+        return rule.is_break(z, self.cfg.entry_z, rule.LONG)
 
-    def is_back_inside(self, z):
-        return rule.is_back_inside(z, self.cfg.entry_z)
+    def is_back_inside(self, z, retning=rule.LONG):
+        return rule.is_back_inside(z, self.cfg.entry_z, retning)
 
-    def check_entry(self, bars5, macd_now, macd_prev, cmf_now, cmf_prev):
+    def check_entry(self, bars5, macd_now, macd_prev, cmf_now, cmf_prev,
+                    retning=rule.LONG):
         return rule.check_entry(bars5, macd_now, macd_prev,
-                                cmf_now, cmf_prev, self.cfg)
+                                cmf_now, cmf_prev, self.cfg, retning)
 
-    def check_exit(self, entry_price, hh_close, last_close, z):
-        return rule.check_exit(entry_price, hh_close, last_close, z, self.cfg)
+    def check_exit(self, entry_price, ekstrem_close, last_close, z,
+                   retning=rule.LONG):
+        return rule.check_exit(entry_price, ekstrem_close, last_close, z,
+                               self.cfg, retning)
 
-    def stop_price(self, entry_price):
-        return rule.stop_price(entry_price, self.cfg)
+    def stop_price(self, entry_price, retning=rule.LONG):
+        return rule.stop_price(entry_price, self.cfg, retning)
+
+    def update_ekstrem(self, ekstrem_close, last_close, retning=rule.LONG):
+        return rule.update_ekstrem(ekstrem_close, last_close, retning)
