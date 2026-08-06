@@ -1768,6 +1768,9 @@
             "BuyTheDip":        { docs: "buythedip",       pill: "pill-bd",  pdf: "btd" },
             "Trend Join Long":  { docs: "trend_join_long", pill: "pill-tjl", pdf: "tjl" },
             "Relativ Styrke":   { docs: "relstyrke",       pill: "pill-rs",  pdf: "rs" },
+            // pdf udelades: der findes endnu ingen usrev_*.pdf i backend/docs,
+            // og feltet ville give tre knapper der rammer 404.
+            "US-reversion":     { docs: "us_reversion",    pill: "pill-usrev" },
         };
 
         // Skrinlagte strategier: bevares i STRATEGY_META så historiske
@@ -3359,6 +3362,7 @@
                 if (src === "BuyTheDip")    return `<span class="pill pill-bd">BuyTheDip</span>`;
                 if (src === "Trend Join Long") return `<span class="pill pill-tjl">TrendJoin</span>`;
                 if (src === "Relativ Styrke") return `<span class="pill pill-rs">RelStyrke</span>`;
+                if (src === "US-reversion") return `<span class="pill pill-usrev">USREVERSION</span>`;
                 if (src === "manual")       return `<span class="pill pill-manuel">Manuel</span>`;
                 return `<span class="pill" style="background:#333;color:#aaa;">${src}</span>`;
             };

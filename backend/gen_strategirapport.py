@@ -345,8 +345,11 @@ def build_pdf(out_pdf, p_eq, p_bar, days, start, end, account, trades, mets, com
     story.append(Image(str(p_eq), width=180*mm, height=85*mm))
     story.append(Spacer(1, 6))
     story.append(Image(str(p_bar), width=180*mm, height=58*mm))
-    story.append(Paragraph("K2 = Konfluens 2 &nbsp;·&nbsp; EUREV = EUREVERSION &nbsp;·&nbsp; "
-                           "BTD = BuyTheDip &nbsp;·&nbsp; TJL = Trend Join Long &nbsp;·&nbsp; RS = Relativ Styrke", NOTE))
+    # Legenden udledes af STRATS_CFG frem for at staa skrevet op igen — den var
+    # allerede bagud (USREV manglede), og en legende der ikke matcher soejlerne
+    # er vaerre end ingen legende.
+    story.append(Paragraph(" &nbsp;·&nbsp; ".join(
+        f"{c['short']} = {c['name']}" for c in STRATS_CFG), NOTE))
     story.append(PageBreak())
 
     # ── Tabel 1: nøgletal ──
