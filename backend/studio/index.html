@@ -1369,6 +1369,7 @@
 
     <nav id="nav">
         <button data-page="oversigt" class="nav-primary active">Oversigt</button>
+        <button data-page="ibkrkonto" class="nav-primary">IBKR-Kontooversigt</button>
         <button data-page="journal" class="nav-primary">Journal</button>
         <button data-page="docs" class="nav-primary">Dokumentation</button>
         <span class="nav-divider" aria-hidden="true"></span>
@@ -1475,8 +1476,13 @@
 
         async function authFetch(url, options = {}) {
             // Del 3b: arkiv-bagede journal-endpoints læser fra den valgte kilde.
-            // Andre endpoints (konto, strategier, status) ignorerer kilden og
-            // viser altid denne (algoserver-)maskines live-data.
+            // Andre endpoints (strategier, status) ignorerer kilden og viser altid
+            // denne (algoserver-)maskines live-data.
+            //
+            // UNDTAGELSE: IBKR-Kontooversigt. Saldi og positioner er LIVE og findes
+            // ikke i et arkiv, saa den kan ikke bruge ?archive=. Den spoerger i
+            // stedet hver maskine paa dens egen URL (se ibkrHentKonto) og gaar
+            // altsaa uden om denne funktion for peers.
             if (selectedSource && url.startsWith("/journal/")) {
                 url += (url.includes("?") ? "&" : "?") + "archive=" + encodeURIComponent(selectedSource);
             }
@@ -1786,6 +1792,7 @@
 
         let accountTimer = null;
         let oversigtTimer = null;
+        let ibkrKontoTimer = null;
         let journalTimer = null;
 
         document.getElementById("nav").addEventListener("click", e => {
@@ -1817,7 +1824,10 @@
             const content = document.getElementById("content");
             content.innerHTML = `<div class="card"><div class="empty">Indlæser...</div></div>`;
 
+            if (ibkrKontoTimer) { clearInterval(ibkrKontoTimer); ibkrKontoTimer = null; }
+
             if (page === "oversigt") showOversigt();
+            else if (page === "ibkrkonto") showIbkrKonto();
             // Byttet om: Status-fanen viser fleet-boardet (alle maskiner),
             // Analyse-fanen viser denne maskines system-status.
             else if (page === "status") showAnalysis();
@@ -1829,6 +1839,188 @@
             // Oversigt hvis en gammel gemt tilstand stadig peger derhen.
             else if (page === "account" || page === "strategies") showOversigt();
             else showPlaceholder(page);
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // IBKR-KONTOOVERSIGT — som TWS' Portfolio, pr. maskine
+        // ═══════════════════════════════════════════════════════════════
+        // Hver maskine er via account.yaml bundet til ÉN IBKR-konto. Det er ikke
+        // altid den man tror: "Sørens udviklingsstation (hos Iben)" har
+        // account.id = iben men ibkr_account = DUN748991, altsaa Sørens konto.
+        // Derfor staar kontonummeret ALTID oeverst — man skal kunne se hvis konto
+        // man kigger paa uden at gaette.
+        //
+        // ⚠ Kontodata er LIVE og findes ikke i et arkiv. Journal-endpoints kan
+        // laese en peers replikerede database (?archive=), men saldi og positioner
+        // skal hentes fra maskinen selv. Derfor spoerges hver maskine direkte paa
+        // sin egen URL — modsat resten af Studio, hvor authFetch altid rammer den
+        // lokale maskine for ikke-journal-endpoints.
+
+        function ibkrPengeFmt(v, decimaler = 2) {
+            if (v == null || isNaN(v)) return "—";
+            // Minus FOER dollartegnet. "$-73,31" laeses forkert i et oejekast —
+            // og et tab i en kontooversigt skal ikke kraeve et ekstra blik.
+            const n = Number(v);
+            return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("da-DK",
+                { minimumFractionDigits: decimaler, maximumFractionDigits: decimaler });
+        }
+
+        function ibkrKlasse(v) {
+            if (v == null || isNaN(v) || v === 0) return "muted";
+            return v > 0 ? "positive" : "negative";
+        }
+
+        /** Hvilke maskiner skal vises? Foelger maskinvaelgeren:
+         *  ""          → kun denne maskine
+         *  "__fleet__" → alle
+         *  <source_id> → praecis den ene
+         *  URL'en kommer fra peers.json (id === source_id). Mangler den, vises
+         *  maskinen alligevel — med en aerlig fejl frem for at blive udeladt. */
+        async function ibkrMaskiner() {
+            let maskiner = [];
+            try {
+                const r = await fetch("/machines");
+                maskiner = (await r.json()).machines || [];
+            } catch (e) {
+                maskiner = [];
+            }
+            const beriget = maskiner.map(m => {
+                if (m.is_self) return { ...m, url: null };
+                const p = (knownPeers || []).find(p => p.id === m.source_id);
+                return { ...m, url: p ? p.url : null };
+            });
+            if (!selectedSource) return beriget.filter(m => m.is_self);
+            if (selectedSource === "__fleet__") return beriget;
+            return beriget.filter(m => m.source_id === selectedSource);
+        }
+
+        /** Hent én maskines live konto-snapshot. Fejl bliver til data, ikke til
+         *  et kast — én slukket maskine maa ikke tage hele siden med sig. */
+        async function ibkrHentKonto(m) {
+            const sti = "/account/dash-snapshot";
+            try {
+                let res;
+                if (m.is_self) {
+                    // authFetch tilfoejer kun ?archive= paa /journal/-stier, og
+                    // selectedPeer er altid null → dette rammer den lokale maskine.
+                    res = await authFetch(sti);
+                } else {
+                    if (!m.url) return { m, fejl: "ingen URL i peers.json" };
+                    const ctrl = new AbortController();
+                    const t = setTimeout(() => ctrl.abort(), 8000);
+                    try {
+                        res = await fetch(`${m.url}${sti}`, {
+                            headers: internalKey ? { "X-Internal-Key": internalKey } : {},
+                            signal: ctrl.signal,
+                        });
+                    } finally { clearTimeout(t); }
+                }
+                if (!res.ok) return { m, fejl: `HTTP ${res.status}` };
+                return { m, data: await res.json() };
+            } catch (e) {
+                return { m, fejl: e.name === "AbortError"
+                    ? "svarer ikke (maskinen er maaske slukket)" : (e.message || "ingen forbindelse") };
+            }
+        }
+
+        function ibkrRenderMaskine(r) {
+            const navn = r.m.name || r.m.source_id;
+            if (r.fejl) {
+                return `<div class="card">
+                    <div class="section-title">${navn}</div>
+                    <div class="empty">Kunne ikke hente konto: ${r.fejl}</div>
+                </div>`;
+            }
+            const d = r.data || {};
+            const pos = d.positions || [];
+
+            // Positioner: futures og aktier i samme tabel, men multiplikatoren vist,
+            // for uden den ser 1 MES ud som en ubetydelig position ved siden af 100 aktier.
+            const raekker = pos.length === 0
+                ? `<tr><td colspan="8" class="empty" style="padding:18px;">Ingen aabne positioner</td></tr>`
+                : pos.map(p => {
+                    const mult = Number(p.multiplier) || 1;
+                    const erFut = (p.sec_type || "") === "FUT";
+                    return `<tr>
+                        <td><strong>${p.ticker}</strong></td>
+                        <td>${p.sec_type || "—"}${erFut ? ` <span class="muted">×${mult}</span>` : ""}</td>
+                        <td style="text-align:right;">${Number(p.position).toLocaleString("da-DK")}</td>
+                        <td style="text-align:right;">${ibkrPengeFmt(p.avg_cost, erFut ? 2 : 4)}</td>
+                        <td style="text-align:right;">${ibkrPengeFmt(p.last_price ?? p.current_price)}</td>
+                        <td style="text-align:right;">${ibkrPengeFmt(p.market_value)}</td>
+                        <td style="text-align:right;" class="${ibkrKlasse(p.pnl)}">${ibkrPengeFmt(p.pnl)}</td>
+                        <td style="text-align:right;" class="${ibkrKlasse(p.pnl_pct)}">${
+                            p.pnl_pct == null ? "—" : Number(p.pnl_pct).toFixed(2) + "%"}</td>
+                    </tr>`;
+                }).join("");
+
+            const tal = [
+                ["Net Liquidation",   d.net_liquidation,      null],
+                ["Kontant",           d.cash_balance,         null],
+                ["Urealiseret P&L",   d.unrealized_pnl,       ibkrKlasse(d.unrealized_pnl)],
+                ["Realiseret P&L",    d.realized_pnl,         ibkrKlasse(d.realized_pnl)],
+                ["Buying Power",      d.buying_power,         null],
+                ["Disponibelt",       d.available_funds,      null],
+                ["Excess Liquidity",  d.excess_liquidity,     null],
+                ["Vedligeholdelsesmargin", d.maint_margin,    null],
+                ["Positionsvaerdi",   d.gross_position_value, null],
+            ].map(([navn2, v, kls]) => `
+                <div>
+                    <div class="stat-label">${navn2}</div>
+                    <div class="stat-value ${kls || ""}">${ibkrPengeFmt(v)}</div>
+                </div>`).join("");
+
+            const konto = d.ibkr_account || "ukendt";
+            const art   = d.paper_trading === false
+                ? `<span class="negative" style="font-weight:700;">LIVE-KONTO</span>`
+                : `<span class="muted">paper</span>`;
+
+            return `<div class="card">
+                <div class="section-title">${navn}</div>
+                <div style="margin:-6px 0 20px 0; font-size:14px; color:#c5c5c5;">
+                    IBKR-konto <strong style="color:#f0f0f0;">${konto}</strong> · ${art}
+                    ${d.checked_at ? `· <span class="muted">aflaest ${String(d.checked_at).slice(11,19)}</span>` : ""}
+                </div>
+                <div class="stats-grid">${tal}</div>
+                <div class="section-title" style="margin-top:26px;">Positioner (${pos.length})</div>
+                <div style="overflow-x:auto;">
+                <table>
+                    <thead><tr>
+                        <th>Ticker</th><th>Type</th>
+                        <th style="text-align:right;">Antal</th>
+                        <th style="text-align:right;">Kostpris</th>
+                        <th style="text-align:right;">Kurs</th>
+                        <th style="text-align:right;">Markedsvaerdi</th>
+                        <th style="text-align:right;">Urealiseret</th>
+                        <th style="text-align:right;">%</th>
+                    </tr></thead>
+                    <tbody>${raekker}</tbody>
+                </table></div>
+            </div>`;
+        }
+
+        async function showIbkrKonto() {
+            const content = document.getElementById("content");
+            const maskiner = await ibkrMaskiner();
+            if (maskiner.length === 0) {
+                content.innerHTML = `<div class="card"><div class="empty">
+                    Ingen maskiner at vise. Tjek maskinvaelgeren oeverst.</div></div>`;
+                return;
+            }
+            // Alle maskiner spoerges parallelt — én langsom peer maa ikke
+            // forsinke de oevrige.
+            const svar = await Promise.all(maskiner.map(m => ibkrHentKonto(m)));
+            content.innerHTML =
+                svar.map(ibkrRenderMaskine).join("") +
+                `<div class="controls">
+                    <span>Auto-opdatering hvert 15. sekund</span>
+                    <button onclick="showIbkrKonto()">↻ Opdater nu</button>
+                </div>`;
+
+            if (ibkrKontoTimer) clearInterval(ibkrKontoTimer);
+            ibkrKontoTimer = setInterval(() => {
+                if (currentPage === "ibkrkonto") showIbkrKonto();
+            }, 15000);
         }
 
         // ── Dokumentation — samme /docs-arkiv som Trading Dash (one source of truth) ──
