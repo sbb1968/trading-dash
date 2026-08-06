@@ -1945,7 +1945,7 @@
                         <td><strong>${p.ticker}</strong></td>
                         <td>${p.sec_type || "—"}${erFut ? ` <span class="muted">×${mult}</span>` : ""}</td>
                         <td style="text-align:right;">${Number(p.position).toLocaleString("da-DK")}</td>
-                        <td style="text-align:right;">${ibkrPengeFmt(p.avg_cost, erFut ? 2 : 4)}</td>
+                        <td style="text-align:right;">${ibkrPengeFmt(p.avg_cost)}</td>
                         <td style="text-align:right;">${ibkrPengeFmt(p.last_price ?? p.current_price)}</td>
                         <td style="text-align:right;">${ibkrPengeFmt(p.market_value)}</td>
                         <td style="text-align:right;" class="${ibkrKlasse(p.pnl)}">${ibkrPengeFmt(p.pnl)}</td>
