@@ -1894,29 +1894,48 @@
             return beriget.filter(m => m.source_id === selectedSource);
         }
 
-        /** Hent én maskines live konto-snapshot. Fejl bliver til data, ikke til
-         *  et kast — én slukket maskine maa ikke tage hele siden med sig. */
+        /** Hent én maskines live konto-snapshot OG dens aabne journal-raekker.
+         *  Fejl bliver til data, ikke til et kast — én slukket maskine maa ikke tage
+         *  hele siden med sig. */
         async function ibkrHentKonto(m) {
-            const sti = "/account/dash-snapshot";
-            try {
-                let res;
+            async function hent(sti) {
                 if (m.is_self) {
                     // authFetch tilfoejer kun ?archive= paa /journal/-stier, og
                     // selectedPeer er altid null → dette rammer den lokale maskine.
-                    res = await authFetch(sti);
-                } else {
-                    if (!m.url) return { m, fejl: "ingen URL i peers.json" };
-                    const ctrl = new AbortController();
-                    const t = setTimeout(() => ctrl.abort(), 8000);
-                    try {
-                        res = await fetch(`${m.url}${sti}`, {
-                            headers: internalKey ? { "X-Internal-Key": internalKey } : {},
-                            signal: ctrl.signal,
-                        });
-                    } finally { clearTimeout(t); }
+                    return await authFetch(sti);
                 }
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 8000);
+                try {
+                    return await fetch(`${m.url}${sti}`, {
+                        headers: internalKey ? { "X-Internal-Key": internalKey } : {},
+                        signal: ctrl.signal,
+                    });
+                } finally { clearTimeout(t); }
+            }
+            try {
+                if (!m.is_self && !m.url) return { m, fejl: "ingen URL i peers.json" };
+                const res = await hent("/account/dash-snapshot");
                 if (!res.ok) return { m, fejl: `HTTP ${res.status}` };
-                return { m, data: await res.json() };
+                const data = await res.json();
+
+                // Journalens aabne raekker giver datoen — IBKR-positioner baerer
+                // ingen anskaffelsesdato. Er der ingen raekke, staar datoen tom, og
+                // DET er selve oplysningen: positionen er ejerloes. Otte saadanne laa
+                // paa algoserveren i en uge uden at nogen opdagede det.
+                let datoer = {};
+                try {
+                    const jr = await hent("/journal/open-positions");
+                    if (jr.ok) {
+                        const jd = await jr.json();
+                        for (const p of (jd.positions || jd || [])) {
+                            const sym = String(p.symbol || "").toUpperCase();
+                            const t = p.entry_time_et || p.entry_time_utc;
+                            if (sym && t && !datoer[sym]) datoer[sym] = t;
+                        }
+                    }
+                } catch (e) { /* uden datoer viser vi stadig positionerne */ }
+                return { m, data, datoer };
             } catch (e) {
                 return { m, fejl: e.name === "AbortError"
                     ? "svarer ikke (maskinen er maaske slukket)" : (e.message || "ingen forbindelse") };
@@ -1933,15 +1952,26 @@
             }
             const d = r.data || {};
             const pos = d.positions || [];
+            const datoer = r.datoer || {};
+
+            // "05-08" er nok til at se om noget har ligget for laenge. Fuld
+            // tidsstempel i title, saa praecisionen er der naar man har brug for den.
+            function datoCelle(sym) {
+                const t = datoer[String(sym).toUpperCase()];
+                if (!t) return `<td class="muted" title="Ingen aaben journal-raekke — ejerloes position">—</td>`;
+                const s = String(t);
+                return `<td title="${s.slice(0, 19).replace("T", " ")}">${s.slice(8, 10)}-${s.slice(5, 7)}</td>`;
+            }
 
             // Positioner: futures og aktier i samme tabel, men multiplikatoren vist,
             // for uden den ser 1 MES ud som en ubetydelig position ved siden af 100 aktier.
             const raekker = pos.length === 0
-                ? `<tr><td colspan="8" class="empty" style="padding:18px;">Ingen aabne positioner</td></tr>`
+                ? `<tr><td colspan="9" class="empty" style="padding:18px;">Ingen aabne positioner</td></tr>`
                 : pos.map(p => {
                     const mult = Number(p.multiplier) || 1;
                     const erFut = (p.sec_type || "") === "FUT";
                     return `<tr>
+                        ${datoCelle(p.ticker)}
                         <td><strong>${p.ticker}</strong></td>
                         <td>${p.sec_type || "—"}${erFut ? ` <span class="muted">×${mult}</span>` : ""}</td>
                         <td style="text-align:right;">${Number(p.position).toLocaleString("da-DK")}</td>
@@ -1986,7 +2016,7 @@
                 <div style="overflow-x:auto;">
                 <table>
                     <thead><tr>
-                        <th>Ticker</th><th>Type</th>
+                        <th>Dato</th><th>Ticker</th><th>Type</th>
                         <th style="text-align:right;">Antal</th>
                         <th style="text-align:right;">Kostpris</th>
                         <th style="text-align:right;">Kurs</th>
