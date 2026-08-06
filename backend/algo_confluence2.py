@@ -796,7 +796,7 @@ class Confluence2Live(BaseStrategy):
         _last_heartbeat = datetime.now(ET)
 
         try:
-            while self.status == StrategyStatus.RUNNING:
+            while self.loop_skal_koere():
                 now_et = datetime.now(ET)
                 t      = now_et.time()
 
@@ -869,6 +869,13 @@ class Confluence2Live(BaseStrategy):
                             break
 
                 await asyncio.sleep(LOOP_SLEEP_SECONDS)
+
+            # Loekken faldt ud af sig selv — loop_skal_koere() sagde nej. SIG HVORFOR.
+            # Her stod "unknown" (5/8-2026), og saa lignede en tabsgraense-nedlukning
+            # med to aabne positioner en almindelig backend-genstart. Vi brugte lang
+            # tid paa at udelukke det forkerte foerst.
+            _shutdown_reason = (f"loop_slut: status={self.status}, "
+                                f"aabne={self.stats.open_positions}")
 
         except asyncio.CancelledError:
             _shutdown_reason = "cancelled"
@@ -1439,7 +1446,7 @@ class Confluence2Live(BaseStrategy):
             deadline     = min(now_et + timedelta(minutes=LATE_CLOSE_MAX_MIN), market_close)
             feed_down_logged = False
             while (self._positions and datetime.now(ET) < deadline
-                   and self.status == StrategyStatus.RUNNING):
+                   and self.loop_skal_koere()):
                 for ticker in list(self._positions.keys()):
                     position = self._positions.get(ticker)
                     if position is None:

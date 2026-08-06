@@ -272,6 +272,33 @@ class BaseStrategy(ABC):
         else:
             self._broadcast_fn(msg)
 
+    def loop_skal_koere(self) -> bool:
+        """Skal handelsløkken køre endnu en runde?
+
+        RUNNING → ja. PAUSED MED ÅBNE POSITIONER → også ja.
+
+        ⚠ Her lå en logisk selvmodsigelse. Da den daglige tabsgrænse blev ramt,
+        satte request_order status = PAUSED, og alle seks strategiers hovedløkke
+        stod `while self.status == RUNNING`. Løkken afsluttede dermed øjeblikkeligt
+        — og INDE i den løkke ligger stop-tjek, trailing og tvangslukning.
+
+        Konsekvensen var det modsatte af hensigten: en grænse der findes for at
+        standse blødningen, holdt op med at passe på de positioner der allerede
+        blødte. Konkret 5/8-2026 ramte Konfluens 2 sin grænse ($25) kl. 12:13 ET og
+        lukkede ned med SLS og VELO åbne. Tvangslukningen 15:30 ET fyrede aldrig,
+        og positionerne lå natten over uden stop.
+
+        Pause betyder derfor nu "ingen NYE entries" — ikke "hold op med at passe på
+        det du har". Entry-stien er allerede lukket, fordi request_order afviser alt
+        når status ikke er RUNNING; her åbner vi kun for at exit-stien kan gøre sit
+        arbejde færdigt. Når sidste position er lukket, falder løkken selv ud.
+        """
+        if self.status == StrategyStatus.RUNNING:
+            return True
+        if self.status == StrategyStatus.PAUSED and self.stats.open_positions > 0:
+            return True
+        return False
+
     def _resolve_risk(self, key: str) -> float:
         """Effektiv risiko-grænse ($) for DENNE strategi + nøgle fra risk_config —
         konfigurerbar pr. konto (Konfiguratoren). Procent slås mod LIVE Net Liquidation;

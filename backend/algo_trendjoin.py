@@ -784,7 +784,7 @@ class TrendJoinLive(BaseStrategy):
         consecutive_errors = 0
         _last_heartbeat = datetime.now(ET)
         try:
-            while self.status == StrategyStatus.RUNNING:
+            while self.loop_skal_koere():
                 now_et = datetime.now(ET)
                 t = now_et.time()
 

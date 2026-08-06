@@ -566,7 +566,7 @@ class EuropaReversionLive(BaseStrategy):
         _last_heartbeat = datetime.now(ET)
 
         try:
-            while self.status == StrategyStatus.RUNNING:
+            while self.loop_skal_koere():
                 now_et = datetime.now(ET)
                 t = now_et.time()
 
@@ -1194,7 +1194,7 @@ class EuropaReversionLive(BaseStrategy):
             deadline = datetime.now(ET) + timedelta(minutes=LATE_CLOSE_MAX_MIN)
             feed_down_logged = False
             while (self._positions and datetime.now(ET) < deadline
-                   and self.status == StrategyStatus.RUNNING):
+                   and self.loop_skal_koere()):
                 for sym in list(self._positions.keys()):
                     pos  = self._positions[sym]
                     snap = await self.conn.get_snapshot(sym)

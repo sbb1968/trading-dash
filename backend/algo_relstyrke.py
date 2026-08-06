@@ -509,7 +509,7 @@ class RelStyrkeLive(BaseStrategy):
         _last_heartbeat = datetime.now(ET)
         _prefetched = False
         try:
-            while self.status == StrategyStatus.RUNNING:
+            while self.loop_skal_koere():
                 now_et = datetime.now(ET)
                 t = now_et.time()
 
