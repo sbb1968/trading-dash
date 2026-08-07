@@ -53,12 +53,21 @@ import argparse
 import csv
 import json
 import sys
+import time as _ur
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 79
 CACHE = "vol_cache"
 SLEEP = 1.2
+
+# Hvor ofte 1-min-hentningen melder fremdrift. 1-min gaar i 2-dages bidder over
+# 14½ aar — flere tusinde kald pr. serie — og skrev tidligere IKKE en eneste
+# linje undervejs. Et job der koerer i timer uden output kan ikke skelnes fra et
+# haengt job, og saa er den eneste tilgaengelige handling at afbryde det.
+# Tidsbaseret frem for pr. bid, saa kadencen er den samme uanset hvor hurtigt
+# IBKR svarer.
+STATUS_HVER_SEK = 20
 REQ_TIMEOUT = 90
 
 # ── Det laaste saet (Revision A, afsnit 2.0) ──────────────────────────────────
@@ -319,6 +328,13 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
     hentede = 0
     forrige_aeldste = None
 
+    # Fremdrift. Vi gaar BAGUD fra i dag mod `fra`, saa andelen af tidsspændet
+    # vi har passeret er den aerlige maalestok — ikke antal kald, som varierer
+    # med helligdage og tomme svar.
+    _t0 = _ur.monotonic()
+    _sidst_meldt = _t0
+    _nyeste_dato = None
+
     while True:
         got = []
         for what in ([what_valgt] if what_valgt else WHAT[spec["art"]]):
@@ -351,6 +367,32 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
             aeldste = t if aeldste is None or t < aeldste else aeldste
         if aeldste is None:
             break
+
+        # ── Fremdriftsmelding ────────────────────────────────────────────
+        if _nyeste_dato is None:
+            _nyeste_dato = aeldste.date()
+        _naa = _ur.monotonic()
+        if _naa - _sidst_meldt >= STATUS_HVER_SEK:
+            _spaend = max((_nyeste_dato - fra).days, 1)
+            _gaaet  = max((_nyeste_dato - aeldste.date()).days, 0)
+            _andel  = min(_gaaet / _spaend, 1.0)
+            _brugt  = _naa - _t0
+            # Resttiden er lineaer fremskrivning. Den er upraecis tidligt i
+            # koerslen og god senere — derfor vises den foerst ved 3 %, hvor
+            # den holder nogenlunde, frem for at give et vildt tal i starten.
+            _rest = ""
+            if _andel >= 0.03:
+                _sek = _brugt * (1 - _andel) / _andel
+                _rest = f" · ca. {int(_sek // 3600)}t {int(_sek % 3600 // 60)}m tilbage"
+            # Dansk talformat: punktum som tusindskilletegn, komma som decimal.
+            # Bygges hver for sig — en global replace paa hele linjen ramte
+            # baade tusindtallet og procentens decimal og gav "18.720 · 0.5%".
+            _antal = f"{len(by_ts):,}".replace(",", ".")
+            _pct   = f"{_andel * 100:.1f}".replace(".", ",")
+            emit(f"   [{spec['navn']} {bar}] naaet {aeldste.date()} "
+                 f"(maal {fra}) · {_antal} barer · {_pct}%{_rest}")
+            _sidst_meldt = _naa
+
         if aeldste.date() <= fra:
             break
         # ⚠ SOEMMEN SKAL OVERLAPPE, IKKE STOEDE OP.
