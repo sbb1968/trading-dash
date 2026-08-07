@@ -70,6 +70,12 @@ SLEEP = 1.2
 STATUS_HVER_SEK = 20
 REQ_TIMEOUT = 90
 
+# Genforsoeg ved FEJL (pacing, kortvarigt forbindelsestab). En fejl maa ikke
+# tolkes som "ingen data" — se hent_skive(). 3 forsoeg med voksende ventetid
+# daekker en pacing-pause uden at hoelde koerslen laenge op.
+HENT_FORSOEG = 3
+HENT_BACKOFF = 8.0
+
 # ── Det laaste saet (Revision A, afsnit 2.0) ──────────────────────────────────
 # `start` er den dybeste dato det giver mening at bede om. For lag 1's serier er
 # den sat af percentilreferencens start (B4: 2009-08-17, bundet af VIX3M), for
@@ -254,21 +260,45 @@ def byg_kontrakt(spec: dict):
 
 
 async def hent_skive(ib, contract, slut: datetime | str, bar: str, what: str,
-                     varighed: str) -> list:
+                     varighed: str, emit=None) -> list:
+    """Ét vindue barer. Tom liste betyder "IBKR svarede, men havde intet".
+
+    ⚠ EN FEJL MAA IKKE SE UD SOM ET TOMT SVAR. Foer returnerede baade timeout og
+    enhver undtagelse en tom liste — og kalderen tolker to tomme svar i traek som
+    "serien er udtoemt" og stopper. En pacing-begraensning eller et kortvarigt
+    forbindelsestab ville dermed afkorte hentningen i stilhed og skrive et
+    manifest der meldte serien hjemme.
+
+    Det er samme sygdom som genoptagelsen havde: en tilstand hvis udfald er
+    afgjort paa forhaand, her ved at fejl og tomhed ikke kan skelnes.
+
+    Nu genforsoeges en FEJL med voksende ventetid. Kun naar IBKR faktisk svarer
+    uden barer, returneres tom liste — og saa betyder den hvad kalderen tror.
+    """
     from ib_async import util  # noqa: F401  (sikrer at ib_async er initialiseret)
-    try:
-        bars = await asyncio.wait_for(
-            ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime=slut if isinstance(slut, str) else slut.replace(tzinfo=timezone.utc),
-                durationStr=varighed, barSizeSetting=bar, whatToShow=what,
-                useRTH=(bar == "1 min"), formatDate=2),
-            timeout=REQ_TIMEOUT)
-    except asyncio.TimeoutError:
-        return []
-    except Exception:
-        return []
-    return list(bars or [])
+    for forsoeg in range(1, HENT_FORSOEG + 1):
+        try:
+            bars = await asyncio.wait_for(
+                ib.reqHistoricalDataAsync(
+                    contract,
+                    endDateTime=slut if isinstance(slut, str) else slut.replace(tzinfo=timezone.utc),
+                    durationStr=varighed, barSizeSetting=bar, whatToShow=what,
+                    useRTH=(bar == "1 min"), formatDate=2),
+                timeout=REQ_TIMEOUT)
+            return list(bars or [])
+        except Exception as e:
+            if forsoeg >= HENT_FORSOEG:
+                # Opgivet efter alle forsoeg. Sig det HOEJT — ellers forsvinder
+                # forskellen paa "ingen data" og "kunne ikke hente" igen.
+                if emit:
+                    emit(f"   ⚠ hentning fejlede {HENT_FORSOEG} gange "
+                         f"({type(e).__name__}) — behandles som tomt svar")
+                return []
+            _vent = HENT_BACKOFF * forsoeg
+            if emit and forsoeg == 1:
+                emit(f"   (fejl: {type(e).__name__} — genforsoeger om {_vent:.0f}s)")
+            await asyncio.sleep(_vent)
+    return []
 
 
 def som_raekke(b) -> tuple[str, list] | None:
@@ -395,7 +425,7 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
       while True:
         got = []
         for what in ([what_valgt] if what_valgt else WHAT[spec["art"]]):
-            got = await hent_skive(ib, c, slut, bar, what, varighed)
+            got = await hent_skive(ib, c, slut, bar, what, varighed, emit)
             if got:
                 what_valgt = what
                 break
