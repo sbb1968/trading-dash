@@ -36,6 +36,20 @@ import pandas as pd
 
 from resample_bars import load_1min, resample_ohlcv, write_bars, find_inputs
 
+# Hvor meget en kontraktfil maa skrumpe foer det regnes som en fejl. 0,95 lader en
+# marginal forskel passere (IBKR's historik er ikke byte-stabil paa tvaers af
+# hentninger — maalt 7/8-2026: én bar af 87.615 afveg) men fanger et tabt kvartal.
+SKRUMP_GRAENSE = 0.95
+
+
+def antal_barer(p) -> int:
+    """Antal datalinjer i en eksisterende CSV. 0 hvis den ikke findes."""
+    try:
+        with open(p, encoding="utf-8") as f:
+            return max(sum(1 for _ in f) - 1, 0)
+    except OSError:
+        return 0
+
 DEFAULT_IN       = Path("data_harvest")
 DEFAULT_OUT      = Path("data_harvest/mes_m2k_clean")
 DEFAULT_MINUTES  = [3, 5, 10, 15]
@@ -91,6 +105,7 @@ def run(args) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     print("=" * 78)
     print(f"  CURATE — rens back-month + saml rent MES/M2K-data  ({len(files)} kontrakter)")
+    afviste = []
     print(f"  {in_dir}  ->  {out_dir}   tidsrammer: 1,{','.join(map(str, minutes))} min")
     print("=" * 78)
 
@@ -119,6 +134,31 @@ def run(args) -> int:
             print(f"     ⚠ intet tilbage efter trim — springer over")
             continue
 
+        # ── SPAERRE: en kontraktfil maa ikke SKRUMPE ────────────────────────
+        # 7. august 2026 blev MES_202606 og M2K_202606 reduceret fra 87.615 til
+        # 4.020 barer — et helt kvartal paa begge symboler — uden en eneste
+        # advarsel. Aarsagen: en hentning med et smalt datointerval lavede en ny
+        # RAA fil paa tre dage, og kureringen skrev den hen over den fulde.
+        #
+        # Hoesteren kunne ikke opdage det: den kigger paa raa-filen, ikke paa den
+        # kurerede. Kureringen kunne, men gjorde det ikke.
+        #
+        # Det er samme fejlklasse som Revision F1 loeste i ARKIVET — en smallere
+        # kilde der overskriver en bredere destination — bare et led tidligere.
+        # En udloebet kontrakt kan kun vokse eller staa stille; skrumper den, er
+        # det en fejl, aldrig en opdatering.
+        _maal = out_dir / f"{base}_1min.csv"
+        _foer = antal_barer(_maal)
+        if (_foer and len(trimmed) < _foer * SKRUMP_GRAENSE
+                and not getattr(args, 'tillad_skrump', False)):
+            print(f"     ⛔ AFVIST: {base}_1min.csv har {_foer} barer, den nye har "
+                  f"{len(trimmed)}. En udloebet kontrakt kan ikke skrumpe.")
+            print(f"        Hentede du et smalt datointerval? Hent kontraktens FULDE "
+                  f"spaend, eller gendan fra arkivet.")
+            print(f"        Tilsidesaet bevidst med --tillad-skrump.")
+            afviste.append(base)
+            continue
+
         # Skriv rent 1-min + resample til underfolder
         write_bars(trimmed, out_dir / f"{base}_1min.csv")
         span = f"{trimmed.index[0]:%Y-%m-%d %H:%M} -> {trimmed.index[-1]:%Y-%m-%d %H:%M} ET"
@@ -133,6 +173,14 @@ def run(args) -> int:
 
     # Kontinuerlige (stitched) serier pr. symbol pr. tidsramme — til studier der vil have
     # ÉN serie (fx eumomentum_separability). RAW-stitched: roll-gap i pris ved hver overgang.
+    if afviste:
+        print("")
+        print(f"  ⛔ {len(afviste)} kontrakt(er) AFVIST — ikke skrevet: "
+              f"{', '.join(afviste)}")
+        print("     Stitching springes over: en ufuldstaendig kontrakt ville give"
+              " et hul i den kontinuerte serie.")
+        return 1
+
     if args.stitch_out:
         stitch_dir = Path(args.stitch_out)
         stitch_continuous(out_dir, stitch_dir, symbols, [1] + minutes)
@@ -201,6 +249,8 @@ def main() -> int:
     ap.add_argument("--symbols", default=None, help="default MES,M2K")
     ap.add_argument("--stitch-out", dest="stitch_out", default="data_harvest/mes_m2k_stitched",
                     help="mappe til kontinuerlige (stitched) serier; tom string for at springe over")
+    ap.add_argument("--tillad-skrump", dest="tillad_skrump", action="store_true",
+                    help="tillad at en kontraktfil bliver mindre (kraever bevidst valg)")
     ap.add_argument("--selftest", action="store_true", help="test trim-logikken uden filer")
     args = ap.parse_args()
     if args.selftest:
