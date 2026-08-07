@@ -712,15 +712,36 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
                     continue
 
+                # ⚠ GENFORBIND FOERST. connect_ibkr() er selv-helende: er den
+                # eksisterende forbindelse doed, ryddes den op og der forbindes
+                # mod den friske TWS; lever den, er kaldet en hurtig no-op.
+                #
+                # Den manuelle REST-sti (/journal/manual-trade) har altid gjort
+                # dette. DENNE sti — knappen Iben faktisk bruger — gjorde ikke, og
+                # gav i stedet op med "start TWS". IBKR lukker forbindelsen hver
+                # nat, saa en backend der har koert siden i gaar staar med et doedt
+                # forbindelsesobjekt selvom TWS er logget ind og klar.
+                #
+                # Maalt 7/8-2026: tws_online=True, ibkr.connected=False. Beskeden
+                # sendte altsaa brugeren hen for at rette noget der ikke fejlede,
+                # mens den ene handling der ville have virket laa ét kald vaek.
+                await strategy_manager.connect_ibkr(paper_trading=True)
                 ibkr = strategy_manager.get_ibkr()
                 if ibkr is None or not ibkr.connected:
+                    # Skeln de to tilfaelde. "start TWS" er forkert naar TWS koerer,
+                    # og sender brugeren hen for at rette noget der ikke fejler.
+                    _tws = bool(tws_watchdog and tws_watchdog.is_online)
+                    _hvorfor = ("TWS svarer paa porten, men API-forbindelsen kunne "
+                                "ikke oprettes — tjek Global Configuration → API → "
+                                "Enable ActiveX and Socket Clients") if _tws else \
+                               "TWS svarer ikke — er den startet og logget ind?"
                     await websocket.send_text(json.dumps({
                         "type":    "ibkr_order_result",
                         "success": False,
                         "ticker":  ticker,
                         "action":  action,
                         "shares":  shares,
-                        "error":   "IBKR ikke forbundet — start TWS",
+                        "error":   f"IBKR ikke forbundet. {_hvorfor}",
                     }))
                     continue
 

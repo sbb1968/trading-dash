@@ -510,15 +510,36 @@ class Journal:
         tilføje en kommentar til en eksisterende handel.
 
         Kan også opdatere lukkede trades (i modsætning til state-felter).
+
+        ⚠ RETURNERER FALSE HVIS INGEN RAEKKE BLEV RAMT.
+
+        Her stod `return True` ubetinget. En UPDATE der matcher nul raekker er ikke
+        en fejl i SQL — den er bare en no-op — saa et forkert trade_id gav 200 OK,
+        og Studio skiftede tilbage til visningstilstand som om noten var gemt.
+        Noten var vaek, og der kom ingen fejl nogen steder.
+
+        Det sker i praksis naar man i maskinvaelgeren ser en ANDEN maskines handler:
+        raekkerne laeses fra dens replikerede arkiv, mens skrivningen gaar til den
+        LOKALE database, hvor det trade_id ikke findes.
+
+        rowcount skelner de to. Det er den samme sygdom som resten af projektets
+        fund: et svar hvis udfald er afgjort paa forhaand.
         """
         if self._db is None:
             return False
         try:
-            await self._db.execute(
+            cur = await self._db.execute(
                 "UPDATE trades SET notes = ? WHERE trade_id = ?",
                 (notes, trade_id),
             )
             await self._db.commit()
+            ramt = cur.rowcount
+            if ramt < 1:
+                logger.warning(
+                    f"[Journal] update_trade_notes: trade_id {trade_id} findes ikke "
+                    f"i DENNE database — intet gemt. Ses en anden maskines handler "
+                    f"i maskinvaelgeren, skal noten skrives dér.")
+                return False
             return True
         except Exception as e:
             logger.error(f"[Journal] update_trade_notes fejl ({trade_id}): {e}")

@@ -674,6 +674,13 @@
             justify-content: flex-end;
         }
 
+        .notes-kvittering {
+            color: #4ade80;
+            font-size: 13px;
+            margin-top: 8px;
+            min-height: 18px;
+        }
+
         .notes-edit-error {
             color: #ff8a8a;
             font-size: 13px;
@@ -3535,6 +3542,8 @@
                                 trade.notes ? trade.notes.replace(/</g, "&lt;").replace(/>/g, "&gt;") : ""
                             }</textarea>
                             <div id="notes-edit-error" class="notes-edit-error"></div>
+                            <div id="notes-kvittering" class="notes-kvittering"
+                                 style="display:none;"></div>
                             <div class="notes-edit-actions">
                                 <button class="btn-primary notes-save-btn"
                                         onclick="saveNotes('${trade.trade_id}')">💾 Gem</button>
@@ -3618,6 +3627,17 @@
                 document.getElementById("notes-edit").style.display = "none";
                 document.getElementById("notes-display").style.display = "block";
                 document.getElementById("notes-edit-btn").style.display = "inline-block";
+
+                // BEKRAEFTELSE. Uden den kunne man ikke skelne "gemt" fra "der
+                // skete ingenting" — og det var praecis symptomet da backenden
+                // svarede 200 paa en UPDATE der ramte nul raekker.
+                saveBtn.textContent = "✅ Gemt";
+                const _kvit = document.getElementById("notes-kvittering");
+                if (_kvit) {
+                    _kvit.textContent = "✅ Noten er gemt";
+                    _kvit.style.display = "block";
+                    setTimeout(() => { _kvit.style.display = "none"; }, 3000);
+                }
 
                 // Refresh underliggende journal-data så tabellen er konsistent
                 // (silent — fejler ikke modal-flowet hvis tabel-refresh fejler)
