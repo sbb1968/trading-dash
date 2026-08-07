@@ -242,6 +242,50 @@ try:
     _gl = vh.siden_sidst(_cache(_d(2025, 2, 14), _d(2026, 8, 4)), _DYB)
     paastand(_gl > _d(2025, 1, 1),
              f"siden_sidst() alene ville stoppe ved {_gl} — derfor segmenter()")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Loebende skrivning under en lang hentning
+    # ═══════════════════════════════════════════════════════════════════════
+    # Betingelsen var `hentede % GEM_HVER == 0`. `hentede` vokser med ~780 pr.
+    # bid (én RTH-session), saa den lander paa 780, 1560, 2340 … og rammer
+    # ALDRIG praecis et multiplum. Cachen blev derfor foerst skrevet naar en hel
+    # serie var faerdig — og en 1-min-serie tager over to timer.
+    #
+    # To afbrudte koersler 7/8-2026 naaede 56.160 og 13.260 barer og efterlod en
+    # TOM vol_cache. Genoptagelsen havde intet at genoptage fra, saa fejlen
+    # lignede at resume var i stykker — men resume var fint; der var bare aldrig
+    # blevet gemt noget.
+    print("")
+    print("[9] Loebende skrivning: afstand, ikke multiplum")
+
+    def _skrivninger(betingelse, bid=780, antal=200):
+        h, s, ud = 0, 0, []
+        for _ in range(antal):
+            h += bid
+            if betingelse(h, s):
+                ud.append(h); s = h
+        return ud, h
+
+    _gl, _tot = _skrivninger(lambda h, s: bool(h) and h % vh.GEM_HVER == 0)
+    paastand(len(_gl) == 0,
+             f"den GAMLE betingelse skrev {len(_gl)} gange paa {_tot} barer — aldrig")
+
+    _ny, _tot = _skrivninger(lambda h, s: h - s >= vh.GEM_HVER)
+    paastand(len(_ny) >= 7, f"den nye skriver loebende ({len(_ny)} gange)")
+    paastand(_tot - _ny[-1] < vh.GEM_HVER * 1.1,
+             f"hoejst ~{vh.GEM_HVER} barer kan gaa tabt (fik {_tot - _ny[-1]})")
+
+    # Ujaevne bidder maa ikke kunne springe en skrivning over.
+    _ujaevn, _t2 = _skrivninger(lambda h, s: h - s >= vh.GEM_HVER, bid=2757, antal=60)
+    paastand(len(_ujaevn) >= 7,
+             f"ujaevne bidstoerrelser rammer ogsaa ({len(_ujaevn)} skrivninger)")
+
+    # Kun KODEN — kommentaren beskriver med vilje den gamle betingelse, saa den
+    # ikke genopfindes af nogen der ikke kender historien.
+    _linjer = Path("vol_harvest.py").read_text(encoding="utf-8").splitlines()
+    _kode = chr(10).join(l for l in _linjer if not l.lstrip().startswith("#"))
+    paastand("hentede % " not in _kode, "ingen rest af multiplum-tjekket i KODEN")
+    paastand("hentede - sidst_gemt >= GEM_HVER" in _kode, "afstands-tjekket er dét der bruges")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

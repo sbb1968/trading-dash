@@ -70,6 +70,12 @@ SLEEP = 1.2
 STATUS_HVER_SEK = 20
 REQ_TIMEOUT = 90
 
+# Hvor mange NYE barer der maa hentes mellem to skrivninger til disk. ~20.000
+# svarer til godt 25 sessioner — altsaa hoejst et minuts hentning der kan gaa tabt
+# ved en afbrydelse. Loekken maaler AFSTANDEN siden sidste skrivning; et
+# multiplum-tjek (`hentede % 20000 == 0`) ramte aldrig, se kommentaren dér.
+GEM_HVER = 20000
+
 # Genforsoeg ved FEJL (pacing, kortvarigt forbindelsestab). En fejl maa ikke
 # tolkes som "ingen data" — se hent_skive(). 3 forsoeg med voksende ventetid
 # daekker en pacing-pause uden at hoelde koerslen laenge op.
@@ -407,6 +413,7 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
     varighed = CHUNK.get(bar, "1 Y")
     what_valgt = None
     hentede = 0
+    sidst_gemt = 0
 
     # Fremdrift. Vi gaar BAGUD fra i dag mod `fra`, saa andelen af tidsspændet
     # vi har passeret er den aerlige maalestok — ikke antal kald, som varierer
@@ -492,8 +499,22 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
             break                      # ingen fremdrift — undgaa evig loekke
         forrige_aeldste = aeldste
         slut = aeldste
-        if hentede and hentede % 20000 == 0:
-            skriv_cache(p, by_ts)      # loebende, saa en afbrydelse ikke koster alt
+
+        # ⚠ HER STOD `hentede % 20000 == 0`, og den var reelt ALTID falsk.
+        # `hentede` vokser med ~780 pr. bid (én RTH-session), saa den lander paa
+        # 780, 1560, 2340 … og rammer aldrig praecis 20.000. Cachen blev derfor
+        # foerst skrevet naar en HEL serie var faerdig — og en 1-min-serie tager
+        # over to timer.
+        #
+        # Konsekvensen var alt-eller-intet: to afbrudte koersler 7/8-2026 naaede
+        # 56.160 og 13.260 barer og efterlod en TOM vol_cache. Genoptagelsen
+        # havde intet at genoptage fra, og fejlen lignede at resume var i stykker.
+        #
+        # Nu maales afstanden siden sidste skrivning frem for at haabe paa et
+        # praecist multiplum.
+        if hentede - sidst_gemt >= GEM_HVER:
+            skriv_cache(p, by_ts)
+            sidst_gemt = hentede
 
     skriv_cache(p, by_ts)
     s0, s1 = (min(by_ts) if by_ts else None), (max(by_ts) if by_ts else None)
