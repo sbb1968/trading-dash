@@ -105,3 +105,46 @@ og bedste skrøbelige er **5.7×**.
 **Hvad øvelsen faktisk viste.** Otte seeds gav det rigtige tal — men det kunne vi
 ikke vide uden at køre flere. Forskellen mellem "estimatet var rigtigt" og "estimatet
 var efterprøvet" er hele grunden til at posten står her.
+
+---
+
+## 2026-08-07 — Lag 1's klassegraenser justeret (specens ENE tilladte justering)
+
+**Hvad:** `GRAENSER` i `vol_lag1.py` fra **20 / 70 / 90** til **22 / 58 / 80**.
+
+**Hvorfor.** Startgraenserne gav 17,3 / 63,3 / 16,7 / **2,6** % mod de tilsigtede
+20 / 50 / 20 / 10. "stress" ramte altsaa en fjerdedel af det tiltaenkte.
+
+Aarsagen er strukturel og ikke et datafaenomen: scoren er et GENNEMSNIT af fire
+percentiler, og et gennemsnit traekker mod midten. Alle fire komponenter skal vaere
+ekstreme SAMTIDIG for at loefte scoren over 90. Enkeltkomponenterne spaender hver
+isaer fuldt 0-100 (maalt: alle fire har baade 0,0 og 100,0), men deres gennemsnit
+naar sjaeldent yderpunkterne.
+
+**Grundlag.** Scorens empiriske kvantiler over udviklingsperioden
+(3.376 dage, 2010-08-03 → 2023-12-29):
+
+| kvantil | score |
+|---|---|
+| 20. | 21,75 |
+| 70. | 58,46 |
+| 90. | 79,81 |
+
+Afrundet til 22 / 58 / 80. Resultat: **20,5 / 48,9 / 20,9 / 9,8 %**.
+
+**Hvorfor det ikke er kontaminering.** Der er kalibreret mod FORDELINGEN af scoren,
+ikke mod testresultatet. Ingen klasse maa vaere strukturelt umulig eller opsluge
+alt — det var praecis det der var galt med 2,6 % i den oeverste klasse.
+
+**Raekkefoelgen er dokumenteret med vilje:** graenserne blev sat FOER den praediktive
+test blev koert foerste gang. Havde de vaeret justeret bagefter, ville de vaere
+umulige at skelne fra tuning mod resultatet — uanset hvor rimelig begrundelsen saa
+ud. `config_hash` gik fra `4115c937` til `e3a52aa4`, saa de to udgaver kan aldrig
+forveksles i historikken.
+
+**Specens ene justering er hermed brugt.** Enhver yderligere aendring af graenserne
+taeller som re-kalibrering under `MAX_RECAL`.
+
+**Femte komponent (VIX/rv20):** IKKE medtaget. Den blev ikke afproevet, fordi lag 1
+bestod med de fire praeregistrerede. At tilfoeje en femte efter et bestaaet resultat
+ville vaere at soege efter et paenere tal.
