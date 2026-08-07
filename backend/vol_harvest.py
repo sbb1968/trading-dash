@@ -311,10 +311,14 @@ async def kontrolfikstur(ib, emit) -> bool:
 
 
 async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
-                     toerloeb: bool = False) -> dict:
+                     toerloeb: bool = False, nr: int = 0, af: int = 0) -> dict:
     """Hent én serie inkrementelt. Returnerer manifestposten."""
     from ibkr_kvalificer import kvalificer_eller_none
 
+    # Maerkatet baerer serie-nummeret. Uden det laeste man "[SPY 1 min] ca. 2t 13m
+    # tilbage" som hele jobbets resttid — men det er ÉN serie ud af tre, og
+    # forskellen er over fire timer.
+    maerkat = f"{spec['navn']} {bar}" + (f" · {nr}/{af}" if af else "")
     p = sti(rod, spec["navn"], bar)
     by_ts = laes_cache(p)
     foer = len(by_ts)
@@ -330,13 +334,13 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
                      "varighed_pr_kald": CHUNK.get(bar, "1 Y")}}
 
     if toerloeb:
-        emit(f"   [{spec['navn']} {bar}] {foer} barer i cache · ville hente fra {fra}")
+        emit(f"   [{maerkat}] {foer} barer i cache · ville hente fra {fra}")
         post.update(barer_foer=foer, toerloeb=True)
         return post
 
     c = await kvalificer_eller_none(ib, byg_kontrakt(spec))
     if c is None:
-        emit(f"   [{spec['navn']} {bar}] KUNNE IKKE KVALIFICERES — springes over")
+        emit(f"   [{maerkat}] KUNNE IKKE KVALIFICERES — springes over")
         post.update(fejl="ikke kvalificeret", barer=foer)
         return post
     post["ibkr"]["conId"] = getattr(c, "conId", 0)
@@ -366,7 +370,7 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
         post.update(barer=len(by_ts), barer_foer=foer, nye_barer=len(by_ts) - foer,
                     foerste=s0, sidste=s1,
                     hentet=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-        emit(f"   [{spec['navn']} {bar}] {len(by_ts)} barer (+{len(by_ts) - foer} nye) "
+        emit(f"   [{maerkat}] {len(by_ts)} barer (+{len(by_ts) - foer} nye) "
              f"· {str(s0)[:10]} .. {str(s1)[:10]} · varighed {brugt}")
         return post
 
@@ -442,7 +446,7 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
             # baade tusindtallet og procentens decimal og gav "18.720 · 0.5%".
             _antal = f"{len(by_ts):,}".replace(",", ".")
             _pct   = f"{_andel * 100:.1f}".replace(".", ",")
-            emit(f"   [{spec['navn']} {bar}] naaet {aeldste.date()} "
+            emit(f"   [{maerkat}] naaet {aeldste.date()} "
                  f"(maal {fra}) · {_antal} barer · {_pct}%{_rest}")
             _sidst_meldt = _naa
 
@@ -467,7 +471,7 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
                 hentede_svar=hentede, foerste=s0, sidste=s1,
                 what_to_show=what_valgt,
                 hentet=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    emit(f"   [{spec['navn']} {bar}] {len(by_ts)} barer "
+    emit(f"   [{maerkat}] {len(by_ts)} barer "
          f"(+{len(by_ts) - foer} nye) · {str(s0)[:10]} .. {str(s1)[:10]}")
     return post
 
@@ -562,7 +566,9 @@ async def koer(args, emit) -> int:
     emit("")
 
     if args.toerloeb:
-        poster = [await hent_serie(None, s, b, rod, emit, toerloeb=True) for s, b in valgte]
+        poster = [await hent_serie(None, s, b, rod, emit, toerloeb=True,
+                                   nr=i, af=len(valgte))
+                  for i, (s, b) in enumerate(valgte, 1)]
         emit("\nToerloeb — intet hentet, intet skrevet.")
         return 0
 
@@ -579,8 +585,9 @@ async def koer(args, emit) -> int:
     try:
         if not await kontrolfikstur(ib, emit):
             return 1
-        for s, bar in valgte:
-            poster.append(await hent_serie(ib, s, bar, rod, emit))
+        for i, (s, bar) in enumerate(valgte, 1):
+            poster.append(await hent_serie(ib, s, bar, rod, emit,
+                                           nr=i, af=len(valgte)))
     finally:
         try:
             ib.disconnect()
