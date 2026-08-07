@@ -184,11 +184,59 @@ def siden_sidst(by_ts: dict, dybeste: date) -> date:
 
     Overlap paa nogle dage er med vilje: dedup paa tidsstempel goer det gratis, og
     det fjerner risikoen for et hul i soemmen mellem to koersler.
+
+    ⚠ Bruges KUN til at beskrive FRONT-hullet (nye dage siden sidste koersel).
+    Til at genoptage en afbrudt dyb hentning er den forkert — se segmenter().
     """
     s = sidste_bar(by_ts)
     if s is None:
         return dybeste
     return max(dybeste, s.date() - timedelta(days=3))
+
+
+def segmenter(by_ts: dict, dybeste: date, i_dag: date) -> list[tuple]:
+    """Hvilke (slut, fra)-stroekninger mangler? Loekken gaar BAGUD fra `slut`
+    indtil den rammer `fra`.
+
+    ⚠ HER LAA EN ALVORLIG FEJL. Startpunktet blev beregnet alene af cachens
+    NYESTE bar. Det er rigtigt til daglig opdatering, men forkert naar en dyb
+    hentning er blevet afbrudt:
+
+        cache efter afbrydelse : 2025-02-14 → 2026-08-04
+        siden_sidst() sagde    : 2026-08-01
+        loekken stoppede altsaa: efter 3 dage
+
+    Genoptagelsen ville hente tre dage, erklaere sig faerdig og skrive et
+    manifest der meldte serien hjemme — med 4.793 af 5.329 dage aldrig hentet.
+    Et "genoptag" der ALTID konkluderer "faerdig" er samme sygdom som resten:
+    en kontrol hvis udfald er afgjort paa forhaand (Revision G).
+
+    Der er TO huller, og de skal begge lukkes:
+      FRONT  nye dage siden sidste koersel (cachens nyeste → i dag)
+      BAG    den uafsluttede dybde        (cachens aeldste → dybeste)
+
+    Tom cache giver ét segment der daekker det hele.
+    """
+    if not by_ts:
+        return [("", dybeste)]                      # "" = start ved i dag
+
+    nyeste = sidste_bar(by_ts)
+    aeldste_ts = min(by_ts)
+    try:
+        aeldste = datetime.fromisoformat(aeldste_ts)
+    except ValueError:
+        return [("", dybeste)]
+
+    ud = []
+    # FRONT: kun hvis der faktisk er nye dage. 3 dages overlap som foer.
+    if nyeste is not None and nyeste.date() < i_dag:
+        ud.append(("", max(dybeste, nyeste.date() - timedelta(days=3))))
+    # BAG: kun hvis dybden ikke er naaet. Start lidt SENERE end cachens
+    # aeldste, saa soemmen overlapper frem for at stoede op (samme grund som
+    # overlappet i loekken).
+    if aeldste.date() > dybeste:
+        ud.append((aeldste + timedelta(days=3), dybeste))
+    return ud
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -271,8 +319,9 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
     by_ts = laes_cache(p)
     foer = len(by_ts)
     dybeste = INTRADAG_START if bar == "1 min" else REFERENCE_START
-    fra = siden_sidst(by_ts, dybeste)
     i_dag = date.today()
+    segs = segmenter(by_ts, dybeste, i_dag)
+    fra = segs[0][1] if segs else dybeste      # kun til toerloebs-teksten
 
     post = {"instrument": spec["navn"], "barstoerrelse": bar,
             "hvorfor": spec["hvorfor"], "fil": str(p.relative_to(rod)),
@@ -323,19 +372,23 @@ async def hent_serie(ib, spec: dict, bar: str, rod: Path, emit,
 
     varighed = CHUNK.get(bar, "1 Y")
     what_valgt = None
-    slut = ""            # tom = 'nu'; vi gaar BAGUD indtil vi rammer `fra`
-    tomme_i_traek = 0
     hentede = 0
-    forrige_aeldste = None
 
     # Fremdrift. Vi gaar BAGUD fra i dag mod `fra`, saa andelen af tidsspændet
     # vi har passeret er den aerlige maalestok — ikke antal kald, som varierer
     # med helligdage og tomme svar.
     _t0 = _ur.monotonic()
     _sidst_meldt = _t0
-    _nyeste_dato = None
 
-    while True:
+    # ÉT segment pr. hul. Se segmenter(): front (nye dage) og bag (uafsluttet
+    # dybde) er to forskellige stroekninger, og en afbrudt koersel har typisk
+    # begge.
+    for _seg_slut, fra in segs:
+      slut = _seg_slut
+      tomme_i_traek = 0
+      forrige_aeldste = None
+      _nyeste_dato = None
+      while True:
         got = []
         for what in ([what_valgt] if what_valgt else WHAT[spec["art"]]):
             got = await hent_skive(ib, c, slut, bar, what, varighed)

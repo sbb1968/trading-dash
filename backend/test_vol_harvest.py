@@ -192,6 +192,56 @@ try:
     paastand(all(s["hvorfor"] for s in vh.SERIER),
              "hver serie har en skreven grund til at vaere med")
 
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Genoptagelse af en AFBRUDT dyb hentning
+    # ═══════════════════════════════════════════════════════════════════════
+    # 1-min-hentningen tager timer og gaar BAGUD fra i dag. Bliver den afbrudt,
+    # staar der en cache der kun daekker den NYESTE ende, fx 2025-02 -> 2026-08.
+    #
+    # Startpunktet blev beregnet alene af cachens nyeste bar. Genoptagelsen
+    # hentede derfor tre dage, erklaerede sig faerdig og skrev et manifest der
+    # meldte serien hjemme — med 4.793 af 5.329 dage aldrig hentet. Et
+    # "genoptag" der ALTID konkluderer "faerdig" er en kontrol hvis udfald er
+    # afgjort paa forhaand (Revision G).
+    print("")
+    print("[8] Genoptagelse: to huller, ikke ét")
+
+    from datetime import date as _d, timedelta as _td
+
+    def _cache(a, b):
+        c, x = {}, a
+        while x <= b:
+            c[f"{x.isoformat()}T15:30:00-05:00"] = [1.0]
+            x += _td(days=1)
+        return c
+
+    _I_DAG, _DYB = _d(2026, 8, 6), vh.INTRADAG_START
+
+    _s = vh.segmenter({}, _DYB, _I_DAG)
+    paastand(len(_s) == 1 and _s[0][0] == "" and _s[0][1] == _DYB,
+             "tom cache -> ét segment der daekker det hele")
+
+    _s = vh.segmenter(_cache(_d(2025, 2, 14), _d(2026, 8, 4)), _DYB, _I_DAG)
+    paastand(len(_s) == 2, f"afbrudt hentning -> TO segmenter (fik {len(_s)})")
+    paastand(_s[0][0] == "", "foerste segment lukker FRONT-hullet (nye dage)")
+    paastand(_s[1][1] == _DYB,
+             f"andet segment gaar helt til dybden {_DYB} (fik {_s[1][1]})")
+    paastand(_s[1][0].date() > _d(2025, 2, 14),
+             "bag-segmentet starter EFTER cachens aeldste — soemmen overlapper")
+
+    _s = vh.segmenter(_cache(_DYB, _d(2026, 8, 4)), _DYB, _I_DAG)
+    paastand(len(_s) == 1 and _s[0][0] == "",
+             "komplet men et par dage bagud -> kun FRONT (daglig opdatering)")
+
+    paastand(vh.segmenter(_cache(_DYB, _I_DAG), _DYB, _I_DAG) == [],
+             "komplet og aktuel -> INTET at hente")
+
+    # Kendt-negativ: vis at den GAMLE beregning ville have stoppet for tidligt,
+    # saa testen ikke blot bekraefter sig selv.
+    _gl = vh.siden_sidst(_cache(_d(2025, 2, 14), _d(2026, 8, 4)), _DYB)
+    paastand(_gl > _d(2025, 1, 1),
+             f"siden_sidst() alene ville stoppe ved {_gl} — derfor segmenter()")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
