@@ -540,6 +540,9 @@ class Journal:
                     f"i DENNE database — intet gemt. Ses en anden maskines handler "
                     f"i maskinvaelgeren, skal noten skrives dér.")
                 return False
+            # En note ER handelsdata. Uden dette skub ville den foerst naa
+            # algoserveren ved den periodiske replikering op til to minutter senere.
+            replication.notify_change()
             return True
         except Exception as e:
             logger.error(f"[Journal] update_trade_notes fejl ({trade_id}): {e}")

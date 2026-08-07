@@ -3609,9 +3609,17 @@
                 });
 
                 if (!res.ok) {
-                    if (res.status === 404) throw new Error("Handlen findes ikke længere");
-                    throw new Error(`HTTP ${res.status}`);
+                    // Backendens detail baerer den brugbare besked — fx at den
+                    // maskine der EJER handlen er slukket. "HTTP 503" alene ville
+                    // efterlade brugeren i tvivl om noten er gemt eller ej.
+                    let grund = `HTTP ${res.status}`;
+                    try {
+                        const j = await res.json();
+                        if (j && j.detail) grund = j.detail;
+                    } catch (_) {}
+                    throw new Error(grund);
                 }
+                const svar = await res.json().catch(() => ({}));
 
                 // Success: opdater display med ny tekst og gå tilbage til view-mode
                 const displayDiv = document.getElementById("notes-display");
@@ -3634,7 +3642,11 @@
                 saveBtn.textContent = "✅ Gemt";
                 const _kvit = document.getElementById("notes-kvittering");
                 if (_kvit) {
-                    _kvit.textContent = "✅ Noten er gemt";
+                    // Hvilken maskine noten landede paa — det er den eneste maade
+                    // at se at videresendelsen til ejeren faktisk skete.
+                    _kvit.textContent = svar.skrevet_paa
+                        ? `✅ Noten er gemt på ${svar.skrevet_paa}`
+                        : "✅ Noten er gemt";
                     _kvit.style.display = "block";
                     setTimeout(() => { _kvit.style.display = "none"; }, 3000);
                 }

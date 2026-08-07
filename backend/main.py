@@ -3080,10 +3080,30 @@ async def journal_trade_detail(trade_id: str, archive: str = None):
                 if trade is not None:
                     return trade
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
+
+    # Ejeren spoerges FOERST. Replikeringen er et snapshot med op til to minutters
+    # forsinkelse; en note man lige har skrevet ville ellers forsvinde igen naar
+    # popup'en aabnes paa ny. Er maskinen slukket, falder vi tavst tilbage paa
+    # algoserverens replikerede arkiv — det er praecis hvad arkivet er til for.
+    maal = peer_url(archive) if archive else None
+    if maal:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as s:
+                async with s.get(f"{maal}/journal/trades/{trade_id}",
+                                 headers={"X-Internal-Key": identity.internal_key}) as r:
+                    if r.status == 200:
+                        live = await r.json()
+                        live["_kilde"] = "live"
+                        return live
+        except Exception as e:
+            logger.debug(f"{archive} svarer ikke ({e}) — bruger replikeret arkiv")
+
     async with _resolve_db(archive) as db:
         trade = await trade_queries.get_trade_by_id(db, trade_id)
     if trade is None:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke")
+    if archive:
+        trade["_kilde"] = "arkiv"
     return trade
 
 
@@ -3221,16 +3241,83 @@ async def journal_events(
     }
 
 
+def peer_url(source_id: str) -> str | None:
+    """URL paa den maskine et source_id hoerer til. None hvis det er mig selv
+    eller maskinen ikke staar i peers.json."""
+    if not source_id or source_id == identity.source_id:
+        return None
+    for p in load_peers():
+        if p.get("id") == source_id and p.get("enabled") and p.get("url"):
+            return str(p["url"]).rstrip("/")
+    return None
+
+
 @app.patch("/journal/trades/{trade_id}")
-async def journal_update_notes(trade_id: str, req: UpdateNotesRequest):
+async def journal_update_notes(trade_id: str, req: UpdateNotesRequest,
+                               archive: str = None):
+    """Opdater notes paa en handel.
+
+    EN NOTE HOERER TIL EN HANDEL og behandles derfor som handelsdata: den skrives
+    paa den maskine der EJER handlen, og foelger med hjem via den almindelige
+    snapshot-replikering (hele trading_dash.db pushes til algoserveren).
+
+    ⚠ HVORFOR VIDERESENDELSEN ER NOEDVENDIG. Studio koerer ALTID paa algoserveren,
+    uanset hvilken maskine eller telefon man sidder ved. Vaelger man "Soren
+    Workstation" i maskinvaelgeren, laeses raekkerne fra algoserverens REPLIKEREDE
+    arkiv af den maskine — mens en skrivning uden videresendelse ville ramme
+    algoserverens EGEN database, hvor det trade_id ikke findes.
+
+    Foer rettelsen skete netop det, og `update_trade_notes` returnerede `True`
+    ogsaa naar nul raekker blev ramt. Resultatet var 200 OK paa en note der aldrig
+    blev gemt nogen steder.
+
+    `archive` er source_id fra maskinvaelgeren; Studios authFetch saetter den
+    allerede paa alle /journal/-stier. Tom eller mit eget id = skriv lokalt.
     """
-    Opdater notes-feltet på en trade. Brugbart fra Studio når man
-    vil tilføje en kommentar efter en handel er lukket.
-    """
+    if archive == FLEET_ARCHIVE:
+        # "⊕ Alle maskiner (samlet)": raekken kan komme fra hvilket som helst arkiv,
+        # saa EJEREN skal slaas op foer der skrives. Uden dette faldt __fleet__
+        # igennem til lokal skrivning, fordi det ikke matcher noget maskin-id.
+        ejer = None
+        async with _fleet_dbs() as dbs:
+            for src, db in dbs:
+                if await trade_queries.get_trade_by_id(db, trade_id) is not None:
+                    ejer = identity.source_id if src == "__local__" else src
+                    break
+        if ejer is None:
+            raise HTTPException(status_code=404,
+                detail=f"Handlen {trade_id} findes ikke paa nogen maskine")
+        archive = ejer
+
+    maal = peer_url(archive) if archive else None
+    if maal:
+        # Videresend UDEN archive-parameter — modtageren er ejeren og skriver lokalt.
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+                async with s.patch(f"{maal}/journal/trades/{trade_id}",
+                                   headers={"X-Internal-Key": identity.internal_key},
+                                   json={"notes": req.notes}) as r:
+                    if r.status == 404:
+                        raise HTTPException(status_code=404,
+                            detail=f"Handlen findes ikke paa {archive}")
+                    r.raise_for_status()
+                    svar = await r.json()
+                    svar["skrevet_paa"] = archive
+                    return svar
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Maskinen er slukket eller uden for netvaerket. SIG DET — en note der
+            # ikke kunne gemmes maa aldrig se ud som om den blev det.
+            raise HTTPException(status_code=503, detail=(
+                f"{archive} svarer ikke — noten er IKKE gemt. "
+                f"Er maskinen taendt? ({str(e)[:80]})"))
+
     ok = await trade_queries.update_notes_via_journal(journal, trade_id, req.notes)
     if not ok:
-        raise HTTPException(status_code=404, detail=f"Trade {trade_id} findes ikke eller fejlede")
-    return {"ok": True, "trade_id": trade_id}
+        raise HTTPException(status_code=404,
+            detail=f"Handlen {trade_id} findes ikke i denne maskines journal")
+    return {"ok": True, "trade_id": trade_id, "skrevet_paa": identity.source_id}
 
 
 # ── Manuelle handel-endpoints ─────────────────────────────────
