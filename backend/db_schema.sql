@@ -104,3 +104,18 @@ CREATE INDEX IF NOT EXISTS idx_trades_source      ON trades(source);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol      ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_open
     ON trades(exit_time_utc) WHERE exit_time_utc IS NULL;
+
+-- ── Dagsnoter ────────────────────────────────────────────────────────────────
+-- Hvorfor der IKKE er handlet en dag. Ferie, sygdom, manglende lyst.
+--
+-- Fraværet af en handel er også information, men det har ingen række at hænge
+-- på: intet trade_id, ingen ejermaskine. Derfor sin egen tabel, nøglet på dato.
+--
+-- Præcis én note pr. dag. Ikke pr. uge, ikke pr. periode — "ferie i uge 30" er
+-- ikke én note, det er fem, én pr. handelsdag. PRIMARY KEY håndhæver det.
+CREATE TABLE IF NOT EXISTS dagsnoter (
+    dato      TEXT PRIMARY KEY,   -- ISO "YYYY-MM-DD", ET-handelsdag
+    note      TEXT NOT NULL,
+    oprettet  TEXT NOT NULL,      -- ISO UTC
+    aendret   TEXT NOT NULL
+);

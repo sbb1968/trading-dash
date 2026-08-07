@@ -2903,6 +2903,8 @@ async def dagenslog_report_fleet(from_: str = Query(None, alias="from"),
 # (automatisk) eller via manuel-handel-endpoints (kommer senere).
 
 import trade_queries
+import dagsnoter
+import replication
 
 
 class UpdateNotesRequest(BaseModel):
@@ -3318,6 +3320,82 @@ async def journal_update_notes(trade_id: str, req: UpdateNotesRequest,
         raise HTTPException(status_code=404,
             detail=f"Handlen {trade_id} findes ikke i denne maskines journal")
     return {"ok": True, "trade_id": trade_id, "skrevet_paa": identity.source_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dagsnoter — hvorfor der IKKE blev handlet en dag
+# ─────────────────────────────────────────────────────────────────────────────
+# Modsat en handelsnote. En handel PRODUCERES af en bestemt maskine, saa noten
+# skal hjem til den. En fravaersdag har ingen maskine: "Iben holdt ferie" er
+# sandt paa alle maskiner samtidig. Derfor ligger dagsnoter ét sted — paa
+# algoserveren — og maskinvaelgeren paavirker dem ikke.
+#
+# Studio saetter ?archive= paa alle /journal/-stier; den IGNORERES her med vilje.
+# Blev der lyttet til den, ville samme dag kunne have én note paa Ibens
+# workstation og en anden paa algoserveren, uden at nogen af dem var forkert.
+
+def _dagsnote_vaert() -> str | None:
+    """Algoserverens URL — eller None hvis DENNE maskine er algoserveren."""
+    if identity.instance_role == "algoserver":
+        return None
+    return (identity.replication_target_url or "").rstrip("/") or None
+
+
+async def _dagsnote_videresend(metode: str, sti: str, krop=None):
+    maal = _dagsnote_vaert()
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as s:
+        kald = getattr(s, metode)
+        async with kald(f"{maal}{sti}",
+                        headers={"X-Internal-Key": identity.internal_key},
+                        **({"json": krop} if krop is not None else {})) as r:
+            if r.status >= 400:
+                raise HTTPException(status_code=r.status,
+                                    detail=(await r.text())[:200])
+            return await r.json()
+
+
+@app.get("/journal/dagsnoter")
+async def journal_dagsnoter(date_from: str, date_to: str):
+    """Baandet oeverst i Journal: handelsdage uden handler i det VALGTE interval."""
+    if _dagsnote_vaert():
+        try:
+            return await _dagsnote_videresend(
+                "get", f"/journal/dagsnoter?date_from={date_from}&date_to={date_to}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=503,
+                detail=f"Algoserveren svarer ikke — dagsnoter kan ikke hentes ({str(e)[:80]})")
+    try:
+        return await dagsnoter.byg_baand(journal.db, date_from, date_to)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class DagsnoteRequest(BaseModel):
+    note: str = ""
+
+
+@app.put("/journal/dagsnoter/{dato}")
+async def journal_saet_dagsnote(dato: str, req: DagsnoteRequest):
+    """Gem eller slet noten for én dag. Tom tekst sletter."""
+    if _dagsnote_vaert():
+        try:
+            return await _dagsnote_videresend(
+                "put", f"/journal/dagsnoter/{dato}", {"note": req.note})
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Ingen lokal skrivning som reserve. En note der landede lokalt ville
+            # vaere usynlig for alle andre og se gemt ud alligevel.
+            raise HTTPException(status_code=503,
+                detail=f"Algoserveren svarer ikke — noten er IKKE gemt ({str(e)[:80]})")
+    try:
+        handling = await dagsnoter.saet_note(journal.db, dato, req.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    replication.notify_change()
+    return {"ok": True, "dato": dato, "handling": handling}
 
 
 # ── Manuelle handel-endpoints ─────────────────────────────────

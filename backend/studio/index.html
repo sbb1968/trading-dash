@@ -674,6 +674,81 @@
             justify-content: flex-end;
         }
 
+        /* ── Dage uden handler ─────────────────────────────── */
+        .dagsnoter-kort { padding: 14px 18px; margin-bottom: 14px; }
+
+        .dagsnoter-overskrift {
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .dagsnoter-alt-ok { color: #8a8a8a; font-size: 13px; }
+
+        .dagsnote-raekke {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 5px 0;
+            border-top: 1px solid #262626;
+            font-size: 14px;
+        }
+
+        .dagsnote-dato {
+            min-width: 78px;
+            color: #bbb;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .dagsnote-midt {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .dagsnote-tekst { color: #e6e6e6; }
+        .dagsnote-tom   { color: #d9a441; }
+
+        /* Fremtid og i dag: ikke et hul man har overset, bare en dag der ikke er
+           kommet endnu. Daempet og uden advarselstrekant. */
+        .dagsnote-kommende .dagsnote-dato,
+        .dagsnote-kommende .dagsnote-tom { color: #6b6b6b; }
+
+        .dagsnote-knap {
+            background: none;
+            border: 1px solid #3a3a3a;
+            color: #9a9a9a;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .dagsnote-knap:hover { color: #e6e6e6; border-color: #5a5a5a; }
+        .dagsnote-gem { border-color: #2f6f4f; color: #4ade80; }
+
+        .dagsnote-input {
+            flex: 1;
+            min-width: 0;
+            background: #141414;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #e6e6e6;
+            padding: 4px 8px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .dagsnote-fejl { color: #ff8a8a; font-size: 12px; }
+
+        .dagsnote-forpasset {
+            border-top: 1px solid #262626;
+            padding: 6px 0 2px;
+            color: #d9a441;
+            font-size: 13px;
+        }
+
         .notes-kvittering {
             color: #4ade80;
             font-size: 13px;
@@ -3044,6 +3119,11 @@
                     </div>
                 </div>
 
+                <!-- Dage uden handler. Ligger HER, over tabellen, fordi det er
+                     praecis her man undrer sig over et hul. En separat side ville
+                     kraeve at man huskede at gaa hen og kigge. -->
+                <div id="dagsnoter-baand"></div>
+
                 <div id="journal-results">
                     <div class="card">
                         <div class="empty">Henter handler...</div>
@@ -3103,12 +3183,172 @@
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 journalData = await res.json();
                 renderJournalResults();
+                loadDagsnoter();   // baandet er uafhaengigt — maa ikke vaelte tabellen
             } catch (e) {
                 document.getElementById("journal-results").innerHTML = `
                     <div class="card">
                         <div class="error"><strong>Fejl:</strong> ${e.message}</div>
                     </div>
                 `;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────
+        // Dagsnoter — dage uden handler
+        // ─────────────────────────────────────────────────────
+        // ⚠ Baandet bruger KUN datointervallet. Strategi- og symbolfiltret
+        // roerer det ikke: filtrerer man paa Konfluens 2 alene, og K2 ikke
+        // handlede 8/7 mens BuyTheDip gjorde, saa er 8/7 ingen tom dag. Regnede
+        // vi huller ud fra de filtrerede raekker, ville man faa tilbudt at skrive
+        // "ferie" paa en dag man sad og handlede.
+
+        const DAGE_DK = ["sø", "ma", "ti", "on", "to", "fr", "lø"];
+        let dagsnoteCache = {};   // dato -> note, saa Rediger kan udfylde feltet
+
+        // Escaper OGSAA " og ' — teksten laegges i et value="..."-attribut, og en
+        // note der indeholder et anfoerselstegn ville ellers braekke feltet.
+        function esc(s) {
+            return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+        }
+
+        function dagsnoteLabel(iso) {
+            // T12:00 og ikke T00:00 — ellers kan tidszonen skubbe datoen en dag
+            // tilbage, og noten ville staa ud for den forkerte dag.
+            const d = new Date(iso + "T12:00:00");
+            return `${DAGE_DK[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
+        }
+
+        async function loadDagsnoter() {
+            const el = document.getElementById("dagsnoter-baand");
+            if (!el) return;
+            const f = journalFilters;
+            if (!f || !f.date_from || !f.date_to) { el.innerHTML = ""; return; }
+            try {
+                const res = await authFetch(
+                    `/journal/dagsnoter?date_from=${f.date_from}&date_to=${f.date_to}`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                renderDagsnoter(await res.json());
+            } catch (e) {
+                // Baandet er et tillaeg. Fejler det, skal handelstabellen stadig
+                // staa — men fejlen maa ikke skjules, ellers ligner et hul-loest
+                // baand en periode uden huller.
+                el.innerHTML = `<div class="card dagsnoter-kort">
+                    <div class="error">Dage uden handler kunne ikke hentes: ${e.message}</div>
+                </div>`;
+            }
+        }
+
+        function renderDagsnoter(d) {
+            const el = document.getElementById("dagsnoter-baand");
+            const huller = d.huller || [];
+            const forpasset = d.noter_paa_handlede_dage || [];
+            dagsnoteCache = {};
+            huller.forEach(h => { if (h.note) dagsnoteCache[h.dato] = h.note; });
+            forpasset.forEach(n => { dagsnoteCache[n.dato] = n.note; });
+
+            if (!huller.length && !forpasset.length) {
+                el.innerHTML = `<div class="card dagsnoter-kort">
+                    <div class="dagsnoter-alt-ok">Der er handlet alle
+                    ${d.handelsdage} handelsdage i perioden.</div></div>`;
+                return;
+            }
+
+            const raekker = huller.map(h => {
+                // Fremtid og i dag er ikke huller man har overset — de er bare
+                // ikke kommet endnu. Uden den skelnen ville hver dag man kigger
+                // fremad ligne et problem, og ⚠ ville miste sin betydning.
+                const blaeg = h.fremtid || h.i_dag ? " dagsnote-kommende" : "";
+                const midt = h.note
+                    ? `<span class="dagsnote-tekst">${esc(h.note)}</span>
+                       <button class="dagsnote-knap" onclick="dagsnoteRediger('${h.dato}')">✎</button>`
+                    : `<span class="dagsnote-tom">${blaeg ? "" : "⚠ "}ingen note</span>
+                       <button class="dagsnote-knap" onclick="dagsnoteRediger('${h.dato}')">+ tilføj grund</button>`;
+                return `<div class="dagsnote-raekke${blaeg}" id="dagsnote-${h.dato}">
+                    <span class="dagsnote-dato">${dagsnoteLabel(h.dato)}</span>
+                    <span class="dagsnote-midt">${midt}</span>
+                </div>`;
+            }).join("");
+
+            // En note paa en dag der VISTE sig at have handler. Sker naar man
+            // skriver ferien ind paa forhaand og saa kommer hjem og handler
+            // alligevel. Den maa ikke forsvinde tavst — saa var den umulig at rette.
+            const advarsler = forpasset.map(n => `
+                <div class="dagsnote-forpasset">
+                    ⚠ ${dagsnoteLabel(n.dato)} har noten "${esc(n.note)}", men der
+                    ER handlet den dag
+                    <button class="dagsnote-knap" onclick="dagsnoteSlet('${n.dato}')">slet</button>
+                </div>`).join("");
+
+            el.innerHTML = `<div class="card dagsnoter-kort">
+                <div class="dagsnoter-overskrift">
+                    Dage uden handler i perioden
+                    <span class="muted-text">(${huller.length} af ${d.handelsdage} handelsdage)</span>
+                </div>
+                ${raekker}${advarsler}
+            </div>`;
+        }
+
+        function dagsnoteRediger(dato) {
+            const raekke = document.getElementById(`dagsnote-${dato}`);
+            if (!raekke) return;
+            const nuvaerende = (dagsnoteCache[dato] || "");
+            raekke.querySelector(".dagsnote-midt").innerHTML = `
+                <input class="dagsnote-input" id="dagsnote-input-${dato}"
+                       value="${esc(nuvaerende)}" placeholder="Fx: Ferie — Mallorca"
+                       onkeydown="dagsnoteTast(event, '${dato}')">
+                <button class="dagsnote-knap dagsnote-gem" onclick="dagsnoteGem('${dato}')">Gem</button>
+                <button class="dagsnote-knap" onclick="loadDagsnoter()">✕</button>
+                <span class="dagsnote-fejl" id="dagsnote-fejl-${dato}"></span>`;
+            const inp = document.getElementById(`dagsnote-input-${dato}`);
+            inp.focus();
+            inp.setSelectionRange(inp.value.length, inp.value.length);
+        }
+
+        function dagsnoteTast(ev, dato) {
+            if (ev.key === "Enter") { ev.preventDefault(); dagsnoteGem(dato); }
+            if (ev.key === "Escape") { ev.preventDefault(); loadDagsnoter(); }
+        }
+
+        async function dagsnoteSkriv(dato, tekst) {
+            const res = await authFetch(`/journal/dagsnoter/${dato}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ note: tekst }),
+            });
+            if (!res.ok) {
+                let grund = `HTTP ${res.status}`;
+                try { const j = await res.json(); if (j && j.detail) grund = j.detail; } catch (_) {}
+                throw new Error(grund);
+            }
+            return res.json();
+        }
+
+        async function dagsnoteGem(dato) {
+            const inp = document.getElementById(`dagsnote-input-${dato}`);
+            if (!inp) return;
+            const tekst = inp.value.trim();
+            const fejlEl = document.getElementById(`dagsnote-fejl-${dato}`);
+            fejlEl.textContent = "";
+            try {
+                await dagsnoteSkriv(dato, tekst);
+                dagsnoteCache[dato] = tekst;
+                await loadDagsnoter();
+            } catch (e) {
+                // ⚠ Feltet BLIVER staaende med teksten i. Lukkede det sig som om
+                // noten var gemt, ville man miste det man skrev og tro det modsatte
+                // — praecis den fejl handelsnoten havde.
+                fejlEl.textContent = `Ikke gemt: ${e.message}`;
+            }
+        }
+
+        async function dagsnoteSlet(dato) {
+            try {
+                await dagsnoteSkriv(dato, "");
+                delete dagsnoteCache[dato];
+                await loadDagsnoter();
+            } catch (e) {
+                alert(`Noten kunne ikke slettes: ${e.message}`);
             }
         }
 
