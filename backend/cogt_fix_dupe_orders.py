@@ -56,14 +56,14 @@ def _active(ib):
 
 
 async def main(execute: bool) -> int:
-    from accounts import load_identity
+    from accounts import load_identity, aktiv_konto
     from ibkr_connect import IBKRConnection
 
     identity = load_identity()
     print("=" * 72)
     print(f"  COGT DUPLIKAT-ORDRE-FIX (global cancel) — {'EXECUTE' if execute else 'PREVIEW (roerer intet)'}")
     print("=" * 72)
-    print(f"  Konto: {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    print(f"  Konto: {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
 
     conn = IBKRConnection(paper_trading=identity.paper_trading)
     if not await conn.connect():

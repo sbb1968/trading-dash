@@ -60,7 +60,7 @@ def _dump_journal_open():
 
 
 async def main():
-    from accounts import load_identity
+    from accounts import load_identity, aktiv_konto
     from ibkr_connect import IBKRConnection
 
     identity = load_identity()
@@ -75,7 +75,7 @@ async def main():
         print(f"  Tid: {dk:%Y-%m-%d %H:%M} dansk / {et:%H:%M} ET")
     except Exception:
         print(f"  Tid: {now:%Y-%m-%d %H:%M} (lokal)")
-    print(f"  Konto: {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    print(f"  Konto: {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
 
     conn = IBKRConnection(paper_trading=identity.paper_trading)
     if not await conn.connect():

@@ -25,7 +25,7 @@ import pytz
 
 import replication_store
 import trade_queries
-from accounts import identity
+from accounts import identity, aktiv_konto
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,7 @@ async def _source_block(db, source_id: str, name: str, is_self: bool,
 
     if is_self:
         account_id   = identity.account_id
-        ibkr_account = identity.ibkr_account
+        ibkr_account = aktiv_konto()
     else:
         ids = sorted({(t.get("account_id") or "?") for t in closed} |
                      {(p.get("account_id") or "?") for p in open_pos})

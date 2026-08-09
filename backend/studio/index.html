@@ -1538,6 +1538,7 @@
                     font-size:14px; font-family:inherit; cursor:pointer;">
                 <option value="">Denne maskine</option>
             </select>
+            <span id="konto-maerke"></span>
             <div class="identity" id="identity">Indlæser identitet...</div>
         </div>
     </header>
@@ -1923,6 +1924,28 @@
             } catch (e) {
                 document.getElementById("identity").textContent = "Identitet ikke tilgængelig";
             }
+            loadKontoMaerke();
+        }
+
+        /** Hvilken IBKR-konto DENNE maskine (algoserveren) handler paa.
+         *
+         *  ⚠ Laesning kun. Kontoen skiftes i Trading Dash paa maskinen selv —
+         *  et fjernskift ville kunne ramme en anden maskine end den man tror man
+         *  ser paa, og et kontoskift er ikke et sted at gaette. Maerket staar her
+         *  fordi Studio er det vindue der er aabent hele dagen. */
+        async function loadKontoMaerke() {
+            const el = document.getElementById("konto-maerke");
+            if (!el) return;
+            try {
+                const r = await authFetch("/account/aktiv");
+                if (!r.ok) { el.textContent = ""; return; }
+                const d = await r.json();
+                el.className = d.paper ? "konto-papir" : "konto-live";
+                el.textContent = (d.paper ? "PAPIR " : "● LIVE ") + d.konto;
+                el.title = d.muligheder.length > 1
+                    ? `Skiftes i Trading Dash på ${d.maskine}`
+                    : "Handelskonto";
+            } catch (e) { el.textContent = ""; }
         }
 
         // ─────────────────────────────────────────────────────

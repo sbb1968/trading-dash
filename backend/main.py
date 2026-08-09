@@ -17,7 +17,8 @@ from journal          import Journal
 from orders_tracker   import get_tracker
 
 
-from accounts import identity
+from accounts import identity, aktiv_konto
+import accounts
 
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pathlib import Path
@@ -432,7 +433,7 @@ async def startup():
     print(f"[Server] Trading Dash backend startet")
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
-    print(f"[Server] IBKR:      {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    print(f"[Server] IBKR:      {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
     # ── Start TWS watchdog ────────────────────────────────────
     global tws_watchdog, algo_scheduler
 
@@ -3842,7 +3843,7 @@ async def strategirapport_pdf(start: str = None, end: str = None):
     except Exception:
         _n_arch = 0
     account = (f"Hele flåden — {_n_arch + 1} maskiner (paper)" if _n_arch
-               else f"{identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+               else f"{aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
     db = str(base / "trading_dash.db")
     try:
         import gen_strategirapport as gsr
@@ -4358,7 +4359,7 @@ async def status():
             "account":  identity.account_display_name,
             "instance": identity.instance_display_name,
             "role":     identity.instance_role,
-            "ibkr":     identity.ibkr_account,
+            "ibkr":     aktiv_konto(),
             "paper":    identity.paper_trading,
         },
 
@@ -4522,7 +4523,7 @@ async def account_info():
         "account_display_name":   identity.account_display_name,
         "instance_role":          identity.instance_role,
         "instance_display_name":  identity.instance_display_name,
-        "ibkr_account":           identity.ibkr_account,
+        "ibkr_account":           aktiv_konto(),
         "paper_trading":          identity.paper_trading,
         "autostart_strategies":   identity.autostart_strategies,
     }
@@ -4803,7 +4804,7 @@ async def account_snapshot(force_journal: bool = False):
 
         result = {
             "ok":              True,
-            "ibkr_account":    identity.ibkr_account,
+            "ibkr_account":    aktiv_konto(),
             "paper_trading":   identity.paper_trading,
             "net_liquidation": summary["net_liquidation"],
             "cash_balance":    summary["cash_balance"],
@@ -4845,6 +4846,136 @@ async def account_snapshot(force_journal: bool = False):
 # ── /account/dash-snapshot — Trading Dash konto-data ──────────
 # Samme data som /account/snapshot men uden auth-krav.
 # Trading Dash kører kun lokalt på 127.0.0.1 og har ikke login.
+# ─────────────────────────────────────────────────────────────────────────────
+# Aktiv konto — hvilken IBKR-konto denne maskine handler paa
+# ─────────────────────────────────────────────────────────────────────────────
+# SAG A: konti under SAMME TWS-login. Samme port, samme forbindelse — kun
+# order.account skifter, saa der skal ikke genforbindes.
+#
+# ⚠ Paper <-> live er IKKE daekket og kan ikke daekkes her. De er to forskellige
+# TWS-logins paa hver sin port (7497/7496); er TWS logget paa paper, findes
+# live-kontoen ikke uanset hvad vi skriver i en fil. Derfor har hvidlisten i
+# account.yaml ingen paper-kolonne: instance.paper_trading gaelder alle konti.
+
+def _konto_spaerringer() -> list[str]:
+    """Hvad der lige nu forhindrer et kontoskift. Tom liste = frit valg.
+
+    ⚠ Spaerringen findes fordi et skift ellers KAN fremstille ejerloese
+    positioner: skifter man konto mens K2 har en aaben position, forvalter
+    strategien nu en position paa en konto den ikke laengere handler paa.
+    Otte saadanne laa paa algoserveren i en uge foer nogen opdagede dem.
+    """
+    ud: list[str] = []
+
+    koerende = [s.name for s in strategy_manager._strategies.values()
+                if s.status == StrategyStatus.RUNNING]
+    if koerende:
+        ud.append(f"Strategier kører: {', '.join(koerende)}")
+
+    # PAUSED taeller kun med hvis der stadig er noget at forvalte — en pauset
+    # strategi uden positioner er harmloes.
+    pauset = [s.name for s in strategy_manager._strategies.values()
+              if s.status == StrategyStatus.PAUSED and s.stats.open_positions > 0]
+    if pauset:
+        ud.append(f"Pauset med åbne positioner: {', '.join(pauset)}")
+
+    return ud
+
+
+async def _aabne_positioner_paa_kontoen() -> list[str]:
+    """Tickers med aaben position hos IBKR. Kan ikke afgoeres uden forbindelse —
+    og saa MAA vi ikke lade skiftet gaa igennem: vi ved det ikke, og "vi ved det
+    ikke" er ikke det samme som "der er ingen"."""
+    conn = strategy_manager.get_ibkr()
+    if conn is None or not conn.connected:
+        raise HTTPException(status_code=503, detail=(
+            "IBKR er ikke forbundet, så det kan ikke afgøres om der er åbne "
+            "positioner. Kontoen skiftes ikke på et ukendt grundlag."))
+    pos = await conn.get_positions_live()
+    return [p["ticker"] for p in pos if p.get("position")]
+
+
+@app.get("/account/aktiv", dependencies=[Depends(require_studio_auth)])
+async def account_aktiv():
+    """Den aktive konto + hvad man kan skifte til. ÉN kilde, saa Trading Dash,
+    Studio og ordredialogen ikke kan komme i utakt om hvad der handles paa."""
+    spaerret = _konto_spaerringer()
+    return {
+        "konto":        aktiv_konto(),
+        "label":        accounts.konto_label(),
+        "paper":        identity.paper_trading,
+        "maskine":      identity.instance_display_name,
+        "muligheder":   [dict(k) for k in accounts.tilladte_konti()],
+        "kan_skifte":   len(accounts.tilladte_konti()) > 1 and not spaerret,
+        "blokeret_af":  spaerret,
+    }
+
+
+class SkiftKontoRequest(BaseModel):
+    konto:   str
+    bekraeft: bool = False
+
+
+@app.post("/account/aktiv", dependencies=[Depends(require_studio_auth)])
+async def account_skift(req: SkiftKontoRequest):
+    """Skift hvilken konto maskinen handler paa."""
+    ny = (req.konto or "").strip().upper()
+    gammel = aktiv_konto()
+    if ny == gammel:
+        return {"ok": True, "konto": ny, "uaendret": True}
+
+    spaerret = _konto_spaerringer()
+    if spaerret:
+        raise HTTPException(status_code=409, detail=" · ".join(spaerret))
+
+    aabne = await _aabne_positioner_paa_kontoen()
+    if aabne:
+        raise HTTPException(status_code=409, detail=(
+            f"{len(aabne)} åbne positioner på {gammel} ({', '.join(aabne[:8])}). "
+            f"Luk dem først — ellers bliver de ejerløse."))
+
+    # Inden for handelsvinduet er et skift lovligt, men ikke noget man goer
+    # ved et uheld. 15:20-22:00 dansk er hvor strategierne auto-starter.
+    nu = datetime.now(pytz.timezone("Europe/Copenhagen"))
+    i_vindue = 15 <= nu.hour < 22
+    if i_vindue and not req.bekraeft:
+        raise HTTPException(status_code=428, detail=(
+            f"Klokken er {nu.strftime('%H:%M')} — inden for handelsvinduet. "
+            f"Bekræft at kontoen skal skiftes nu."))
+
+    try:
+        accounts.saet_aktiv_konto(ny, hvem=identity.instance_display_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Bind den levende forbindelse om. Uden dette ville filen sige én konto og
+    # ordrerne gaa til en anden indtil naeste genstart.
+    conn = strategy_manager.get_ibkr()
+    if conn is not None and conn.connected:
+        styrede = [a.strip().upper() for a in (conn.ib.managedAccounts() or [])]
+        if ny not in styrede:
+            # ⚠ Rul tilbage. Et halvt skift — fil aendret, forbindelse ikke — er
+            # vaerre end intet skift: journalen ville stemple handler med en
+            # konto de ikke blev lagt paa.
+            accounts.saet_aktiv_konto(gammel, hvem="rulning-tilbage")
+            raise HTTPException(status_code=400, detail=(
+                f"TWS styrer ikke {ny} i denne session (kun {', '.join(styrede)}). "
+                f"Kontoen er IKKE skiftet. Er det en konto under et andet login?"))
+        conn.account = ny
+
+    logger.info(f"[Konto] Skiftet fra {gammel} til {ny}")
+    # Til BEGGE WS-kanaler. Hovedkanalen driver menubar-mærket i Trading Dash;
+    # algo-kanalen fanger de vinduer der kun lytter dér. Et vindue der viser den
+    # forrige konto er værre end intet mærke.
+    besked = {"type": "konto_skiftet", "konto": ny,
+              "label": accounts.konto_label(ny), "paper": identity.paper_trading,
+              "time": datetime.now().strftime("%H:%M:%S")}
+    await broadcast(besked)
+    await broadcast_algo(besked)
+    return {"ok": True, "konto": ny, "label": accounts.konto_label(ny),
+            "tidligere": gammel}
+
+
 @app.get("/account/dash-snapshot")
 async def account_dash_snapshot():
     """
@@ -4957,7 +5088,7 @@ async def account_dash_snapshot():
 
         return {
             "ok":                   True,
-            "ibkr_account":         identity.ibkr_account,
+            "ibkr_account":         aktiv_konto(),
             "paper_trading":        identity.paper_trading,
             "net_liquidation":      summary["net_liquidation"],
             "cash_balance":         summary["cash_balance"],

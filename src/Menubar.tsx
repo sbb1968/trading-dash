@@ -451,6 +451,106 @@ function ThemeSection({ theme, setTheme }: { theme: string; setTheme: (t: string
 }
 
 // ── Menubar ───────────────────────────────────────────────────
+interface KontoInfo {
+  konto:       string;
+  label:       string;
+  paper:       boolean;
+  muligheder:  { id: string; label: string }[];
+  kan_skifte:  boolean;
+  blokeret_af: string[];
+}
+
+/**
+ * Hvilken IBKR-konto denne maskine handler paa — altid synlig i menubaren.
+ *
+ * ⚠ Det er det eneste sted man garanteret kigger hele dagen. En konto der kun
+ * kan ses ved at aabne et vindue er ikke set. Og LIVE faar sit eget roede maerke
+ * frem for bare at vaere fravaeret af "PAPIR": det man skal opdage uden at lede,
+ * maa ikke signaleres ved noget der MANGLER.
+ */
+function KontoMaerke() {
+  const [info, setInfo]   = useState<KontoInfo | null>(null);
+  const [aaben, setAaben] = useState(false);
+  const [fejl, setFejl]   = useState("");
+
+  async function hent() {
+    try {
+      const r = await fetch("http://127.0.0.1:8000/account/aktiv");
+      if (r.ok) setInfo(await r.json());
+    } catch { /* backend nede — maerket forsvinder hellere end at lyve */ }
+  }
+
+  useEffect(() => {
+    hent();
+    const t = window.setInterval(hent, 30_000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  async function skift(id: string, bekraeft = false) {
+    setFejl("");
+    try {
+      const r = await fetch("http://127.0.0.1:8000/account/aktiv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ konto: id, bekraeft }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 428) {
+        // Inden for handelsvinduet: lovligt, men ikke noget man goer ved et uheld.
+        if (window.confirm(`${d.detail}\n\nSkift til ${id} alligevel?`)) {
+          return skift(id, true);
+        }
+        return;
+      }
+      if (!r.ok) { setFejl(d.detail || `HTTP ${r.status}`); return; }
+      setAaben(false);
+      hent();
+    } catch (e) {
+      setFejl(String(e));
+    }
+  }
+
+  if (!info) return null;
+  const live = !info.paper;
+
+  return (
+    <div className="konto-maerke-wrap">
+      <button
+        className={`konto-maerke ${live ? "konto-live" : "konto-papir"}`}
+        onClick={() => info.muligheder.length > 1 && setAaben(v => !v)}
+        title={info.blokeret_af.length
+          ? `Kan ikke skiftes nu: ${info.blokeret_af.join(" · ")}`
+          : (info.muligheder.length > 1 ? "Klik for at skifte konto" : "Handelskonto")}
+      >
+        {live ? "● LIVE" : "PAPIR"} {info.konto}
+        {info.muligheder.length > 1 && <span className="konto-pil"> ▾</span>}
+      </button>
+
+      {aaben && (
+        <div className="konto-menu">
+          {info.blokeret_af.length > 0 && (
+            <div className="konto-blokeret">
+              ⚠ Kan ikke skiftes nu:<br />{info.blokeret_af.join(" · ")}
+            </div>
+          )}
+          {info.muligheder.map(m => (
+            <button
+              key={m.id}
+              className={`konto-valg ${m.id === info.konto ? "konto-valgt" : ""}`}
+              disabled={!info.kan_skifte && m.id !== info.konto}
+              onClick={() => skift(m.id)}
+            >
+              {m.id === info.konto ? "✓ " : "   "}{m.label}
+              <span className="konto-nr">{m.id}</span>
+            </button>
+          ))}
+          {fejl && <div className="konto-fejl">{fejl}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Menubar({
   activeView, onViewChange,
   layouts, activeLayoutId, layoutDirty, onLoadLayout, onSaveLayout, onDeleteLayout,
@@ -610,6 +710,7 @@ export function Menubar({
 
       {/* ── HOEJRE: platform & hjaelp (doere, ikke vinduer) ── */}
       <div className="menubar-right">
+        <KontoMaerke />
         <span className="menubar-sep" />
         <button className="menu-btn menu-btn-door menu-btn-door-primary"
                 onClick={() => openUrl(STUDIO_URL)}

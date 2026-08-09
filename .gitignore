@@ -214,3 +214,8 @@ backend/store_bevaegelser_out/store_bevaegelser_baseline_30k.csv
 backend/regime_v2_output/*
 !backend/regime_v2_output/*.md
 !backend/regime_v2_output/regime_metrics_daily.csv
+
+# Hvilken af de tilladte konti maskinen handler på lige nu. Maskine-lokal
+# tilstand, ligesom risk_config.json — hvidlisten selv står i account.yaml.
+backend/aktiv_konto.json
+backend/test_aktiv_konto.json

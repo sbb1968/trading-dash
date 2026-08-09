@@ -51,7 +51,7 @@ def _fmt(t):
 
 
 async def main(execute: bool) -> int:
-    from accounts import load_identity
+    from accounts import load_identity, aktiv_konto
     from ibkr_connect import IBKRConnection, FUTURES_EXCHANGE
     from ib_async import MarketOrder
 
@@ -59,7 +59,7 @@ async def main(execute: bool) -> int:
     print("=" * 72)
     print(f"  MES FLATTEN (orphan-oprydning) — {'EXECUTE' if execute else 'PREVIEW (roerer intet)'}")
     print("=" * 72)
-    print(f"  Konto: {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    print(f"  Konto: {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
 
     conn = IBKRConnection(paper_trading=identity.paper_trading)
     if not await conn.connect():
@@ -79,10 +79,10 @@ async def main(execute: bool) -> int:
         mes = [p for p in (poss or [])
                if (p.contract.symbol or "").upper() == SYMBOL
                and p.position != 0
-               and (not identity.ibkr_account or p.account == identity.ibkr_account)]
+               and (not aktiv_konto() or p.account == aktiv_konto())]
 
         if not mes:
-            print(f"\n  -> Ingen åben {SYMBOL}-position på {identity.ibkr_account}. Intet at goere. Faerdig.")
+            print(f"\n  -> Ingen åben {SYMBOL}-position på {aktiv_konto()}. Intet at goere. Faerdig.")
             return 0
         if len(mes) > 1:
             print(f"\n  ⛔ AFBRYDER: fandt {len(mes)} separate {SYMBOL}-positioner (flere maaneder?):")
@@ -158,7 +158,7 @@ async def main(execute: bool) -> int:
             poss2 = await asyncio.wait_for(ib.reqPositionsAsync(), timeout=10)
             net_after = sum(p.position for p in (poss2 or [])
                             if (p.contract.symbol or "").upper() == SYMBOL
-                            and (not identity.ibkr_account or p.account == identity.ibkr_account))
+                            and (not aktiv_konto() or p.account == aktiv_konto()))
         except Exception:
             net_after = None
         print(f"  Position {SYMBOL} efter: {net_after if net_after is not None else '?'}")

@@ -33,7 +33,7 @@ import aiosqlite
 import pytz
 
 import replication
-from accounts import identity
+from accounts import identity, aktiv_konto
 
 # Tidszone-konstant — bruges af trade-helpers til at gemme entry_time_et og exit_time_et
 ET = pytz.timezone("America/New_York")
@@ -142,7 +142,7 @@ class Journal:
                     identity.instance_role,
                     source,
                     event_type,
-                    ibkr_account or identity.ibkr_account,
+                    ibkr_account or aktiv_konto(),
                     symbol,
                     json.dumps(payload or {}, default=str),
                 ),
@@ -313,7 +313,7 @@ class Journal:
                     trade_id,
                     identity.account_id,
                     identity.instance_role,
-                    ibkr_account or identity.ibkr_account,
+                    ibkr_account or aktiv_konto(),
                     source,
                     variant,
                     symbol,

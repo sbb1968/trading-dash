@@ -122,7 +122,7 @@ def backend_algo_running():
 
 
 async def execute(db, sources, force):
-    from accounts import load_identity
+    from accounts import load_identity, aktiv_konto
     from journal import Journal
     from ibkr_connect import IBKRConnection
     from strategy_base import StrategyConfig
@@ -152,7 +152,7 @@ async def execute(db, sources, force):
         print("  ⚠ --force: fortsaetter selvom en strategi koerer (kan konflikte).")
 
     identity = load_identity()
-    print(f"  Konto: {identity.ibkr_account} ({'paper' if identity.paper_trading else 'LIVE'})")
+    print(f"  Konto: {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
 
     conn = IBKRConnection(paper_trading=identity.paper_trading)
     ok = await conn.connect()

@@ -82,9 +82,9 @@ class StrategyManager:
         # Kontoen fra account.yaml bindes til forbindelsen, saa ordrer, saldi og
         # positioner gaelder PRAECIS den konto — noedvendigt naar ét IBKR-login
         # styrer flere konti. Bekraeftes mod managedAccounts() i connect().
-        from accounts import identity
+        from accounts import identity, aktiv_konto
         self.ibkr_conn = IBKRConnection(paper_trading=paper_trading,
-                                        account=identity.ibkr_account)
+                                        account=aktiv_konto())
         ok = await self.ibkr_conn.connect()
         self.ibkr_ready = ok
 

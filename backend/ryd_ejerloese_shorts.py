@@ -73,12 +73,12 @@ async def open_journal_symbols(db) -> set[str]:
 
 
 async def run(execute: bool, force: bool, db_path: str) -> int:
-    from accounts import load_identity
+    from accounts import load_identity, aktiv_konto
     from journal import Journal
     from ibkr_connect import IBKRConnection
 
     identity = load_identity()
-    print(f"\n  Konto: {identity.ibkr_account} "
+    print(f"\n  Konto: {aktiv_konto()} "
           f"({'paper' if identity.paper_trading else 'LIVE'})")
 
     if not identity.paper_trading:
