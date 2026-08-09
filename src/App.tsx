@@ -56,7 +56,7 @@ const FONT_WINDOW_TYPES = [
   { id: "livealgo",  label: "Live Algo" },
   { id: "marketoverview", label: "Markedsoverblik" },
   { id: "regimefingerprint", label: "Regime-fingeraftryk" },
-  { id: "account",   label: "Konto" },
+  { id: "account",   label: "Portfolio" },
 ];
 
 const FONT_DEFAULTS = { title: 14, header: 11, content: 13 };

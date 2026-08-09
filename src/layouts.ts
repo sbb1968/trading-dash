@@ -43,7 +43,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   livealgo:     "Live Algo",
   marketoverview:  "Markedsoverblik",
   regimefingerprint: "Regime-fingeraftryk",
-  account:         "Konto",
+  account:         "Portfolio",
   orders:          "Ordrer",
   swing:           "Swing trading-scores",
   buyhold:         "Buy-and-Hold-scores",

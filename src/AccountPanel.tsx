@@ -5,6 +5,8 @@ interface AccountPosition {
   ticker:        string;
   position:      number;
   avg_cost:      number | null;
+  multiplier:    number | null;
+  sec_type:      string | null;
   last_price:    number | null;
   current_price: number | null;
   market_value:  number | null;
@@ -137,6 +139,7 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState("");
   const [lastUpdate, setLastUpdate] = useState("");
+  const [datoer,     setDatoer]     = useState<Record<string, string>>({});
   const timerRef = useRef<number | null>(null);
 
   async function fetchSnapshot() {
@@ -154,9 +157,28 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
     }
   }
 
+  // Anskaffelsesdatoen kommer fra VORES journal — IBKR-positioner bærer den ikke.
+  // Mangler datoen, er positionen ejerløs, og tomme felt ER selve oplysningen.
+  // Otte sådanne lå på algoserveren i en uge uden at nogen opdagede det.
+  async function fetchDatoer() {
+    try {
+      const resp = await fetch("http://127.0.0.1:8000/journal/open-positions");
+      if (!resp.ok) return;
+      const d = await resp.json();
+      const ud: Record<string, string> = {};
+      for (const p of (d.positions ?? d ?? [])) {
+        const sym = String(p.symbol ?? "").toUpperCase();
+        const t = p.entry_time_et ?? p.entry_time_utc;
+        if (sym && t && !ud[sym]) ud[sym] = String(t);
+      }
+      setDatoer(ud);
+    } catch { /* uden datoer viser vi stadig positionerne */ }
+  }
+
   useEffect(() => {
-    fetchSnapshot();
-    timerRef.current = window.setInterval(fetchSnapshot, 10_000);
+    const hent = () => { fetchSnapshot(); fetchDatoer(); };
+    hent();
+    timerRef.current = window.setInterval(hent, 10_000);
     return () => { if (timerRef.current) window.clearInterval(timerRef.current); };
   }, []);
 
@@ -170,7 +192,12 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
           {snapshot?.ok ? (
             <>
               IBKR-konto: <code style={{ background: "var(--bg-base)", padding: "2px 6px", borderRadius: 3, color: "var(--text-primary)" }}>{snapshot.ibkr_account}</code>
-              {snapshot.paper_trading && (
+              {/* LIVE skal skrige. Paper er hverdagen; en live-konto er undtagelsen
+                  man skal opdage UDEN at lede efter den. Derfor eget mærke — ikke
+                  bare fraværet af "PAPIR". */}
+              {snapshot.paper_trading === false ? (
+                <span style={{ marginLeft: 8, padding: "2px 7px", background: "var(--bear)", color: "#fff", borderRadius: 3, fontSize: 10, fontWeight: 800, letterSpacing: 0.5 }}>● LIVE — RIGTIGE PENGE</span>
+              ) : (
                 <span style={{ marginLeft: 8, padding: "2px 6px", background: "var(--accent)", color: "#fff", borderRadius: 3, fontSize: 10, fontWeight: 700 }}>PAPIR</span>
               )}
             </>
@@ -230,7 +257,9 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
               <table className="scanner-table" style={{ width: "100%" }}>
                 <thead>
                   <tr>
+                    <th>Dato</th>
                     <th>Ticker</th>
+                    <th>Type</th>
                     <th style={{ textAlign: "right" }}>Antal</th>
                     <th style={{ textAlign: "right" }}>Gns. kurs</th>
                     <th style={{ textAlign: "right" }}>Aktuel kurs</th>
@@ -240,9 +269,21 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
                   </tr>
                 </thead>
                 <tbody>
-                  {snapshot.positions?.map(p => (
+                  {snapshot.positions?.map(p => {
+                    const t = datoer[p.ticker.toUpperCase()];
+                    const mult = Number(p.multiplier) || 1;
+                    return (
                     <tr key={p.ticker} style={{ cursor: onSelectTicker ? "pointer" : "default" }} onClick={() => onSelectTicker?.(p.ticker)}>
+                      <td title={t ? t.slice(0, 19).replace("T", " ") : "Ingen åben journal-række — ejerløs position"}
+                          style={t ? undefined : { color: "var(--text-muted)" }}>
+                        {t ? `${t.slice(8, 10)}-${t.slice(5, 7)}` : "—"}
+                      </td>
                       <td><strong>{p.ticker}</strong></td>
+                      {/* Multiplikatoren vist, for uden den ser 1 MES ud som en
+                          ubetydelig position ved siden af 100 aktier. */}
+                      <td>{p.sec_type || "—"}
+                        {p.sec_type === "FUT" && <span style={{ color: "var(--text-muted)" }}> ×{mult}</span>}
+                      </td>
                       <td style={{ textAlign: "right", color: p.position < 0 ? "var(--bear)" : "var(--text-primary)" }}>
                         {p.position.toLocaleString("da-DK")}
                       </td>
@@ -252,7 +293,8 @@ export function AccountPanel({ onSelectTicker }: { onSelectTicker?: (t: string) 
                       <td style={{ textAlign: "right" }} className={pnlClass(p.pnl)}>{fmtMoneySigned(p.pnl)}</td>
                       <td style={{ textAlign: "right" }} className={pnlClass(p.pnl_pct)}>{fmtPct(p.pnl_pct)}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
