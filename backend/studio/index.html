@@ -714,6 +714,20 @@
             margin-left: 6px;
         }
 
+        /* "Alle maskiner" og "svarer ikke": ingen konto at vise. Dæmpet, men
+           til stede — et tomt felt kunne forveksles med "ingen konto". */
+        .konto-flere, .konto-ukendt {
+            background: #2a2a2a;
+            color: #9a9a9a;
+            font-weight: 600;
+            font-size: 11px;
+            padding: 3px 7px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+
+        .konto-ukendt { color: #d9a441; }
+
         .portfolio-dagens {
             background: #141414;
             border: 1px solid #2a2a2a;
@@ -1643,11 +1657,16 @@
 
             sel.onchange = () => {
                 selectedSource = sel.value;   // "" = lokal, ellers source_id
+                // Kontomærket følger maskinvælgeren. Gjorde det ikke det, ville
+                // det vise algoserverens konto mens man kigger på en anden
+                // maskines handler — og mærket læses som den valgte maskines.
+                loadKontoMaerke();
                 // Status = fleet board (alle maskiner) — påvirkes ikke af kildevalg.
                 if (currentPage !== "status") {
                     switchPage(currentPage || "oversigt");
                 }
             };
+            loadKontoMaerke();
         }
 
         async function authFetch(url, options = {}) {
@@ -1927,25 +1946,59 @@
             loadKontoMaerke();
         }
 
-        /** Hvilken IBKR-konto DENNE maskine (algoserveren) handler paa.
+        /** Hvilken IBKR-konto den VALGTE maskine handler paa.
          *
-         *  ⚠ Laesning kun. Kontoen skiftes i Trading Dash paa maskinen selv —
-         *  et fjernskift ville kunne ramme en anden maskine end den man tror man
-         *  ser paa, og et kontoskift er ikke et sted at gaette. Maerket staar her
-         *  fordi Studio er det vindue der er aabent hele dagen. */
+         *  ⚠ Maerket foelger maskinvaelgeren, ikke den maskine Studio tilfaeldigvis
+         *  koerer paa. Studio koerer altid paa algoserveren, saa et fast maerke ville
+         *  vise Ibens konto mens man kigger paa Soerens handler — og et kontomaerke
+         *  ved siden af en maskinvaelger laeses som den valgte maskines konto.
+         *
+         *  Laesning kun. Kontoen skiftes i Trading Dash paa maskinen selv; et
+         *  fjernskift kunne ramme en anden maskine end den man tror man ser paa. */
         async function loadKontoMaerke() {
             const el = document.getElementById("konto-maerke");
             if (!el) return;
+
+            const vis = (klasse, tekst, titel) => {
+                el.className = klasse;
+                el.textContent = tekst;
+                el.title = titel || "";
+            };
+
+            // "Alle maskiner samlet": der ER ingen ét konto. At vise én af dem
+            // ville vaere direkte forkert.
+            if (selectedSource === "__fleet__") {
+                vis("konto-flere", "⊕ flere konti", "Alle maskiner er valgt");
+                return;
+            }
+
             try {
-                const r = await authFetch("/account/aktiv");
-                if (!r.ok) { el.textContent = ""; return; }
+                let r;
+                if (!selectedSource) {
+                    r = await authFetch("/account/aktiv");
+                } else {
+                    const p = (knownPeers || []).find(p => p.id === selectedSource);
+                    if (!p || !p.url) { vis("", "", ""); return; }
+                    const ctrl = new AbortController();
+                    const t = setTimeout(() => ctrl.abort(), 6000);
+                    try {
+                        r = await fetch(`${p.url}/account/aktiv`, {
+                            headers: internalKey ? { "X-Internal-Key": internalKey } : {},
+                            signal: ctrl.signal,
+                        });
+                    } finally { clearTimeout(t); }
+                }
+                if (!r.ok) { vis("", "", ""); return; }
                 const d = await r.json();
-                el.className = d.paper ? "konto-papir" : "konto-live";
-                el.textContent = (d.paper ? "PAPIR " : "● LIVE ") + d.konto;
-                el.title = d.muligheder.length > 1
-                    ? `Skiftes i Trading Dash på ${d.maskine}`
-                    : "Handelskonto";
-            } catch (e) { el.textContent = ""; }
+                vis(d.paper ? "konto-papir" : "konto-live",
+                    (d.paper ? "PAPIR " : "● LIVE ") + d.konto,
+                    `${d.maskine} · ${d.label}` + (d.muligheder.length > 1
+                        ? " — skiftes i Trading Dash på maskinen" : ""));
+            } catch (e) {
+                // Maskinen svarer ikke. Sig det — et tomt maerke kunne forveksles
+                // med "ingen konto", og et gammelt maerke ville vaere en loegn.
+                vis("konto-ukendt", "konto ukendt", "Maskinen svarer ikke");
+            }
         }
 
         // ─────────────────────────────────────────────────────
