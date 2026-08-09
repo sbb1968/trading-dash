@@ -14,6 +14,7 @@ from tws_watchdog import TWSWatchdog
 from scheduler    import AlgoScheduler
 
 from journal          import Journal
+import journal as journal_mod
 from orders_tracker   import get_tracker
 
 
@@ -137,6 +138,23 @@ live_feed      = None
 live_feed_task = None
 ibkr_connected = False   # sidst KENDTE status (opstart/strategi-start) — kan vaere forael det
 journal = Journal("trading_dash.db")
+
+
+def _handelskonto() -> tuple[str, bool]:
+    """(konto, paper) fra den forbindelse ordrer FAKTISK gaar igennem.
+
+    Journalen kalder denne. Uden den ville maerket komme fra maskinens identitet
+    — og naar paper og live skal koere samtidig, kan maskinen ikke afgoere hvad
+    en given handel var.
+    """
+    conn = strategy_manager.get_ibkr()
+    if conn is not None and getattr(conn, "connected", False):
+        konto = (getattr(conn, "account", "") or "").strip()
+        return (konto or aktiv_konto(), bool(getattr(conn, "paper", True)))
+    return aktiv_konto(), identity.paper_trading
+
+
+journal_mod.saet_konto_kilde(_handelskonto)
 
 
 def ibkr_live_connected() -> bool:
@@ -3028,6 +3046,7 @@ async def journal_trades(
     account_id:  str = None,
     instance_id: str = None,
     archive:     str = None,
+    handelstype: str = None,   # "paper" | "live" | None = begge
     limit:       int = 200,
     offset:      int = 0,
 ):
@@ -3042,7 +3061,10 @@ async def journal_trades(
       account_id, instance_id: filtrerer på maskine (på lokal: typisk udelades)
       limit, offset: paginering (default: 200 trades)
       archive: "" = denne maskine · source_id = ét arkiv · "__fleet__" = ALLE maskiner samlet
+      handelstype: "paper" eller "live". Udelades den, kommer BEGGE med — og
+        summary.blandet siger saa at tallene daekker to uforenelige ting.
     """
+    _paper = None if not handelstype else (handelstype.lower() == "paper")
     if archive == FLEET_ARCHIVE:
         return await _journal_trades_fleet(
             date_from, date_to, source, symbol, status, account_id, instance_id, limit, offset)
@@ -3051,14 +3073,14 @@ async def journal_trades(
             db,
             date_from=date_from, date_to=date_to,
             source=source, symbol=symbol, status=status,
-            account_id=account_id, instance_id=instance_id,
+            account_id=account_id, instance_id=instance_id, paper=_paper,
             limit=limit, offset=offset,
         )
         total = await trade_queries.count_trades(
             db,
             date_from=date_from, date_to=date_to,
             source=source, symbol=symbol, status=status,
-            account_id=account_id, instance_id=instance_id,
+            account_id=account_id, instance_id=instance_id, paper=_paper,
         )
         # Aggregat over HELE det filtrerede sæt (ikke kun denne side).
         # trades_summary tæller kun lukkede (pnl findes kun for lukkede);
@@ -3067,7 +3089,7 @@ async def journal_trades(
             db,
             date_from=date_from, date_to=date_to,
             source=source, symbol=symbol,
-            account_id=account_id, instance_id=instance_id,
+            account_id=account_id, instance_id=instance_id, paper=_paper,
         )
     return {"trades": trades, "count": len(trades), "total": total, "summary": summary}
 

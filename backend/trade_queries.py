@@ -27,7 +27,7 @@ ET = pytz.timezone("America/New_York")
 # Kolonner vi henter for én komplet trade-row.
 # Defineret som konstant fordi vi gentager den i flere queries.
 _TRADE_COLUMNS = (
-    "trade_id, account_id, instance_id, ibkr_account, "
+    "trade_id, account_id, instance_id, ibkr_account, paper, "
     "source, variant, "
     "symbol, side, shares, "
     "entry_time_utc, entry_time_et, entry_price, entry_reason, "
@@ -71,6 +71,7 @@ async def list_trades(
     status:       Optional[str] = None,   # "open", "closed", None=alle
     account_id:   Optional[str] = None,   # "soren", "iben", None=alle (på lokal: kun denne)
     instance_id:  Optional[str] = None,
+    paper:        Optional[bool] = None,  # True=kun paper, False=kun LIVE, None=begge
     limit:        int = 200,
     offset:       int = 0,
 ) -> list[dict]:
@@ -86,6 +87,10 @@ async def list_trades(
     where = []
     params = []
 
+    # ⚠ paper og LIVE maa aldrig lægges sammen i et aggregat. Se _paper_flag.
+    if paper is not None:
+        where.append("COALESCE(paper, 1) = ?")
+        params.append(1 if paper else 0)
     if date_from:
         # entry_time_et begynder med "YYYY-MM-DD" — vi sammenligner som streng
         where.append("entry_time_et >= ?")
@@ -133,12 +138,16 @@ async def list_trades(
 async def count_trades(
     db,
     date_from=None, date_to=None, source=None, symbol=None,
-    status=None, account_id=None, instance_id=None,
+    status=None, account_id=None, instance_id=None, paper=None,
 ) -> int:
     """Antal trades der matcher filtrene (uden limit/offset) — til paginering."""
     if db is None:
         return 0
     where, params = [], []
+    # ⚠ paper og LIVE maa aldrig lægges sammen i et aggregat. Se _paper_flag.
+    if paper is not None:
+        where.append("COALESCE(paper, 1) = ?")
+        params.append(1 if paper else 0)
     if date_from:   where.append("entry_time_et >= ?"); params.append(date_from)
     if date_to:     where.append("entry_time_et <= ?"); params.append(date_to + "T23:59:59")
     if source:      where.append("source = ?");         params.append(source)
@@ -185,6 +194,7 @@ async def trades_summary(
     symbol:      Optional[str] = None,
     account_id:  Optional[str] = None,
     instance_id: Optional[str] = None,
+    paper:       Optional[bool] = None,
 ) -> dict:
     """
     Aggregeret statistik over lukkede trades i intervallet.
@@ -209,6 +219,10 @@ async def trades_summary(
 
     where = ["exit_time_utc IS NOT NULL"]   # kun lukkede til pnl-stats
     params = []
+    # ⚠ paper og LIVE maa aldrig lægges sammen i et aggregat. Se _paper_flag.
+    if paper is not None:
+        where.append("COALESCE(paper, 1) = ?")
+        params.append(1 if paper else 0)
     if date_from:
         where.append("entry_time_et >= ?")
         params.append(date_from)
@@ -270,6 +284,16 @@ async def trades_summary(
         # dvs. vægtet efter positionsstørrelse — konsistent med per-handel-%.
         pnl_pct = ((total or 0.0) / total_cost * 100.0) if total_cost > 0 else 0.0
 
+        # ⚠ HVILKE HANDELSTYPER ER TALLENE LAVET AF?
+        # Uden dette ville en win rate på 58 % kunne være seks paper-handler og
+        # to live — ét tal ud af to uforenelige ting, og INTET ville fejle.
+        # Kalderen kan ikke se det af summen; derfor siger vi det direkte.
+        async with db.execute(
+            f"SELECT DISTINCT COALESCE(paper, 1) FROM trades {where_clause}",
+            params,
+        ) as cur:
+            typer = sorted(r[0] for r in await cur.fetchall())
+
         return {
             "count":       count,
             "wins":        wins,
@@ -282,6 +306,10 @@ async def trades_summary(
             "best_trade":  round(best  or 0.0, 2),
             "worst_trade": round(worst or 0.0, 2),
             "open_count":  open_count,
+            # ["paper"], ["live"] eller begge. Er der begge, BLANDER tallene
+            # paper og rigtige penge, og modtageren skal sige det til brugeren.
+            "typer":       [("paper" if t else "live") for t in typer],
+            "blandet":     len(typer) > 1,
         }
     except Exception as e:
         logger.error(f"[trade_queries] trades_summary fejl: {e}")
@@ -301,6 +329,8 @@ def _empty_summary() -> dict:
         "best_trade":  0.0,
         "worst_trade": 0.0,
         "open_count":  0,
+        "typer":       [],
+        "blandet":     False,
     }
 
 

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS events (
     source       TEXT    NOT NULL,
     event_type   TEXT    NOT NULL,
     ibkr_account TEXT,                       -- IBKR konto-nummer (kan være NULL for system-events)
+    paper        INTEGER,                    -- 1 = paper, 0 = LIVE. Se trades.paper.
     symbol       TEXT,
     payload_json TEXT    NOT NULL DEFAULT '{}'
 );
@@ -51,6 +52,14 @@ CREATE TABLE IF NOT EXISTS trades (
     account_id      TEXT    NOT NULL,            -- "soren", "iben"
     instance_id     TEXT    NOT NULL,            -- "workstation", "algoserver"
     ibkr_account    TEXT    NOT NULL,            -- "DUO509856" osv
+    -- 1 = paper, 0 = LIVE. Kommer fra den FORBINDELSE ordren gik igennem, ikke
+    -- fra maskinens identitet: paper og live skal kunne koere samtidig, saa
+    -- maskinen alene kan ikke afgoere hvad en given handel var.
+    --
+    -- ⚠ Uden denne kolonne ville live-resultater blive lagt oven i maanedsvis af
+    -- paper-handler i enhver statistik — win rate, P&L, top-lister — uden at
+    -- noget fejlede. Det er den slags fejl der ikke goer vroevl.
+    paper           INTEGER NOT NULL DEFAULT 1,
 
     -- Strategi
     source          TEXT    NOT NULL,            -- "Momentum ORB", "Konfluens", "manual"
@@ -119,3 +128,6 @@ CREATE TABLE IF NOT EXISTS dagsnoter (
     oprettet  TEXT NOT NULL,      -- ISO UTC
     aendret   TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_trades_paper ON trades(paper);
+CREATE INDEX IF NOT EXISTS idx_events_paper ON events(paper);

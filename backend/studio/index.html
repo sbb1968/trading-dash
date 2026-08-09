@@ -399,6 +399,26 @@
             background: #454545;
         }
 
+        .pill-live {
+            background: #b91c1c;
+            color: #fff;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
+        /* Tal der daekker baade paper og LIVE. Roed, fordi det ikke er en
+           finesse: det er to uforenelige ting lagt sammen. */
+        .blandet-advarsel {
+            background: rgba(185, 28, 28, 0.18);
+            border: 1px solid #b91c1c;
+            border-radius: 5px;
+            padding: 9px 12px;
+            margin-bottom: 14px;
+            color: #ffb4b4;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
         /* ── Journal: summary-strip ──────────────────────────── */
         .journal-summary-grid {
             display: grid;
@@ -2926,7 +2946,7 @@
                         <tr class="${rowClass}">
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}${multBadge(t.symbol, t.entry_price)}</td>
+                            <td><strong style="font-size:16px;">${t.symbol}</strong> ${sourcePill(t.source)}${livePill(t)}${multBadge(t.symbol, t.entry_price)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -3269,6 +3289,7 @@
                 source: "",      // tom = alle
                 symbol: "",      // tom = alle
                 status: "all",   // all | open | closed
+                handelstype: "", // "" = begge, "paper", "live"
             };
         }
 
@@ -3338,6 +3359,14 @@
                             <label for="f-status">Status</label>
                             <select id="f-status">${statusOptions}</select>
                         </div>
+                        <div class="filter-field">
+                            <label for="f-handelstype">Handelstype</label>
+                            <select id="f-handelstype">
+                                <option value=""${f.handelstype ? "" : " selected"}>Alle</option>
+                                <option value="paper"${f.handelstype === "paper" ? " selected" : ""}>Kun paper</option>
+                                <option value="live"${f.handelstype === "live" ? " selected" : ""}>Kun LIVE</option>
+                            </select>
+                        </div>
                         <div class="filter-field filter-actions">
                             <button id="f-apply" class="btn-primary">Anvend filtre</button>
                             <button id="f-reset" class="btn-secondary">Nulstil</button>
@@ -3381,6 +3410,7 @@
                 source:    document.getElementById("f-source").value,
                 symbol:    document.getElementById("f-symbol").value.toUpperCase().trim(),
                 status:    document.getElementById("f-status").value,
+                handelstype: document.getElementById("f-handelstype").value,
             };
             journalPage = 0;  // reset til side 1 når filtre ændres
             loadJournalData();
@@ -3401,6 +3431,7 @@
             if (f.source)    params.set("source",    f.source);
             if (f.symbol)    params.set("symbol",    f.symbol);
             if (f.status && f.status !== "all") params.set("status", f.status);
+            if (f.handelstype) params.set("handelstype", f.handelstype);
             params.set("limit",  JOURNAL_PAGE_SIZE);
             params.set("offset", journalPage * JOURNAL_PAGE_SIZE);
 
@@ -3427,6 +3458,13 @@
         // handlede 8/7 mens BuyTheDip gjorde, saa er 8/7 ingen tom dag. Regnede
         // vi huller ud fra de filtrerede raekker, ville man faa tilbudt at skrive
         // "ferie" paa en dag man sad og handlede.
+
+        // Kun LIVE faar et maerke. Paper er hverdagen og ville blot stoeje; en
+        // enkelt live-raekke i en liste af paper-handler er derimod praecis det
+        // man skal kunne se uden at lede efter det.
+        // Aeldre raekker har paper=null (foer kolonnen fandtes) — de er paper.
+        const livePill = (t) => (t && (t.paper === 0 || t.paper === false))
+            ? ` <span class="pill pill-live">LIVE</span>` : "";
 
         const DAGE_DK = ["sø", "ma", "ti", "on", "to", "fr", "lø"];
         let dagsnoteCache = {};   // dato -> note, saa Rediger kan udfylde feltet
@@ -3678,7 +3716,7 @@
                             <td>${date}</td>
                             <td>${entryTime}</td>
                             <td>${exitTime}</td>
-                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}${multBadge(t.symbol, t.entry_price)}</td>
+                            <td><strong style="font-size:15px; display:inline-block; min-width:52px;">${t.symbol}</strong>${sourcePill(t.source)}${livePill(t)}${multBadge(t.symbol, t.entry_price)}</td>
                             <td>${sidePill(t.side)}</td>
                             <td class="num">${t.shares}</td>
                             <td class="num">${fmtMoney(t.entry_price)}</td>
@@ -3700,8 +3738,20 @@
             const prevDisabled = journalPage === 0 ? "disabled" : "";
             const nextDisabled = (journalPage + 1) >= totalPages ? "disabled" : "";
 
+            // ⚠ Blander tallene paper og rigtige penge? Sig det. En win rate paa
+            // 58 % kan vaere seks paper-handler og to live — ét tal ud af to
+            // uforenelige ting, og INTET ville fejle.
+            const sum = data.summary || {};
+            const blandingsvarsel = sum.blandet ? `
+                <div class="blandet-advarsel">
+                    ⚠ Tallene herunder dækker BÅDE paper og LIVE
+                    (${(sum.typer || []).join(" + ")}). De må ikke lægges sammen —
+                    vælg handelstype i filtret for at se dem hver for sig.
+                </div>` : "";
+
             document.getElementById("journal-results").innerHTML = `
                 <div class="card journal-summary">
+                    ${blandingsvarsel}
                     <div class="journal-summary-grid">
                         <div>
                             <div class="stat-label">I alt fundet</div>

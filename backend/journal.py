@@ -43,6 +43,63 @@ logger = logging.getLogger(__name__)
 SCHEMA_PATH = Path(__file__).parent / "db_schema.sql"
 
 
+# ── Hvor paper/live-mærket kommer fra ────────────────────────────────────────
+# Ikke fra maskinens identitet. Paper og live skal kunne køre SAMTIDIG — algoerne
+# videre på paper mens der handles live manuelt — så maskinen alene kan ikke
+# afgøre hvad en given handel var. Kilden er den FORBINDELSE ordren gik igennem.
+#
+# main.py registrerer opslaget ved opstart (undgår cirkulær import: journal må
+# ikke kende strategy_manager). Er intet registreret, falder vi tilbage på
+# identity — korrekt i dag, hvor der kun findes én forbindelse.
+_konto_kilde = None
+
+
+def saet_konto_kilde(fn) -> None:
+    """fn() -> (ibkr_account: str, paper: bool). Sættes af main ved opstart."""
+    global _konto_kilde
+    _konto_kilde = fn
+
+
+def _paper_flag(ibkr_account: str | None, paper: bool | None) -> tuple[str, int]:
+    """Løs (konto, paper) og krydstjek dem mod hinanden.
+
+    ⚠ Krydstjekket er det eneste der kan fange at flaget og kontoen er uenige.
+    IBKR's paper-konti begynder med D (DU/DF), live-konti med U. Et 0/1-flag kan
+    ikke selv afsløre at det er forkert — men en live-konto stemplet som paper
+    ville lægge rigtige penge oven i paper-statistikken, og det ville ingen
+    opdage. Vi retter ikke automatisk: vi ved ikke hvilken af de to der lyver.
+    """
+    konto = ibkr_account
+    flag = paper
+
+    if (konto is None or flag is None) and _konto_kilde is not None:
+        try:
+            k, p = _konto_kilde()
+            if konto is None:
+                konto = k
+            if flag is None:
+                flag = p
+        except Exception as e:
+            logger.error(f"[Journal] Kunne ikke slå handelskonto op: {e}")
+
+    if konto is None:
+        konto = aktiv_konto()
+    if flag is None:
+        flag = identity.paper_trading
+
+    k = (konto or "").upper()
+    if k:
+        ligner_paper = k.startswith("D")
+        if ligner_paper != bool(flag):
+            logger.error(
+                f"[Journal] ⚠ KONTO OG PAPER-FLAG ER UENIGE: konto {k} "
+                f"{'ligner paper' if ligner_paper else 'ligner LIVE'}, men flaget "
+                f"siger {'paper' if flag else 'LIVE'}. Rækken skrives med flaget "
+                f"som angivet — undersøg hvilken af de to der er forkert.")
+
+    return konto, int(bool(flag))
+
+
 class Journal:
     """Tynd wrapper omkring aiosqlite — append-only event log."""
 
@@ -69,12 +126,27 @@ class Journal:
 
         # Idempotent migration: skema-ændringer rammer kun NYE db'er (CREATE
         # TABLE IF NOT EXISTS), så eksisterende db'er får nye kolonner her.
-        for col_ddl in ("current_price REAL",):
+        for col_ddl in ("current_price REAL", "paper INTEGER NOT NULL DEFAULT 1"):
             try:
                 await self._db.execute(f"ALTER TABLE trades ADD COLUMN {col_ddl}")
                 await self._db.commit()
             except Exception:
                 pass  # kolonnen findes allerede
+        for col_ddl in ("paper INTEGER",):
+            try:
+                await self._db.execute(f"ALTER TABLE events ADD COLUMN {col_ddl}")
+                await self._db.commit()
+            except Exception:
+                pass
+
+        # ⚠ Eksisterende rækker får paper=1 af DEFAULT. Det er korrekt for alt
+        # hvad der findes i dag — der er aldrig handlet live — men det er en
+        # ANTAGELSE, ikke en måling. Skulle den nogensinde være forkert, ville
+        # live-handler blive talt med som paper. Derfor krydstjekket i
+        # _paper_flag(): IBKR's paper-konti begynder med D, live med U.
+        await self._db.execute(
+            "UPDATE trades SET paper = 1 WHERE paper IS NULL")
+        await self._db.commit()
 
         logger.info(f"[Journal] Klar — db: {self.db_path}")
 
@@ -105,6 +177,7 @@ class Journal:
         payload:      Optional[dict] = None,
         symbol:       Optional[str]  = None,
         ibkr_account: Optional[str]  = None,
+        paper:        Optional[bool] = None,
     ) -> None:
         """
         Skriv ét event til journalen.
@@ -127,13 +200,14 @@ class Journal:
         try:
             now_utc   = datetime.now(timezone.utc)
             now_local = datetime.now().astimezone()
+            _konto, _paper = _paper_flag(ibkr_account, paper)
 
             await self._db.execute(
                 """
                 INSERT INTO events
                     (ts_utc, ts_local, account_id, instance_id, source, event_type,
-                     ibkr_account, symbol, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     ibkr_account, paper, symbol, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     now_utc.isoformat(),
@@ -142,7 +216,8 @@ class Journal:
                     identity.instance_role,
                     source,
                     event_type,
-                    ibkr_account or aktiv_konto(),
+                    _konto,
+                    _paper,
                     symbol,
                     json.dumps(payload or {}, default=str),
                 ),
@@ -206,7 +281,8 @@ class Journal:
 
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         sql = (
-            "SELECT ts_utc, ts_local, source, event_type, symbol, payload_json "
+            "SELECT ts_utc, ts_local, source, event_type, symbol, payload_json, "
+            "ibkr_account, COALESCE(paper, 1) AS paper "
             "FROM events" + where +
             " ORDER BY ts_utc ASC LIMIT ?"
         )
@@ -228,6 +304,10 @@ class Journal:
                         "event_type": r[3],
                         "symbol":     r[4],
                         "payload":    payload,
+                        # Forensikken skal kunne kende paper fra live uden at
+                        # gaette ud fra maskinen den blev skrevet paa.
+                        "ibkr_account": r[6],
+                        "paper":        bool(r[7]),
                     })
             return rows
         except Exception as e:
@@ -261,6 +341,7 @@ class Journal:
         current_target: Optional[float] = None,
         current_stage:  Optional[str]  = None,
         ibkr_account:   Optional[str]  = None,
+        paper:          Optional[bool] = None,
         notes:          Optional[str]  = None,
         payload:        Optional[dict] = None,
     ) -> Optional[str]:
@@ -278,6 +359,7 @@ class Journal:
             return None
 
         trade_id = str(uuid.uuid4())
+        _konto, _paper = _paper_flag(ibkr_account, paper)
 
         try:
             # Tidsstempler: hvis entry_time er tz-aware konverteres det;
@@ -293,7 +375,7 @@ class Journal:
             await self._db.execute(
                 """
                 INSERT INTO trades (
-                    trade_id, account_id, instance_id, ibkr_account,
+                    trade_id, account_id, instance_id, ibkr_account, paper,
                     source, variant,
                     symbol, side, shares,
                     entry_time_utc, entry_time_et, entry_price, entry_reason,
@@ -301,7 +383,7 @@ class Journal:
                     current_stop, current_target, current_stage,
                     notes, payload_json
                 )
-                VALUES (?, ?, ?, ?,
+                VALUES (?, ?, ?, ?, ?,
                         ?, ?,
                         ?, ?, ?,
                         ?, ?, ?, ?,
@@ -313,7 +395,8 @@ class Journal:
                     trade_id,
                     identity.account_id,
                     identity.instance_role,
-                    ibkr_account or aktiv_konto(),
+                    _konto,
+                    _paper,
                     source,
                     variant,
                     symbol,

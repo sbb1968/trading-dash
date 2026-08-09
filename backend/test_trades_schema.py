@@ -50,6 +50,10 @@ async def main():
         "pnl", "pnl_pct", "duration_sec", "capital_used",
         "current_stop", "current_target", "current_stage", "trail_stop",
         "notes", "payload_json", "current_price",
+        # 1 = paper, 0 = LIVE. Kommer fra den forbindelse ordren gik igennem —
+        # paper og live skal kunne koere samtidig, saa maskinens identitet kan
+        # ikke afgoere det. Se test_paper_live.py.
+        "paper",
     ]
     mangler = [k for k in FORVENTEDE if k not in navne]
     nye     = [k for k in navne if k not in FORVENTEDE]
