@@ -129,5 +129,8 @@ CREATE TABLE IF NOT EXISTS dagsnoter (
     aendret   TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_trades_paper ON trades(paper);
-CREATE INDEX IF NOT EXISTS idx_events_paper ON events(paper);
+-- ⚠ INDEKS PAA paper STAAR IKKE HER, MEN I journal.init() EFTER MIGRATIONEN.
+-- db_schema.sql koeres med executescript() FOER ALTER TABLE-migrationen. Paa en
+-- eksisterende database er CREATE TABLE IF NOT EXISTS en no-op, saa kolonnen
+-- findes ikke endnu, og et CREATE INDEX ... ON trades(paper) her faar backenden
+-- til at naegte at starte med "no such column: paper".

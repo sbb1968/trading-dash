@@ -148,6 +148,20 @@ class Journal:
             "UPDATE trades SET paper = 1 WHERE paper IS NULL")
         await self._db.commit()
 
+        # ⚠ INDEKSENE SKAL LIGGE HER, EFTER migrationen — ikke i db_schema.sql.
+        # Skemaet køres med executescript() FØR ALTER TABLE. På en eksisterende
+        # database er CREATE TABLE IF NOT EXISTS en no-op, så kolonnen findes
+        # ikke endnu, og backenden nægtede at starte med "no such column: paper".
+        # Ingen test fangede det, fordi alle tests opretter en FRISK database,
+        # hvor kolonnen er med fra CREATE TABLE. Se test_migration_paper.py.
+        for ddl in ("CREATE INDEX IF NOT EXISTS idx_trades_paper ON trades(paper)",
+                    "CREATE INDEX IF NOT EXISTS idx_events_paper ON events(paper)"):
+            try:
+                await self._db.execute(ddl)
+                await self._db.commit()
+            except Exception as e:
+                logger.error(f"[Journal] kunne ikke oprette indeks ({e}): {ddl}")
+
         logger.info(f"[Journal] Klar — db: {self.db_path}")
 
     async def close(self) -> None:
