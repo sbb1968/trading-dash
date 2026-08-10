@@ -112,7 +112,7 @@ async def hent(genforbind: bool = True) -> IBKRConnection:
     # ── V1: kontobekræftelse ────────────────────────────────────────────────
     styrede = [a.strip().upper() for a in (_forbindelse.ib.managedAccounts() or [])]
     if profil["konto"] not in styrede:
-        await _forbindelse.disconnect()
+        _forbindelse.disconnect()      # synkron — ikke await
         _forbindelse = None
         raise OrdreForbindelseFejl(
             f"⚠ FORKERT KONTO. Gatewayen på port {profil['port']} styrer "
@@ -124,7 +124,7 @@ async def hent(genforbind: bool = True) -> IBKRConnection:
     # virkeligheden der tjekkes.
     for k in styrede:
         if not k.startswith("D") and not profil.get("tillad_live"):
-            await _forbindelse.disconnect()
+            _forbindelse.disconnect()      # synkron — ikke await
             _forbindelse = None
             raise OrdreForbindelseFejl(
                 f"⚠ Gatewayen styrer en LIVE-konto ({k}) og tillad_live er ikke "
@@ -140,7 +140,7 @@ async def luk() -> None:
     global _forbindelse
     if _forbindelse is not None:
         try:
-            await _forbindelse.disconnect()
+            _forbindelse.disconnect()      # synkron — ikke await
         except Exception as e:
             logger.warning(f"[Ordre] kunne ikke lukke pænt: {e}")
         _forbindelse = None

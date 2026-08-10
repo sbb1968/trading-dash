@@ -100,7 +100,7 @@ async def hoved(args) -> int:
         trin(1, "kontoen findes i sessionen", False,
              f"{konto} er ikke blandt {styrede}")
         print(f"\n→ Gatewayen er ikke logget ind som den bruger der ejer {konto}.")
-        await ib.disconnectAsync()
+        ib.disconnect()          # ib_async: synkron, ikke disconnectAsync
         return 1
 
     # ── 2. reqAccountSummary ─────────────────────────────────────────────────
@@ -134,7 +134,7 @@ async def hoved(args) -> int:
     if not konto.startswith("D"):
         trin(4, "SIKKERHEDSPORT", False,
              f"{konto} ligner IKKE en paper-konto (D-præfiks) — sender INGEN ordre")
-        await ib.disconnectAsync()
+        ib.disconnect()          # ib_async: synkron, ikke disconnectAsync
         return 1
     print(f"     sikkerhedsport: {konto} er paper (D-præfiks) · "
           f"{args.antal} stk. · limit ${args.limit:.2f} — fylder ikke")
@@ -144,7 +144,7 @@ async def hoved(args) -> int:
         k = await asyncio.wait_for(ib.qualifyContractsAsync(kontrakt), timeout=20)
         if not k or not getattr(kontrakt, "conId", 0):
             trin(4, "qualifyContracts", False, f"{args.ticker} kunne ikke kvalificeres")
-            await ib.disconnectAsync()
+            ib.disconnect()          # ib_async: synkron, ikke disconnectAsync
             return 1
 
         ordre = LimitOrder("BUY", args.antal, args.limit)
@@ -175,7 +175,7 @@ async def hoved(args) -> int:
     except Exception as e:
         trin(4, "placeOrder/cancelOrder", False, f"{type(e).__name__}: {e}")
 
-    await ib.disconnectAsync()
+    ib.disconnect()          # ib_async: synkron, ikke disconnectAsync
     return 0
 
 
