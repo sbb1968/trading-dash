@@ -1098,3 +1098,37 @@ body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator:
   font-size: 11px;
   line-height: 1.4;
 }
+
+/* ── Ordrekvittering med konto ────────────────────────────────────────────
+   ⚠ Kontoen står ved siden af handlen, ikke kun i journalen. To backends lå
+   engang og lyttede på samme port, én med gammel kode — en ordre kunne da
+   lande på den forkerte konto uden at noget fejlede. Det er en driftsfælde
+   der kan opstå på enhver maskine med en glemt proces, og den skal være
+   synlig i samme sekund ordren sendes. */
+.ordre-kvittering {
+  margin: 2px 8px 4px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: var(--bull-muted);
+  border: 1px solid var(--bull);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ordre-kvittering.ordre-fejl {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: var(--bear);
+  color: var(--bear);
+}
+
+.ordre-konto {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+
+.ordre-vej { color: var(--text-muted); }
+
+/* Gik ordren gennem den DELTE forbindelse, er det værd at bemærke — på en
+   maskine med en separat ordre-Gateway betyder det at noget er galt. */
+.ordre-vej-delt { color: var(--neutral, #d9a441); font-weight: 700; }

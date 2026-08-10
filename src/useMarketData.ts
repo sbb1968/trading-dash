@@ -48,6 +48,13 @@ export interface IbkrOrderResult {
   filled?:  number;
   avg_fill?: number;
   error?:   string;
+  // ⚠ Hvilken konto og hvilken forbindelse ordren FAKTISK gik igennem. Vises i
+  // watchlisten, saa en ordre gennem den forkerte backend bliver synlig med det
+  // samme — ikke fundet i journalen bagefter, hvis nogen kigger.
+  konto?:       string | null;
+  forbindelse?: "ordre" | "delt";
+  port?:        number | null;
+  order_ref?:   string;
 }
 
 // ── Hook ──────────────────────────────────────────────────────

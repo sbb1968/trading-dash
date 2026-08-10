@@ -325,6 +325,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // KØB akkumulerer beholdning + vægtet gennemsnits-købspris; SÆLG reducerer (lukker
   // rækkens position når beholdning når 0). Gemmes i meta (localStorage) -> overlever
   // genstart; Aktuel pris + urealiseret P/L beregnes derefter live fra feedet.
+  // Kvitteringen bliver staaende i 20 sekunder. Kort nok til ikke at forveksles
+  // med naeste handel, langt nok til at man kan naa at laese kontoen.
+  const [sidsteOrdre, setSidsteOrdre] = useState<IbkrOrderResult | null>(null);
+  useEffect(() => {
+    if (!orderResult) return;
+    setSidsteOrdre(orderResult);
+    const t = window.setTimeout(() => setSidsteOrdre(null), 20_000);
+    return () => window.clearTimeout(t);
+  }, [orderResult]);
+
   const processedRef = useRef<IbkrOrderResult | null>(null);
   useEffect(() => {
     const r = orderResult;
@@ -549,6 +559,29 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>
         Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde) · <b>ALT+H</b> test halt-alarm
       </div>
+      {/* ⚠ ORDREKVITTERING MED KONTO. To backends laa engang og lyttede paa samme
+          port, én med gammel kode — en ordre kunne da lande paa den forkerte konto
+          uden at noget fejlede. Det er en driftsfaelde, ikke en kodefejl, og den
+          kan opstaa paa enhver maskine med en glemt proces. Derfor staar kontoen
+          her, ved siden af handlen, frem for kun i journalen. */}
+      {sidsteOrdre && (
+        <div className={sidsteOrdre.success ? "ordre-kvittering" : "ordre-kvittering ordre-fejl"}>
+          {sidsteOrdre.success ? (
+            <>
+              {sidsteOrdre.action === "BUY" ? "KØBT" : "SOLGT"}{" "}
+              <b>{sidsteOrdre.filled ?? sidsteOrdre.shares} {sidsteOrdre.ticker}</b>
+              {sidsteOrdre.avg_fill ? ` @ ${sidsteOrdre.avg_fill}` : ""}
+              {" · konto "}
+              <b className="ordre-konto">{sidsteOrdre.konto || "UKENDT"}</b>
+              {sidsteOrdre.forbindelse === "ordre"
+                ? <span className="ordre-vej"> · lokal ordre-Gateway{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
+                : <span className="ordre-vej ordre-vej-delt"> · ⚠ DELT forbindelse</span>}
+            </>
+          ) : (
+            <>⚠ {sidsteOrdre.action === "BUY" ? "Køb" : "Salg"} af {sidsteOrdre.ticker} fejlede: {sidsteOrdre.error}</>
+          )}
+        </div>
+      )}
       {haltedHeldTickers.length > 0 && (
         <div className="watchlist-halt-banner">
           ⛔ HALT — din åbne position er STOPPET på børsen: <b>{haltedHeldTickers.join(", ")}</b>

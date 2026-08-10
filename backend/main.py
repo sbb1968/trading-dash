@@ -838,6 +838,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     "status":  result.get("status"),
                     "filled":  result.get("filled"),
                     "avg_fill": result.get("avg_fill"),
+                    # ⚠ HVILKEN KONTO OG HVILKEN FORBINDELSE. Vises i UI'et, saa en
+                    # ordre gennem den forkerte backend bliver synlig i SAMME
+                    # sekund den sendes — ikke fundet i journalen bagefter, hvis
+                    # nogen kigger.
+                    #
+                    # Anledningen: to backends laa og lyttede paa port 8000, én med
+                    # gammel kode uden ordre_forbindelse. Windows tillader begge
+                    # bindinger, saa intet fejlede — og udfaldet ville have vaeret
+                    # en ordre paa den forkerte konto, tavst og tilsyneladende
+                    # tilfaeldigt. Det er en driftsfaelde, ikke en kodefejl, og den
+                    # kan opstaa paa enhver maskine med en glemt proces.
+                    "konto":        getattr(ibkr, "account", "") or None,
+                    "forbindelse":  ("ordre" if ordre_forbindelse.konfigureret()
+                                     else "delt"),
+                    "port":         getattr(ibkr, "port", None),
+                    "order_ref":    result.get("order_ref"),
                 }))
 
                 # Registrer i orders tracker så ordrer-vinduet kan vise den
@@ -4761,14 +4777,42 @@ def _best_snapshot_price(snap: dict):
 async def quote(ticker: str):
     """Sidste/aktuelle kurs for ÉN ticker (til Watchlist 'Pris ved tilføj'). Ingen auth —
     kun en kurs. price=None hvis IBKR ikke er forbundet eller ingen kurs kan hentes."""
+    tkr = ticker.upper()
     conn = strategy_manager.get_ibkr()
-    if conn is None or not getattr(conn, "connected", False):
-        return {"ticker": ticker.upper(), "price": None, "connected": False}
-    try:
-        snap = await asyncio.wait_for(conn.get_snapshot(ticker.upper()), timeout=3.0)
-    except Exception:
-        snap = None
-    return {"ticker": ticker.upper(), "price": _best_snapshot_price(snap), "connected": True}
+    if conn is not None and getattr(conn, "connected", False):
+        try:
+            snap = await asyncio.wait_for(conn.get_snapshot(tkr), timeout=3.0)
+        except Exception:
+            snap = None
+        pris = _best_snapshot_price(snap)
+        if pris:
+            return {"ticker": tkr, "price": pris, "connected": True, "kilde": "lokal"}
+
+    # ⚠ KURSER KOMMER FRA DEN LAESENDE FORBINDELSE — og den behoever ikke vaere her.
+    #
+    # I to-forbindelses-opsaetningen har DENNE maskine kun en ordre-Gateway, som
+    # med vilje aldrig beder om markedsdata (det var netop dét der udloeste
+    # sessionskonflikten). Abonnementet ligger paa algoserveren.
+    #
+    # Uden dette fald tilbage ville watchlisten ikke kunne prissaette en ticker,
+    # og frontenden spaerrer en ordre den ikke kan prissaette — saa en maskine der
+    # KAN handle ville se ud som om den ikke kunne.
+    maal = (identity.replication_target_url or "").rstrip("/")
+    if maal and identity.instance_role != "algoserver":
+        try:
+            async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=6)) as s_:
+                async with s_.get(f"{maal}/quote/{tkr}",
+                                  headers={"X-Internal-Key": identity.internal_key}) as r:
+                    if r.status == 200:
+                        d = await r.json()
+                        if d.get("price"):
+                            return {"ticker": tkr, "price": d["price"],
+                                    "connected": True, "kilde": "algoserver"}
+        except Exception as e:
+            logger.debug(f"/quote/{tkr}: algoserveren svarede ikke ({e})")
+
+    return {"ticker": tkr, "price": None, "connected": False, "kilde": None}
 
 
 @app.get("/account/snapshot", dependencies=[Depends(require_studio_auth)])
@@ -5145,7 +5189,10 @@ async def account_dash_snapshot():
 
         return {
             "ok":                   True,
-            "ibkr_account":         aktiv_konto(),
+            # Kontoen er DEN forbindelses, ikke maskinens standardvalg. Handles
+            # der gennem ordre-Gatewayen, er det dens konto vinduet skal vise.
+            "ibkr_account":         (getattr(conn, "account", "") or aktiv_konto()),
+            "forbindelse":          "ordre" if via_ordre else "delt",
             "paper_trading":        identity.paper_trading,
             "net_liquidation":      summary["net_liquidation"],
             "cash_balance":         summary["cash_balance"],

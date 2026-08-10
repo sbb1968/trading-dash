@@ -110,7 +110,9 @@ ikke bevist — den er håbet.
 
 | # | Handling | Verificér | ☐ |
 |---|---|---|---|
-| T0 | `python algoserver_vagt.py --gem` | Udgangspunkt gemt (exit 0) | ☐ |
+| T0a | `python port_tjek.py` | ⚠ **Præcis ÉN lytter** på 8000. Flere = STOP | ☐ |
+| T0b | `python port_tjek.py --port 4002` | Præcis én Gateway | ☐ |
+| T0c | `python algoserver_vagt.py --gem` | Udgangspunkt gemt (exit 0) | ☐ |
 | T1 | Gateway startet, API forbinder | Forbindelsen kommer op. **Notér om der kommer nogen konfliktbesked overhovedet** | ☐ |
 | ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ exit 0. Andet = STOP | ☐ |
 | T2 | `reqAccountSummary` | Svarer, og kontoen er den rigtige | ☐ |
@@ -125,6 +127,25 @@ ikke bevist — den er håbet.
 | T9 | Luk positionen | Fill modtaget | ☐ |
 | T10 | Fladkontrol | Ingen position tilbage | ☐ |
 | ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ sidste kontrol | ☐ |
+
+⚠ **T0a er ikke en formalitet.** Under den første kørsel lå der **to** backends
+på port 8000 — én fra 13:39 med gammel kode på `0.0.0.0`, én ny på `127.0.0.1`.
+Windows tillader begge bindinger, så **ingenting fejlede**. En ordre kunne have
+ramt den gamle, som ikke havde `ordre_forbindelse`, og dermed være landet på den
+forkerte konto — tavst og tilsyneladende tilfældigt.
+
+Det er en **driftsfælde, ikke en kodefejl**, og den kan opstå på enhver maskine
+med en glemt proces. Derfor står den som eget trin.
+
+⚠ **T4 og T6 viser nu kontoen i grænsefladen.** Kvitteringen i watchlisten
+skriver hvilken konto og hvilken forbindelse ordren gik igennem:
+
+```
+KØBT 1 MES @ 7776 · konto DUQ441063 · lokal ordre-Gateway :4002
+```
+
+Står der **⚠ DELT forbindelse** på en maskine der har en ordre-Gateway, er noget
+galt — og det ses i samme sekund ordren sendes, ikke i journalen bagefter.
 
 ⚠ **T7 er testens kerne.** Det er ikke nok at ordren blev fyldt — den skal
 beviseligt være landet i den rigtige konto og beviseligt ikke i den forkerte. En
