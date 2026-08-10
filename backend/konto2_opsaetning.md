@@ -112,11 +112,11 @@ ikke bevist — den er håbet.
 |---|---|---|---|
 | T0 | `python algoserver_vagt.py --gem` | Udgangspunkt gemt (exit 0) | ☐ |
 | T1 | Gateway startet, API forbinder | Forbindelsen kommer op. **Notér om der kommer nogen konfliktbesked overhovedet** | ☐ |
-| ↳ | `python algoserver_vagt.py` | ⚠ exit 0. Andet = STOP | ☐ |
+| ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ exit 0. Andet = STOP | ☐ |
 | T2 | `reqAccountSummary` | Svarer, og kontoen er den rigtige | ☐ |
-| ↳ | `python algoserver_vagt.py` | ⚠ exit 0. Andet = STOP | ☐ |
+| ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ exit 0. Andet = STOP | ☐ |
 | T3 | `reqPositions` | Svarer uden fejl (tomt svar = flad konto, ikke fejl) | ☐ |
-| ↳ | `python algoserver_vagt.py` | ⚠ exit 0. Andet = STOP | ☐ |
+| ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ exit 0. Andet = STOP | ☐ |
 | T4 | Limitordre MES, 1 stk., pris langt fra markedet | Accepteres. `orderRef` = `manuel:…`, konto korrekt | ☐ |
 | T5 | Annullér T4 | Annulleringen bekræftes | ☐ |
 | T6 | Marketable ordre, MES, 1 stk. | **Fill modtaget** | ☐ |
@@ -124,7 +124,7 @@ ikke bevist — den er håbet.
 | T8 | Journalkontrol | Rækken har korrekt konto, `paper`-flag og `orderRef` | ☐ |
 | T9 | Luk positionen | Fill modtaget | ☐ |
 | T10 | Fladkontrol | Ingen position tilbage | ☐ |
-| ↳ | `python algoserver_vagt.py` | ⚠ sidste kontrol | ☐ |
+| ↳ | `python algoserver_vagt.py --i-vindue` | ⚠ sidste kontrol | ☐ |
 
 ⚠ **T7 er testens kerne.** Det er ikke nok at ordren blev fyldt — den skal
 beviseligt være landet i den rigtige konto og beviseligt ikke i den forkerte. En
@@ -167,9 +167,15 @@ mister ingenting ved at ligge dér.
 ### 8.3 Afbrydelsesreglen — en kommando, ikke en huskeregel
 
 ```bash
-python algoserver_vagt.py --gem     # FØR T1: gem udgangspunktet
-python algoserver_vagt.py           # efter T1, T2, T3 — og efter T10
+python algoserver_vagt.py --gem                 # FØR T1: gem udgangspunktet
+python algoserver_vagt.py --i-vindue            # efter T1, T2, T3 — og efter T10
 ```
+
+⚠ **`--i-vindue` hører til vinduet 08:00–14:00**, hvor strategierne ikke handler.
+Da tæller et ændret positionstal med som stopsignal. Kører du uden for vinduet,
+så udelad flaget — ellers råber vagten ved hver eneste handel, og *en vagt der
+råber hele tiden, lærer man at se forbi på en time.* Mistet forbindelse, stoppet
+algo og skiftet konto stopper altid, uanset flaget.
 
 | Exit | Betyder |
 |---|---|

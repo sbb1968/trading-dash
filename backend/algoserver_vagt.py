@@ -77,6 +77,9 @@ def main() -> int:
                     help="algoserverens base-URL (default: replication.target_url)")
     ap.add_argument("--gem", action="store_true",
                     help="gem denne maaling som udgangspunkt (koeres FOER T1)")
+    ap.add_argument("--i-vindue", dest="i_vindue", action="store_true",
+                    help="testvinduet 08:00-14:00 dansk, hvor strategierne IKKE "
+                         "handler: da er et aendret positionstal ogsaa et stopsignal")
     args = ap.parse_args()
 
     if not args.url:
@@ -110,10 +113,16 @@ def main() -> int:
         print("  Stop testen og find ud af hvorfor foer du fortsaetter.")
         return 2
 
-    # ⚠ Kun det der betyder noget for afbrydelsesreglen. Positionstallet aendrer
-    # sig lovligt naar strategierne handler — men i test-vinduet 08:00-14:00 goer
-    # de ikke, saa en aendring dér er ogsaa et signal.
-    afvig = []
+    # ⚠ TO SLAGS AENDRINGER, OG DE MAA IKKE BLANDES SAMMEN.
+    #
+    # Mistet forbindelse, stoppet algo og skiftet konto er ALTID stopsignaler.
+    #
+    # Positionstallet er det ikke. Handler strategierne, aendrer det sig lovligt
+    # hvert par minutter — og en vagt der raaber ved hver eneste handel, laerer
+    # man at se forbi paa en time. Netop derfor ligger testvinduet 08:00-14:00
+    # dansk, hvor strategierne IKKE handler; dér ER en aendring et signal, og saa
+    # saettes --i-vindue.
+    afvig, bemaerk = [], []
     if foer.get("forbundet") and not nu.get("forbundet"):
         afvig.append("IBKR-forbindelsen er VAEK")
     if foer.get("algo_running") and not nu.get("algo_running"):
@@ -121,7 +130,8 @@ def main() -> int:
     if foer.get("konto") != nu.get("konto"):
         afvig.append(f"kontoen er skiftet: {foer.get('konto')} -> {nu.get('konto')}")
     if foer.get("positioner") != nu.get("positioner"):
-        afvig.append(f"antal positioner: {foer.get('positioner')} -> {nu.get('positioner')}")
+        _t = f"antal positioner: {foer.get('positioner')} -> {nu.get('positioner')}"
+        (afvig if args.i_vindue else bemaerk).append(_t)
 
     if afvig:
         print("\n⚠⚠ AENDRET — STOP TESTEN NU")
@@ -133,7 +143,11 @@ def main() -> int:
         print("  Fortsaet IKKE for at se om det var et tilfaelde.")
         return 1
 
-    print("\n  Uaendret — fortsaet.")
+    for b_ in bemaerk:
+        print(f"\n  (bemaerk: {b_}")
+        print(f"   — forventet naar strategierne handler. Koerer du i vinduet")
+        print(f"   08:00-14:00, saet --i-vindue, saa taeller det med som stopsignal.)")
+    print("\n  Ingen stopsignaler — fortsaet.")
     return 0
 
 
