@@ -56,8 +56,12 @@ import json
 import statistics
 import sys
 from collections import defaultdict
+
+import pytz
+
+_ET_TZ = pytz.timezone("America/New_York")
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 from nyse_kalender import (er_halv_dag, er_handelsdag, forventede_rth_minutter,
@@ -121,8 +125,23 @@ class Fuldstaendighed:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Indlaesning
 # ═══════════════════════════════════════════════════════════════════════════════
-def laes_tider(sti: Path, kolonne: str = "timestamp") -> list[datetime]:
-    """Laes tidsstempler fra en CSV. Naive stempler antages allerede at vaere ET."""
+def laes_tider(sti: Path, kolonne: str = "timestamp",
+               stempler: str = "et") -> list[datetime]:
+    """Laes tidsstempler fra en CSV og returnér dem i ET.
+
+    ⚠ DE TO DATASAET BRUGER FORSKELLIG KONVENTION. data_harvest/ skriver ET
+    (harvest_futures_1min gemmer b["et"]), mens vol_cache/ skriver UTC —
+    SPY's foerste bar staar som 13:30 om sommeren og 14:30 om vinteren, begge
+    09:30 ET. Antager man ET paa vol_cache, rammer RTH-vinduet 09:30-16:00 kun
+    13:30-16:00 (150 barer) henholdsvis 14:30-16:00 (90 barer), og B2 melder
+    "aarsmedianen skifter 90 -> 150" som om sessionsdefinitionen var aendret.
+    Det er sommertidsskiftet, ikke markedet — en falsk alarm der ligner det
+    allerfarligste fund kontrollen kan lave.
+
+    `stempler`: "et" (default, bevarer opfoerslen for data_harvest) eller "utc".
+    """
+    if stempler not in ("et", "utc"):
+        raise ValueError(f"stempler skal vaere 'et' eller 'utc', ikke {stempler!r}")
     ud: list[datetime] = []
     with sti.open(newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
@@ -131,6 +150,13 @@ def laes_tider(sti: Path, kolonne: str = "timestamp") -> list[datetime]:
                 dt = datetime.fromisoformat(str(raa).strip())
             except ValueError:
                 continue
+            if stempler == "utc":
+                # pytz haandterer sommertid pr. dato — en fast forskydning ville
+                # vaere forkert halvdelen af aaret, og netop paa de dage hvor
+                # skiftet sker, ville den flytte en session en time.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.astimezone(_ET_TZ)
             ud.append(dt.replace(tzinfo=None) if dt.tzinfo else dt)
     ud.sort()
     return ud
@@ -177,6 +203,53 @@ def forventede_barer(d: date, vindue: tuple[time, time],
 # ═══════════════════════════════════════════════════════════════════════════════
 # B2 — konstant barantal pr. session
 # ═══════════════════════════════════════════════════════════════════════════════
+def vinduets_daekning(tider, vindue: tuple[time, time], navn: str = "serie",
+                      graense: float = 0.90) -> dict:
+    """Fylder vinduet? Forudsaetningen for enhver tid-paa-dagen-profil.
+
+    ⚠ DENNE VAGT ER SVARET PAA EN FALSK ALARM VI FAKTISK FIK. Foerste koersel af
+    B2 paa 1-min-saettet meldte "aarsmedianen skifter 90 -> 150" for baade SPY og
+    IWM — hvilket ligner det allerfarligste fund kontrollen kan lave: at
+    sessionsdefinitionen har aendret sig midt i historikken. Det var sommertid.
+    vol_cache gemmer UTC, vinduet er ET, og overlappet mellem [09:30,16:00] og en
+    session der staar 13:30-20:00 om sommeren og 14:30-21:00 om vinteren er
+    netop 150 og 90 minutter.
+
+    B2 kunne ikke se det, fordi den kun spoerger om tallet er KONSTANT — ikke om
+    det er RIGTIGT. Et konstant forkert tal ville have passeret i tavshed.
+
+    Denne kontrol spoerger det andet: rummer vinduet det antal barer det er langt
+    nok til? Er svaret nej, er forudsaetningen brudt uanset aarsagen — forkert
+    tidszone, forkert vindue eller huller — og profilen maa ikke bygges paa det.
+    """
+    minutter = ((vindue[1].hour * 60 + vindue[1].minute)
+                - (vindue[0].hour * 60 + vindue[0].minute))
+    n_pr_dag = _pr_session(tider, vindue)
+    if not n_pr_dag:
+        return {"navn": navn, "ok": False, "median": 0, "vindue_min": minutter,
+                "grad": 0.0,
+                "besked": f"{navn}: NUL barer i {vindue[0]}-{vindue[1]} — "
+                          f"forkert vindue eller forkert tidszone"}
+
+    # Medianen af de TRAVLESTE dage: halve handelsdage og datahuller skal ikke
+    # traekke gennemsnittet ned og skjule en tidszonefejl bag "der mangler nok
+    # bare noget data".
+    v = sorted(n_pr_dag.values())
+    top = v[len(v) // 2:]                      # oeverste halvdel
+    median_travl = top[len(top) // 2]
+    grad = median_travl / minutter if minutter else 0.0
+    ok = grad >= graense
+    return {
+        "navn": navn, "ok": ok, "median": median_travl, "vindue_min": minutter,
+        "grad": round(grad, 3),
+        "besked": None if ok else (
+            f"{navn}: en fuld dag giver {median_travl} barer i et vindue paa "
+            f"{minutter} minutter ({grad:.0%}). Vinduet er ikke fyldt — tjek "
+            f"tidszonen paa tidsstemplerne (vol_cache er UTC, data_harvest er ET) "
+            f"foer du bygger noget paa det."),
+    }
+
+
 def tjek_konstant_barantal(tider, vindue: tuple[time, time] = RTH_VINDUE,
                            navn: str = "serie", rejs: bool = True,
                            marked: str = "aktier",
@@ -409,6 +482,8 @@ def main() -> int:
                     help="futures = CME equity-index (halve dage lukker 13:15, ikke 13:00)")
     ap.add_argument("--barer-pr-session", dest="barer_pr_session", type=int, default=None,
                     help="fast antal barer pr. handelsdag (brug 1 til DAGSSERIER)")
+    ap.add_argument("--stempler", default="et", choices=["et", "utc"],
+                    help="tidszone paa CSV-tidsstemplerne: data_harvest=et, vol_cache=utc")
     ap.add_argument("--streng", action="store_true",
                     help="afslut med fejlkode hvis B2 finder brud")
     args = ap.parse_args()
@@ -425,11 +500,19 @@ def main() -> int:
         print(f"Ingen filer matcher {mappe}/{args.moenster}")
         return 2
 
-    rapporter, b2 = [], []
+    rapporter, b2, daekning = [], [], []
     for f in filer:
-        tider = laes_tider(f)
+        tider = laes_tider(f, stempler=args.stempler)
         navn = f.stem
         print(f"[{navn}] {len(tider)} barer …")
+        if vindue is not None and args.barer_pr_session != 1:
+            d = vinduets_daekning(tider, vindue, navn)
+            daekning.append(d)
+            if not d["ok"]:
+                print(f"   !! {d['besked']}")
+            else:
+                print(f"   vinduet fyldt: {d['median']}/{d['vindue_min']} barer "
+                      f"({d['grad']:.0%}) paa en fuld dag")
         r = fuldstaendighedsrevision(tider, navn=navn, vindue=vindue,
                                      marked=args.marked,
                                      forventede_pr_session=args.barer_pr_session)
@@ -460,6 +543,13 @@ def main() -> int:
         ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nSkrevet: {ud}\n         {ud.with_suffix('.json')}")
 
+    # Daekningsvagten foerst: er vinduet ikke fyldt, er B2's dom om KONSTANS
+    # ligegyldig — den ville bare vaere konstant forkert.
+    if any(not d["ok"] for d in daekning):
+        print("\n⚠ Vinduet er ikke fyldt — se ovenfor. B2's resultat kan ikke "
+              "bruges foer det er i orden.")
+        if args.streng:
+            return 1
     if args.streng and any(not b["ok"] for b in b2):
         print("\nB2 fandt strukturbrud — se rapporten.")
         return 1
