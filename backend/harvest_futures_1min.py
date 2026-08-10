@@ -138,10 +138,22 @@ def write_csv(path: Path, by_ts: dict) -> None:
 
 
 def expected_trading_days(s0: datecls, s1: datecls) -> list:
-    """Man-fre i [s0, s1] (grov: helligdage ignoreres — CME-lukkedage giver bare tomme dage)."""
+    """Handelsdage i [s0, s1] — helligdage UDELADT.
+
+    ⚠ Foer brugte denne bare man-fre, og saa stod hver helligdag i "mangler"-
+    listen. Langfredag 2025-04-18 blev flaget som manglende i RTY-hoesten, selv om
+    boersen var lukket. En liste der rutinemaessigt tager fejl, laerer man at se
+    forbi — og saa er den ubrugelig den dag der VIRKELIG mangler en dag.
+
+    CME's equity-index-futures foelger NYSE's helligdage taet nok til formaalet.
+    Undtagelserne (halv dag lukker 13:15 ikke 13:00; langfredag med jobrapport
+    aabner et kort vindue) handler om TIDSPUNKTER paa en dag der findes, ikke om
+    hvorvidt dagen findes.
+    """
+    from nyse_kalender import er_handelsdag
     out, d = [], s0
     while d <= s1:
-        if d.weekday() < 5:
+        if er_handelsdag(d):
             out.append(d)
         d += timedelta(days=1)
     return out

@@ -64,6 +64,7 @@ import pytz
 
 import vol_lag1 as l1
 import vol_percentil as vp
+import vol_serier as vs
 from nyse_kalender import handelsdage
 
 ET = pytz.timezone("America/New_York")
@@ -92,10 +93,11 @@ TYPISK_VINDUE = 20
 #     percentil af range/luk            +0,6239   ← percentilering koster 0,012
 #     percentil af range/typisk range   +0,2431   ← normaliseringen koster 0,38
 #
-# ⚠ Standarden ændres IKKE her. Specen erklærer i §2 at "K2 er benchmarken selv";
-# det er den ikke som skrevet, og den modsigelse hører til i v2.2 frem for at
-# blive rettet stiltiende efter at resultatet er set.
-NORMALISERING = "typisk_range"
+# ⚠ RETTET I v2.2. Specens §2 erklærede at "K2 er benchmarken selv"; det var den
+# ikke som skrevet, og forskellen kostede 0,38. Divisionen med typisk range er
+# derfor ude: den fjerner den skala målet lever på. Rettelsen skete i v2.2 efter
+# en eksplicit beslutning — ikke stiltiende, da resultatet forelå.
+NORMALISERING = "forrige_luk"
 
 # Klassegrænser. ⚠ SAT MOD DEN MÅLTE FORDELING, FØR DEN PRÆDIKTIVE TEST BLEV
 # KØRT FØRSTE GANG (spec §7 punkt 5). Rækkefølgen er hele pointen: at vælge
@@ -123,49 +125,13 @@ class Lag2Fejl(Exception):
 # RTH-dage udledt af 1-min-sættet
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@dataclass(frozen=True)
-class RTHDag:
-    dag: dt.date
-    aabning: float      # 09:30-baren
-    hoej: float
-    lav: float
-    luk: float
-
-    @property
-    def range_(self) -> float:
-        return self.hoej - self.lav
+# RTH-OHLC kommer fra vol_serier.laes_1min_rth — ÉT sted, saa tidszonen og
+# sessionsskaeringen ikke skal huskes i hver beregning (spec v2.2 §5.3).
+RTHDag = vs.RTHDag
 
 
-def laes_rth(instrument: str = INSTRUMENT) -> dict[dt.date, RTHDag]:
-    """RTH-OHLC pr. dag, udledt af 1-min-sættet.
-
-    ⚠ Tidsstemplerne i vol_cache er UTC. Læses de som ET, forskydes hele dagen —
-    det var netop den fejl der fik B2 til at melde falsk strukturbrud på SPY og
-    IWM (se sessions_revision.laes_tider)."""
-    sti = CACHE / f"{instrument}_1min.csv"
-    if not sti.exists():
-        raise Lag2Fejl(f"{sti} findes ikke — kør vol_harvest.py --hvad 1min")
-
-    ud: dict[dt.date, list] = {}
-    with sti.open(encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            u = dt.datetime.fromisoformat(r["timestamp"]).replace(tzinfo=dt.timezone.utc)
-            e = u.astimezone(ET)
-            d = e.date()
-            o, h, l, c = (float(r["open"]), float(r["high"]),
-                          float(r["low"]), float(r["close"]))
-            v = ud.get(d)
-            if v is None:
-                ud[d] = [e, o, h, l, c]
-            else:
-                if h > v[2]:
-                    v[2] = h
-                if l < v[3]:
-                    v[3] = l
-                v[4] = c
-                if e < v[0]:
-                    v[0], v[1] = e, o
-    return {d: RTHDag(d, v[1], v[2], v[3], v[4]) for d, v in ud.items()}
+def laes_rth(instrument: str = INSTRUMENT):
+    return vs.laes_1min_rth(instrument)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

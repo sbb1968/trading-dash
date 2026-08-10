@@ -648,7 +648,15 @@ async def koer(args, emit) -> int:
     # ── Afkortnings-tjek FOER manifestet skrives ──────────────────────────────
     afkortede = []
     for (s, bar), post in zip(valgte, poster):
-        grund = for_kort(post, s["forvent_fra"],
+        # ⚠ 1-min maales mod INTRADAG_START, ikke mod seriens forvent_fra.
+        # forvent_fra er hvornaar DAGSDATA findes (2009). 1-min-hoesten sigter
+        # bevidst kun mod 2012, saa afstanden mellem de to er en KONSTANT — og
+        # kontrollen meldte derfor AFKORTET paa hver eneste 1-min-serie, hver
+        # gang, uanset data. En alarm der fyrer altid baerer nul information og
+        # oedelaegger vaerdien af alarmerne omkring sig: man laerer at se forbi
+        # det roede felt, og saa overses den dag det betyder noget.
+        forvent = INTRADAG_START if bar == "1 min" else s["forvent_fra"]
+        grund = for_kort(post, forvent,
                          MIN_DAGSBARER_PR_AAR if bar == "1 day" else None)
         if grund:
             post["advarsel"] = grund

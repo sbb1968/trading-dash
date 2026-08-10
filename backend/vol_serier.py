@@ -42,7 +42,7 @@ from __future__ import annotations
 import csv
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from nyse_kalender import er_handelsdag, handelsdage
@@ -197,3 +197,96 @@ def tilstoedende(raekker: list[Raekke], navn: str) -> list[tuple[date, float]]:
     er man tilbage ved positionssammenstilling, og L1's fejl er genopstaaet.
     """
     return [(r.dag, r.vaerdier[navn]) for r in raekker if r.har(navn)]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1-min-serier — RTH-skaaret ÉT sted
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⚠ TO FALDGRUBER DER BEGGE ER RAMT I PRAKSIS, OG SOM BEGGE HOERER TIL HER FREM
+# FOR I HVER BEREGNING DER TILFAELDIGVIS HUSKER DEM.
+#
+# 1) TIDSZONEN. vol_cache gemmer UTC (SPY's foerste bar staar 13:30 om sommeren
+#    og 14:30 om vinteren, begge 09:30 ET), mens data_harvest gemmer ET. Laeses
+#    vol_cache som ET, forskydes hele dagen — det fik sessions_revision til at
+#    melde falsk strukturbrud paa baade SPY og IWM.
+#
+# 2) SESSIONEN. useRTH=True betyder ikke det samme for et CBOE-indeks som for en
+#    ETF. VIX har 765 barer om dagen mod SPY's 390, fordi indekset beregnes fra
+#    03:15 ET. Stilles serierne op ved siden af hinanden uden skaering, daekker
+#    "en dag" for VIX naesten dobbelt saa meget kalendertid som for SPY, og
+#    enhver sammenligning er skaev uden at noget fejler.
+#
+# Skaeringen er derfor ubetinget: ALLE instrumenter skaeres til aktiesessionen.
+# Det er en no-op for SPY og IWM (de ER 09:30-16:00) og det rigtige for VIX.
+
+RTH_START = (9, 30)
+RTH_SLUT = (16, 0)
+
+
+@dataclass(frozen=True)
+class RTHDag:
+    """Én handelsdags RTH-OHLC, udledt af 1-min-barer."""
+    dag: date
+    aabning: float          # foerste bar i vinduet
+    hoej: float
+    lav: float
+    luk: float              # sidste bar i vinduet
+
+    @property
+    def range_(self) -> float:
+        return self.hoej - self.lav
+
+
+def laes_1min_rth(instrument: str, mappe: Path | None = None) -> dict[date, RTHDag]:
+    """RTH-OHLC pr. dag for ét instrument, udledt af dets 1-min-serie.
+
+    Tidsstempler laeses som UTC og konverteres til ET; kun barer i
+    [09:30, 16:00) taeller med. Halvaabent interval: 16:00-baren hoerer til
+    naeste vindue, ikke dette.
+    """
+    import pytz
+    ET = pytz.timezone("America/New_York")
+    mappe = mappe or CACHE
+    p = mappe / f"{instrument}_1min.csv"
+    if not p.exists():
+        raise Sammenstillingsfejl(f"serien findes ikke: {p}")
+
+    t0 = RTH_START[0] * 60 + RTH_START[1]
+    t1 = RTH_SLUT[0] * 60 + RTH_SLUT[1]
+
+    ud: dict[date, list] = {}
+    with p.open(newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            try:
+                u = datetime.fromisoformat(r["timestamp"])
+            except ValueError:
+                continue
+            if u.tzinfo is None:
+                u = u.replace(tzinfo=timezone.utc)
+            e = u.astimezone(ET)
+            m = e.hour * 60 + e.minute
+            if not (t0 <= m < t1):
+                continue
+            try:
+                o, h, l, c = (float(r["open"]), float(r["high"]),
+                              float(r["low"]), float(r["close"]))
+            except (ValueError, KeyError):
+                continue
+            d = e.date()
+            v = ud.get(d)
+            if v is None:
+                ud[d] = [e, o, h, l, e, c]     # [tidligst, open, hoej, lav, senest, close]
+            else:
+                if h > v[2]:
+                    v[2] = h
+                if l < v[3]:
+                    v[3] = l
+                if e < v[0]:
+                    v[0], v[1] = e, o
+                if e > v[4]:
+                    v[4], v[5] = e, c
+    if not ud:
+        raise Sammenstillingsfejl(
+            f"{p.name}: ingen barer i {RTH_START[0]:02d}:{RTH_START[1]:02d}-"
+            f"{RTH_SLUT[0]:02d}:{RTH_SLUT[1]:02d} ET — forkert vindue eller tidszone?")
+    return {d: RTHDag(d, v[1], v[2], v[3], v[5]) for d, v in ud.items()}

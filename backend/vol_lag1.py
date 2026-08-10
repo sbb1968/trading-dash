@@ -93,6 +93,27 @@ class Lag1Dag:
 def log_afkast(serie: dict[date, float]) -> dict[date, float]:
     """Daglige log-afkast. Foerste dag har intet afkast og udelades.
 
+    ⚠ LOGNOTAT (spec v2.2 §5.2) — ETH kontra RTH, kontrolleret 2026-08-10.
+    Dagsserien i vol_cache er hentet med useRTH=False, saa `close` er lukket
+    20:00 ET (efter eftermarkedet), ikke 16:00. Spoergsmaalet var om lag 1's
+    realiserede vol dermed er bygget paa noget andet end den maaler.
+
+    Svaret er nej, af to grunde:
+      1. Komponenten er LUK-TIL-LUK, ikke range. ETH flytter hvilket luk der
+         bruges, men serien er intern konsistent — luk er luk.
+      2. Maalet i vol_lag1_test bruger de SAMME funktioner paa den SAMME serie
+         (vs.laes_serie("SPY") -> log_afkast -> realiseret_vol). Komponent og
+         maal kan altsaa ikke vaere uenige om definitionen.
+
+    Maalt: rv20 paa ETH-luk mod rv20 paa RTH-luk (udledt af 1-min-saettet) har
+    Spearman +0,974 over 3.648 dage. Medianforskellen er +0,65 %, men paa
+    enkeltdage op til ±11-13 %. Rangkorrelationen er det der betyder noget her,
+    fordi komponenten percentileres — saa valget aendrer ikke lag 1's dom.
+
+    Det er IKKE samme sag som K2's normaliseringsfejl i v2.1: dér maalte
+    komponenten en anden STOERRELSE end benchmarken. Her er det samme stoerrelse
+    aflaest et andet klokkeslaet, konsistent i baade komponent og maal.
+
     Log frem for procent, fordi de er additive over tid — summen af log-afkast
     over 20 dage ER 20-dages afkastet. Det goer standardafvigelsen til et
     velformet maal for spredning over perioden.
