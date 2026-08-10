@@ -89,13 +89,21 @@ export interface Layout {
 }
 
 // ── Kolonner ──────────────────────────────────────────────────
+// Watchlistens kolonner. Ticker er altid synlig — som Symbol i de to andre
+// vinduer — og linjenummeret og krydset er struktur, ikke data.
+//
+// ⚠ "Stk" og "Handel" er handelsknapperne. Slås Handel fra, slaas K/S-genvejene
+// fra med den; ellers ville et tastetryk kunne lægge en ordre paa en maengde man
+// ikke kan se. Se WatchlistPanel.
 export const WATCHLIST_COLUMNS = [
-  { id: "price",  label: "Price"    },
-  { id: "change", label: "Change %" },
-  { id: "volume", label: "Volume"   },
-  { id: "float",  label: "Float"    },
-  { id: "relvol", label: "RelVol"   },
-  { id: "gap",    label: "Gap %"    },
+  { id: "pris",     label: "Pris"        },
+  { id: "stk",      label: "Stk"         },
+  { id: "handel",   label: "Handel (KØB/SÆLG)" },
+  { id: "koebspris", label: "Købspris"    },
+  { id: "aktuel",   label: "Aktuel pris" },
+  { id: "beholdning", label: "Beholdning" },
+  { id: "upl",      label: "Ur. P/L"     },
+  { id: "uplpct",   label: "Ur. P/L %"   },
 ];
 
 export const LEVEL2_COLUMNS = [
@@ -115,7 +123,7 @@ export const TIMESALES_COLUMNS = [
   { id: "value",     label: "Værdi" },
 ];
 
-export const DEFAULT_WATCHLIST_COLUMNS = ["price","change","volume","float","relvol","gap"];
+export const DEFAULT_WATCHLIST_COLUMNS = ["pris","stk","handel","koebspris","aktuel","beholdning","upl","uplpct"];
 export const DEFAULT_LEVEL2_COLUMNS    = ["mm","bidprice","bidsize","askprice","asksize"];
 export const DEFAULT_TIMESALES_COLUMNS = ["time","price","size","direction"];
 

@@ -243,12 +243,50 @@ function playHaltAlarm() {
 // ── Watchlist Panel ───────────────────────────────────────────
 interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: number }; }
 
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult }: {
+// ── Kolonnevalg fra Konfiguratoren ──────────────────────────────
+// localStorage's "storage"-event fyrer KUN i andre faner, ikke i den der skrev.
+// Uden en egen begivenhed ville et hak i Konfiguratoren derfor foerst slaa
+// igennem naar man genstartede appen — og det ville ligne at knappen ikke virker.
+export const KOLONNER_AENDRET = "td-kolonner-aendret";
+
+function useKolonner(noegle: string, standard: string[]): string[] {
+  const laes = () => {
+    try {
+      const v = JSON.parse(localStorage.getItem(noegle) || "null");
+      return Array.isArray(v) ? v : standard;
+    } catch { return standard; }
+  };
+  const [cols, setCols] = useState<string[]>(laes);
+  useEffect(() => {
+    const opdater = () => setCols(laes());
+    window.addEventListener(KOLONNER_AENDRET, opdater);
+    window.addEventListener("storage", opdater);
+    return () => {
+      window.removeEventListener(KOLONNER_AENDRET, opdater);
+      window.removeEventListener("storage", opdater);
+    };
+  }, [noegle]);
+  return cols;
+}
+
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, cols }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
   orderResult?: IbkrOrderResult | null;
+  cols?: string[];
 }) {
+  // Kolonnevalget hentes her frem for at blive traadt gennem hele vinduestraeet.
+  // Er der intet gemt, vises ALT — et vindue der mangler sin konfiguration skal
+  // vise for meget, ikke for lidt.
+  const valgte = useKolonner("columns_watchlist", DEFAULT_WATCHLIST_COLUMNS);
+  const vist = (id: string) => (cols ?? valgte).includes(id);
+
+  // ⚠ HANDELSGENVEJENE FOELGER "HANDEL"-KOLONNEN. Er knapperne skjult, er K og S
+  // ogsaa slaaet fra. Ellers kunne et enkelt tastetryk laegge en markedsordre paa
+  // en maengde man hverken kan se eller aendre, fordi Stk-feltet er vaek — en
+  // usynlig aftraekker er vaerre end ingen genvej.
+  const handelAktiv = vist("handel");
   // Mængde pr. ticker — default 100 (Ross Cameron standard)
   const [orderShares, setOrderShares] = useState<Record<string, string>>({});
   const [input, setInput] = useState("");
@@ -491,7 +529,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       }
       return;
     }
-    if (!inField && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
+    if (handelAktiv && !inField && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
       const stock = watchedStocks[(selectedNum ?? 1) - 1];
       if (!stock) return;
       e.preventDefault();
@@ -522,19 +560,19 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             <tr>
               <th style={{ textAlign: "center", width: 28 }}>#</th>
               <th style={{ textAlign: "left" }}>Ticker</th>
-              <th style={R}>Pris</th>
-              <th style={{ textAlign: "center", width: 76 }}>Stk</th>
-              <th style={{ textAlign: "center", width: 130 }}>Handel</th>
-              <th style={R}>Købspris</th>
-              <th style={R}>Aktuel pris</th>
-              <th style={R}>Beholdning</th>
-              <th style={R}>Ur. P/L</th>
-              <th style={R}>Ur. P/L %</th>
+              {vist("pris")       && <th style={R}>Pris</th>}
+              {vist("stk")        && <th style={{ textAlign: "center", width: 76 }}>Stk</th>}
+              {vist("handel")     && <th style={{ textAlign: "center", width: 130 }}>Handel</th>}
+              {vist("koebspris")  && <th style={R}>Købspris</th>}
+              {vist("aktuel")     && <th style={R}>Aktuel pris</th>}
+              {vist("beholdning") && <th style={R}>Beholdning</th>}
+              {vist("upl")        && <th style={R}>Ur. P/L</th>}
+              {vist("uplpct")     && <th style={R}>Ur. P/L %</th>}
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {watchedStocks.length === 0 && <tr><td colSpan={11} className="watchlist-empty">Ingen aktier endnu</td></tr>}
+            {watchedStocks.length === 0 && <tr><td colSpan={3 + WATCHLIST_COLUMNS.filter(c => vist(c.id)).length} className="watchlist-empty">Ingen aktier endnu</td></tr>}
             {watchedStocks.map((stock, i) => {
               const m = meta[stock.ticker] || {};
               const b = m.bought;   // udfyldes i næste trin (ordre-sporing / fills)
@@ -566,8 +604,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                       </span>
                     )}
                   </td>
-                  <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>
-                  <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                  {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
+                  {vist("stk") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
                       ref={el => { stkRefs.current[i] = el; }}
                       onChange={e => setShares(stock.ticker, e.target.value)}
@@ -575,27 +613,27 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                       onClick={e => { e.stopPropagation(); setSelectedNum(i + 1); }}
                       onKeyDown={e => {
                         // K/S virker mens cursoren står i Stk-feltet: tast mængde -> K/S handler straks
-                        if (!e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
+                        if (handelAktiv && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "k" || e.key === "K" || e.key === "s" || e.key === "S")) {
                           e.preventDefault();
                           handleOrder(e.key.toLowerCase() === "k" ? "BUY" : "SELL", stock);
                           (e.target as HTMLInputElement).blur();
                         }
                       }}
                       style={{ width: 60, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 7px", textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-                  </td>
-                  <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
+                  </td>}
+                  {vist("handel") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
                       title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
                       style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4, cursor: "pointer" }}>KØB</button>
                     <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
                       title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
                       style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>SÆLG</button>
-                  </td>
-                  <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>
-                  <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>
-                  <td style={R}>{b ? b.qty : "—"}</td>
-                  <td style={R} className={plCls(uplAmt)}>{uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>
-                  <td style={R} className={plCls(uplPct)}>{uplPct != null ? `${uplPct >= 0 ? "+" : ""}${uplPct.toFixed(2)}%` : "—"}</td>
+                  </td>}
+                  {vist("koebspris")  && <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>}
+                  {vist("aktuel")     && <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>}
+                  {vist("beholdning") && <td style={R}>{b ? b.qty : "—"}</td>}
+                  {vist("upl")    && <td style={R} className={plCls(uplAmt)}>{uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>}
+                  {vist("uplpct") && <td style={R} className={plCls(uplPct)}>{uplPct != null ? `${uplPct >= 0 ? "+" : ""}${uplPct.toFixed(2)}%` : "—"}</td>}
                   <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); removeRow(stock.ticker); }}>✕</button></td>
                 </tr>
               );
@@ -643,7 +681,10 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
     return obj;
   });
 
-  useEffect(() => { localStorage.setItem("columns_watchlist", JSON.stringify(colsWatchlist)); }, [colsWatchlist]);
+  useEffect(() => {
+    localStorage.setItem("columns_watchlist", JSON.stringify(colsWatchlist));
+    window.dispatchEvent(new Event(KOLONNER_AENDRET));   // slaa igennem med det samme
+  }, [colsWatchlist]);
   useEffect(() => { localStorage.setItem("columns_level2",    JSON.stringify(colsLevel2)); }, [colsLevel2]);
   useEffect(() => { localStorage.setItem("columns_timesales", JSON.stringify(colsTimeSales)); }, [colsTimeSales]);
 
@@ -712,6 +753,7 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
 
   function handleCancel() {
     localStorage.setItem("columns_watchlist", JSON.stringify(originals.current.colsWatchlist));
+    window.dispatchEvent(new Event(KOLONNER_AENDRET));
     localStorage.setItem("columns_level2",    JSON.stringify(originals.current.colsLevel2));
     localStorage.setItem("columns_timesales", JSON.stringify(originals.current.colsTimeSales));
     originals.current.fonts.forEach(({ id, title, header, content }) => {
@@ -826,11 +868,19 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
             <input type="checkbox" checked={confirmDelete} onChange={e => setConfirmDelete(e.target.checked)} />
             <span>Bekræft før en linje med <b>åben position</b> fjernes (krydset)</span>
           </label>
-          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-            Watchlist-kolonnerne er nu en fast handels-opsætning (Ticker · Pris · Stk · KØB/SÆLG ·
-            Købspris · Aktuel pris · Beholdning · Ur. P/L) og konfigureres ikke længere her.
-          </div>
         </div>
+
+        <div className="konfigurator-divider" />
+        <ColSection title="Watchlist — Kolonner" columns={WATCHLIST_COLUMNS}
+                    selected={colsWatchlist} setSelected={setColsWatchlist} />
+        {!colsWatchlist.includes("handel") && (
+          <div style={{ fontSize: 11, color: "var(--neutral, #d9a441)", padding: "0 14px 10px",
+                        lineHeight: 1.5 }}>
+            ⚠ Uden <b>Handel</b> er KØB/SÆLG-knapperne væk — og <b>K/S-genvejene er slået fra
+            med dem</b>. Ellers kunne et tastetryk lægge en markedsordre på en mængde du
+            hverken kan se eller ændre.
+          </div>
+        )}
 
         {/* ── Risikostyring: grænser pr. strategi ── */}
         <div className="konfigurator-divider" />
@@ -878,6 +928,7 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
+        <div className="konfigurator-divider" />
         <div className="konfigurator-divider" />
         <ColSection title="Level 2 — Kolonner"           columns={LEVEL2_COLUMNS}    selected={colsLevel2}    setSelected={setColsLevel2} />
         <div className="konfigurator-divider" />
