@@ -225,9 +225,15 @@ def config_hash() -> str:
 
 
 def som_kontrakt(d: Lag1Dag, beregnet_kl: str,
-                 data_as_of: Optional[dict] = None) -> dict:
-    """C2's outputkontrakt med kun lag 1 udfyldt. Lag 2 og 3 er null indtil videre —
-    skemaet aendrer sig IKKE naar de kommer til."""
+                 data_as_of: Optional[dict] = None,
+                 lag2: Optional[dict] = None) -> dict:
+    """C2's outputkontrakt. Lag 3 er null indtil videre — skemaet aendrer sig IKKE
+    naar det kommer til.
+
+    `lag2` fyldes med vol_lag2.som_kontrakt(...) naar lag 2 er godkendt. Det er
+    None her, fordi lag 2 IKKE bestod sin praediktive test som specificeret i
+    v2.1 — se vol_lag2_test.py. At udfylde pladsen alligevel ville lade et
+    ugodkendt lag se godkendt ud i outputtet."""
     advarsler = []
     if d.manglende:
         advarsler.append(f"manglende komponenter: {', '.join(d.manglende)}")
@@ -245,6 +251,9 @@ def som_kontrakt(d: Lag1Dag, beregnet_kl: str,
             "komponenter": {k: d.komponenter.get(k) for k in KOMPONENTER},
             "data_as_of": data_as_of or {},
         },
-        "lag2": None,
+        # lag2 udfyldes af vol_lag2.som_kontrakt naar laget er godkendt. Skemaet
+        # er uaendret — pladsen har vaeret her hele tiden, saa den dag lag 2 og 3
+        # kommer til, aendrer outputtets FORM sig ikke.
+        "lag2": lag2,
         "lag3": None,
     }
