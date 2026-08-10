@@ -35,6 +35,7 @@ TWS_PORT_LIVE  = 7496
 # ⚠ TILFØJ IKKE ET SYMBOL HER. Listen udledes nu af futures_katalog.py, som er
 # ÉN sandhedskilde for symbol, børs og multiplikator. Tilføjes et symbol kun her,
 # mangler multiplikatoren, og P&L bliver stille forkert.
+import ibkr_client_ids
 from futures_katalog import KATALOG as _FUT_KATALOG
 
 FUTURES_EXCHANGE = {s: i.exchange for s, i in _FUT_KATALOG.items()}
@@ -177,8 +178,13 @@ class IBKRConnection:
             return False
 
     async def connect(self) -> bool:
-        import random
-        client_id = random.randint(10, 99)
+        # ⚠ FAST ID, IKKE EN TRAEKNING. Her stod random.randint(10, 99) — og
+        # femten faste script-id'er ligger i netop det interval, saa hver
+        # forbindelse havde ca. 17 % chance for at kollidere med et koerende
+        # hoest-job. En kollision fejler ikke hoejlydt; den ligner en mistet
+        # forbindelse eller manglende data, og sender fejlsoegningen andetsteds.
+        # Se ibkr_client_ids.py.
+        client_id = ibkr_client_ids.BACKEND
         try:
             await self.ib.connectAsync(
                 host     = TWS_HOST,

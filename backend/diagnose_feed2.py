@@ -70,7 +70,7 @@ async def main():
     print(f"\nForbinder til TWS (port {TWS_PORT})...")
     try:
         await ib.connectAsync(host=TWS_HOST, port=TWS_PORT,
-                              clientId=random.randint(50, 99), timeout=15)
+                              clientId=54, timeout=15)   # fast id, se ibkr_client_ids.py
     except Exception as e:
         print(f"❌ Kunne ikke forbinde: {e}")
         return

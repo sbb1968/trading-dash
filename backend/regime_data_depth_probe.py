@@ -18,7 +18,7 @@ from pathlib import Path
 
 IBKR_HOST = "127.0.0.1"
 IBKR_PORT = 7497
-CLIENT_ID = 47
+CLIENT_ID = 53
 
 OUTPUT_DIRNAME = "regime_data_depth_output"
 MANIFEST_PATH  = Path("data_harvest") / "_manifest.json"

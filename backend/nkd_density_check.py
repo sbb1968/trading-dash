@@ -67,7 +67,7 @@ from ib_async import IB, Future
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 HOST            = "127.0.0.1"
 PORT            = 7497
-CLIENT_ID       = 46
+CLIENT_ID       = 45
 BAR_SIZE        = "15 mins"     # 15-min timeframe
 CHUNK_DAYS      = 30
 SLEEP_BETWEEN   = 0.6

@@ -55,7 +55,7 @@ from ib_async import IB, Future
 
 HOST          = "127.0.0.1"
 PORT          = 7497
-CLIENT_ID     = 47
+CLIENT_ID     = 49
 BAR_SIZE      = "1 min"
 CHUNK_DAYS    = 5                # "5 D" — gennemproevet 1-min chunk (probe_futures_depth)
 SLEEP_BETWEEN = 0.8

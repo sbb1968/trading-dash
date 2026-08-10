@@ -96,9 +96,22 @@ Kollisionen kan kun ske **inden for samme maskine** (samme TWS), så den forklar
 ikke M5, der går på tværs af to maskiner. Men den skal væk før fase B og C, ellers
 kan et svigt dér ikke tilskrives entydigt.
 
-**Rettelsen er lille:** giv backenden et fast, reserveret id uden for det interval
-scripts bruger — eller lad den trække fra et interval ingen faste id'er ligger i.
-Ikke gennemført her, da §7 forbyder konfigurationsændringer i undersøgelsesfasen.
+### RETTET 2026-08-10 (spec v1.1 §2 — fejlrettelse, ikke opsætningsændring)
+
+Den fulde optælling gav **15** faste id'er i intervallet, ikke 11:
+`10 11 12 15 16 28 29 46 47 48 50 51 52 55 76` → ca. **17 %** pr. forbindelse.
+
+Registret afslørede desuden to kollisioner scripts imellem, som ingen havde set:
+`46` delt af nkd_density_check + nkd_harvest_15min, og `47` delt af
+asian_harvest_1min + nikkei_harvest_1min + regime_data_depth_probe.
+
+- `ibkr_client_ids.py` er nu ét register. Backenden har den reserverede blok
+  **200-209** (fast id 200), langt uden for scripts' interval.
+- De tre delte tildelinger er skilt ad (45, 49, 53), og `diagnose_feed2` har
+  fået et fast id (54) i stedet for `random.randint(50, 99)`.
+- `test_client_ids.py` scanner kodebasen og fejler på hardkodede id'er uden for
+  registret, delte id'er, og enhver tilfældig traekning. Afsnit 5 viser at vagten
+  kan sige nej.
 
 ---
 
