@@ -421,6 +421,70 @@ class BaseStrategy(ABC):
         self.stats.entries_filled += 1
         return filled
 
+    async def _lukkeordre_ufyldt(self, close_result: dict, ticker: str,
+                                 side: str, quantity: float) -> Optional[bool]:
+        """Er lukkeordren beviseligt IKKE fyldt? True / False / None.
+
+        ⚠ ERSTATTER _ibkr_still_holds SOM BESLUTNINGSGRUNDLAG, og grunden er den
+        vigtigste laering fra over-sell-sagen:
+
+            Udled ikke et faktum du kan spoerge direkte om.
+
+        _ibkr_still_holds spurgte kontoens NETTOPOSITION. Positionen er en
+        konsekvens af fills, og sammenlaegningen har kastet information vaek: paa
+        en ticker to strategier deler, giver "der er stadig 39 aktier" samme svar
+        uanset om det er MINE eller den andens. Vagten svarede da "holder stadig
+        -> genafgiv", ordren blev sendt to gange, og den anden strategis andel
+        blev solgt med. Kontoen endte short praecis én andel — VELO -19, XE -12,
+        ALOY -24, WOLF -10, TE -86.
+
+        Ordrens egen status er derimod et direkte svar paa det direkte spoergsmaal.
+
+        Returnerer:
+          True   ordren er beviseligt IKKE fyldt      -> genafgiv
+          False  ordren ER fyldt                       -> bogfoer, genafgiv aldrig
+          None   ved det ikke                          -> behold, genafgiv ALDRIG
+
+        None er ikke en fejl, det er et svar. Et ukendt udfald maa aldrig udloese
+        en ny ordre — samme invariant som decide_confirmation.
+        """
+        oid = (close_result or {}).get("order_id")
+        if oid is None or self.conn is None or not getattr(self.conn, "connected", False):
+            return None
+
+        try:
+            st = await self.conn.ordre_status(oid)
+        except Exception as e:
+            logger.warning(f"[{self.name}] ordre_status({oid}) fejlede: {e}")
+            return None
+
+        if not st.get("kendt"):
+            # Typisk efter en genforbindelse: ordren er ikke i denne sessions
+            # trades(). Vi VED det ikke — og saa gaetter vi ikke.
+            logger.warning(
+                f"[{self.name}] {ticker}: ordre {oid} kendes ikke i sessionen "
+                f"({st.get('grund')}) — beholder position, gen-afgiver IKKE.")
+            return None
+
+        filled = st.get("filled") or 0
+        if filled >= quantity:
+            return False                      # fyldt: bogfoer
+        if st.get("status") in ("Cancelled", "ApiCancelled"):
+            return True                       # entydigt ikke fyldt: genafgiv
+        if 0 < filled < quantity:
+            # Delvis fyldning. Hverken "fyldt" eller "urort" — og en ny ordre paa
+            # HELE maengden ville saelge for meget. Behold og lad naeste pas se
+            # den mindre restmaengde.
+            logger.warning(
+                f"[{self.name}] {ticker}: ordre {oid} delvist fyldt "
+                f"({filled:g}/{quantity:g}) — beholder, gen-afgiver IKKE.")
+            return None
+        if st.get("status") in ("Submitted", "PreSubmitted", "PendingSubmit", "Inactive"):
+            # Stadig arbejdende. 'Inactive' er IKKE terminal — det var den
+            # oprindelige fejl.
+            return None
+        return None
+
     async def _ibkr_still_holds(self, ticker: str, side: str,
                                 quantity: float) -> Optional[bool]:
         """Holder IBKR stadig positionen? True / False / None (ved det ikke).

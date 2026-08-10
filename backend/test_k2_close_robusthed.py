@@ -62,13 +62,22 @@ k2mod.LATE_CLOSE_MAX_MIN = 0
 # ── Mocks ──────────────────────────────────────────────────────
 class MockConn:
     """Registrerer ALLE place_paper_order-kald i order_calls."""
-    def __init__(self, order_ret=None, positions=None, last=10.0, open_orders=None):
+    def __init__(self, order_ret=None, positions=None, last=10.0, open_orders=None,
+                 ordre=None):
         self.connected = True
         self.order_calls = []
+        # Den KONKRETE lukkeordres status. Beslutningen om at gen-afgive traeffes
+        # nu her og ikke ud fra beholdningen — se _lukkeordre_ufyldt.
+        self._ordre = ordre
         self._order_ret = order_ret            # dict | callable(call_idx)->dict | None
         self._positions = positions or []
         self._last = last
         self._open_orders = open_orders or []  # dup-vagt (get_open_orders) — default tom
+
+    async def ordre_status(self, order_id):
+        if self._ordre is None:
+            return {"kendt": False, "grund": "mock uden ordre-status"}
+        return dict(self._ordre)
 
     def get_positions(self):
         return self._positions
@@ -343,18 +352,26 @@ def section_C():
     # blev der solgt to gange -> ejerloes short (8 stk. paa kontoen 31/7). Nu spoerges
     # IBKR foerst, og de tre svar giver tre forskellige udfald.
 
-    def setup_pos(order_ret, positions):
-        conn = MockConn(order_ret=order_ret, positions=positions, last=5.05)
+    def setup_pos(order_ret, positions, ordre=None):
+        conn = MockConn(order_ret=order_ret, positions=positions, last=5.05,
+                        ordre=ordre)
         journal = MockJournal()
         algo = make_algo(conn, journal)
         algo._positions["AAA"] = mk_position(100, 5.0)
         return algo, conn, journal
 
-    UNFILLED = {"filled": 0, "avg_fill": 0, "status": "Submitted"}
+    # ⚠ OMSKREVET 10/8-2026. Udfaldet afgoeres nu af ORDRENS status, ikke af
+    # beholdningen. Intentionen i C2a/b/c er uaendret — kun mekanismen der
+    # udtrykker den. Kontoens netto kan ikke skelne "mine aktier" fra "den anden
+    # strategis", og det var praecis dét der solgte fem tickers to gange.
+    UNFILLED = {"filled": 0, "avg_fill": 0, "status": "Submitted", "order_id": 900}
     HOLDT    = [{"ticker": "AAA", "position": 100, "avg_cost": 5.0}]
+    O_AFVIST = {"kendt": True, "status": "Cancelled", "filled": 0, "remaining": 100}
+    O_FYLDT  = {"kendt": True, "status": "Filled", "filled": 100, "remaining": 0}
+    O_UKENDT = {"kendt": False, "grund": "ikke i sessionens trades()"}
 
     # C2a ufyldt + IBKR HOLDER stadig positionen -> aegte ufyldt, behold + genforsoeg
-    algo, conn, journal = setup_pos(UNFILLED, HOLDT)
+    algo, conn, journal = setup_pos(UNFILLED, HOLDT, ordre=O_AFVIST)
     asyncio.run(algo._close("AAA", 5.05, "test"))
     check("C2a ufyldt + IBKR holder → AAA STADIG åben",
           "AAA" in algo._positions, list(algo._positions))
@@ -363,7 +380,7 @@ def section_C():
 
     # C2b ufyldt + IBKR FLAD -> ordren fyldte alligevel: bogfoer, gen-afgiv ALDRIG.
     # Det er praecis dette tilfaelde der skabte over-sell.
-    algo, conn, journal = setup_pos(UNFILLED, [])
+    algo, conn, journal = setup_pos(UNFILLED, [], ordre=O_FYLDT)
     asyncio.run(algo._close("AAA", 5.05, "test"))
     check("C2b ufyldt + IBKR flad → AAA popped (ordren fyldte alligevel)",
           "AAA" not in algo._positions, list(algo._positions))
@@ -374,7 +391,7 @@ def section_C():
 
     # C2c ufyldt + positions-feed UPAALIDELIGT -> ukendt udfald: behold, men
     # gen-afgiv aldrig paa tvivl (samme invariant som decide_confirmation).
-    algo, conn, journal = setup_pos(UNFILLED, [])
+    algo, conn, journal = setup_pos(UNFILLED, [], ordre=O_UKENDT)
     async def _degraderet():
         return ([], False)
     conn.get_positions_reliable = _degraderet
@@ -423,9 +440,16 @@ def section_D():
     check(f"D2 kaldt {k2mod.FORCE_CLOSE_MAX_ATTEMPTS} gange (= MAX_ATTEMPTS)",
           len(conn.order_calls) == k2mod.FORCE_CLOSE_MAX_ATTEMPTS, conn.order_calls)
 
-    # D3 (NY) — over-sell-vagten: ufyldt svar MEN IBKR er flad -> ÉN ordre i alt.
+    # D3 (NY) — over-sell-vagten: ufyldt svar MEN ordren fyldte -> ÉN ordre i alt.
     # Det er praecis scenariet der skabte de otte ejerloese shorts 31/7-2026.
-    conn = MockConn(order_ret={"filled": 0, "status": "Inactive"}, positions=[], last=5.05)
+    #
+    # ⚠ OMSKREVET 10/8-2026: udfaldet kommer fra ORDRENS status, ikke fra en flad
+    # konto. "IBKR flad" var et upaalideligt signal — paa en ticker to strategier
+    # deler er kontoen netop IKKE flad, og vagten svarede da forkert.
+    conn = MockConn(order_ret={"filled": 0, "status": "Inactive", "order_id": 901},
+                    positions=[], last=5.05,
+                    ordre={"kendt": True, "status": "Filled", "filled": 100,
+                           "remaining": 0})
     journal = MockJournal()
     algo = make_algo(conn, journal)
     algo._positions["AAA"] = mk_position(100, 5.0)

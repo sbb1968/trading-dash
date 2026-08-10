@@ -1268,7 +1268,13 @@ class Confluence2Live(BaseStrategy):
             # Spørg IBKR FØR vi lader næste bar gen-afgive. Er positionen væk,
             # fyldte ordren alligevel — så bogfører vi den i stedet for at sælge
             # endnu en gang og efterlade en ejerløs short (over-sell, 31/7-2026).
-            still = await self._ibkr_still_holds(ticker, "long", shares)
+            # ⚠ SPOERG ORDREN, IKKE BEHOLDNINGEN. Foer stod her
+            # _ibkr_still_holds(), som laeste kontoens NETTOposition. Paa en
+            # ticker to strategier deler, kan den ikke skelne "mine aktier er der
+            # endnu" fra "den andens" — og svarede derfor "genafgiv" naar den
+            # burde have sagt "fyldt". Resultatet var en short paa praecis én
+            # andel. Ordrens egen status er et direkte svar. Se strategy_base.
+            still = await self._lukkeordre_ufyldt(close_result, ticker, "long", shares)
             if still is False:
                 await self._log(
                     f"ℹ {ticker}: SELL var ubekræftet, men IBKR er flad — ordren "

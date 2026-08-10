@@ -794,6 +794,66 @@ class IBKRConnection:
     
 
     # ── Ordre ─────────────────────────────────────────────────
+    async def ordre_status(self, order_id: int) -> dict:
+        """Den KONKRETE ordres status. Ikke udledt af beholdningen.
+
+        ⚠ PRINCIPPET: udled ikke et faktum du kan spoerge direkte om.
+        Positionen er en KONSEKVENS af fills, og sammenlaegningen har kastet
+        information vaek — flere forskellige aarsager giver samme nettoposition.
+        Paa en ticker to strategier deler, kan kontoens netto ikke skelne
+        "mine aktier er der endnu" fra "den anden strategis aktier er der".
+        Det var praecis den forveksling der solgte IOVA/VELO/XE to gange.
+
+        Returnerer altid en dict med `kendt`:
+          kendt=True   status/filled/remaining er ordrens EGNE tal
+          kendt=False  ordren findes ikke i denne sessions liste (typisk efter
+                       en genforbindelse) — kalderen maa da ALDRIG gen-afgive
+        """
+        try:
+            for t in (self.ib.trades() or []):
+                if getattr(t.order, "orderId", None) == order_id:
+                    st = t.orderStatus
+                    return {
+                        "kendt":     True,
+                        "status":    st.status,
+                        "filled":    float(st.filled or 0),
+                        "remaining": float(st.remaining or 0),
+                    }
+        except Exception as e:
+            logger.warning(f"ordre_status({order_id}) fejlede: {e}")
+            return {"kendt": False, "grund": str(e)}
+        return {"kendt": False, "grund": "ordren findes ikke i sessionens trades()"}
+
+    async def executions_i_dag(self, ticker: str = "") -> list[dict]:
+        """Dagens udfoerelser, direkte fra IBKR.
+
+        Til genopbygning efter en genforbindelse: efter en afbrydelse ved vi ikke
+        hvad der skete, og saa skal vi LAESE hvad der skete frem for at gaette det
+        ud fra hvad der staar nu. Samme princip som ordre_status, ét lag hoejere.
+        """
+        try:
+            from ib_async import ExecutionFilter
+            f = ExecutionFilter()
+            if ticker:
+                f.symbol = ticker.upper()
+            fills = await self.ib.reqExecutionsAsync(f)
+            ud = []
+            for fl in (fills or []):
+                ex, c = fl.execution, fl.contract
+                ud.append({
+                    "ticker":   c.symbol,
+                    "side":     ex.side,          # BOT / SLD
+                    "shares":   float(ex.shares or 0),
+                    "price":    float(ex.price or 0),
+                    "time":     str(ex.time),
+                    "order_id": ex.orderId,
+                    "perm_id":  ex.permId,
+                })
+            return ud
+        except Exception as e:
+            logger.error(f"executions_i_dag({ticker}) fejlede: {e}")
+            return []
+
     async def place_paper_order(
         self,
         ticker:         str,

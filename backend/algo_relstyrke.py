@@ -844,7 +844,13 @@ class RelStyrkeLive(BaseStrategy):
         if filled < shares:
             # Spoerg IBKR FOER naeste bar gen-afgiver — ellers saelges en position der
             # allerede er lukket, og residualet bliver en ejerloes short.
-            still = await self._ibkr_still_holds(ticker, "long", shares)
+            # ⚠ SPOERG ORDREN, IKKE BEHOLDNINGEN. Foer stod her
+            # _ibkr_still_holds(), som laeste kontoens NETTOposition. Paa en
+            # ticker to strategier deler, kan den ikke skelne "mine aktier er der
+            # endnu" fra "den andens" — og svarede derfor "genafgiv" naar den
+            # burde have sagt "fyldt". Resultatet var en short paa praecis én
+            # andel. Ordrens egen status er et direkte svar. Se strategy_base.
+            still = await self._lukkeordre_ufyldt(result, ticker, "long", shares)
             if still is False:
                 await self._log(f"ℹ {ticker}: SELL var ubekraeftet, men IBKR er flad — "
                                 f"ordren fyldte alligevel. Bogfoerer (gen-afgiver IKKE).",
