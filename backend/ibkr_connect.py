@@ -54,9 +54,25 @@ class IBKRConnection:
     Alle metoder er async og skal kaldes med await.
     """
 
-    def __init__(self, paper_trading: bool = True, account: str = ""):
+    def __init__(self, paper_trading: bool = True, account: str = "",
+                 host: str = "", port: int = 0, client_id: int = 0,
+                 kraev_konto: bool = False):
         self.ib        = IB()
-        self.port      = TWS_PORT_PAPER if paper_trading else TWS_PORT_LIVE
+        # host/port/client_id kan overstyres, saa der kan koeres en ANDEN Gateway
+        # ved siden af den delte — fx en lokal ordre-forbindelse paa konto 2 mens
+        # kurserne kommer fra algoserverens. Tomme vaerdier = hidtidig adfaerd.
+        self.host      = host or TWS_HOST
+        self.port      = port or (TWS_PORT_PAPER if paper_trading else TWS_PORT_LIVE)
+        self._client_id_override = client_id or 0
+        # ⚠ Naar True: en ordre UDEN konto sendes ALDRIG. Bruges af den separate
+        # ordreforbindelse, hvor der ikke maa findes en kodesti der udelader
+        # kontoen og lader IBKR's standardvalg traede til.
+        #
+        # Det er ikke teoretisk: _verificer_konto NULSTILLER self.account ved
+        # uoverensstemmelse — med vilje, saa en forkert vaerdi i account.yaml ikke
+        # kan spaerre den DELTE forbindelses ordresti. Paa ordreforbindelsen er
+        # den afvejning modsat: dér er en ordre uden konto vaerre end ingen ordre.
+        self.kraev_konto = bool(kraev_konto)
         self.paper     = paper_trading
 
         # IBKR-kontokode ordrer, saldi og positioner skal gaelde (fx "DUQ441063").
@@ -184,10 +200,10 @@ class IBKRConnection:
         # hoest-job. En kollision fejler ikke hoejlydt; den ligner en mistet
         # forbindelse eller manglende data, og sender fejlsoegningen andetsteds.
         # Se ibkr_client_ids.py.
-        client_id = ibkr_client_ids.BACKEND
+        client_id = self._client_id_override or ibkr_client_ids.BACKEND
         try:
             await self.ib.connectAsync(
-                host     = TWS_HOST,
+                host     = self.host,
                 port     = self.port,
                 clientId = client_id,
                 timeout  = 15,
@@ -905,6 +921,12 @@ class IBKRConnection:
             _konto = getattr(self, "account", "")
             if _konto:
                 order.account = _konto
+            elif getattr(self, "kraev_konto", False):
+                logger.error(
+                    f"[IBKR] {ticker} {action}: kontoen er tom paa en forbindelse "
+                    f"der KRAEVER den. Ordren sendes IKKE — en ordre uden konto "
+                    f"ville lande hvor IBKR selv vaelger.")
+                return None
             # TIF saettes EKSPLICIT og er som standard DAY. To grunde:
             #
             # 1. Et TWS order preset kan ellers tvinge TIF til GTC — og en

@@ -744,8 +744,30 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Maalt 7/8-2026: tws_online=True, ibkr.connected=False. Beskeden
                 # sendte altsaa brugeren hen for at rette noget der ikke fejlede,
                 # mens den ene handling der ville have virket laa ét kald vaek.
-                await strategy_manager.connect_ibkr(paper_trading=True)
-                ibkr = strategy_manager.get_ibkr()
+                # ⚠ ORDRER GAAR GENNEM DEN SKRIVENDE FORBINDELSE naar der er en.
+                # Kurser kommer fra den delte (laesende) forbindelse; ordrer fra en
+                # lokal Gateway paa den konto der handles. De to sloges om
+                # markedsdata-abonnementet — men en Gateway beder aldrig om data af
+                # sig selv, saa naar KUN den ene laeser, opstaar konflikten ikke.
+                # Se ordre_forbindelse.py.
+                ibkr = None
+                _ordre_fejl = ""
+                if ordre_forbindelse.konfigureret():
+                    try:
+                        ibkr = await ordre_forbindelse.hent()
+                    except ordre_forbindelse.OrdreForbindelseFejl as e:
+                        # En spaerret vagt maa IKKE falde tilbage til den delte
+                        # forbindelse — saa ville ordren lande paa en anden konto
+                        # end den brugeren tror. Vi stopper i stedet.
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": f"Ordreforbindelsen er spaerret: {e}",
+                        }))
+                        continue
+                else:
+                    await strategy_manager.connect_ibkr(paper_trading=True)
+                    ibkr = strategy_manager.get_ibkr()
                 if ibkr is None or not ibkr.connected:
                     # Skeln de to tilfaelde. "start TWS" er forkert naar TWS koerer,
                     # og sender brugeren hen for at rette noget der ikke fejler.
@@ -770,6 +792,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         action=action,
                         quantity=shares,
                         order_type="MKT",
+                        # Markerer MANUEL oprindelse, saa handlen er tilskrivbar i
+                        # regnskabet. Uden den ville den vaere ejerloes paa praecis
+                        # samme maade som SHAZ.
+                        order_ref=ordre_forbindelse.order_ref(),
                     )
                 except Exception as e:
                     await websocket.send_text(json.dumps({
@@ -2924,6 +2950,7 @@ async def dagenslog_report_fleet(from_: str = Query(None, alias="from"),
 import trade_queries
 import dagsnoter
 import replication
+import ordre_forbindelse
 
 
 class UpdateNotesRequest(BaseModel):

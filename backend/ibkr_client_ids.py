@@ -44,6 +44,9 @@ class KlientIdFejl(Exception):
 # Blokken har plads til flere, fordi paper og live på sigt skal kunne køre
 # samtidig mod hver sin Gateway — se ibkr_session_rapport.md.
 BACKEND = 200
+# Den lokale ORDRE-forbindelse (konto 2). Koerer paa SAMME maskine som backenden,
+# saa en kollision mellem de to ville vaere reel. Se ordre_forbindelse.py.
+ORDRE = 201
 BACKEND_BLOK = range(200, 210)
 
 # ── Scripts og høst-jobs ────────────────────────────────────────────────────

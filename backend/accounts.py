@@ -20,6 +20,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, field
+from typing import Optional
 from pathlib import Path
 
 import yaml
@@ -57,6 +58,8 @@ class AccountIdentity:
     # Konti maskinen MAA handle paa: [{"id": "DUQ441063", "label": "Iben paper 2"}]
     # Hvidlisten ER sikkerheden — man kan ikke vaelge en konto ingen har erklaeret.
     ibkr_konti:             tuple = ()
+    # Valgfri SEPARAT forbindelse til ORDRER. Se _laes_ordre_forbindelse.
+    ordre_forbindelse:      tuple = ()
 
 
 def _fail(msg: str) -> None:
@@ -112,6 +115,59 @@ def _laes_konti(instance: dict) -> tuple:
         _fail(f"instance.ibkr_account ({standard}) staar ikke i instance.ibkr_konti. "
               f"Tilfoej den, eller ret standardkontoen.")
     return tuple(ud)
+
+
+def _laes_ordre_forbindelse(instance: dict) -> tuple:
+    """Valgfri SEPARAT forbindelse til ordrer:
+
+        instance:
+          ordre_forbindelse:
+            host:  127.0.0.1
+            port:  4002            # IB Gateway paper
+            konto: DUQ441063
+            bruger: fasteriben2    # kun til dokumentation og verifikation
+
+    ⚠ HVORFOR TO FORBINDELSER OVERHOVEDET. Konflikten opstod fordi TWS
+    automatisk abonnerer paa alt i watchlisten ved opstart, og to sessioner ikke
+    maa traekke paa samme markedsdata-abonnement. En Gateway goer ingenting af sig
+    selv — den beder foerst om data naar en klient goer det. Sender vi KUN ordrer
+    gennem den lokale forbindelse og henter kurser fra algoserverens, udloeses
+    konflikten aldrig.
+
+    Mangler blokken, er der ingen adskillelse, og ordrer gaar gennem den delte
+    forbindelse som hidtil. Maskiner der ikke skal skille tingene ad, aendrer
+    altsaa ingenting.
+
+    Returneres som en tuple af ét dict, saa dataclass'en kan forblive frozen.
+    """
+    raa = instance.get("ordre_forbindelse")
+    if not raa:
+        return ()
+    if not isinstance(raa, dict):
+        _fail("instance.ordre_forbindelse skal vaere et opslag med host/port/konto")
+    konto = str(raa.get("konto", "")).strip().upper()
+    port = raa.get("port")
+    if not konto:
+        _fail("instance.ordre_forbindelse.konto mangler — en ordreforbindelse "
+              "uden konto ville sende ordrer et sted vi ikke kan verificere")
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        _fail(f"instance.ordre_forbindelse.port skal vaere et tal, fik {port!r}")
+    if port <= 0:
+        _fail(f"instance.ordre_forbindelse.port skal vaere positiv, fik {port}")
+    return ({
+        "host":   str(raa.get("host", "127.0.0.1")).strip() or "127.0.0.1",
+        "port":   port,
+        "konto":  konto,
+        "bruger": str(raa.get("bruger", "")).strip(),
+        "tillad_live": bool(raa.get("tillad_live", False)),
+    },)
+
+
+def ordre_forbindelse() -> Optional[dict]:
+    """Profilen for ordreforbindelsen, eller None hvis der ikke er nogen."""
+    return dict(identity.ordre_forbindelse[0]) if identity.ordre_forbindelse else None
 
 
 def tilladte_konti() -> tuple:
@@ -219,6 +275,7 @@ def load_identity() -> AccountIdentity:
             replication_target_url = str(repl.get("target_url", "")),
             source_id              = f"{str(account['id'])}_{str(instance['role'])}",
             ibkr_konti             = _laes_konti(instance),
+            ordre_forbindelse      = _laes_ordre_forbindelse(instance),
         )
     except (KeyError, TypeError) as e:
         _fail(f"Manglende eller forkert felt i account.yaml: {e}")
