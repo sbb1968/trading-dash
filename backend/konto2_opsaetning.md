@@ -215,5 +215,5 @@ positionstal er et signal**.
 | Konto | DUQ441063 | `______` |
 | Bruger | fasteriben2 | `______` |
 | Futures-tilladelse (F1) | ☐ | ☐ |
-| Master API client ID | `______` | `______` |
-| T1: konfliktbesked? | `______` | `______` |
+| Master API client ID | **tom** (aflæst 2026-08-10) | `______` |
+| T1: konfliktbesked? | **ingen** (Gateway, 2026-08-10) | `______` |

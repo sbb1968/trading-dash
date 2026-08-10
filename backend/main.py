@@ -808,6 +808,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
                     # Journaliser fejlen så vi kan se den senere
                     await journal.log_event(
+                        # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
+                        ibkr_account = getattr(ibkr, 'account', '') or None,
                         source     = "manual_watchlist",
                         event_type = "ibkr_order_error",
                         symbol     = ticker,
@@ -852,6 +854,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Journaliser manuel ordre
                 await journal.log_event(
+                    # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
+                    ibkr_account = getattr(ibkr, 'account', '') or None,
                     source     = "manual_watchlist",
                     event_type = "ibkr_order_placed",
                     symbol     = ticker,
@@ -896,6 +900,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         # aldrig vaelte WS-loekken, men det skal kunne ses.
                         logger.error(f"[WS] manuel forensik fejlede for {ticker}: {e}")
                         await journal.log_event(
+                            # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
+                            ibkr_account = getattr(ibkr, 'account', '') or None,
                             source="manual", event_type="forensik_fejl",
                             symbol=ticker,
                             payload={"fase": action, "fejl": str(e)})
@@ -904,6 +910,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Det er ikke en fejl, men det skal staa der, saa en manglende
                     # trades-raekke kan forklares frem for at undre.
                     await journal.log_event(
+                        # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
+                        ibkr_account = getattr(ibkr, 'account', '') or None,
                         source="manual", event_type="ordre_ikke_fyldt",
                         symbol=ticker,
                         payload={"action": action, "shares": shares,
