@@ -54,6 +54,7 @@ BACKEND_BLOK = range(200, 210)
 SCRIPTS: dict[str, int] = {
     "test_feed.py":                   4,
     "ibkr_session_probe.py":          5,
+    "flatten_alt.py":                 8,
     "download_daily_ibkr.py":        10,
     "fetch_universe.py":             11,
     "download_intraday_ibkr.py":     12,

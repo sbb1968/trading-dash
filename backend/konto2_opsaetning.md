@@ -238,3 +238,53 @@ positionstal er et signal**.
 | Futures-tilladelse (F1) | ☐ | ☐ |
 | Master API client ID | **tom** (aflæst 2026-08-10) | `______` |
 | T1: konfliktbesked? | **ingen** (Gateway, 2026-08-10) | `______` |
+
+---
+
+## 10. ⚠ Før en genstart: kontoen skal være flad
+
+Genstartes backenden med åbne positioner, er `self._positions`,
+`_open_positions` og `_exposure_by_strategy` alle tomme mens IBKR stadig holder
+dem. Risikogrænserne tror eksponeringen er nul, og en strategi kan gå ind i en
+ticker den allerede er i.
+
+**Tom hukommelse er kun korrekt hvis kontoen også er flad.**
+
+### Rækkefølgen
+
+```
+1.  Stop strategierne (algo_running fra) — behold forbindelsen,
+    ellers åbner de nyt mens du lukker
+2.  python flatten_alt.py --konto <konto>            # PREVIEW
+3.  python flatten_alt.py --konto <konto> --udfoer   # send
+4.  ⚠ Verificér flad HOS IBKR — ikke i journalen
+5.  git pull
+6.  Genstart
+7.  Verificér: forbundet, fladt, tom hukommelse
+```
+
+### ⚠ Luk ikke gennem strategiernes egne lukkeveje
+
+De kører den gamle kode indtil genstarten, og på en **delt ticker** er det netop
+dér over-salget opstår: `_ibkr_still_holds` læser kontoens netto og kan ikke
+skelne "mine aktier" fra "den anden strategis".
+
+`flatten_alt.py` involverer hverken strategihukommelse eller den vagt.
+**Mængden kommer fra kontoen selv** — `netto +78 → SELL 78`, `netto −19 → BUY 19`
+— så der findes ingen vej til at sælge for meget. Én ordre pr. ticker, ingen
+genforsøg.
+
+Og ordren sendes mod **den kontrakt IBKR selv rapporterer**, ikke en
+nykvalificeret. For en future betyder det at udløbsmåneden er præcis den der
+ligger i positionen; en gen-kvalificering kunne ramme den nye frontmåned og
+**åbne** en position i stedet for at lukke en.
+
+### Punkt 4 er værd at være pedantisk med
+
+Journalen har vist sig uenig med kontoen i halvdelen af tilfældene — seks af tolv
+positioner uden journalrække. Det er **IBKR** der skal sige fladt.
+
+`flatten_alt.py` verificerer selv bagefter mod IBKR og returnerer exit 1 hvis
+noget hænger. Den gen-afgiver aldrig: hænger en position, skal årsagen forstås
+(halt, lukket marked, tynd likviditet) før nogen gør noget.
+
