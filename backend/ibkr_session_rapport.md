@@ -207,3 +207,60 @@ Beslutningsreglen fra §5 står ved magt og er værd at gentage, fordi den udelu
 den nemmeste udvej: **en model der kun virker hvis man logger på i den rigtige
 rækkefølge, er ikke en løsning.** Algoserveren genstarter automatisk hver dag; en
 rækkefølgeafhængig opsætning ville før eller siden ramme netop det tidspunkt.
+
+---
+
+## 8. Kan Iben handle manuelt på konto 2 mens algoserveren kører på konto 1?
+
+*(spec v1.0 af 2026-08-10 — udfyldes af Søren, fem felter)*
+
+### 8.1 Master API client ID
+
+| Maskine | Master API client ID | Aflæst |
+|---|---|---|
+| Algoserveren (`iben-algo`) | `___________` | |
+| Sørens workstation | `___________` | |
+
+⚠ **Tom er også et svar** — skriv "tom" frem for at springe rækken over.
+
+Betydningen af værdien har ændret sig i dag: backenden brugte indtil `538d465`
+et **tilfældigt** id i 10–99 ved hver forbindelse. Var Master ID sat til en værdi
+i det interval, har backenden med jævne mellemrum modtaget ordreopdateringer fra
+*alle* klienter — uden fejlmeddelelse, blot et forkert billede. Efter genstart
+med den nye kode er backendens id fast **200**.
+
+Er Master ID sat til 200, skal klassifikationen af de tolv `orderRef`-baserede
+læsninger i kontogennemgangen revideres fra "tilskrevet" til familie A.
+
+### 8.2 C0 — deling slået fra for DUQ441063
+
+**Kun konto 2. Algoserverens konto røres ikke.**
+
+| Felt | Værdi |
+|---|---|
+| Indstilling før (ordret, inkl. dropdown) | `___________` |
+| Udfald (1, 2 eller 3 — se nedenfor) | `___________` |
+| Fejltekst **ordret** | `___________` |
+| Indstilling genoprettet og verificeret | ☐ |
+
+| # | Udfald | Betyder | Konklusion |
+|---|---|---|---|
+| 1 | Konflikt væk, **data flyder** | `fasteriben2` har eget abonnement | **Ja** — slå delingen fra permanent |
+| 2 | Konflikt væk, men **"ikke abonneret"** | Delingen bandt | **Ja, mod betaling** — se 8.3 |
+| 3 | Konflikten **består** | Begrænsningen ligger på brugernavns-parret | **Nej** — intet abonnement hjælper |
+
+⚠ Udfald 2 er det mest sandsynlige og det letteste at forveksle med udfald 3: i
+begge tilfælde kommer der *en* fejl. Forskellen er om den handler om
+**abonnement** eller om **session**. Derfor skal teksten citeres ordret.
+
+### 8.3 IBKR's svar
+
+> *If market data sharing is disabled for paper username `fasteriben2`, can that
+> username hold its own market data subscription and run a session simultaneously
+> with `fasteriben`?*
+
+Svar: `___________`
+
+### 8.4 Anbefaling
+
+`___________`
