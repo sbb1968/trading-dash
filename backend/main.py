@@ -5247,8 +5247,33 @@ async def account_dash_snapshot():
     """
     Open snapshot endpoint til Trading Dash (lokal frontend).
     Returnerer NLV, cash, P&L og åbne positioner beriget med live priser.
+
+    ⚠ VINDUET SKAL VISE DEN KONTO DER HANDLES PÅ. Har maskinen en
+    ordre-forbindelse, er det **dens** positioner der er de rigtige — den delte
+    forbindelse kender en anden konto, eller findes slet ikke.
+
+    Fejlen der blev fundet 11-08: `17f3350` tilføjede feltet `forbindelse` med
+    variablen `via_ordre`, men tildelte den aldrig, og hentede fortsat kun fra
+    den delte forbindelse. NameError'en var **skjult** fordi funktionen returnerer
+    tidligt når den delte forbindelse mangler — og på en maskine med
+    ordre-Gateway mangler den næsten altid.
+
+    ⚠ Konsekvensen var større end fejlbeskeden: på Ibens workstation ville
+    Portfolio-vinduet have sagt "IBKR ikke forbundet" mens hendes MES-position lå
+    lige der. Det er trin 8a i aftenens test — kontrollen af at handlen landede
+    på den rigtige konto.
     """
-    conn = strategy_manager.get_ibkr()
+    via_ordre = ordre_forbindelse.konfigureret()
+    if via_ordre:
+        try:
+            conn = await ordre_forbindelse.hent()
+        except ordre_forbindelse.OrdreForbindelseFejl as e:
+            # Ikke fald tilbage til den delte. Vinduet ville da vise en ANDEN
+            # kontos positioner under overskriften "din konto".
+            return {"ok": False, "error": f"Ordreforbindelsen er spærret: {e}"}
+    else:
+        conn = strategy_manager.get_ibkr()
+
     if conn is None or not conn.connected:
         return {
             "ok":    False,
@@ -5289,6 +5314,19 @@ async def account_dash_snapshot():
                 return _best_snapshot_price(snap)
             except (asyncio.TimeoutError, Exception):
                 return None
+
+        if via_ordre:
+            # ⚠ ALDRIG MARKEDSDATA PAA ORDREFORBINDELSEN. Det var netop dét der
+            # udloeste sessionskonflikten: en Gateway beder ikke om data af sig
+            # selv, og saa laenge KUN den ene laeser, opstaar den ikke. quote()
+            # henter fra algoserveren — eller TradingView for crypto — og er
+            # allerede den vej watchlisten bruger.
+            async def fetch_price(ticker):          # noqa: F811 — bevidst
+                try:
+                    return (await asyncio.wait_for(quote(ticker),
+                                                   timeout=4.0)).get("price")
+                except Exception:
+                    return None
 
         # Wrap hele gather i timeout — hvis markedet er lukket og IBKR
         # ikke svarer, returnerer vi uden live priser i stedet for at hænge.
