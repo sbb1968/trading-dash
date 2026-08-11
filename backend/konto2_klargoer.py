@@ -261,6 +261,21 @@ def tjek_porte(p: dict | None) -> None:
                       f"{p.get('bruger') or 'den rigtige bruger'}" if not g else
                       f"{len(g)} lyttere paa ordre-porten"))
 
+    # ⚠ HVAD LIGGER DER PAA DEN DELTE PORT? Rent oplysende, men det er
+    # spraengradius: gaar ordre_forbindelse tabt (en fejlindrykning, en glemt
+    # blok), falder ordreveje tilbage til 127.0.0.1:7497. Lytter der ingenting,
+    # fejler et saadant uheld HOEJLYDT. Lytter der en TWS, gaar ordren derhen —
+    # tavst, og til hvilken konto DEN nu styrer.
+    delt = port_tjek.lyttere(7497)
+    if delt:
+        print(f"       ⚠ 7497 (delt/TWS): {len(delt)} lytter(e) — en ordre uden "
+              f"ordre_forbindelse ville gaa HERTIL")
+        for adr, pid in delt:
+            print(f"          {adr:24} PID {pid}")
+    else:
+        print("       7497 (delt/TWS): tom — et konfigurationsuheld ville "
+              "fejle hoejlydt frem for at ramme forbi")
+
 
 # ── 6. journalen ────────────────────────────────────────────────────────────
 def tjek_journal() -> None:

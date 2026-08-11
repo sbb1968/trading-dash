@@ -3,8 +3,13 @@
 Målet: når Iben kommer hjem fra arbejde, er maskinen **bevist** klar til at handle
 manuelt på DUQ441063 — ikke antaget klar.
 
-⚠ **Alt herunder kan gøres nu, uden Iben.** Du loggede selv ind som `fasteriben2`
-i går, så du har det der skal til. Hun skal ikke bruges som nøglebærer.
+⚠ **Rettet 11-08 kl. 09:10.** Første udgave antog at Søren kunne logge Gatewayen
+ind. Det kan han ikke — `fasteriben2` er **Ibens** bruger med hendes password, og
+det tastes af hende. Alt herunder er derfor delt i to: hvad der kan gøres uden
+hende, og de få minutter der kræver hende.
+
+Fejlen er værd at bemærke frem for bare at rette: en plan der antager en adgang
+den ikke har, ser komplet ud lige indtil man rammer trinnet.
 
 ---
 
@@ -86,8 +91,12 @@ får maskinen ingen kurser, og frontenden spærrer en ordre den ikke kan prissæ
 
 ## 4 · IB Gateway
 
-1. Installér **IB Gateway** (ikke TWS).
-2. Log ind som `fasteriben2`, **paper**.
+⚠ **Kun trin 1 kan gøres uden Iben.** Gatewayens `Configure`-menu findes først
+efter login, så API-indstillingerne må vente på hende. Installationen selv koster
+ingen adgang — og det er den der tager tid.
+
+1. Installér **IB Gateway** (ikke TWS). ← *kan gøres nu*
+2. Log ind som `fasteriben2`, **paper**. ← *kræver Iben*
 3. Configure → Settings → API:
    - Enable ActiveX and Socket Clients: **✓**
    - Socket port: **4002**
@@ -145,6 +154,74 @@ Afslut med T9/T10, så hendes konto står flad når hun kommer hjem.
 
 ---
 
-## Hvad der bliver tilbage til Iben selv
+## 7 · ⚠ Testen der er BEDRE at lave uden Gateway
 
-Kun at starte Gatewayen og taste sit password. Alt andet er gjort og målt.
+Der findes én prøve der kun kan laves mens Gatewayen er nede, og den er vigtig:
+**hvad sker der når man trykker K uden ordreforbindelse?**
+
+Svaret skal være en ren afvisning. Det farlige alternativ er at ordren i stilhed
+går gennem den **delte** forbindelse og lander på en anden konto — og det er
+netop den udgang der ville se ud som en succes.
+
+### Rækkefølgen — og den må ikke byttes om
+
+1. `python konto2_klargoer.py` — **afsnit 3 skal være grønt.** Står der
+   "ordre_forbindelse findes: FEJL", så **stop**. Så er blokken ikke læst, og
+   et tryk på K ville gå til den delte forbindelse i stedet for at blive afvist.
+2. Start Trading Dash, vælg en ticker med kurs
+3. Tryk **K**
+
+### Hvad der skal ske
+
+```
+Ordreforbindelsen er spaerret: kunne ikke forbinde til Gateway på
+127.0.0.1:4002 — kører den, og er API'et slået til?
+```
+
+Rød kvittering. **Ingen ordre sendt.**
+
+⚠ **Sker der noget som helst andet** — en grøn kvittering, en position, eller
+"⚠ DELT forbindelse" — så stop og sig til. Så falder ordreveje tilbage et sted
+de ikke må.
+
+Koden er bygget rigtigt (`main.py:758-766`: en spærret vagt sender fejl og
+`continue`, uden fallback), men det er læst, ikke målt på hendes maskine. Det er
+forskellen denne prøve lukker.
+
+### Sprængradius, målt af kontrollen selv
+
+Afsnit 5 skriver nu hvad der ligger på **7497**, den delte port:
+
+- **tom** → et konfigurationsuheld ville fejle højlydt
+- **en lytter** → ⚠ en ordre uden `ordre_forbindelse` ville gå *derhen*, til
+  hvilken konto den TWS nu styrer
+
+På Sørens maskine er den tom. Hendes vides endnu ikke.
+
+---
+
+## Arbejdsdelingen
+
+### Kan gøres nu — uden Iben
+
+| ☐ | |
+|---|---|
+| ☑ | `git pull` |
+| ☑ | `app.exe` overført til repo-roden |
+| ☑ | `ordre_forbindelse` i `account.yaml` |
+| ☐ | Start backenden én gang — kører journalens `paper`-migration |
+| ☐ | `python konto2_klargoer.py` — alt grønt undtagen Gateway |
+| ☐ | **Afvisningstesten** (§7) |
+| ☐ | Installér IB Gateway (ikke login, bare installationen) |
+| ☐ | `python algoserver_vagt.py --gem` — udgangspunkt til senere |
+
+### Kræver Iben — cirka fem minutter
+
+| ☐ | |
+|---|---|
+| ☐ | Log Gatewayen ind som `fasteriben2`, paper |
+| ☐ | Configure → API: port 4002, Read-Only ✗, Master client ID **tom** |
+| ☐ | `python konto2_klargoer.py` → **exit 0** |
+| ☐ | `konto2_opsaetning.md` §7, T1–T10 |
+
+Hendes tid går til login og til at se testen køre. Alt andet står klar.
