@@ -103,14 +103,30 @@ def tjek_kode() -> None:
 def tjek_exe() -> None:
     kap("2. Frontend-exe'en")
 
-    exe = HER.parent / "src-tauri" / "target" / "release" / "app.exe"
+    # ⚠ DEN EXE DER FAKTISK STARTES, er den i repo-roden. start_trading_dash.bat
+    # koerer `%~dp0app.exe`. Byggestien er kun kilden paa en maskine der bygger,
+    # og paa Ibens maskine findes den slet ikke. En kontrol der maalte
+    # byggestien, ville maale en fil der aldrig aabnes — og paa en maskine der
+    # baade bygger OG har en aeldre kopi i roden, ville den maale den forkerte.
+    rod = HER.parent / "app.exe"
+    bygget = HER.parent / "src-tauri" / "target" / "release" / "app.exe"
+
+    exe = rod if rod.exists() else bygget
     if not ok("app.exe findes", exe.exists(),
-              naar_fejl="byg med `npm run tauri build`, eller kopiér den fra en "
-                        "maskine der har den"):
+              naar_fejl=f"hverken {rod} eller byggestien. Kopiér app.exe til "
+                        f"repo-roden — det er den start_trading_dash.bat aabner"):
         return
 
     exe_tid = datetime.fromtimestamp(exe.stat().st_mtime, tz=timezone.utc)
+    print(f"       {exe}")
     print(f"       bygget {exe_tid.astimezone():%Y-%m-%d %H:%M}")
+
+    if rod.exists() and bygget.exists():
+        b_tid = datetime.fromtimestamp(bygget.stat().st_mtime, tz=timezone.utc)
+        ok("roden er ikke aeldre end byggestien", exe_tid >= b_tid,
+           naar_fejl=f"⚠ byggestien er NYERE ({b_tid.astimezone():%Y-%m-%d %H:%M}). "
+                     f"Du har bygget uden at kopiere — launcheren aabner den gamle",
+           blokerer=False)
 
     # ⚠ DEN FAELDE DER FAKTISK RAMTE OS. Exe'en er et build-artefakt og foelger
     # ikke med `git pull`. En maskine kan have helt ny backend-kode og en
