@@ -1021,6 +1021,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         action=action,
                         shares=shares,
                         order_type="MKT",
+                        # ⚠ Hvilken konto ordren FAKTISK gik til. Uden den kan en
+                        # senere aflaesning ikke vide om den overhovedet KAN
+                        # kende ordren, og et manglende svar ligner "uaendret".
+                        ibkr_account=getattr(ibkr, "account", "") or None,
                     )
 
                 # Journaliser manuel ordre
@@ -3762,6 +3766,7 @@ async def open_manual_trade(req: ManualTradeOpenRequest):
                 action=action,
                 shares=req.shares,
                 order_type="MKT",
+                ibkr_account=getattr(ibkr, "account", "") or None,
             )
     except Exception as e:
         # Ikke fatalt — handel er allerede fyldt, vi mangler bare ordre-tracking
@@ -3913,6 +3918,7 @@ async def close_manual_trade(trade_id: str, req: ManualTradeCloseRequest):
                 action=close_action,
                 shares=shares,
                 order_type="MKT",
+                ibkr_account=getattr(ibkr, "account", "") or None,
             )
     except Exception as e:
         print(f"[ManualTrade] OrdersTracker fejl ved close: {e}")

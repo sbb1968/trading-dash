@@ -15,6 +15,11 @@ interface OrderEntry {
   remaining:    number;
   avg_fill:     number;
   status_group: "filled" | "open" | "cancelled" | "unknown";
+  /** ⚠ Hvorfor status ikke kan fastslaas. Saettes af backenden naar en ordre
+   *  aldrig blev bekraeftet af en live-aflaesning — fx fordi den blev lagt paa
+   *  en anden konto end den forbindelsen styrer. Uden den ville "Status
+   *  ukendt" se ud som en fejl i stedet for som en graense for hvad vi kan vide. */
+  note?: string | null;
 }
 
 // ── Hjælpere ──────────────────────────────────────────────────
@@ -355,8 +360,11 @@ export function OrdersWindow() {
                       {o.order_type}
                       {o.limit_price ? ` @ $${o.limit_price.toFixed(2)}` : ""}
                     </td>
-                    <td style={{ color: statusColor(o.status_group), fontWeight: 600 }}>
+                    <td style={{ color: statusColor(o.status_group), fontWeight: 600 }}
+                        title={o.note || undefined}>
                       {statusEmoji(o.status_group)} {statusText(o.status)}
+                      {o.note && <span style={{ marginLeft: 4, cursor: "help",
+                                                color: "var(--text-muted)" }}>ⓘ</span>}
                     </td>
                     <td style={{ textAlign: "right" }}>
                       {o.filled > 0

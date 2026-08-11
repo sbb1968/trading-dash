@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 ORDERS_LOG = Path(__file__).parent / "orders_log.json"
 
+# ⚠ Naar DENNE proces startede. Ordrer lagt FOER dette tidspunkt, som aldrig
+# er blevet bekraeftet af en live-aflaesning, kan vi ikke udtale os om — se
+# get_all_orders. ib.trades() daekker kun den nuvaerende session.
+_OPSTART = datetime.now()
+
 # IBKR-statusser opdelt i overordnede grupper for UI
 STATUS_OPEN = {"PendingSubmit", "PendingCancel", "PreSubmitted", "Submitted",
                "ApiPending", "Inactive"}
@@ -91,8 +96,15 @@ class OrdersTracker:
         shares: int,
         order_type: str = "MKT",
         limit_price: Optional[float] = None,
+        ibkr_account: Optional[str] = None,
     ) -> None:
-        """Registrer en nyplaceret ordre."""
+        """Registrer en nyplaceret ordre.
+
+        ⚠ `ibkr_account` er ikke pynt. Uden den kan en senere aflaesning ikke
+        vide OM den overhovedet kan kende ordren: en ordre lagt gennem
+        ordre-Gatewayen paa DUQ441063 findes ikke i en session der styrer
+        DUN748991, og fravaeret af svar ligner "ingen aendring".
+        """
         entry = {
             "order_id":    int(order_id),
             "source":      source,
@@ -101,8 +113,15 @@ class OrdersTracker:
             "shares":      int(shares),
             "order_type":  order_type,
             "limit_price": limit_price,
+            "ibkr_account": (ibkr_account or "").upper() or None,
             "placed_at":   datetime.now().isoformat(),
-            "status":      "Submitted",   # live-afstemning retter den straks for in-session-ordrer
+            # ⚠ ET GAET, IKKE EN MAALING. Status saettes optimistisk her og
+            # rettes af live-afstemningen — men KUN hvis afstemningen naar den.
+            # `bekraeftet` skiller de to, saa et uafstemt gaet ikke kan staa som
+            # faktum. Maalt 11-08: to MES-ordrer fra i gaar stod som "2 aabne"
+            # med filled=0. De blev fyldt og lukket samme aften.
+            "status":      "Submitted",
+            "bekraeftet":  False,
             "filled":      0,
             "remaining":   int(shares),
             "avg_fill":    0,
@@ -157,21 +176,56 @@ class OrdersTracker:
         dirty = False
         for e in recent:
             live = live_status.get(e["order_id"])
-            if live and live["status"] != e.get("status"):
-                e["status"]    = live["status"]
-                e["filled"]    = live["filled"]
-                e["remaining"] = live["remaining"]
-                e["avg_fill"]  = live["avg_fill"]
-                dirty = True
+            if live:
+                if live["status"] != e.get("status") or not e.get("bekraeftet"):
+                    e["status"]    = live["status"]
+                    e["filled"]    = live["filled"]
+                    e["remaining"] = live["remaining"]
+                    e["avg_fill"]  = live["avg_fill"]
+                    e["bekraeftet"] = True
+                    dirty = True
         if dirty:
             _save_log(self._entries)
 
+        # ⚠ ET UBEKRAEFTET GAET MAA IKKE STAA SOM "AABEN".
+        #
+        # `status` skrives optimistisk til "Submitted" ved placering. Naar
+        # afstemningen aldrig naar ordren — fordi ib.trades() kun daekker den
+        # nuvaerende session, eller fordi forbindelsen styrer en ANDEN konto —
+        # bliver gaettet staaende, og UI'et taeller det som en aaben ordre.
+        #
+        # Maalt 11-08: to MES-ordrer fra 10-08 stod som "2 aabne · Afsendt ·
+        # 0 fyldt". De blev fyldt og lukket samme aften; de laa bare paa
+        # DUQ441063, og maskinen spurgte DUN748991 om dem.
+        #
+        # Her skilles de to. Uafstemt + fra en tidligere koersel = UKENDT, med
+        # en note der siger hvorfor. "Vi ved det ikke" er et daarligere svar end
+        # sandheden, men et bedre svar end en paastand.
+        konto_nu = ""
+        if ibkr_conn is not None and getattr(ibkr_conn, "connected", False):
+            konto_nu = (getattr(ibkr_conn, "account", "") or "").upper()
+
         out = []
         for e in sorted(recent, key=lambda x: x.get("placed_at", ""), reverse=True):
-            status = e.get("status", "UNKNOWN")   # gemt status, IKKE altid UNKNOWN
+            status = e.get("status", "UNKNOWN")
+            note = None
+
+            if not e.get("bekraeftet") and _parse_ts(e.get("placed_at")) < _OPSTART:
+                e_konto = (e.get("ibkr_account") or "").upper()
+                if e_konto and konto_nu and e_konto != konto_nu:
+                    note = (f"lagt paa {e_konto}; denne forbindelse styrer "
+                            f"{konto_nu} og kan ikke se den")
+                elif not konto_nu:
+                    note = "ingen IBKR-forbindelse til at bekraefte status"
+                else:
+                    note = ("aldrig bekraeftet af en live-aflaesning — "
+                            "ib.trades() daekker kun den nuvaerende session")
+                status = "UNKNOWN"
+
             out.append({
                 **e,
                 "status":       status,
+                "note":         note,
                 "filled":       e.get("filled", 0),
                 "remaining":    e.get("remaining", 0),
                 "avg_fill":     e.get("avg_fill", 0),
