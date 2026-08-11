@@ -206,6 +206,11 @@ def tjek_konfig() -> dict | None:
                   f"(konto2_opsaetning.md §6b).")
         return None
 
+    # ⚠ Den vigtigste kontrol i afsnittet skal ogsaa SIGE at den bestod. Efter
+    # --kraev-omskrivningen printede den kun host/port, saa laeseren skulle selv
+    # slutte sig til at blokken var fundet. En kontrol der kun er synlig naar den
+    # fejler, laeses som fravaerende naar den lykkes.
+    ok("ordre_forbindelse findes", True)
     print(f"       {p['host']}:{p['port']} konto {p['konto']} "
           f"bruger {p.get('bruger') or '(ikke angivet)'}")
 
