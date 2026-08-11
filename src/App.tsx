@@ -553,7 +553,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       <div className="watchlist-add">
         <input className="watchlist-input" type="text" placeholder="Tilføj ticker (tryk Enter)" value={input}
           onChange={e => { setInput(e.target.value.toUpperCase()); setError(""); }}
-          onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={10} />
+          onKeyDown={e => e.key === "Enter" && handleAdd()}
+          /* ⚠ 10 tegn spaerrede for crypto. `BINANCE:LINKUSDT` er 16, saa
+             symbolet kunne bogstavelig talt ikke tastes — feltet klippede det
+             af, og resultatet lignede en ukendt ticker frem for et for kort
+             felt. 24 giver plads til boers-praefiks og perpetual-suffiks
+             (`BINANCE:LINKUSDT.P`). */
+          maxLength={24} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
       {/* ⚠ HJAELPELINJEN MAA IKKE LOVE EN AFTRAEKKER DER ER SLAAET FRA.

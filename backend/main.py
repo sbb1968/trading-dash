@@ -20,6 +20,7 @@ from orders_tracker   import get_tracker
 
 from accounts import identity, aktiv_konto
 import accounts
+import krypto_kurs
 
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pathlib import Path
@@ -301,6 +302,25 @@ async def algoserver_kurs_loop():
 
         symboler = sorted(_proxy_symboler)
         ticks = []
+
+        # ⚠ Crypto hentes LOKALT, ikke gennem algoserveren. Kilden er
+        # TradingView, som enhver maskine kan naa — at gaa omvejen ville binde
+        # LINK-kurserne til at algoserveren er oppe, uden at vinde noget.
+        kryp = [s for s in symboler if krypto_kurs.er_krypto(s)]
+        if kryp:
+            for sym, d in (await krypto_kurs.hent(kryp)).items():
+                ticks.append({"ticker": sym, "price": d["price"],
+                              "change_percent": d.get("change_percent"),
+                              "volume": d.get("volume"), "high": d.get("high"),
+                              "low": d.get("low"), "open": d.get("open")})
+            symboler = [s for s in symboler if s not in kryp]
+
+        if not symboler:
+            if ticks:
+                await broadcast({"type": "ticks", "data": ticks,
+                                 "timestamp": datetime.now().isoformat()})
+            continue
+
         try:
             async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=8)) as s_:
@@ -838,6 +858,31 @@ async def websocket_endpoint(websocket: WebSocket):
                         "action":  action,
                         "shares":  shares,
                         "error":   "Ugyldig ticker eller mængde",
+                    }))
+                    continue
+
+                # ── ⚠ CRYPTO HANDLES IKKE HERFRA ────────────────────────────
+                # BINANCE:LINKUSDT kan prissaettes (TradingView), men IBKR kan
+                # ikke handle Binance-spot. Uden denne spaerring ville ordren gaa
+                # videre til qualifyContracts og fejle med en IBKR-besked om et
+                # ukendt symbol — teknisk korrekt, men den peger paa tickeren i
+                # stedet for paa den egentlige grund, og sender saaledes den der
+                # taster hen for at rette noget der ikke er galt.
+                #
+                # Crypto handles manuelt (TradingView paper eller boers-demo),
+                # jf. spec §11. Skal det automatiseres, er det en ny adapter bag
+                # samme graenseflade — ikke en udvidelse af denne vej.
+                if krypto_kurs.er_krypto(ticker):
+                    await websocket.send_text(json.dumps({
+                        "type":    "ibkr_order_result",
+                        "success": False,
+                        "ticker":  ticker,
+                        "action":  action,
+                        "shares":  shares,
+                        "error":   f"{ticker} er crypto og handles ikke gennem "
+                                   f"Trading Dash. IBKR kan ikke handle "
+                                   f"Binance-spot — kursen vises, men ordren "
+                                   f"skal lægges manuelt.",
                     }))
                     continue
 
@@ -4888,6 +4933,16 @@ async def quote(ticker: str):
     """Sidste/aktuelle kurs for ÉN ticker (til Watchlist 'Pris ved tilføj'). Ingen auth —
     kun en kurs. price=None hvis IBKR ikke er forbundet eller ingen kurs kan hentes."""
     tkr = ticker.upper()
+
+    # ⚠ CRYPTO KOMMER IKKE FRA IBKR. `BINANCE:LINKUSDT` findes ikke der, og
+    # Binance-spot handles ikke gennem IBKR overhovedet. Kilden er TradingView,
+    # og den kraever hverken forbindelse eller abonnement — derfor foerst, og
+    # derfor lokalt paa enhver maskine, ogsaa naar algoserveren er nede.
+    if krypto_kurs.er_krypto(tkr):
+        k = await krypto_kurs.hent_en(tkr)
+        return {"ticker": tkr, "price": (k or {}).get("price"),
+                "connected": bool(k), "kilde": "tradingview" if k else None}
+
     conn = strategy_manager.get_ibkr()
     if conn is not None and getattr(conn, "connected", False):
         try:
