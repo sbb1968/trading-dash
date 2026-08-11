@@ -216,8 +216,7 @@ async def start_ibkr_feed():
         ibkr_conn = strategy_manager.get_ibkr()
 
         if ibkr_conn is None:
-            print("[LiveFeed] Ingen IBKR-forbindelse — bruger mock data")
-            asyncio.create_task(mock_data_loop())
+            _uden_feed("Ingen IBKR-forbindelse")
             return
 
         print("[LiveFeed] Bruger delt IBKR-forbindelse — starter live feed")
@@ -226,8 +225,42 @@ async def start_ibkr_feed():
         live_feed_task = asyncio.create_task(live_feed.start())
 
     except Exception as e:
-        print(f"[LiveFeed] Fejl: {e} — bruger mock data")
+        _uden_feed(f"Fejl: {e}")
+
+
+def _uden_feed(hvorfor: str) -> None:
+    """Hvad der sker når der ikke er noget lokalt live-feed.
+
+    ⚠ FØR: her startede mock_data_loop ubetinget. Den digter kurser for RIGTIGE
+    tickere — AAPL 189.50, TSLA 245.30, GME 18.40 — og intet i grænsefladen
+    markerer dem som opfundne.
+
+    Prisen når ikke selve ordren; `ibkrBuy` lægger en markedsordre. Men den står
+    i **bekræftelsesdialogen**, altså præcis dér hvor mennesket beslutter. Viser
+    den AAPL 189.50 mens AAPL koster 230, godkendes et køb 21 % dyrere end vist.
+
+    ⚠ Og på en maskine som Ibens er tavshed IKKE et tab. Watchlisten falder
+    tilbage til `/quote`, som henter ægte kurser fra algoserveren (App.tsx:440-447
+    — tre trin, faldende friskhed, alle ægte IBKR-priser). En tom pris udløser
+    den vej; en opdigtet pris blokerer den.
+
+    Derfor: opdigtede tal kun når nogen udtrykkeligt har bedt om dem.
+    """
+    if accounts.identity.mock_feed:
+        print(f"[LiveFeed] {hvorfor} — instance.mock_feed er sat, "
+              f"⚠ OPDIGTEDE PRISER FØLGER")
         asyncio.create_task(mock_data_loop())
+        return
+
+    print(f"[LiveFeed] {hvorfor} — INGEN opdigtede priser (instance.mock_feed "
+          f"er ikke sat).")
+    if accounts.identity.replication_target_url and \
+            accounts.identity.instance_role != "algoserver":
+        print(f"[LiveFeed] Watchlisten henter ægte kurser fra "
+              f"{accounts.identity.replication_target_url} via /quote.")
+    else:
+        print("[LiveFeed] ⚠ Watchlisten står uden priser. Det er ærligt, men "
+              "ubrugeligt — start TWS, eller sæt replication.target_url.")
 
 
 # ── Mock fallback ─────────────────────────────────────────────

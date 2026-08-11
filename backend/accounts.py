@@ -60,6 +60,13 @@ class AccountIdentity:
     ibkr_konti:             tuple = ()
     # Valgfri SEPARAT forbindelse til ORDRER. Se _laes_ordre_forbindelse.
     ordre_forbindelse:      tuple = ()
+    # ⚠ OPDIGTEDE PRISER — kun hvis nogen udtrykkeligt beder om dem.
+    # mock_data digter kurser for RIGTIGE tickere (AAPL 189.50, TSLA 245.30 …),
+    # og intet i graensefladen markerer dem. Prisen naar ikke ordren (den er en
+    # markedsordre), men den staar i BEKRAEFTELSESDIALOGEN — altsaa praecis dér
+    # hvor mennesket beslutter. Default er derfor false: hellere en tom
+    # watchlist end en troværdig løgn. Se start_ibkr_feed i main.py.
+    mock_feed:              bool = False
 
 
 def _fail(msg: str) -> None:
@@ -291,6 +298,7 @@ def load_identity() -> AccountIdentity:
             ibkr_account          = str(instance["ibkr_account"]),
             paper_trading         = bool(instance["paper_trading"]),
             autostart_strategies  = list(instance.get("autostart_strategies", [])),
+            mock_feed             = bool(instance.get("mock_feed", False)),
             studio_password       = str(auth.get("studio_password", "")),
             internal_key          = str(auth.get("internal_key", "")),
             replication_enabled    = bool(repl.get("enabled", False)),
