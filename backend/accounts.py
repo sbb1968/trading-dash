@@ -255,6 +255,28 @@ def load_identity() -> AccountIdentity:
     if not isinstance(data, dict):
         _fail("account.yaml er tom eller har forkert format på topniveau")
 
+    # ── ⚠ FEJLINDRYKKEDE NØGLER — fanges her, ikke i stilhed ────────────────
+    # Målt 11-08-2026 på Ibens workstation: `ordre_forbindelse` var indsat i
+    # kolonne 0 og blev dermed en TOPNIVEAU-nøgle. `_laes_ordre_forbindelse`
+    # læser den fra `instance`, så den fandt ingenting og returnerede ().
+    #
+    # Intet fejlede. Backenden startede. Men ordrer ville være gået gennem den
+    # DELTE forbindelse i stedet for den lokale Gateway — og V1/V2 kunne ikke
+    # gribe det, fordi de først kører når der ER en ordreforbindelse. Vagterne
+    # var altså ikke omgået; de blev aldrig kaldt.
+    #
+    # To mellemrum er hele forskellen, og YAML siger ikke fra. Så gør vi.
+    FEJLPLACERET = ("ordre_forbindelse", "ibkr_konti", "ibkr_account",
+                    "role", "paper_trading", "autostart_strategies")
+    forkert = [k for k in FEJLPLACERET if k in data]
+    if forkert:
+        _fail(f"disse nøgler står på TOPNIVEAU i account.yaml, men hører under "
+              f"'instance:': {', '.join(forkert)}\n"
+              f"Ryk dem ind med to mellemrum, så de bliver en del af instance-"
+              f"blokken. Som de står nu, læses de slet ikke — og for "
+              f"ordre_forbindelse betyder det at ordrer går gennem den DELTE "
+              f"forbindelse og kan lande på en anden konto.")
+
     try:
         account  = data["account"]
         instance = data["instance"]
