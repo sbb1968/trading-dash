@@ -556,8 +556,19 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
           onKeyDown={e => e.key === "Enter" && handleAdd()} maxLength={10} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
+      {/* ⚠ HJAELPELINJEN MAA IKKE LOVE EN AFTRAEKKER DER ER SLAAET FRA.
+          Maalt paa Ibens workstation 11-08: kolonnevalget stod tomt, saa
+          `handel` var skjult og K/S dermed deaktiveret (se handelAktiv) — men
+          linjen her reklamerede stadig for dem. Et tryk paa K gjorde ingenting,
+          uden nogen forklaring nogen steder. En genvej der annonceres og ikke
+          virker, er vaerre end en der ikke annonceres. */}
       <div style={{ padding: "2px 8px 4px", fontSize: 10.5, color: "var(--text-muted)" }}>
-        Genveje: <b>ALT+tal</b> vælg række · <b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde) · <b>ALT+H</b> test halt-alarm
+        Genveje: <b>ALT+tal</b> vælg række · {handelAktiv
+          ? <><b>K</b> køb · <b>S</b> sælg (handler den valgtes Stk-mængde) · </>
+          : <span style={{ color: "var(--negative, #e05252)" }}>
+              ⚠ K/S er slået fra — kolonnen “Handel” er fravalgt (Værktøjer →
+              Konfigurator) ·{" "}
+            </span>}<b>ALT+H</b> test halt-alarm
       </div>
       {/* ⚠ ORDREKVITTERING MED KONTO. To backends laa engang og lyttede paa samme
           port, én med gammel kode — en ordre kunne da lande paa den forkerte konto

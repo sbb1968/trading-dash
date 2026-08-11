@@ -814,7 +814,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif syms:
                     # Intet lokalt feed — men algoserveren har abonnementet.
                     # Se algoserver_kurs_loop.
+                    nye = set(syms) - _proxy_symboler
                     _proxy_symboler.update(syms)
+                    if nye:
+                        logger.info(f"[Kursproxy] henter nu {', '.join(sorted(nye))} "
+                                    f"fra algoserveren ({len(_proxy_symboler)} i alt)")
 
             elif message["type"] in ("ibkr_buy", "ibkr_sell"):
                 # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR
