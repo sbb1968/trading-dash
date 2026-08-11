@@ -49,6 +49,28 @@ Overfør den med TeamViewers filoverførsel til **samme sti** på hendes maskine
 Det er den `start_trading_dash.bat` åbner (`%~dp0app.exe`) — ikke den under
 `src-tauri\target\release\`.
 
+### ⚠ Verificér summen EFTER overførslen — hver gang
+
+Målt 11-08: den overførte fil havde en **anden sha256** end kilden, og appen
+startede ikke. En ufuldstændig overførsel forklarer begge dele.
+
+```powershell
+(Get-Item C:\Projects\Trading_Dash\app.exe).Length
+(Get-FileHash C:\Projects\Trading_Dash\app.exe -Algorithm SHA256).Hash.Substring(0,32)
+```
+
+Skal give **8964096** og **381F1A70C041F06A6B6F97590ECD82F3** (for buildet fra
+11-08 07:56).
+
+⚠ **Tiden beviser ingenting her.** `mtime` bliver overførselstidspunktet, så en
+halv fil ser lige så frisk ud som en hel. `konto2_klargoer.py` gav tre grønne
+flueben — "exe nyere end 17f3350" og to til — på en binær der ikke kunne starte.
+Kun summen skiller.
+
+⚠ **Bygger maskinen selv**, er en anden sum derimod normal: Tauri-builds er ikke
+byte-reproducerbare, fordi stier og tidsstempler bages ind. Så gælder summen kun
+til at sammenligne *kopier*, ikke *builds*.
+
 ---
 
 ## 2 · Koden
