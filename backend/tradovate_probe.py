@@ -87,6 +87,37 @@ def _get(url: str, token: str) -> tuple[int, dict | list | str]:
             return e.code, raa
 
 
+def _forklar(fejl: str) -> None:
+    """Oversæt Tradovates fejltekst til hvad der faktisk mangler.
+
+    ⚠ De to hyppigste ligner hinanden i alvor og er helt forskellige i årsag.
+    Målt 11-08-2026, samme endepunkt, kun brugernavnet ændret:
+
+        opdigtet bruger  ->  "Incorrect username or password"
+        rigtig bruger    ->  "The app is not registered"
+
+    Kontrasten er selve beviset: får man den ANDEN, er brugernavn og password
+    accepteret, og spærringen ligger i appId. Uden den sammenligning ville
+    "app is not registered" let læses som endnu en loginfejl, og man ville
+    bruge eftermiddagen på at nulstille et password der virker.
+    """
+    f = (fejl or "").lower()
+    if "not registered" in f:
+        print("\n   → OVERSAT: brugernavn og password blev ACCEPTERET.")
+        print("     Det der mangler, er en registreret applikation — altsaa en")
+        print("     API-noegle (appId + cid + sec).")
+        print("\n     Beviset er kontrasten: et opdigtet brugernavn giver")
+        print("     'Incorrect username or password' paa samme endepunkt.")
+        print("     Naar svaret skifter, er login-delen passeret.")
+        print("\n     Naeste skridt er IKKE et nyt password, men en API-noegle.")
+    elif "incorrect username or password" in f:
+        print("\n   → OVERSAT: tvetydigt. Enten er koden forkert, ELLER brugeren")
+        print("     findes ikke i Tradovate. API'et skelner ikke.")
+    elif "captcha" in f or "locked" in f:
+        print("\n   → OVERSAT: kontoen er midlertidigt spaerret af for mange")
+        print("     forsoeg. Vent, og log ind i webplatformen foerst.")
+
+
 def sloer(s: str, vis: int = 4) -> str:
     """Nok til at genkende, for lidt til at bruge."""
     s = str(s or "")
@@ -155,10 +186,12 @@ def main() -> int:
         print(f"   FEJL HTTP {kode}: {str(svar)[:200]}")
         return 1
     if svar.get("errorText"):
+        fejl = svar["errorText"]
         print(f"   FEJL HTTP {kode} — men login mislykkedes alligevel:")
-        print(f"        {svar['errorText']}")
+        print(f"        {fejl}")
         print("\n   ⚠ Bemaerk at statuskoden var 200. Kode der stoler paa")
         print("     raise_for_status() ville have troet at det lykkedes.")
+        _forklar(fejl)
         return 1
     token = svar.get("accessToken")
     if not token:
