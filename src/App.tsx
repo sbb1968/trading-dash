@@ -38,7 +38,7 @@ import { HaltScanner } from "./HaltScanner";
 import { HelpAssistant } from "./HelpAssistant";
 import { SwingTop15 } from "./SwingTop15";
 import { BuyHoldTop15 } from "./BuyHoldTop15";
-import { useTickerName } from "./useTickerName";
+import { useTickerName, useTickerNames } from "./useTickerName";
 
 
 // ── Konstanter ────────────────────────────────────────────────
@@ -518,6 +518,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     setMeta(prev => { const n = { ...prev }; delete n[ticker]; return n; });
   }
 
+  // ⚠ ÉN batch-forespoergsel for hele listen, ikke ét kald pr. raekke.
+  // useTickerNames deler global cache med useTickerName, saa navnet er det
+  // samme her som i chart-titlen og i top-15-vinduerne.
+  const navne = useTickerNames(watchlist);
+
   const watchedStocks = watchlist.map(ticker => {
     const live = stocks.find(s => s.ticker === ticker);
     return live ?? { ticker, price: 0 };
@@ -640,6 +645,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             <tr>
               <th style={{ textAlign: "center", width: 28 }}>#</th>
               <th style={{ textAlign: "left" }}>Ticker</th>
+              {vist("navn")       && <th style={{ textAlign: "left" }}>Navn</th>}
               {vist("pris")       && <th style={R}>Pris</th>}
               {vist("stk")        && <th style={{ textAlign: "center", width: 76 }}>Stk</th>}
               {vist("handel")     && <th style={{ textAlign: "center", width: 130 }}>Handel</th>}
@@ -684,6 +690,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                       </span>
                     )}
                   </td>
+                  {/* ⚠ Tom streng betyder "henter endnu", ikke "findes ikke".
+                      useTickerNames returnerer "" mens opslaget er undervejs, og
+                      et "(ukendt)" i det oejeblik ville paastaa noget den ikke
+                      har maalt. Derfor en tankestreg indtil svaret er der. */}
+                  {vist("navn") && <td style={{ textAlign: "left", color: "var(--text-secondary)",
+                                                maxWidth: 190, overflow: "hidden",
+                                                textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                                        title={navne[stock.ticker] || stock.ticker}>
+                    {navne[stock.ticker] || "—"}
+                  </td>}
                   {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
                   {vist("stk") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}

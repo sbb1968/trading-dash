@@ -96,6 +96,9 @@ export interface Layout {
 // fra med den; ellers ville et tastetryk kunne lægge en ordre paa en maengde man
 // ikke kan se. Se WatchlistPanel.
 export const WATCHLIST_COLUMNS = [
+  // Firmanavnet. Hentes af useTickerNames fra /ticker/info, samme kilde og
+  // cache som alle andre vinduer — saa navnet er NOEJAGTIGT ens overalt.
+  { id: "navn",     label: "Navn"        },
   { id: "pris",     label: "Pris"        },
   { id: "stk",      label: "Stk"         },
   { id: "handel",   label: "Handel (KØB/SÆLG)" },
@@ -123,7 +126,7 @@ export const TIMESALES_COLUMNS = [
   { id: "value",     label: "Værdi" },
 ];
 
-export const DEFAULT_WATCHLIST_COLUMNS = ["pris","stk","handel","koebspris","aktuel","beholdning","upl","uplpct"];
+export const DEFAULT_WATCHLIST_COLUMNS = ["navn","pris","stk","handel","koebspris","aktuel","beholdning","upl","uplpct"];
 export const DEFAULT_LEVEL2_COLUMNS    = ["mm","bidprice","bidsize","askprice","asksize"];
 export const DEFAULT_TIMESALES_COLUMNS = ["time","price","size","direction"];
 
