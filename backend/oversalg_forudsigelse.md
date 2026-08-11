@@ -93,4 +93,64 @@ redigeres.**
 
 ## 6. UDFALD
 
-*(udfyldes efter luk 2026-08-10)*
+**Målt 2026-08-11 kl. 07:25 dansk. Udfald: IOVA 0 — fladt.**
+
+Begge rækker lukkede normalt, med fyldning og pris:
+
+| Strategi | Stk. | Entry | Exit | Årsag |
+|---|---|---|---|---|
+| Konfluens 2 | 39 | 09:53:00 @ 6.265 | 13:05:01 @ 6.46 | `trail_pct` |
+| BuyTheDip | 39 | 09:57:59 @ 6.29 | 12:06:16 @ 6.54 | `target` |
+
+78 købt, 78 solgt, kontoen flad. IOVA står ikke i IBKR's opgørelse.
+
+⚠ Grundlaget i §1 var rigtigt. Der er en tredje IOVA-række i journalen, men den er
+fra **16. juli** (Relativ Styrke, 17 stk.) — ikke fra måledagen. Nettoen d. 10.
+august var altså præcis de +78 som §1 målte, og forudsigelsen blev afprøvet på det
+grundlag den blev skrevet på.
+
+### Fortolkning — efter §4's egen tabel
+
+**Hverken bekræftet eller falsificeret.** Udløseren fyrede ikke.
+
+§4's advarsel gælder ordret: dette må ikke læses som "så var der ikke noget galt".
+
+### ⚠ Og nu ved vi hvorfor udløseren ikke fyrede
+
+Begge lukkeordrer **fyldte prompte** — begge rækker har exit-pris og exit-årsag.
+Genafgivelsesvejen, hvor `_ibkr_still_holds` overhovedet bliver spurgt, åbner sig
+kun når en lukkeordre *ikke* fylder. Eksperimentet var derfor aldrig ladt.
+
+Det er en brugbar præcisering af mekanismen: **delt ticker er ikke nok.** Der skal
+også en ufyldt lukkeordre til. Det er netop den betingelse `_lukkeordre_ufyldt`
+(d42cd75) griber.
+
+---
+
+## 7. Det stærkere bevis — seks andre tickere
+
+Samme morgen viste afstemningen noget IOVA ikke kunne: **journalen har nul åbne
+rækker, IBKR holder syv positioner.**
+
+| Ticker | IBKR | Seneste journal-lukning | Journalrækker |
+|---|---|---|---|
+| TE | **−86** | 08-10 14:24, 46 stk. | 9, alle lukkede |
+| NUAI | **−46** | 08-10 15:27, 47 stk. | 8, alle lukkede |
+| ALOY | **−24** | 08-07 12:28, 20 stk. | 9, alle lukkede |
+| VELO | **−19** | 08-10 10:23, 17 stk. | 7, alle lukkede |
+| XE | **−12** | 08-06 15:27, 11 stk. | 5, alle lukkede |
+| WOLF | **−10** | 08-10 12:12, 8 stk. | 8, alle lukkede |
+| SHAZ | +4 | — | **0** — ældre end journalen |
+
+⚠ **Alle seks shorts er opstået på strategier der kun går long.** En long-only
+strategi kan ikke ende i en short ved at handle som tiltænkt. Aktierne er solgt to
+gange.
+
+⚠ **Størrelserne er hele positioner, ikke brøkdele.** −46 er en 46-lot. −24 er en
+24-lot. −86 er 40+46. Det er signaturen på et dobbeltsalg — ikke på delvise
+fyldninger, som ville give skæve tal.
+
+Det er stærkere end IOVA-forsøget ville have været, og det peger samme vej:
+mekanismen i §2 er virkelig. IOVA viste kun at den er **betinget**, præcis som §3
+sagde.
+
