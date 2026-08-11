@@ -46,7 +46,12 @@ At gøre ingenting er også et valg. Det skal bare være et bevidst et.
 | 15:40 | Genstart backenden | |
 | 15:45 | Verificér | `port_tjek.py` · `/health` · flatten-preview = "allerede flad" |
 | 15:50 | Start strategierne manuelt | Studio, eller `POST /algo/start` |
-| 15:55 | **Nyt udgangspunkt for vagten** | `python algoserver_vagt.py --gem` |
+| 15:55 | **Nyt udgangspunkt for vagten** | `python algoserver_vagt.py --gem` ⚠ **fra en workstation**, ikke på algoserveren |
+
+⚠ **Vagten køres udefra.** Den bruger `replication.target_url`, og algoserveren
+har ingen — den er jo målet, ikke afsenderen. Kørt derovre svarer den *"Ingen
+URL"*. Og det er den rigtige form: en vagt der kører på det den overvåger, dør
+sammen med det.
 
 ## ⚠ Afbrydelsesreglen
 
