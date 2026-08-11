@@ -237,6 +237,34 @@ På Sørens maskine er den tom. Hendes vides endnu ikke.
 | ☐ | Installér IB Gateway (ikke login, bare installationen) |
 | ☐ | `python algoserver_vagt.py --gem` — udgangspunkt til senere |
 
+### ⚠ Vagten skal have et NYT udgangspunkt før aftenens test
+
+Udgangspunktet gemt kl. 09:08 så sådan ud:
+
+```
+forbundet=True · algo_running=True · konto=DUO509856 · positioner=7
+```
+
+Tre af de fire tal ændrer vi **med vilje** i løbet af dagen: de syv positioner
+flattes kl. 15:30, og strategierne stoppes og startes igen. Sammenlignes aftenens
+tilstand med denne baseline, rapporterer vagten hver eneste af vores egne
+handlinger som en afvigelse — og en vagt der råber ved ting man selv har gjort,
+lærer man at se forbi på en time.
+
+**Gem derfor forfra, efter algoserveren er genstartet og strategierne kørt op:**
+
+```bash
+python algoserver_vagt.py --gem
+```
+
+⚠ **Og brug IKKE `--i-vindue` om aftenen.** Flaget gør ændringer i positionstallet
+til et stopsignal, og det giver kun mening i vinduet 08:00–14:00 dansk, hvor
+strategierne ikke handler (`algoserver_vagt.py:118-124`). Om aftenen handler de,
+så positionstallet ændrer sig lovligt hvert par minutter.
+
+Kør den uden flag. Så er **mistet forbindelse**, **stoppet algo** og **skiftet
+konto** stadig stopsignaler — og det er dem der betyder noget.
+
 ### Kræver Iben — cirka fem minutter
 
 | ☐ | |
