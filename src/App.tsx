@@ -249,6 +249,24 @@ interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: numbe
 // igennem naar man genstartede appen — og det ville ligne at knappen ikke virker.
 export const KOLONNER_AENDRET = "td-kolonner-aendret";
 
+// ── Crypto: prissættes, men handles ikke herfra ──────────────────────────────
+// ⚠ SANDHEDEN LIGGER I BACKENDEN. `krypto_kurs.KRYPTO_BOERSER` er listen der
+// gælder, og ordrevejen afviser symbolerne uanset hvad denne funktion mener
+// (main.py, ibkr_buy/ibkr_sell). Denne kopi findes KUN for at grænsefladen ikke
+// skal tilbyde en knap der med sikkerhed bliver afvist.
+//
+// Driver de to lister fra hinanden, er udfaldet en KØB-knap der giver en pæn
+// fejl — ikke en ordre det forkerte sted. Det er den rigtige vej at fejle.
+const KRYPTO_PRAEFIKS = new Set([
+  "BINANCE", "COINBASE", "KRAKEN", "BITSTAMP", "BYBIT", "OKX", "KUCOIN",
+  "BITFINEX", "GEMINI", "HUOBI", "MEXC", "BITGET", "CRYPTO", "CRYPTOCAP",
+]);
+function erKrypto(ticker: string): boolean {
+  const t = (ticker || "").trim().toUpperCase();
+  if (!t.includes(":")) return false;          // ikke "har et kolon" alene —
+  return KRYPTO_PRAEFIKS.has(t.split(":")[0]); // BATS:AAPL er ikke crypto
+}
+
 function useKolonner(noegle: string, standard: string[]): string[] {
   const laes = () => {
     try {
@@ -684,12 +702,19 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                       style={{ width: 60, background: "var(--bg-input)", border: "1px solid var(--border-default)", borderRadius: 3, color: "var(--text-primary)", fontSize: 12, padding: "3px 7px", textAlign: "right", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
                   </td>}
                   {vist("handel") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
-                    <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
-                      title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                      style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4, cursor: "pointer" }}>KØB</button>
-                    <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
-                      title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                      style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>SÆLG</button>
+                    {erKrypto(stock.ticker)
+                      ? <span title={`${stock.ticker} kan prissættes, men IBKR handler ikke crypto-spot. Læg ordren manuelt (TradingView paper eller børs-demo).`}
+                          style={{ fontSize: 10.5, color: "var(--text-muted)", fontStyle: "italic" }}>
+                          manuel handel
+                        </span>
+                      : <>
+                        <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
+                          title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                          style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4, cursor: "pointer" }}>KØB</button>
+                        <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
+                          title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                          style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>SÆLG</button>
+                      </>}
                   </td>}
                   {vist("koebspris")  && <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>}
                   {vist("aktuel")     && <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>}

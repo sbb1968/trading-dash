@@ -1205,10 +1205,38 @@ class CancelOrderRequest(BaseModel):
 MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual"}
 
 
+async def handels_forbindelse():
+    """Den forbindelse ordrer FAKTISK gik igennem — ikke maskinens standardvalg.
+
+    ⚠ SPØRG DEN DER KAN VIDE DET. En ordre lagt gennem ordre-Gatewayen kendes
+    kun dér. Spørger man den delte forbindelse om dens status, svarer den ikke
+    "nej" — den svarer ingenting, og ordren bliver stående som `Afsendt` for
+    evigt.
+
+    Målt 11-08: to MES-ordrer fra gårsdagens konto 2-test stod som "2 åbne" i
+    Ordre-vinduet. De blev fyldt og lukket samme aften — men de lå på DUQ441063,
+    og vinduet spurgte DUN748991 om dem.
+
+    ⚠ Det ville have gentaget sig hos Iben i aften: hendes MES-ordrer går gennem
+    ordre-Gatewayen, og hun har slet ingen delt forbindelse. Alle hendes ordrer
+    ville have stået som ufyldte.
+
+    Returnerer None hvis intet er tilgængeligt — kalderen skal kunne skelne
+    "ingen forbindelse" fra "ingen ordrer".
+    """
+    if ordre_forbindelse.konfigureret():
+        try:
+            return await ordre_forbindelse.hent()
+        except ordre_forbindelse.OrdreForbindelseFejl as e:
+            logger.warning(f"[Ordrer] ordreforbindelsen er spærret: {e}")
+            return None
+    return strategy_manager.get_ibkr()
+
+
 @app.get("/orders/list")
 async def get_orders_list(period_hours: int = 24):
     """Returnér Trading Dash's MANUELLE ordrer i de seneste N timer med holdbar status."""
-    ibkr = strategy_manager.get_ibkr()
+    ibkr = await handels_forbindelse()
     orders = await get_tracker().get_all_orders(
         ibkr, period_hours=period_hours, sources=MANUAL_ORDER_SOURCES)
     return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
@@ -1217,7 +1245,9 @@ async def get_orders_list(period_hours: int = 24):
 @app.post("/orders/cancel")
 async def cancel_order(req: CancelOrderRequest):
     """Annullér en åben ordre via IBKR."""
-    ibkr = strategy_manager.get_ibkr()
+    # ⚠ Og annulleringen skal sendes til den forbindelse ordren blev lagt paa.
+    # Den delte kender den ikke, saa annulleringen ville tavst intet gøre.
+    ibkr = await handels_forbindelse()
     result = await get_tracker().cancel(ibkr, req.order_id)
     return result
 
