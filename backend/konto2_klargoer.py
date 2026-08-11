@@ -119,7 +119,23 @@ def tjek_exe() -> None:
 
     exe_tid = datetime.fromtimestamp(exe.stat().st_mtime, tz=timezone.utc)
     print(f"       {exe}")
-    print(f"       bygget {exe_tid.astimezone():%Y-%m-%d %H:%M}")
+    print(f"       filens tid {exe_tid.astimezone():%Y-%m-%d %H:%M}")
+
+    # ⚠ TIDEN BEVISER MINDRE END DEN SER UD TIL. Paa en maskine der BYGGER, er
+    # mtime byggetidspunktet. Paa en maskine der har faaet exe'en KOPIERET, er
+    # den overfoerselstidspunktet — og en kopieret exe ser derfor altid frisk ud,
+    # uanset hvad den indeholder. Maalt 11-08: kilden 07:56, kopien 08:11.
+    #
+    # Tidskontrollen nedenfor fanger stadig det almindelige tilfaelde (en exe der
+    # aldrig blev opdateret), men den kan ikke skelne "nybygget" fra "netop
+    # kopieret gammel binaer". Det kan summen. Sammenlign den paa tvaers af
+    # maskiner — er de ens, er det den samme fil, uanset hvad tiderne siger.
+    import hashlib
+    h = hashlib.sha256(exe.read_bytes()).hexdigest()
+    print(f"       sha256     {h[:32]}")
+    print(f"       ⚠ tiden er BYGGE-tid paa en maskine der bygger, og")
+    print(f"         OVERFOERSELS-tid paa en der har faaet filen kopieret.")
+    print(f"         Kun summen beviser at to maskiner har samme exe.")
 
     if rod.exists() and bygget.exists():
         b_tid = datetime.fromtimestamp(bygget.stat().st_mtime, tz=timezone.utc)
