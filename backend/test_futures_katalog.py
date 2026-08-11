@@ -118,12 +118,20 @@ kraev(futures_katalog.multiplikator("mes") == 5.0, "multiplikator('mes') = 5,0")
 kraev(futures_katalog.multiplikator("AAPL") == 1.0, "en aktie giver 1,0")
 kraev(futures_katalog.multiplikator("") == 1.0, "tom streng giver 1,0 (ingen crash)")
 kraev(futures_katalog.multiplikator(None) == 1.0, "None giver 1,0 (ingen crash)")
-kraev(futures_katalog.er_future("MNQ") is False, "MNQ er IKKE i kataloget endnu")
+# ⚠ MNQ KOM I KATALOGET 11-08-2026. Den stod her som "kendt fravaerende" og
+# blev dermed en test der laaste en mangel fast. Eksemplet skal vaere et symbol
+# vi IKKE handler — ellers skal testen rettes hver gang kataloget vokser, og saa
+# er den en bremse frem for en vagt.
+kraev(futures_katalog.er_future("MNQ") is True, "MNQ ER i kataloget")
+kraev(futures_katalog.multiplikator("MNQ") == 2.0,
+      "MNQ har multiplier 2,0 — IKKE 5,0 som MES/M2K (aflaest hos IBKR 11-08)")
+kraev(futures_katalog.er_future("ZZZ9") is False,
+      "et symbol vi ikke handler, er ikke en future")
 
 print("\n5. Halvt tilfoejet symbol fanges")
-kraev(futures_katalog.manglende_i_katalog(["MES", "MNQ", "M2K"]) == ["MNQ"],
-      "manglende_i_katalog peger paa MNQ")
-kraev(futures_katalog.manglende_i_katalog(["MES", "M2K"]) == [],
+kraev(futures_katalog.manglende_i_katalog(["MES", "ZZZ9", "M2K"]) == ["ZZZ9"],
+      "manglende_i_katalog peger paa det ukendte symbol")
+kraev(futures_katalog.manglende_i_katalog(["MES", "M2K", "MNQ"]) == [],
       "intet mangler naar alle er kendte")
 
 print("\n6. Rullevinduet — hvornaar spoerger vi markedet?")

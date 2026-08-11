@@ -52,6 +52,14 @@ KATALOG: dict[str, FuturesInstrument] = {
                           "CME_MINI:MES1!"),
         FuturesInstrument("M2K", "CME", 5.0, "Micro E-mini Russell 2000",
                           "CME_MINI:M2K1!"),
+        # ⚠ MULTIPLIER 2, IKKE 5. MNQ er den eneste af de tre mikroer med en anden
+        # multiplikator, og forskellen er praecis den fejl filens indledning
+        # advarer imod: P&L ville vaere regnet 2,5 gange for stort, journalen ville
+        # se rigtig ud, og det ville foerst blive opdaget paa kontoudtoget.
+        # Aflaest 11-08-2026 fra IBKR's egen kontrakt-spec (reqContractDetails,
+        # front MNQU6): multiplier='2', minTick=0.25.
+        FuturesInstrument("MNQ", "CME", 2.0, "Micro E-mini Nasdaq-100",
+                          "CME_MINI:MNQ1!"),
     ]
 }
 

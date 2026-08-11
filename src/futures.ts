@@ -16,7 +16,7 @@
 // qualify_future, som tager den mest handlede kontrakt — ikke bare den naermeste
 // ikke-udloebne. Man skriver altid det rene symbol: "MES", aldrig "MESU6".
 
-export const FUTURES_SYMBOLS = new Set(["MES", "M2K"]);
+export const FUTURES_SYMBOLS = new Set(["MES", "M2K", "MNQ"]);
 
 // TradingViews symbol for det samme instrument. MAA IKKE udelades:
 // widget'en faar ellers det bare "MES", og TradingView vaelger selv boers —
@@ -28,6 +28,7 @@ export const FUTURES_SYMBOLS = new Set(["MES", "M2K"]);
 const TV_SYMBOL: Record<string, string> = {
   MES: "CME_MINI:MES1!",
   M2K: "CME_MINI:M2K1!",
+  MNQ: "CME_MINI:MNQ1!",
 };
 
 export function isFutureSymbol(ticker: string): boolean {
