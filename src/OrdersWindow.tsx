@@ -80,7 +80,10 @@ function statusText(status: string): string {
     "ApiCancelled":   "Annulleret",
     "Inactive":       "Inaktiv",
     "ApiPending":     "Behandler...",
-    "UNKNOWN":        "Status ukendt",
+    // ⚠ Kort med vilje. "Status ukendt" blev klippet til "Status uk…" i
+    // STATUS-kolonnen, og en afklippet forklaring forklarer ingenting.
+    // Begrundelsen ligger i ⓘ-tooltippet ved siden af.
+    "UNKNOWN":        "Ukendt",
   };
   return map[status] || status;
 }
@@ -103,12 +106,18 @@ export function OrdersWindow() {
     localStorage.getItem("orders_show_open") !== "false");
   const [showFilled, setShowFilled]       = useState<boolean>(() =>
     localStorage.getItem("orders_show_filled") !== "false");
+  // ⚠ "Ukendt" er en FJERDE gruppe, ikke en restkategori. Uden sin egen taeller
+  // stod vinduet med "0 aabne · 0 udfoerte · 0 annul." OG to synlige raekker —
+  // og et vindue hvis tal ikke stemmer med det man ser, laeses som i stykker.
+  const [showUnknown, setShowUnknown]     = useState<boolean>(() =>
+    localStorage.getItem("orders_show_unknown") !== "false");
   const [showCancelled, setShowCancelled] = useState<boolean>(() =>
     localStorage.getItem("orders_show_cancelled") !== "false");
 
   useEffect(() => { localStorage.setItem("orders_show_open",      String(showOpen)); },      [showOpen]);
   useEffect(() => { localStorage.setItem("orders_show_filled",    String(showFilled)); },    [showFilled]);
   useEffect(() => { localStorage.setItem("orders_show_cancelled", String(showCancelled)); }, [showCancelled]);
+  useEffect(() => { localStorage.setItem("orders_show_unknown",   String(showUnknown)); },   [showUnknown]);
 
   // Gem periode-valg
   useEffect(() => {
@@ -169,13 +178,14 @@ export function OrdersWindow() {
   const openCount      = orders.filter(o => o.status_group === "open").length;
   const filledCount    = orders.filter(o => o.status_group === "filled").length;
   const cancelledCount = orders.filter(o => o.status_group === "cancelled").length;
+  const unknownCount   = orders.filter(o => o.status_group === "unknown").length;
 
   // Filtrer ordrer baseret på Iben's valg
   const visibleOrders = orders.filter(o => {
     if (o.status_group === "open"      && !showOpen)      return false;
     if (o.status_group === "filled"    && !showFilled)    return false;
     if (o.status_group === "cancelled" && !showCancelled) return false;
-    if (o.status_group === "unknown"   && !showOpen && !showFilled && !showCancelled) return false;
+    if (o.status_group === "unknown"   && !showUnknown)   return false;
     return true;
   });
 
@@ -257,6 +267,15 @@ export function OrdersWindow() {
             >
               ❌ {cancelledCount} annul.
             </span>
+            {unknownCount > 0 && (
+              <span
+                onClick={() => setShowUnknown(s => !s)}
+                style={badgeStyle(showUnknown, "var(--text-muted)")}
+                title="Ordrer hvis status ingen forbindelse har kunnet bekræfte — hold musen over statussen for at se hvorfor"
+              >
+                ⚪ {unknownCount} ukendt
+              </span>
+            )}
           </div>
         </div>
 
