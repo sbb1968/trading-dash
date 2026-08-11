@@ -1,4 +1,40 @@
-# Ibens MES-test — nummereret gennemgang
+# Ibens MES-test — BESTÅET 11-08-2026 kl. 15:28
+
+> ⚠ **Testen er gennemført.** Alle ti trin bestod, kørt af Søren over TeamViewer
+> før Iben kom hjem. Nedenstående er bevaret som opskrift til næste maskine —
+> resultatet står i **§0**.
+>
+> ## §0 Resultat
+>
+> | Trin | Resultat |
+> |---|---|
+> | T1–T5 sessionsprøve | ✓ `styrede konti: ['DUQ441063']` · NetLiq 10.012,53 · `placeOrder → PreSubmitted` · annullering bekræftet |
+> | T6 KØB 1 MES | ✓ fyldt @ 7791,25 |
+> | **T7 kontokontrol** | ✓ **MES kom IKKE på algoserveren** — den havde uændret de samme syv positioner |
+> | T8 journalen | ✓ `ibkr_account: DUQ441063` · `paper: 1` · begge fills |
+> | T9 SÆLG 1 MES | ✓ fyldt @ 7791,00 |
+> | T10 fladkontrol | ✓ *"Kontoen er allerede flad"* |
+>
+> Rundturen kostede **−1,25 $** = 0,25 point × 5. Præcis spreadet, intet andet.
+>
+> ⚠ **To ting skulle rettes undervejs, og de er værd at huske til næste maskine:**
+>
+> 1. **Read-Only API var stadig sat** i Gatewayen. Trading Dash nåede frem, men
+>    IBKR svarede med en dialog om skriveadgang. Tilladelsen gælder for **nye**
+>    forbindelser, så backenden skulle genstartes bagefter.
+> 2. **Min egen tjekliste lovede `order_ref: manuel:…` i journalrækken.** Feltet
+>    findes ikke i `trades`-skemaet. `orderRef` sendes til IBKR og står i deres
+>    ordrehistorik, men spejles ikke ind i journalen. Det er `source: "manual"`
+>    og kontoen der bærer tilskrivningen.
+>
+> ⚠ **Uafklaret:** algoserveren har modtaget snapshots fra `iben_workstation`
+> (`/replication/sources` bekræfter det), men dens `/journal/trades` viser kun
+> dens egne rækker. Handlen er registreret korrekt dér hvor den skete; hvorfor
+> den ikke kommer frem i forespørgslen på algoserveren, er ikke undersøgt.
+
+---
+
+# Opskriften
 
 **Skrevet 11-08-2026. Køres når Iben er hjemme fra arbejde.**
 
