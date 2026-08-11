@@ -256,11 +256,80 @@ def _uden_feed(hvorfor: str) -> None:
           f"er ikke sat).")
     if accounts.identity.replication_target_url and \
             accounts.identity.instance_role != "algoserver":
-        print(f"[LiveFeed] Watchlisten henter ægte kurser fra "
+        print(f"[LiveFeed] Henter i stedet ægte kurser fra "
               f"{accounts.identity.replication_target_url} via /quote.")
+        asyncio.create_task(algoserver_kurs_loop())
     else:
         print("[LiveFeed] ⚠ Watchlisten står uden priser. Det er ærligt, men "
               "ubrugeligt — start TWS, eller sæt replication.target_url.")
+
+
+# Tickere watchlisten har bedt om, når der ikke er et lokalt feed.
+_proxy_symboler: set[str] = set()
+PROXY_INTERVAL = 5.0
+
+
+async def algoserver_kurs_loop():
+    """Ægte kurser fra algoserveren, når denne maskine ikke har et eget feed.
+
+    ⚠ HVORFOR DEN FINDES. Watchlistens **Pris** virker allerede uden feed — den
+    viser `addPrice`, hentet fra /quote da tickeren blev tilføjet. Men **Aktuel
+    pris** og **urealiseret P/L** læser `stock.price` fra tick-strømmen, og uden
+    ticks står de tomme. Netop de to felter er dem man har brug for *efter* et
+    køb, altså mens man sidder med en åben position.
+
+    ⚠ OG DEN DIGTER IKKE. Vi sender kun de to felter der er målt: `ticker` og
+    `price`. Volumen, ændring i procent og relativ volumen udelades — de findes
+    ikke i /quote, og et 0 ville stå i grænsefladen som en påstand ("uændret",
+    "ingen omsætning") frem for som et hul. Det var præcis den fejl mock-feedet
+    lavede i stor skala.
+
+    Watchlistens standardkolonner bruger ingen af de udeladte felter, så der er
+    intet at fylde ud.
+
+    Alerts køres heller ikke: alert_engine forventer fulde ticks, og at fodre den
+    med to felter ville give udslag der intet betyder.
+    """
+    maal = accounts.identity.replication_target_url.rstrip("/")
+    hoved = {"X-Internal-Key": accounts.identity.internal_key}
+    fejl_i_traek = 0
+
+    while True:
+        await asyncio.sleep(PROXY_INTERVAL * (1 + min(fejl_i_traek, 6)))
+        if not connected_clients or not _proxy_symboler:
+            continue
+
+        symboler = sorted(_proxy_symboler)
+        ticks = []
+        try:
+            async with aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=8)) as s_:
+                async def hent(sym: str):
+                    try:
+                        async with s_.get(f"{maal}/quote/{sym}", headers=hoved) as r:
+                            if r.status != 200:
+                                return None
+                            d = await r.json()
+                            p = d.get("price")
+                            # Ingen kurs er ikke nul — det er ingen kurs.
+                            return {"ticker": sym, "price": p} if p else None
+                    except Exception:
+                        return None
+
+                for svar in await asyncio.gather(*(hent(s) for s in symboler)):
+                    if svar:
+                        ticks.append(svar)
+            fejl_i_traek = 0
+        except Exception as e:
+            fejl_i_traek += 1
+            if fejl_i_traek in (1, 5):
+                logger.warning(f"[Kursproxy] algoserveren svarer ikke ({e}) — "
+                               f"venter længere mellem forsøg")
+            continue
+
+        if ticks:
+            await broadcast({"type": "ticks", "data": ticks,
+                             "timestamp": datetime.now().isoformat()})
 
 
 # ── Mock fallback ─────────────────────────────────────────────
@@ -742,6 +811,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         await live_feed.add_symbols(syms)
                     except Exception as e:
                         logger.warning(f"[WS] watchlist_subscribe fejl: {e}")
+                elif syms:
+                    # Intet lokalt feed — men algoserveren har abonnementet.
+                    # Se algoserver_kurs_loop.
+                    _proxy_symboler.update(syms)
 
             elif message["type"] in ("ibkr_buy", "ibkr_sell"):
                 # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR

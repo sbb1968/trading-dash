@@ -59,11 +59,30 @@ def _koer(mock_feed: bool) -> list[str]:
 
 
 def test_uden_flag_digtes_der_ikke():
-    """⚠ Kernen. Default må aldrig fabrikere."""
-    assert _koer(False) == [], (
+    """⚠ Kernen. Default må aldrig fabrikere.
+
+    Testen siger `mock_data_loop er ikke blandt de startede` — ikke `ingen tasks
+    blev startet`. Første udgave gjorde det sidste og fejlede da kursproxyen kom
+    til, selvom rettelsen var korrekt. En test der forbyder mere end den mener,
+    står i vejen for arbejdet frem for at beskytte det.
+    """
+    assert "mock_data_loop" not in _koer(False), (
         "mock_data_loop blev startet uden at nogen bad om det — watchlisten "
         "ville vise opdigtede priser for rigtige tickere, og bekræftelses-"
         "dialogen ville bygge på dem")
+
+
+def test_uden_flag_hentes_aegte_kurser_i_stedet():
+    """Tavshed er ikke svaret — ægte kurser er.
+
+    Har maskinen en algoserver at spørge, skal den spørge. Ellers står **Aktuel
+    pris** og urealiseret P/L tomme på en åben position, hvilket er ærligt men
+    ubrugeligt.
+    """
+    startede = _koer(False)
+    if accounts.identity.replication_target_url and \
+            accounts.identity.instance_role != "algoserver":
+        assert "algoserver_kurs_loop" in startede, startede
 
 
 def test_med_flag_digtes_der():
