@@ -103,10 +103,43 @@ igennem.
 
 ---
 
+## 6b. ⚠ Kun ÉN Gateway må være logget ind som `fasteriben2`
+
+En TWS-bruger kan have **én** session ad gangen. Starter Ibens maskine en Gateway
+som `fasteriben2` mens Sørens stadig kører som `fasteriben2`, smider IBKR den ene
+af — typisk midt i noget.
+
+Sørens `account.yaml` har stadig `ordre_forbindelse`-blokken fra opbygningen, og
+den skal have lov at blive; det er dér der udvikles og testes. **Reglen er
+driftsmæssig, ikke konfigurationsmæssig:** kun én Gateway ad gangen.
+
+Tjek før du starter den anden:
+
+```bash
+python port_tjek.py --port 4002      # på den maskine der IKKE skal handle
+```
+
+Er der en lytter, kører der en Gateway — luk den først.
+
+⚠ **Symptomet ligner ikke årsagen.** Et sessionstyveri viser sig som en
+forbindelse der falder, eller kurser der stopper — ikke som "en anden er logget
+ind". Det er præcis den slags der koster en time hvis reglen ikke er skrevet ned.
+
+Vagterne dækker det **ikke**: V1 og V2 fanger forkert konto og live-konto, men en
+Gateway logget ind som den rigtige bruger på den rigtige konto er *rigtig* — den
+er bare ikke alene.
+
+---
+
 ## 7. Testen — tjekliste ved flytning
 
 Kør hele listen på den nye maskine. Kan den ikke køres igennem, er flytningen
 ikke bevist — den er håbet.
+
+**Kør `python konto2_klargoer.py` først.** Den måler T0a, T0b, konfigurationen,
+kurserne, journalens migration og — vigtigst — **om exe'en er nyere end de
+frontend-commits der betyder noget**. Det sidste fanger et hul `git pull` ikke
+kan lukke, fordi exe'en er et build-artefakt der ikke følger med.
 
 | # | Handling | Verificér | ☐ |
 |---|---|---|---|
