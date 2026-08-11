@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import sys
 from pathlib import Path
 
@@ -58,6 +59,26 @@ from ib_async import IB, MarketOrder
 import ibkr_client_ids
 
 IBKR_FEJL: list[tuple] = []
+
+
+def rute_for(kontrakt) -> str:
+    """Hvilken boers ordren skal rutes til.
+
+    ⚠ reqPositions giver kontrakten med dens PRIMAERE boers (NASDAQ, NYSE). En
+    ordre mod den boers er "direct routed", og det er spaerret af Precautionary
+    Settings i Global Configuration. Maalt 11-08-2026: alle syv lukkeordrer
+    afvist med 10311 -> 201 "Order was discarded". Intet blev udfoert, men intet
+    blev lukket heller.
+
+    ⚠ FUTURES ROERES IKKE. Hele grunden til at bruge IBKR's egen kontrakt var at
+    en gen-kvalificering kunne ramme den nye frontmaaned og AABNE en position i
+    stedet for at lukke en. Det hensyn gaelder stadig; det er kun aktiernes boers
+    der aendres, og conId foelger med, saa SMART ikke kan rute til et andet papir.
+    """
+    ex = (kontrakt.exchange or "").upper()
+    if (kontrakt.secType or "").upper() == "STK" and ex not in ("", "SMART"):
+        return "SMART"
+    return ex or "SMART"
 
 
 async def hent_positioner(ib: IB, konto: str) -> list:
@@ -109,7 +130,15 @@ async def hoved(args) -> int:
         print("\nPREVIEW — disse ordrer VILLE blive sendt:")
         for p in poser:
             n = float(p.position)
-            print(f"   {'SELL' if n > 0 else 'BUY ':4} {abs(n):g} {p.contract.symbol} (MKT)")
+            # ⚠ Vis den boers ordren FAKTISK rutes til. Foerste udgave viste kun
+            # symbolet, saa previewet saa fint ud mens alle syv blev afvist paa
+            # netop routingen. Et preview der udelader det felt der faejler, er
+            # ikke et preview.
+            ex = (p.contract.exchange or "").upper()
+            rute = rute_for(p.contract)
+            print(f"   {'SELL' if n > 0 else 'BUY ':4} {abs(n):g} "
+                  f"{p.contract.symbol} (MKT via {rute}"
+                  + (f", var {ex}" if rute != ex and ex else "") + ")")
         print("\n  Intet sendt. Kør igen med --udfoer.")
         ib.disconnect()
         return 0
@@ -122,8 +151,15 @@ async def hoved(args) -> int:
         ordre.account = konto
         ordre.tif = "DAY"                    # aldrig GTC
         ordre.orderRef = "flatten_alt"
-        # ⚠ p.contract — IBKR's EGEN kontrakt, ikke en nykvalificeret.
-        t = ib.placeOrder(p.contract, ordre)
+
+        # ⚠ IBKR's EGEN kontrakt — men med den rute `rute_for` bestemmer.
+        # conId foelger med, saa SMART ikke kan ramme et andet papir.
+        # Reglen og begrundelsen staar ÉT sted: rute_for. Previewet bruger samme
+        # funktion, saa det der vises, er det der sendes.
+        kontrakt = copy.copy(p.contract)
+        kontrakt.exchange = rute_for(p.contract)
+
+        t = ib.placeOrder(kontrakt, ordre)
         handler.append((p.contract.symbol, n, t))
         print(f"   {ordre.action:4} {ordre.totalQuantity:g} {p.contract.symbol}")
         await asyncio.sleep(0.4)
