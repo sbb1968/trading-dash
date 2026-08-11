@@ -41,6 +41,10 @@ sys.path.insert(0, str(HER))
 FEJL: list[str] = []
 ADVARSEL: list[str] = []
 
+# Saettes af --kraev. Uden den er en manglende ordre_forbindelse en oplysning,
+# ikke en fejl — se tjek_konfig.
+KRAEV_ORDRE_FORBINDELSE = False
+
 # Frontend-commits der ÆNDREDE noget synligt for den der handler. Er exe'en
 # ældre end en af dem, mangler brugeren noget hun ikke kan se mangler.
 FRONTEND_KRAV = {
@@ -176,9 +180,30 @@ def tjek_konfig() -> dict | None:
           f"ibkr_account {i.ibkr_account}")
 
     p = accounts.ordre_forbindelse()
-    if not ok("ordre_forbindelse findes", p is not None,
-              naar_fejl="uden den gaar ordrer gennem den DELTE forbindelse og "
-                        "lander paa en anden konto — se konto2_opsaetning.md §5"):
+
+    # ⚠ FRAVAER ER IKKE DET SAMME SOM FEJL. Foerste udgave meldte FEJL paa enhver
+    # maskine uden blokken — og fejlteksten instruerede i at tilfoeje den. Paa
+    # Soerens workstation, hvor den er slaaet FRA med vilje (11-08, saa Ibens
+    # fasteriben2-session ikke kan blive stjaalet), ville en kontrol altsaa
+    # sende folk hen for at genskabe netop det problem den skulle beskytte imod.
+    #
+    # Maskiner der ikke skal skille ordrer og kurser ad, er en gyldig opsaetning.
+    # Skal fravaeret vaere en fejl — fordi man ER ved at saette konto 2 op — saa
+    # sig det: --kraev.
+    if p is None:
+        if KRAEV_ORDRE_FORBINDELSE:
+            ok("ordre_forbindelse findes", False,
+               naar_fejl="--kraev er sat, men blokken mangler. Ordrer ville gaa "
+                         "gennem den DELTE forbindelse — se konto2_opsaetning.md §5")
+        else:
+            print(f"  ADV  ingen ordre_forbindelse — ordrer gaar gennem den DELTE "
+                  f"forbindelse til {i.ibkr_account}")
+            print(f"       Det er en gyldig opsaetning. Skal maskinen handle paa "
+                  f"konto 2, koer med --kraev.")
+            print(f"       ⚠ Er den slaaet fra med vilje, saa lad den vaere: kun ÉN "
+                  f"Gateway maa vaere logget")
+            print(f"         ind som samme TWS-bruger ad gangen "
+                  f"(konto2_opsaetning.md §6b).")
         return None
 
     print(f"       {p['host']}:{p['port']} konto {p['konto']} "
@@ -327,6 +352,14 @@ def tjek_client_ids() -> None:
 
 
 def main() -> int:
+    global KRAEV_ORDRE_FORBINDELSE
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Er denne maskine klar til at handle paa konto 2?")
+    ap.add_argument("--kraev", action="store_true",
+                    help="behandl en manglende ordre_forbindelse som en FEJL. Bruges naar man ER ved at saette konto 2 op.")
+    KRAEV_ORDRE_FORBINDELSE = ap.parse_args().kraev
+
     print("=" * 78)
     print("ER DENNE MASKINE KLAR TIL KONTO 2?")
     print("=" * 78)

@@ -584,9 +584,21 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               {sidsteOrdre.avg_fill ? ` @ ${sidsteOrdre.avg_fill}` : ""}
               {" · konto "}
               <b className="ordre-konto">{sidsteOrdre.konto || "UKENDT"}</b>
+              {/* ⚠ ADVARSLEN SKAL RAMME DET DER ER GALT, IKKE DET DER ER NORMALT.
+                  Foerste udgave advarede paa alt der ikke var "ordre" — og paa
+                  en maskine UDEN ordre_forbindelse (som Soerens efter 11-08) er
+                  den delte vej den rigtige. En advarsel der lyser ved hver
+                  eneste ordre, holder man op med at se efter tre dage.
+
+                  Den farlige tilstand er ikke "delt" — den er FRAVAERET af
+                  feltet. En backend uden ordre_forbindelse-stoette sender det
+                  slet ikke, og det er praecis den gamle proces der laa og
+                  lyttede paa port 8000 ved siden af den nye. Dér skal der raabes. */}
               {sidsteOrdre.forbindelse === "ordre"
                 ? <span className="ordre-vej"> · lokal ordre-Gateway{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
-                : <span className="ordre-vej ordre-vej-delt"> · ⚠ DELT forbindelse</span>}
+                : sidsteOrdre.forbindelse === "delt"
+                  ? <span className="ordre-vej"> · delt forbindelse{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
+                  : <span className="ordre-vej ordre-vej-delt"> · ⚠ UKENDT forbindelse — svarer en gammel backend?</span>}
             </>
           ) : (
             <>⚠ {sidsteOrdre.action === "BUY" ? "Køb" : "Salg"} af {sidsteOrdre.ticker} fejlede: {sidsteOrdre.error}</>
