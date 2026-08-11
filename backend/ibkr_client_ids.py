@@ -73,6 +73,7 @@ SCRIPTS: dict[str, int] = {
     "diagnose_feed2.py":             54,   # var random.randint(50, 99)
     "harvest_trendjoin_5min.py":     13,
     "probe_futures_depth.py":        26,
+    "scalping_universe_tjek.py":     19,
     "relstyrke_shadow_eval.py":      14,
     "test_vol_kontroller.py":        99,
     "trendjoin_shadow_eval.py":      17,
