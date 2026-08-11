@@ -17,7 +17,7 @@ Live-wrapperen (algo_relstyrke.py) emitterer ved T=09:45 EET event med HELE tvae
 navns handel som backtesten (cross_sectional_rs_backtest.py): entry = naeste bar's OPEN efter T,
 exit = EOD (sidste RTH-bar <= 15:51). Saa live-maalingen == backtest-mekanikken 1:1.
 
-READ-ONLY mod handel: ingen ordrer, skriver kun sin egen summary. Egen CLIENT_ID = 49 (maa
+READ-ONLY mod handel: ingen ordrer, skriver kun sin egen summary. Egen CLIENT_ID = 14 (maa
 IKKE kollidere med backend (client 1), trendjoin_shadow_eval (45) ELLER NKD-probe (46) — stop
 backend, ELLER skift --client-id). Historik-pull sker EFTER luk, saa det aldrig konkurrerer med live-feedet.
 
@@ -51,7 +51,7 @@ except Exception:
     ET = None
 
 SOURCE = "Relativ Styrke"
-HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 49
+HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 14
 
 # FROSNE parametre (SKAL matche algo_relstyrke.py + cross_sectional_rs_backtest.py)
 DECISION_ET_DEFAULT = dtime(9, 45)          # T

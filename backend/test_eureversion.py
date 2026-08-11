@@ -72,6 +72,15 @@ class MockConn:
         self._margin = margin
         self._pos = positions or []
         self._ret = order_ret
+        # ⚠ _lukkeordre_ufyldt spoerger om ORDRENS status, ikke om positionen.
+        # Uden denne metode kastede kaldet AttributeError, blev fanget, og
+        # vagten svarede None ("ved det ikke") — saa scenariet maalte noget
+        # andet end det stod der.
+        self._ordre_status = {"kendt": True, "status": "Filled",
+                              "filled": 999, "remaining": 0}
+
+    async def ordre_status(self, order_id):
+        return self._ordre_status
 
     def get_account_summary(self):
         return {"net_liquidation": self._equity}
@@ -123,7 +132,13 @@ class MockJournal:
     async def log_trade_close(self, **kw):
         self.closes.append(kw)
 
-    async def update_trade_state(self, **kw):
+    # ⚠ trade_id sendes POSITIONELT af algoerne
+    #     update_trade_state(_tid, current_stage=RECONCILE_CLOSING)
+    # Attrappen tog kun **kw og kastede 'takes 1 positional argument
+    # but 2 were given'. Produktionskoden fanger den fejl og logger,
+    # saa testen bestod alligevel — men markoeren blev aldrig sat, og
+    # scenariet maalte derfor ikke det det sagde.
+    async def update_trade_state(self, trade_id=None, **kw):
         self.state_updates.append(kw)
 
     def ev(self, etype):
@@ -518,8 +533,11 @@ def section_I():
     # I1a: ufyldt OG IBKR holder stadig positionen → behold aaben (M2K-fix'en 16/6:
     #      journal sagde 'lukket' mens IBKR holdt 10 kontrakter).
     a, conn, j = _algo_with_pos("long", 5000.0,
-                                order_ret={"filled": 0, "avg_fill": 0, "status": "Submitted"})
+                                order_ret={"filled": 0, "avg_fill": 0,
+                                           "status": "Submitted", "order_id": 42})
     conn._pos = [{"ticker": "MES", "position": 5, "avg_cost": 25000.0}]
+    conn._ordre_status = {"kendt": True, "status": "Cancelled",
+                          "filled": 0, "remaining": 5}
     asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
     check("I1a ufyldt + IBKR HOLDER → MES forbliver åben", "MES" in a._positions, list(a._positions))
     check("I1a ufyldt + IBKR holder → INGEN log_trade_close", j.closes == [], j.closes)
@@ -528,8 +546,11 @@ def section_I():
     # I1b: ufyldt MEN IBKR er flad → ordren fyldte alligevel; bogfoer lukningen og
     #      send IKKE en ny ordre. Uden dette opstod de ejerloese shorts 31/7.
     a, conn, j = _algo_with_pos("long", 5000.0,
-                                order_ret={"filled": 0, "avg_fill": 0, "status": "Submitted"})
+                                order_ret={"filled": 0, "avg_fill": 0,
+                                           "status": "Submitted", "order_id": 43})
     conn._pos = []
+    conn._ordre_status = {"kendt": True, "status": "Filled",
+                          "filled": 5, "remaining": 0}
     asyncio.run(a._close("MES", 5010.0, "revert", z=-0.3))
     check("I1b ufyldt + IBKR FLAD → MES lukket (ordren fyldte alligevel)",
           "MES" not in a._positions, list(a._positions))

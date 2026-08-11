@@ -71,6 +71,14 @@ SCRIPTS: dict[str, int] = {
     "vol_data_probe.py":             52,
     "regime_data_depth_probe.py":    53,   # var 47 — delte med asian_harvest
     "diagnose_feed2.py":             54,   # var random.randint(50, 99)
+    "harvest_trendjoin_5min.py":     13,
+    "probe_futures_depth.py":        26,
+    "relstyrke_shadow_eval.py":      14,
+    "test_vol_kontroller.py":        99,
+    "trendjoin_shadow_eval.py":      17,
+    "vol_futures_retention_test.py": 65,
+    "vol_intradag_dybde_verifikation.py": 64,
+    "vol_kvartalsjob.py":            18,
     "vol_harvest.py":                79,
     "regime_univers_backfill.py":    76,
 }

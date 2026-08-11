@@ -46,7 +46,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 76
+HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 18
 SYMBOLER = ["MES", "M2K", "ES", "RTY"]
 EXCHANGE = {"MES": "CME", "M2K": "CME", "ES": "CME", "RTY": "CME"}
 KVARTALSMAANEDER = (3, 6, 9, 12)

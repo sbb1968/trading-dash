@@ -24,6 +24,7 @@ data og sender fejlsøgningen et andet sted hen.
 from __future__ import annotations
 
 import pathlib
+import ast
 import re
 import sys
 
@@ -75,16 +76,65 @@ kraev(not tilfaeldige, f"ingen fundet{'' if not tilfaeldige else ': ' + '; '.joi
 
 # ── 3. Hardkodede id'er stemmer med registret ───────────────────────────────
 print("\n3. Hardkodede id'er stemmer med registret")
-MOENSTRE = (
-    r"^\s*(?:IBKR_)?CLIENT_ID\s*=\s*(\d+)",
-    r"PORT,\s*CLIENT_ID,\s*TIMEOUT\s*=\s*\d+,\s*(\d+)",
-    r"clientId\s*=\s*(\d+)",
-)
+
+
+def ids_i_kode(kilde: str) -> set[int]:
+    """Client-id'er der faktisk BRUGES — laest med ast, ikke med regex.
+
+    ⚠ REGEX MATCHEDE DOCSTRINGS. Fundet 11-08-2026: preflight_genstart.py
+    advarer i sin egen docstring mod at koere test_feed.py, "som forbinder til
+    TWS med clientId=4". Scanneren laeste den saetning som en id-tildeling og
+    meldte en dublet mellem de to filer.
+
+    Det er anden gang samme fejlklasse rammer os — position_ledger.py's scanner
+    matchede ogsaa en docstring, og loesningen var den samme. En kontrol der
+    laeser kildekode som tekst, kan ikke skelne kode fra omtale af kode.
+
+    ast kan. Kun literaler taeller: `clientId=args.client_id` er ikke en
+    hardkodning og skal ikke fanges.
+    """
+    ud: set[int] = set()
+    try:
+        trae = ast.parse(kilde)
+    except SyntaxError:
+        return ud
+
+    def _tal(node) -> int | None:
+        return (node.value if isinstance(node, ast.Constant)
+                and isinstance(node.value, int)
+                and not isinstance(node.value, bool) else None)
+
+    for n in ast.walk(trae):
+        # foo(..., clientId=5) / connect(client_id=5)
+        if isinstance(n, ast.Call):
+            for kw in n.keywords:
+                if kw.arg in ("clientId", "client_id"):
+                    v = _tal(kw.value)
+                    if v is not None:
+                        ud.add(v)
+        # CLIENT_ID = 5  ·  IBKR_CLIENT_ID = 5
+        # PORT, CLIENT_ID, TIMEOUT = 4002, 5, 20
+        elif isinstance(n, ast.Assign):
+            for maal in n.targets:
+                navne = ([maal] if isinstance(maal, ast.Name)
+                         else list(maal.elts) if isinstance(maal, (ast.Tuple, ast.List))
+                         else [])
+                vaerdier = (list(n.value.elts)
+                            if isinstance(n.value, (ast.Tuple, ast.List))
+                            else [n.value] * len(navne))
+                for nav, val in zip(navne, vaerdier):
+                    if isinstance(nav, ast.Name) and nav.id in ("CLIENT_ID", "IBKR_CLIENT_ID"):
+                        v = _tal(val)
+                        if v is not None:
+                            ud.add(v)
+    return ud
+
+
 fundet: dict[str, set[int]] = {}
 for rel, t in kildefiler():
-    for m in MOENSTRE:
-        for x in re.finditer(m, t, re.M):
-            fundet.setdefault(rel, set()).add(int(x.group(1)))
+    ids = ids_i_kode(t)
+    if ids:
+        fundet[rel] = ids
 
 ukendte, uenige = [], []
 for rel, ids in sorted(fundet.items()):

@@ -45,7 +45,7 @@ except Exception:
 
 from ib_async import IB, Stock
 
-HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 52
+HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 13
 BAR_SIZE      = "5 mins"
 CHUNK_DAYS    = 20                  # "20 D" — sikker 5-min chunk
 SLEEP_BETWEEN = 0.8

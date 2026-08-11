@@ -15,7 +15,7 @@ D3/D1/I1/I2/I3 bar-for-bar fra scan-tid & 10:05 ET frem). Udfald måles med en L
 beregnes for treatment, så sammenligningen er æbler-til-æbler.
 
 READ-ONLY mod handel: ingen ordrer, skriver intet til handels-state (kun sin egen summary).
-Egen CLIENT_ID = 45 (må IKKE kollidere med backend — stop backend, ELLER skift --client-id).
+Egen CLIENT_ID = 17 (må IKKE kollidere med backend — stop backend, ELLER skift --client-id).
 Historik-pull sker EFTER luk, så det aldrig konkurrerer med live-strategiens feed.
 
 ⚠ Kendt drift-risiko: dette script reimplementerer entry-gates + R-proxyen og kan komme ud
@@ -51,7 +51,7 @@ except Exception:
     ET = None
 
 SOURCE = "Trend Join Long"
-HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 45
+HOST, PORT, CLIENT_ID = "127.0.0.1", 7497, 17
 
 # Regel-parametre (SKAL matche algo_trendjoin.py — drift-risiko, jf. header)
 MIN_GAP_PCT   = 3.0

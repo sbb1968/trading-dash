@@ -64,6 +64,10 @@ class MockConn:
         self._ret = order_ret
         self._pos = positions or []
         self._last = last
+        # Default: ordren kendes og er fyldt. Scenarier der skal teste andet,
+        # saetter conn._ordre_status direkte.
+        self._ordre_status = {"kendt": True, "status": "Filled",
+                              "filled": 999, "remaining": 0}
 
     def get_positions(self):
         return self._pos
@@ -76,6 +80,20 @@ class MockConn:
     async def get_open_orders(self):
         # Dup-vagten i _reconcile_close læser denne. Default tom (ingen hvilende ordrer).
         return []
+
+    async def ordre_status(self, order_id):
+        """⚠ ORDRENS EGEN STATUS — det _lukkeordre_ufyldt nu spørger om.
+
+        Mocken manglede denne metode, så kaldet kastede AttributeError, blev
+        fanget, og vagten svarede None ("ved det ikke"). Testen fejlede altså
+        ikke fordi produktionskoden var forkert, men fordi attrappen ikke var
+        fulgt med designændringen.
+
+        Det er værd at holde fast i: den nye vagt spørger om ORDREN, ikke om
+        positionen. `positions=[]` betyder derfor ikke længere "ordren fyldte" —
+        det skal ordrens status sige.
+        """
+        return self._ordre_status
 
     def get_account_summary(self):
         return {"net_liquidation": 100000.0}
@@ -110,6 +128,13 @@ class MockJournal:
 
     async def log_trade_close(self, **kw):
         self.closes.append(kw)
+
+    async def update_trade_state(self, trade_id=None, **kw):
+        # ⚠ Algoerne sender trade_id POSITIONELT. Manglede metoden helt,
+        # kastede kaldet AttributeError, blev fanget og logget — og
+        # reconcile_closing-markoeren blev aldrig sat.
+        self.state_updates = getattr(self, 'state_updates', [])
+        self.state_updates.append({'trade_id': trade_id, **kw})
 
     def ev(self, etype):
         return [e for e in self.events if e[0] == etype]
@@ -501,7 +526,10 @@ def section_F():
     # ALTID regnet for fejlet, positionen holdt aaben, og naeste bar sendte en ny
     # SELL; fyldte den oprindelige alligevel, blev der solgt to gange.
     base = ET.localize(datetime(2026, 6, 16, 10, 0))
-    UNFILLED = {"filled": 0, "status": "Submitted"}
+    # ⚠ order_id SKAL med. _lukkeordre_ufyldt slaar ordren op paa sit id; uden
+    # det returnerer den None ("ved det ikke") allerede i foerste linje, og
+    # scenariet tester saa noget helt andet end det staar der.
+    UNFILLED = {"filled": 0, "status": "Submitted", "order_id": 42}
     HOLDT = [{"ticker": "S", "position": 5.0, "avg_cost": 102.0}]
 
     def _pos_algo(positions):
@@ -514,19 +542,24 @@ def section_F():
         a._mfe["S"] = 102; a._mae["S"] = 102
         return a, conn
 
-    # F3a ufyldt + IBKR HOLDER stadig -> aegte ufyldt: behold + genforsoeg
+    # F3a: ordren er ANNULLERET -> entydigt ikke fyldt -> behold + genforsoeg
     a, conn = _pos_algo(HOLDT)
+    conn._ordre_status = {"kendt": True, "status": "Cancelled",
+                          "filled": 0, "remaining": 5}
     asyncio.run(a._close("S", 100.0, "stop"))
-    check("F3a ufyldt + IBKR holder → STADIG åben", "S" in a._positions, list(a._positions))
-    check("F3a ufyldt + IBKR holder → INGEN log_trade_close",
+    check("F3a ordre annulleret → STADIG åben", "S" in a._positions, list(a._positions))
+    check("F3a ordre annulleret → INGEN log_trade_close",
           a._journal.closes == [], a._journal.closes)
 
-    # F3b ufyldt + IBKR FLAD -> ordren fyldte alligevel: bogfoer, gen-afgiv ALDRIG
+    # F3b: ordren FYLDTE alligevel (8-sek-aflaesningen naaede det bare ikke)
+    #      -> bogfoer, gen-afgiv ALDRIG
     a, conn = _pos_algo([])
+    conn._ordre_status = {"kendt": True, "status": "Filled",
+                          "filled": 5, "remaining": 0}
     asyncio.run(a._close("S", 100.0, "stop"))
-    check("F3b ufyldt + IBKR flad → lukket (ordren fyldte alligevel)",
+    check("F3b ordre fyldt → lukket (bogfoert)",
           "S" not in a._positions, list(a._positions))
-    check("F3b ufyldt + IBKR flad → KUN 1 ordre (ingen over-sell)",
+    check("F3b ordre fyldt → KUN 1 ordre (ingen over-sell)",
           len(conn.orders) == 1, conn.orders)
 
     # F4: reconcile-close UFYLDT (ghost-match men lukke-ordren fylder ikke) → SELL
