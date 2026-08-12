@@ -74,6 +74,7 @@ SCRIPTS: dict[str, int] = {
     "harvest_trendjoin_5min.py":     13,
     "probe_futures_depth.py":        26,
     "scalping_universe_tjek.py":     19,
+    "maal_futures_margin.py":        20,
     "relstyrke_shadow_eval.py":      14,
     "test_vol_kontroller.py":        99,
     "trendjoin_shadow_eval.py":      17,

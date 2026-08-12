@@ -1011,22 +1011,62 @@ class IBKRConnection:
         order_type:  str   = "MKT",
         limit_price: float = 0,
     ) -> Optional[float]:
-        """IBKR's INITIAL-margin (USD) som DENNE ordre ville binde — via en whatIf-ordre
-        (ingen rigtig ordre sendes). KUN til display. Fuldstændig fejl-sikker: enhver
-        fejl/timeout → None (kalderen viser så ingen margin). Må ALDRIG kaste videre —
-        en margin-forespørgsel må aldrig kunne påvirke en handel."""
+        """PORTEFØLJENS init-margin-ændring (USD) hvis denne ordre blev lagt.
+
+        Via en whatIf-ordre — ingen rigtig ordre sendes. KUN til display. Enhver
+        fejl/timeout → None. Må ALDRIG kaste videre; en margin-forespørgsel må
+        aldrig kunne påvirke en handel.
+
+        ⚠ TO TING VAR GALT, OG DEN FØRSTE SKJULTE DEN ANDEN.
+
+        1. **Svaret var altid tomt.** IBKR returnerer en tom OrderState hvis
+           ordren mangler `account` ELLER `tif` — uden at fejle. Advarslen
+           `10349 "Order TIF was set to DAY based on order preset"` blev logget
+           hver gang og var sporet, men blev aldrig koblet til det tomme svar.
+
+           Målt 11-08-2026, samme kontrakt, kun felterne ændret:
+
+               MKT, ingen konto         -> TOMT SVAR
+               MKT + account            -> TOMT SVAR
+               MKT + account + tif=DAY  -> initMarginChange '-2756.85'
+
+           Konsekvens: **nul af 24 futures-handler i journalen har en målt
+           margin.** Reservens estimat har været brugt hver eneste gang, og
+           kommentaren i Studio sagde "bruges KUN når den faktiske ikke er
+           fanget" — som om det var undtagelsen.
+
+        2. ⚠ **Og feltet er ikke instrumentets margin.** Det er porteføljens
+           ÆNDRING, og den afhænger af hvad kontoen i forvejen holder:
+
+               konto med MES -1:
+                 MES x1 BUY  ->  -2756,85   (lukker shorten, frigiver margin)
+                 MES x2 BUY  ->   +734,59   (lukker og aabner modsat)
+                 M2K x1 BUY  ->   -516,78   (modregner MES-shorten)
+
+           Den gamle kode tog `abs()` af det. For M2K ville det have givet 516,78
+           som "M2K's margin" — et tal der intet har med M2K at gøre.
+
+        Derfor returneres tallet nu **med fortegn** og med sit rigtige navn.
+        Skal man bruge instrumentets EGEN margin, er det `margin_est` i
+        futures_katalog — målt på en flad konto. Se `hent_standalone_margin`.
+        """
         if not self.connected:
             return None
         try:
             contract = await self._resolve_contract(ticker)
             order = MarketOrder(action, quantity) if order_type == "MKT" \
                     else LimitOrder(action, quantity, limit_price)
+            # ⚠ BEGGE er noedvendige. Uden dem: tom OrderState, ingen fejl.
+            order.account = self.account or ""
+            order.tif = "DAY"
             state = await asyncio.wait_for(
-                self.ib.whatIfOrderAsync(contract, order), timeout=5)
+                self.ib.whatIfOrderAsync(contract, order), timeout=8)
             raw = getattr(state, "initMarginChange", None) if state else None
             if raw in (None, ""):
+                logger.warning(
+                    f"[whatIf] tomt svar for {ticker} — mangler account eller tif?")
                 return None
-            return abs(float(raw))
+            return float(raw)          # ⚠ MED fortegn. Se docstring.
         except Exception as e:
             logger.warning(f"[whatIf] init-margin kunne ikke beregnes for {ticker}: {e}")
             return None

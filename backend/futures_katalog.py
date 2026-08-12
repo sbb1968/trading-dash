@@ -36,6 +36,19 @@ class FuturesInstrument:
     multiplier: float    # $ pr. prispoint
     navn: str
     tradingview: str     # TradingViews symbol — se noten nedenfor
+    # ⚠ ESTIMAT, og det skal blive ved med at hedde det. Instrumentets EGEN
+    # init-margin for ÉN kontrakt, maalt paa en FLAD konto med
+    # maal_futures_margin.py. None = ikke maalt endnu; UI'et skal da vise
+    # ingenting frem for at gaette.
+    #
+    # Hvorfor det ikke bare hentes live: `initMarginChange` fra IBKR er
+    # PORTEFOELJENS aendring, ikke instrumentets margin. Paa en konto med MES -1
+    # gav M2K x1 minus 516,78 — et tal der intet har med M2K at goere. Kun paa en
+    # flad konto er de to ens, og derfor maales det ÉN gang og gemmes.
+    #
+    # Margin aendrer sig med volatiliteten. Derfor staar datoen ved siden af.
+    margin_est: float | None = None
+    margin_maalt: str = ""      # YYYY-MM-DD
 
 
 # Multiplikatorerne er bekraeftet live mod reqPositions-avgCost (= pris x multiplier)
