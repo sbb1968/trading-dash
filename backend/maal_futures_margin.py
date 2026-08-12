@@ -119,7 +119,24 @@ async def hoved(args) -> int:
         if en:
             resultat[sym] = round(en, 2)
 
+    # ── ⚠ VAR DEN STADIG FLAD DA VI VAR FAERDIGE? ───────────────────────────
+    # Vagten ovenfor maaler ÉN gang, foer. Koerer der strategier paa kontoen,
+    # kan en position aabne midt i maalingen — og saa er de sidste symboler
+    # forurenede uden at noget siger fra. En kontrol der kun kigger foer, kan
+    # ikke se det der skete under.
+    pos2 = await asyncio.wait_for(ib.reqPositionsAsync(), timeout=30)
+    aabne2 = [p for p in pos2
+              if (p.account or "").upper() == konto and float(p.position or 0) != 0]
     ib.disconnect()
+
+    if aabne2:
+        print(f"\n⚠⚠ KONTOEN ER IKKE LAENGERE FLAD — {len(aabne2)} position(er)")
+        for p in aabne2:
+            print(f"     {p.contract.symbol:8} {float(p.position):+g}")
+        print("\n  En position aabnede MENS der blev maalt. Tallene ovenfor kan")
+        print("  vaere forurenede, og vi kan ikke se hvilke. KASSÉR DEM og maal")
+        print("  igen naar kontoen ligger stille.")
+        return 1
 
     if resultat:
         print("\n" + "=" * 78)
