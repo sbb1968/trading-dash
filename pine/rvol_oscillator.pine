@@ -20,7 +20,7 @@
 //  store_bevaegelser_lib.rvol(). ADX(14,14) matcher ligeledes bibliotekets
 //  ADX_DI_LEN / ADX_SMOOTH, saa chart og datasaet kan sammenlignes direkte.
 // ════════════════════════════════════════════════════════════════════════════
-indicator("RVOL Oscillator + ADX", shorttitle="RVOL Osc", precision=2)
+indicator("Relativ volume + ADX", shorttitle="Relativ volume + ADX", precision=2)
 
 // Pine tillader ikke en collection direkte i en anden collections type-template
 // (`map<int, array<float>>` giver CE10025). Arrayet pakkes derfor i en

@@ -1,0 +1,280 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cockpit MTF — z-reversion  v3.6   (Context 1h / Trade 15m / Timing 3m)
+//
+//  ÆNDRING v3.5 → v3.6 (kun tegning af snit + bånd):
+//   • Snit (SMA) og øvre/nedre bånd hentes NU ALTID fra 15m via request.security
+//     — også når chartet er 5m, 2m, 1m eller 1h. Ingen native beregning længere.
+//   • Tidsjustering: med "Tegn 15m-bånd tidsjusteret" (default TIL) bruges
+//     lookahead_on, så en 15m-bar's værdi står PRÆCIST over det tidsrum baren
+//     dækker — dvs. samme placering som på 15m-chartet. Uden den slås fra
+//     forskydes linjen 1×15m til højre (det var problemet i v3.5).
+//     NB: lookahead bruges KUN til tegning. Alle signaler/DOM/z-værdier bruger
+//     uændret lookahead_off, så handelslogikken ikke repainter.
+//   • Rolle-afhængige snit-plots (isCtx/isTrade/isTim) er slået sammen til ét
+//     plot — linjen er identisk i alle tre vinduer.
+//   • På 5m/2m tegnes 15m-linjen som en trappe (ét niveau pr. 15m-bar). Det er
+//     korrekt: det ER 15m-værdien. Sæt "Interpolér 15m-linjen" til for at
+//     trække en glat linje mellem 15m-punkterne, så den ligner 15m-chartet.
+//
+//  z = (close − SMA(lookback)) / population-std(lookback).
+//  v3.4: + CMF (volumen). v3.5: stærk 3m-trigger, VIX-række, Data Window ①–⑩.
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("Cockpit MTF z-reversion v3.6 (15m-bånd på alle TF)", overlay = true)
+
+// ── Rolle & timeframes ───────────────────────────────────────────────────────
+role   = input.string("Trade (15m)", "Vindue-rolle", options = ["Context (1h)", "Trade (15m)", "Timing (3m)"], group = "Cockpit")
+tf_ctx = input.timeframe("60", "Kontekst-TF",        group = "Cockpit")
+tf_sig = input.timeframe("15", "Signal-TF (handel)", group = "Cockpit")
+tf_tim = input.timeframe("3",  "Timing-TF",          group = "Cockpit")
+
+// ── MTF-bånd (snit + σ-bånd fra Signal-TF på ALLE charts) ────────────────────
+alignMTF  = input.bool(true,  "Tegn 15m-bånd tidsjusteret med 15m-baren (lookahead)", group = "MTF-bånd (tegning)")
+smoothMTF = input.bool(false, "Interpolér 15m-linjen (glat i stedet for trappe)",     group = "MTF-bånd (tegning)")
+
+// ── Strategi-parametre (v2-defaults) ─────────────────────────────────────────
+lookback  = input.int(30,   "Lookback (bars)", minval = 2, group = "Strategi")
+entry_z   = input.float(2.0, "Entry  |z| ≥", step = 0.1,   group = "Strategi")
+exit_z    = input.float(0.5, "Revert |z| ≤", step = 0.1,   group = "Strategi")
+stop_z    = input.float(3.5, "Stop   |z| ≥", step = 0.1,   group = "Strategi")
+show_stop = input.bool(false, "Vis stop-bånd (±3.5σ)", group = "Strategi")
+
+// ── ADX regime-filter ────────────────────────────────────────────────────────
+adx_len    = input.int(14,   "ADX længde",       minval = 1, group = "Regime-filter")
+adx_smooth = input.int(14,   "ADX udjævning",    minval = 1, group = "Regime-filter")
+adx_thresh = input.float(25, "Trend hvis ADX ≥", step = 1,   group = "Regime-filter")
+
+// ── CMF (volumen-bekræftelse) ────────────────────────────────────────────────
+cmfLen  = input.int(20,    "CMF Length", minval = 1, group = "CMF-filter")
+cmfGate = input.bool(true, "Kræv CMF-bekræftelse på GO", group = "CMF-filter")
+
+// ── Timing-trigger (3m) ──────────────────────────────────────────────────────
+strongTurn = input.bool(true, "Stærk 3m-vending (z op 2 bars + reel op-bar)", group = "Timing-trigger")
+
+// ── VIX (bredt markeds frygt/ro) ─────────────────────────────────────────────
+vixSym = input.symbol("TVC:VIX", "VIX symbol", group = "VIX")
+
+// ── Data Window-felter (ATR + rel. volumen) ──────────────────────────────────
+atrLen  = input.int(14, "ATR-længde (VWAP-afstand)",  minval = 1, group = "Data Window")
+rvolLen = input.int(20, "Rel. volumen længde (bars)", minval = 1, group = "Data Window")
+
+// ── MACD-filter (bekræft momentum-skift før GO/trekant) ──────────────────────
+macdGate = input.bool(true, "Kræv MACD skiftet til positiv/negativ på GO", group = "MACD-filter")
+macdFast = input.int(12, "MACD hurtig lgd.",  minval = 1, group = "MACD-filter")
+macdSlow = input.int(26, "MACD langsom lgd.", minval = 1, group = "MACD-filter")
+macdSig  = input.int(9,  "MACD signal lgd.",  minval = 1, group = "MACD-filter")
+
+// ── Metric-funktion (evalueres pr. timeframe via request.security) ───────────
+f_calc() =>
+    _ma  = ta.sma(close, lookback)
+    _sd  = ta.stdev(close, lookback, true)          // biased=true => population-std
+    _z   = _sd > 0 ? (close - _ma) / _sd : na
+    [_dip, _dim, _adx] = ta.dmi(adx_len, adx_smooth)
+    _vw  = ta.vwap(hlc3)
+    _mult = (high - low) != 0 ? ((close - low) - (high - close)) / (high - low) : 0.0
+    _sv   = math.sum(volume, cmfLen)
+    _cmf  = _sv != 0 ? math.sum(_mult * volume, cmfLen) / _sv : 0.0
+    _up   = close > close[1]                          // reel op-bar på denne TF
+    _atr  = ta.atr(atrLen)                            // til VWAP-afstand (volatilitets-enhed)
+    _vavg = ta.sma(volume[1], rvolLen)                // snit af FOREGÅENDE bars (excl. denne)
+    _rvol = (not na(_vavg) and _vavg > 0) ? volume / _vavg : na   // relativ volumen (×)
+    [_z, _adx, _ma, _sd, _vw, _cmf, _up, _atr, _rvol]
+
+// Native (denne charts egen TF) — bruges nu KUN til VWAP/ATR/rel.volumen
+[zN, adxN, maN, sdN, vwN, cmfN, upN, atrN, rvolN] = f_calc()
+
+// Pr. rolle-TF via security (til boksen + signaler) — lookahead_off = ingen repaint
+[z1, adx1, ma1, sd1, vw1, cmf1, up1, atr1, rvol1] = request.security(syminfo.tickerid, tf_ctx, f_calc())
+[z2, adx2, ma2, sd2, vw2, cmf2, up2, atr2, rvol2] = request.security(syminfo.tickerid, tf_sig, f_calc())
+[z3, adx3, ma3, sd3, vw3, cmf3, up3, atr3, rvol3] = request.security(syminfo.tickerid, tf_tim, f_calc())
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  TEGNE-DATA: snit + std fra Signal-TF (15m), identisk i ALLE vinduer
+//  lookahead_on ⇒ 15m-værdien står over det tidsrum 15m-baren dækker,
+//  dvs. præcis samme placering som på 15m-chartet (kun til tegning).
+// ─────────────────────────────────────────────────────────────────────────────
+f_band() =>
+    _ma = ta.sma(close, lookback)
+    _sd = ta.stdev(close, lookback, true)
+    [_ma, _sd]
+
+[maA, sdA] = request.security(syminfo.tickerid, tf_sig, f_band(), lookahead = barmerge.lookahead_on)
+[maB, sdB] = request.security(syminfo.tickerid, tf_sig, f_band(), lookahead = barmerge.lookahead_off)
+
+ma15raw = alignMTF ? maA : maB
+sd15raw = alignMTF ? sdA : sdB
+
+// Valgfri interpolation: træk en ret linje mellem 15m-punkterne, så linjen på
+// 2m/5m ser ud som på 15m-chartet i stedet for en trappe.
+f_interp(_src) =>
+    var float _prev  = na
+    var float _cur   = na
+    var int   _len   = 1
+    var int   _i     = 0
+    _chg = _src != _src[1]
+    if _chg
+        _prev := _cur
+        _cur  := _src
+        _len  := math.max(_i, 1)
+        _i    := 1
+    else
+        _i += 1
+    _out = (na(_prev) or na(_cur)) ? _src : _prev + (_cur - _prev) * math.min(_i, _len) / _len
+    _out
+
+sameTF = timeframe.in_seconds(timeframe.period) >= timeframe.in_seconds(tf_sig)
+ma15 = (smoothMTF and not sameTF) ? f_interp(ma15raw) : ma15raw
+sd15 = (smoothMTF and not sameTF) ? f_interp(sd15raw) : sd15raw
+
+// MACD-histogram på Timing-TF (3m)
+f_macdHist() =>
+    [_m, _s, _h] = ta.macd(close, macdFast, macdSlow, macdSig)
+    _h
+macdHist3 = request.security(syminfo.tickerid, tf_tim, f_macdHist())
+
+// VIX (aktuel TF) — stiger = risk-off/frygt (rød) · falder = ro/reversion-venligt (grøn)
+vixV   = request.security(vixSym, timeframe.period, close)
+vixArr = na(vixV) ? "" : (vixV > vixV[1] ? " ▲" : " ▼")
+vixCol = na(vixV) ? color.new(color.gray, 20) : (vixV > vixV[1] ? color.new(color.red, 30) : color.new(color.green, 45))
+
+// ── Rolle-flags ──────────────────────────────────────────────────────────────
+isCtx   = role == "Context (1h)"
+isTrade = role == "Trade (15m)"
+isTim   = role == "Timing (3m)"
+expTF   = isCtx ? tf_ctx : isTrade ? tf_sig : tf_tim
+tfMatch = timeframe.period == expTF
+
+// ── VWAP-afstand i ATR-enheder (native TF) ───────────────────────────────────
+vwapDistATR = (not na(vwN) and not na(atrN) and atrN > 0) ? (close - vwN) / atrN : na
+
+// ── HISTORIK I DATA WINDOW (læs for ENHVER candle) ───────────────────────────
+plot(atrN,        "① ATR",             display = display.data_window)
+plot(vwapDistATR, "② VWAP-afst (ATR)", display = display.data_window)
+plot(rvolN,       "③ Rel. vol (×)",    display = display.data_window)
+plot(z1,          "④ z (1h)",          display = display.data_window)
+plot(z2,          "⑤ z (15m)",         display = display.data_window)
+plot(z3,          "⑥ z (3m)",          display = display.data_window)
+plot(cmf2,        "⑦ CMF (15m)",       display = display.data_window)
+plot(adx1,        "⑧ ADX (1h)",        display = display.data_window)
+plot(adx2,        "⑨ ADX (15m)",       display = display.data_window)
+plot(adx3,        "⑩ ADX (3m)",        display = display.data_window)
+
+// ── Bånd-niveauer — ALLE fra 15m (ma15/sd15), uanset chartets TF ─────────────
+upE15 = ma15 + entry_z * sd15
+loE15 = ma15 - entry_z * sd15
+upX15 = ma15 + exit_z  * sd15
+loX15 = ma15 - exit_z  * sd15
+upS15 = ma15 + stop_z  * sd15
+loS15 = ma15 - stop_z  * sd15
+
+// ── Plot: ÉT sæt linjer — identisk på 15m, 5m og 2m ──────────────────────────
+plot(ma15,  "Snit (15m)",     color = color.new(color.white, 0),  linewidth = 1, display = display.pane)
+plot(upE15, "15m +σ (SHORT)", color = color.new(color.red, 0),    linewidth = 1, display = display.pane)
+plot(loE15, "15m −σ (LONG)",  color = color.new(color.green, 0),  linewidth = 1, display = display.pane)
+// plot(upX15, "Øvre revert",  color = color.new(color.blue, 40),  linewidth = 1, display = display.pane)
+// plot(loX15, "Nedre revert", color = color.new(color.blue, 40),  linewidth = 1, display = display.pane)
+plot(show_stop ? upS15 : na, "Øvre stop",  color = color.new(color.orange, 0), linewidth = 2, display = display.pane)
+plot(show_stop ? loS15 : na, "Nedre stop", color = color.new(color.orange, 0), linewidth = 2, display = display.pane)
+// VWAP (native i alle vinduer — bevidst, den skal følge vinduets egen TF)
+plot(vwN, "VWAP", color = color.new(color.purple, 0), linewidth = 2, display = display.pane)
+
+// ── Kombineret dom (verdict) — uændret, bruger lookahead_off-data ────────────
+trend1    = not na(adx1) and adx1 >= adx_thresh
+fadeLong  = not na(z2) and z2 <= -entry_z
+fadeShort = not na(z2) and z2 >=  entry_z
+turnUp    = not na(z3) and (strongTurn ? (z3 > z3[1] and z3[1] > z3[2] and up3)       : (z3 > z3[1]))
+turnDn    = not na(z3) and (strongTurn ? (z3 < z3[1] and z3[1] < z3[2] and not up3)   : (z3 < z3[1]))
+cmfUp      = not na(cmf2) and cmf2 >= cmf2[1]   // CMF stiger = købspres tiltager
+cmfDown    = not na(cmf2) and cmf2 <= cmf2[1]   // CMF falder = salgspres tiltager
+cmfOKlong  = not cmfGate or cmfUp
+cmfOKshort = not cmfGate or cmfDown
+macdPosLong  = not macdGate or (not na(macdHist3) and macdHist3 > 0)
+macdNegShort = not macdGate or (not na(macdHist3) and macdHist3 < 0)
+vetoStop   = not na(z2) and math.abs(z2) >= stop_z
+goLong     = not trend1 and not vetoStop and fadeLong  and turnUp and cmfOKlong  and macdPosLong
+goShort    = not trend1 and not vetoStop and fadeShort and turnDn and cmfOKshort and macdNegShort
+
+verdictTxt   = "VENT"
+verdictShort = "VENT"
+verdictCol   = color.new(color.gray, 20)
+if trend1
+    verdictTxt := "STÅ OVER — 1h trend (ADX " + str.tostring(adx1, "0") + ")"
+    verdictShort := "STÅ OVER"
+    verdictCol := color.new(color.purple, 0)
+else if vetoStop
+    verdictTxt := "STÅ OVER — stop-zone"
+    verdictShort := "STÅ OVER"
+    verdictCol := color.maroon
+else if goLong
+    verdictTxt := "GO LONG"
+    verdictShort := "GO LONG"
+    verdictCol := color.green
+else if goShort
+    verdictTxt := "GO SHORT"
+    verdictShort := "GO SHORT"
+    verdictCol := color.red
+else if fadeLong and turnUp and cmfOKlong and not macdPosLong
+    verdictTxt := "ARM LONG — vent på MACD (positiv)"
+    verdictShort := "ARM LONG"
+    verdictCol := color.new(color.green, 45)
+else if fadeShort and turnDn and cmfOKshort and not macdNegShort
+    verdictTxt := "ARM SHORT — vent på MACD (negativ)"
+    verdictShort := "ARM SHORT"
+    verdictCol := color.new(color.red, 45)
+else if fadeLong and turnUp
+    verdictTxt := "ARM LONG — mangler volumen (CMF ↓)"
+    verdictShort := "ARM LONG"
+    verdictCol := color.new(color.green, 45)
+else if fadeShort and turnDn
+    verdictTxt := "ARM SHORT — mangler volumen (CMF ↑)"
+    verdictShort := "ARM SHORT"
+    verdictCol := color.new(color.red, 45)
+else if fadeLong
+    verdictTxt := "ARM LONG — vent på 3m-vending op"
+    verdictShort := "ARM LONG"
+    verdictCol := color.new(color.green, 45)
+else if fadeShort
+    verdictTxt := "ARM SHORT — vent på 3m-vending ned"
+    verdictShort := "ARM SHORT"
+    verdictCol := color.new(color.red, 45)
+else
+    d = na(z2) ? na : entry_z - math.abs(z2)
+    verdictTxt := "VENT — 15m afstand " + (na(d) ? "—" : str.tostring(d, "0.00"))
+    verdictShort := "VENT"
+    verdictCol := color.new(color.orange, 0)
+
+// ── Timing-pil (kun timing-vinduet) ──────────────────────────────────────────
+plotshape(isTim and goLong  ? loE15 : na, "Entry long timing",  style = shape.triangleup,   location = location.absolute, color = color.green, size = size.small)
+plotshape(isTim and goShort ? upE15 : na, "Entry short timing", style = shape.triangledown, location = location.absolute, color = color.red,   size = size.small)
+
+// ── Farve-/tekst-hjælp ───────────────────────────────────────────────────────
+f_zcol(_z, _adx) =>
+    na(_z) ? color.gray :
+      (not na(_adx) and _adx >= adx_thresh) ? color.new(color.gray, 0) :
+      math.abs(_z) >= stop_z        ? color.maroon :
+      math.abs(_z) >= entry_z       ? (_z > 0 ? color.red : color.green) :
+      math.abs(_z) >= entry_z - 0.5 ? color.orange :
+      math.abs(_z) <= exit_z        ? color.blue : color.new(color.gray, 20)
+
+f_ztxt(_z)   => na(_z) ? "—" : str.tostring(_z, "0.00")
+f_reg(_adx)  => na(_adx) ? "—" : (_adx >= adx_thresh ? "T " : "R ") + str.tostring(_adx, "0")
+f_regcol(_a) => na(_a) ? color.new(color.gray, 20) : (_a >= adx_thresh ? color.new(color.purple, 0) : color.new(color.green, 35))
+
+// ── Panel (kun på 15m-chartet) ───────────────────────────────────────────────
+showBox = timeframe.period == tf_sig
+var table t = table.new(position.top_right, 2, 5, frame_width = 1, frame_color = color.new(color.gray, 40), border_width = 1, border_color = color.new(color.gray, 55))
+
+if barstate.islast and showBox
+    bg = color.new(color.black, 0)
+    tx = color.new(color.silver, 0)
+    table.cell(t, 0, 0, "15m · TRADE", text_color = color.white, bgcolor = color.new(color.gray, 0), text_size = size.small)
+    table.cell(t, 1, 0, syminfo.ticker, text_color = color.white, bgcolor = color.new(color.gray, 0), text_size = size.small)
+    table.cell(t, 0, 1, "Z (15m)", text_color = tx, bgcolor = bg, text_size = size.normal)
+    table.cell(t, 1, 1, f_ztxt(z2), text_color = color.white, bgcolor = f_zcol(z2, adx2), text_size = size.large)
+    ribbon = "1h " + f_ztxt(z1) + " " + f_reg(adx1) + "   ·   3m " + f_ztxt(z3) + " " + f_reg(adx3)
+    table.cell(t, 0, 2, "Z (1h/3m)", text_color = tx, bgcolor = bg, text_size = size.small)
+    table.cell(t, 1, 2, ribbon, text_color = color.white, bgcolor = f_regcol(adx1), text_size = size.small)
+    table.cell(t, 0, 3, "DOM", text_color = tx, bgcolor = bg, text_size = size.small)
+    table.cell(t, 1, 3, verdictTxt, text_color = color.white, bgcolor = verdictCol, text_size = size.small)
+    table.cell(t, 0, 4, "VIX", text_color = tx, bgcolor = bg, text_size = size.small)
+    table.cell(t, 1, 4, na(vixV) ? "—" : str.tostring(vixV, "0.00") + vixArr, text_color = color.white, bgcolor = vixCol, text_size = size.small)
