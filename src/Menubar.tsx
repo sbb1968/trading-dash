@@ -588,27 +588,43 @@ export function Menubar({
   // er startet. Ellers ville browseren nå frem før serveren.
   const [oevebaneStarter, setOevebaneStarter] = useState(false);
 
+  // ⚠ ÅBNINGEN HAR SIN EGEN FEJLHÅNDTERING. Alt lå før i ét `try`, så da Tauri
+  // afviste adressen ("Not allowed to open url http://127.0.0.1:8100"), stod der
+  // "Kunne ikke nå backenden på 127.0.0.1:8000 — kører den?" — mens backenden
+  // havde svaret helt fint et øjeblik før. En fejlmeddelelse der peger på det
+  // forkerte, sender fejlsøgningen det forkerte sted hen.
+  async function aabn(url: string) {
+    try {
+      await openUrl(url);
+    } catch (err) {
+      alert(`Kunne ikke åbne ${url}\n\n${err}\n\n`
+          + "Adressen skal stå i src-tauri/capabilities/default.json "
+          + "(opener:allow-open-url) — og mønstrene dér kræver en sti, "
+          + "så adressen skal ende på '/'.");
+    }
+  }
+
   async function aabnOevebane() {
     setOevebaneStarter(true);
     try {
       const s = await fetch("http://127.0.0.1:8000/practice/status").then(r => r.json());
       // ⚠ Koerer oevebanen et andet sted (fx algoserveren), kan vi hverken
       // maale eller starte den herfra — saa aabner vi den bare.
-      if (!s.lokal) { await openUrl(s.url); return; }
-      if (s.koerer) { await openUrl(s.url); return; }
+      if (!s.lokal) { await aabn(s.url); return; }
+      if (s.koerer) { await aabn(s.url); return; }
       if (!s.installeret) {
-        alert(`Øvebanen findes ikke på denne maskine. Forventet: ${s.sti}`);
+        alert(`Trading Practice findes ikke på denne maskine. Forventet: ${s.sti}`);
         return;
       }
       if (!s.har_data) {
         // ⚠ Uden bar_cache starter appen fint og viser en TOM vælger. Sig det
         // frem for at lade brugeren lede efter fejlen i programmet.
-        alert("Øvebanen kan starte, men der er ingen markedsdata på denne maskine "
+        alert("Trading Practice kan starte, men der er ingen markedsdata på denne maskine "
             + "(bar_cache mangler). Den vil vise en tom liste.");
       }
       const r = await fetch("http://127.0.0.1:8000/practice/start", { method: "POST" });
-      if (!r.ok) { alert("Kunne ikke starte øvebanen: " + (await r.text())); return; }
-      await openUrl(s.url);
+      if (!r.ok) { alert("Kunne ikke starte Trading Practice: " + (await r.text())); return; }
+      await aabn(s.url);
     } catch (err) {
       alert("Kunne ikke nå backenden på 127.0.0.1:8000 — kører den? " + err);
     } finally {
@@ -763,8 +779,8 @@ export function Menubar({
         <button className="menu-btn menu-btn-door"
                 disabled={oevebaneStarter}
                 onClick={aabnOevebane}
-                title="Åbn Trading Practice (øvebanen) — startes automatisk hvis den ikke kører">
-          {oevebaneStarter ? "⏳ starter…" : "🎯 Øvebane"}
+                title="Åbn Trading Practice — startes automatisk hvis den ikke kører">
+          {oevebaneStarter ? "⏳ starter…" : "🎯 Trading Practice"}
         </button>
         <button className="menu-btn menu-btn-door"
                 onClick={() => onAddWindow("docs")} title="Åbn dokumentation">

@@ -13,6 +13,9 @@
         { "url": "http://127.0.0.1:8000/*" },
         { "url": "http://localhost:8000/*" },
         { "url": "http://192.168.8.16:8000/*" },
+        { "url": "http://127.0.0.1:8100/*" },
+        { "url": "http://localhost:8100/*" },
+        { "url": "http://iben-algo:8100/*" },
         { "url": "https://*/*" },
         { "url": "http://*/*" }
       ]

@@ -5617,7 +5617,19 @@ def _practice_url_default() -> str:
     return f"http://127.0.0.1:{PRACTICE_PORT}"
 
 
-PRACTICE_URL = os.environ.get("PRACTICE_URL") or _practice_url_default()
+# ⚠ ALTID MED AFSLUTTENDE SKRAASTREG. Tauri's opener har en allowliste med
+# moenstre som "http://*/*", og det kraever en STI efter vaerten. Adressen
+# "http://127.0.0.1:8100" (uden skraastreg) matchede derfor ikke, og appen
+# svarede "Not allowed to open url" — mens Studio-knappen virkede fint, fordi
+# dens adresse tilfaeldigvis ender paa "/studio".
+#
+# Et moenster der virker for én adresse og ikke for en anden, fordi den ene har
+# en sti, er ikke noget man gaetter sig til foran en dialogboks.
+def _med_skraastreg(u: str) -> str:
+    return u if u.rstrip().endswith("/") or "/" in u.split("://", 1)[-1] else u + "/"
+
+
+PRACTICE_URL = _med_skraastreg(os.environ.get("PRACTICE_URL") or _practice_url_default())
 
 # ⚠ Kan DENNE backend starte oevebanen? Kun hvis den koerer samme sted.
 # Peger PRACTICE_URL paa en anden maskine, kan vi hverken maale eller starte
