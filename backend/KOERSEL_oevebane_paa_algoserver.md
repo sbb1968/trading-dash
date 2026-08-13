@@ -51,7 +51,7 @@ API bag; `git clone`, `venv` og `pip install` har ingen API.
 **Derfor: RDP ind, og indsæt disse to linjer.** Resten klarer scriptet.
 
 ```powershell
-cd C:\Projects	rading_dash ; git pull
+cd C:\Projects\trading_dash ; git pull
 cd backend ; .\installer_oevebane.ps1 -Bredt
 ```
 
