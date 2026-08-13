@@ -5567,6 +5567,84 @@ async def risk_config_set(request: Request):
     return {"ok": True, "config": risk_config.for_api(_risk_nlv())}
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Trading Practice — øvebanen (separat app, egen proces, port 8100)
+# ═══════════════════════════════════════════════════════════════════
+# ⚠ DEN KØRER DÉR HVOR DATA LIGGER, ikke på algoserveren. `bar_cache` (521 MB)
+# og `data_harvest` (466 MB) er gitignorerede, så et `git pull` på algoserveren
+# giver koden men ikke barerne. Øvebanen kan derfor kun køre på en maskine hvor
+# de mapper findes — i praksis Sørens workstation.
+#
+# ⚠ DERFOR ER STATUS-KONTROLLEN KUN MENINGSFULD LOKALT. Kaldes den herfra på
+# algoserveren, måler den ALGOSERVERENS port 8100 — ikke den maskine brugeren
+# sidder ved. Studio-knappen spørger derfor slet ikke; den åbner bare
+# 127.0.0.1:8100 hos den der klikker.
+PRACTICE_PORT = 8100
+PRACTICE_DIR = Path("C:/projects/trading_practice")
+PRACTICE_URL = f"http://127.0.0.1:{PRACTICE_PORT}"
+
+
+def _practice_svarer(timeout: float = 0.6) -> bool:
+    import socket
+    s = socket.socket()
+    s.settimeout(timeout)
+    try:
+        return s.connect_ex(("127.0.0.1", PRACTICE_PORT)) == 0
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+@app.get("/practice/status")
+async def practice_status():
+    """Kører øvebanen på DENNE maskine?"""
+    findes = (PRACTICE_DIR / "app.py").exists()
+    return {
+        "koerer": _practice_svarer(),
+        "installeret": findes,
+        "url": PRACTICE_URL,
+        "sti": str(PRACTICE_DIR),
+        # ⚠ Uden data er der ingenting at øve på, og appen ville starte og
+        # vise en tom vælger. Bedre at sige det end at lade brugeren gætte.
+        "har_data": (Path(__file__).parent / "bar_cache").is_dir(),
+    }
+
+
+@app.post("/practice/start")
+async def practice_start():
+    """Start øvebanen hvis den ikke allerede kører.
+
+    ⚠ Ingen parametre fra kaldet. Stien og kommandoen er hårdkodede — en rute
+    der kan starte processer, må ikke kunne starte HVILKEN SOM HELST proces.
+    """
+    if _practice_svarer():
+        return {"ok": True, "koerte_allerede": True, "url": PRACTICE_URL}
+    app_py = PRACTICE_DIR / "app.py"
+    if not app_py.exists():
+        raise HTTPException(404, f"oevebanen findes ikke: {app_py}")
+
+    import subprocess
+    venv_py = PRACTICE_DIR / "venv" / "Scripts" / "python.exe"
+    exe = str(venv_py) if venv_py.exists() else sys.executable
+    try:
+        subprocess.Popen([exe, str(app_py)], cwd=str(PRACTICE_DIR),
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        raise HTTPException(500, f"kunne ikke starte oevebanen: {e}")
+
+    # ⚠ Vent til den SVARER, ikke bare til processen er startet. Indekset
+    # indlaeses ved opstart (~16.500 sessioner), saa der gaar et par sekunder
+    # foer porten er aaben — og en browser der aabnes for tidligt, viser en
+    # fejlside som brugeren opfatter som at knappen ikke virker.
+    import asyncio as _a
+    for _ in range(40):                      # op til ~20 sekunder
+        await _a.sleep(0.5)
+        if _practice_svarer():
+            return {"ok": True, "koerte_allerede": False, "url": PRACTICE_URL}
+    raise HTTPException(504, "oevebanen startede, men svarede ikke inden for 20 sekunder")
+
+
 @app.get("/studio")
 async def studio_index():
     """Servér Studio's index.html. Studio er en separat browser-baseret app

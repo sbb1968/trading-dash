@@ -80,6 +80,13 @@ const ALL_WIN_SHORTCUTS: WinEntry[] = NON_CHART_GROUPS.flatMap(g => g.items);
 // 127.0.0.1 ville på en workstation kun vise den lokale maskine (intet replikeret arkiv).
 const STUDIO_URL = "http://iben-algo:8000/studio";
 
+// Oevebanen (trading_practice) er en SEPARAT app paa port 8100.
+// ⚠ Den koerer paa den maskine hvor DATA ligger — ikke paa algoserveren.
+// bar_cache (521 MB) og data_harvest (466 MB) er gitignorerede, saa et
+// git pull paa algoserveren giver koden men ikke barerne. Derfor 127.0.0.1
+// og ikke iben-algo, modsat Studio ovenfor.
+const PRACTICE_URL = "http://127.0.0.1:8100";
+
 // ── Temaer ────────────────────────────────────────────────────
 const THEMES: { id: string; label: string; dot: string; group: string }[] = [
   { id: "original",   label: "Original",       dot: "#555555", group: "Original" },
@@ -573,6 +580,42 @@ export function Menubar({
     try { await invoke("open_screen2"); } catch (err) { console.error("Skærm 2 fejl:", err); }
   }
 
+  // ── Øvebanen ──────────────────────────────────────────────────────────
+  // ⚠ EN KNAP DER ÅBNER EN DØD SIDE ER VÆRRE END INGEN KNAP. Øvebanen er en
+  // separat proces; kører den ikke, viser browseren "kan ikke oprette
+  // forbindelse", og det ligner at knappen er i stykker. Derfor spørger vi
+  // backenden først og lader den STARTE appen hvis den er nede.
+  //
+  // ⚠ Backenden svarer først når indekset er indlæst (~16.500 sessioner), så
+  // /practice/start venter til porten faktisk svarer — ikke bare til processen
+  // er startet. Ellers ville browseren nå frem før serveren.
+  const [oevebaneStarter, setOevebaneStarter] = useState(false);
+
+  async function aabnOevebane() {
+    setOevebaneStarter(true);
+    try {
+      const s = await fetch("http://127.0.0.1:8000/practice/status").then(r => r.json());
+      if (s.koerer) { await openUrl(PRACTICE_URL); return; }
+      if (!s.installeret) {
+        alert(`Øvebanen findes ikke på denne maskine. Forventet: ${s.sti}`);
+        return;
+      }
+      if (!s.har_data) {
+        // ⚠ Uden bar_cache starter appen fint og viser en TOM vælger. Sig det
+        // frem for at lade brugeren lede efter fejlen i programmet.
+        alert("Øvebanen kan starte, men der er ingen markedsdata på denne maskine "
+            + "(bar_cache mangler). Den vil vise en tom liste.");
+      }
+      const r = await fetch("http://127.0.0.1:8000/practice/start", { method: "POST" });
+      if (!r.ok) { alert("Kunne ikke starte øvebanen: " + (await r.text())); return; }
+      await openUrl(PRACTICE_URL);
+    } catch (err) {
+      alert("Kunne ikke nå backenden på 127.0.0.1:8000 — kører den? " + err);
+    } finally {
+      setOevebaneStarter(false);
+    }
+  }
+
   // ALT+A global shortcut til auto-arrange
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -716,6 +759,12 @@ export function Menubar({
                 onClick={() => openUrl(STUDIO_URL)}
                 title="Åbn Studio på algoserveren (hele flåden) i browser">
           🎛 Studio
+        </button>
+        <button className="menu-btn menu-btn-door"
+                disabled={oevebaneStarter}
+                onClick={aabnOevebane}
+                title="Åbn Trading Practice (øvebanen) — startes automatisk hvis den ikke kører">
+          {oevebaneStarter ? "⏳ starter…" : "🎯 Øvebane"}
         </button>
         <button className="menu-btn menu-btn-door"
                 onClick={() => onAddWindow("docs")} title="Åbn dokumentation">

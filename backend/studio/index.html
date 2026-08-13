@@ -1572,6 +1572,19 @@
                     font-size:14px; font-family:inherit; cursor:pointer;">
                 <option value="">Denne maskine</option>
             </select>
+            <!-- ⚠ 127.0.0.1, IKKE iben-algo. Studio serveres fra algoserveren,
+                 men oevebanen koerer paa den maskine hvor DATA ligger — bar_cache
+                 (521 MB) og data_harvest (466 MB) er gitignorerede, saa
+                 algoserveren har koden men ikke barerne. Linket aabner derfor
+                 oevebanen paa DEN MASKINE MAN SIDDER VED.
+                 ⚠ Og derfor er der ingen status-kontrol her: en kontrol fra
+                 Studio ville maale ALGOSERVERENS port 8100, ikke brugerens. -->
+            <a href="http://127.0.0.1:8100" target="_blank" rel="noopener"
+               id="oevebane-link"
+               title="Åbn Trading Practice på DIN maskine (port 8100). Den skal køre lokalt — Studio kan ikke se om den gør."
+               style="background:#1a1a1a; color:#f0f0f0; border:1px solid #4a4a4a;
+                      border-radius:4px; padding:8px 12px; font-size:14px;
+                      text-decoration:none; white-space:nowrap;">🎯 Øvebane</a>
             <span id="konto-maerke"></span>
             <div class="identity" id="identity">Indlæser identitet...</div>
         </div>
