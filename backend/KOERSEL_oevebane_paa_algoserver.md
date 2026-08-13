@@ -32,7 +32,52 @@ cd C:\Projects\trading_dash\backend
 
 ---
 
-## 1. Hent koden
+## 1. Alt i ét: kør installeren
+
+⚠ Der er ingen vej til algoserveren udefra. **Målt 13-08-2026 over Tailscale:**
+
+| vej | resultat |
+|---|---|
+| Tailscale SSH (:22) | lukket — Tailscale SSH understøttes ikke på Windows |
+| WinRM (:5985) | ingen lytter, testet både på navn og på 100.76.201.59 |
+| SMB admin-share | `Systemfejl 5 — adgang nægtet` |
+| RDP (:3389) | åben — den eneste vej |
+
+⚠ Og der har aldrig været en shell på algoserveren. Det jeg har kørt før var
+`Invoke-RestMethod` mod `http://iben-algo:8000` — HTTP-kald til dens backend,
+sendt fra en PowerShell på workstationen. Strategi-start virker fordi der er en
+API bag; `git clone`, `venv` og `pip install` har ingen API.
+
+**Derfor: RDP ind, og indsæt disse to linjer.** Resten klarer scriptet.
+
+```powershell
+cd C:\Projects	rading_dash ; git pull
+cd backend ; .\installer_oevebane.ps1 -Bredt
+```
+
+Det kloner, bygger venv, installerer afhængigheder, bygger indekset, starter
+appen og rapporterer hvor mange sessioner den fandt. Det er idempotent — kør
+det igen når som helst. `-KunKontrol` kigger uden at røre noget.
+
+⚠ **Det stopper hvis der ikke er markedsdata** i stedet for at installere noget
+der ser vellykket ud og viser en tom vælger.
+
+### Vil du have mig til at kunne arbejde derovre fremover?
+
+Én kommando på algoserveren over RDP åbner WinRM, så jeg kan køre kommandoer
+der ligesom her:
+
+```powershell
+Enable-PSRemoting -Force
+```
+
+⚠ Det er en reel udvidelse af angrebsfladen på den maskine der handler. Over
+Tailscale er nettet privat, men beslutningen er din — og jeg skal stadig bruge
+legitimationsoplysninger. Uden det er RDP + scriptet ovenfor vejen.
+
+---
+
+## 1b. Manuelt, hvis du hellere vil trin for trin
 
 ```powershell
 cd C:\projects
