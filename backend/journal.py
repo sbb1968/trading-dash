@@ -506,6 +506,35 @@ class Journal:
             entry_utc = datetime.fromisoformat(entry_time_utc_str)
             duration_sec = int((exit_utc - entry_utc).total_seconds())
 
+            # ⚠ EN HANDEL KAN IKKE SLUTTE FØR DEN BEGYNDER.
+            #
+            # Målt 13-08 på den levende journal: 13 af Konfluens 2's 149 lukkede
+            # handler havde exit FØR entry — fx SECZ, entry 11:43:00, exit
+            # 11:42:59.19. Årsagen lå i K2 (bar-etiket til entry, vægur til
+            # exit) og er rettet dér. Men vagten hører hjemme HER, hvor alle
+            # strategier passerer: den næste kalder der blander to ure, skal
+            # ikke kunne skrive en umulig række i stilhed.
+            #
+            # ⚠ Rækken skrives ALLIGEVEL — vi retter ikke tallene. En handel der
+            # forsvandt fordi dens tidsstempler var i uorden, ville være værre
+            # end en handel med et synligt problem. Anomalien logges og gemmes i
+            # payload, så den kan findes bagefter.
+            if exit_utc < entry_utc:
+                afvig = (entry_utc - exit_utc).total_seconds()
+                logger.warning(
+                    f"[Journal] ⚠ exit FØR entry for {trade_id}: "
+                    f"entry {entry_utc.isoformat()} > exit {exit_utc.isoformat()} "
+                    f"({afvig:.2f} s). Rækken gemmes uændret — se payload."
+                )
+                merged_anomali = {"tidsanomali": {
+                    "beskrivelse": "exit foer entry",
+                    "afvigelse_sek": round(afvig, 3),
+                    "entry_utc": entry_utc.isoformat(),
+                    "exit_utc":  exit_utc.isoformat(),
+                }}
+            else:
+                merged_anomali = {}
+
             # Merge payloads
             try:
                 merged_payload = json.loads(existing_payload_json or "{}")
@@ -513,6 +542,10 @@ class Journal:
                 merged_payload = {}
             if payload:
                 merged_payload.update(payload)
+            # ⚠ Anomalien gemmes MED handlen, ikke kun i en log der roterer.
+            # En advarsel ingen læser, findes ikke.
+            if merged_anomali:
+                merged_payload.update(merged_anomali)
 
             await self._db.execute(
                 """

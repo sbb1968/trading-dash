@@ -1017,7 +1017,9 @@ class Confluence2Live(BaseStrategy):
                 position, new_bar, self._variant_key, indicator_row=row
             )
             if decision is not None:
-                await self._close(ticker, decision.exit_price, decision.reason)
+                # ⚠ Barens tid med — samme ur som entry. Se _close.
+                await self._close(ticker, decision.exit_price, decision.reason,
+                                  bar_time=new_bar.timestamp)
             return
 
         # ── Ingen position: vurdér entry ──────────────────────
@@ -1232,8 +1234,26 @@ class Confluence2Live(BaseStrategy):
         except Exception as e:
             logger.exception(f"Forensics (entry) for {signal.ticker} fejlede: {e}")
 
-    async def _close(self, ticker: str, price: float, reason: str):
-        """Luk en åben position."""
+    async def _close(self, ticker: str, price: float, reason: str,
+                     bar_time: Optional[datetime] = None):
+        """Luk en åben position.
+
+        ⚠ `bar_time`: tidsstemplet på den BAR der udløste exit. Uden det stemples
+        exit med vægur, mens entry stemples med barens etiket
+        (`signal.entry_time = bar.timestamp`) — to forskellige ure i samme
+        handel.
+
+        Det gav handler der lukkede FØR de åbnede. Målt 13-08 på journalen:
+        13 af Konfluens 2's 149 lukkede handler (9 %) havde exit før entry, og
+        ingen af de andre fire strategier havde en eneste — de bruger vægur i
+        begge ender.
+
+        Mekanismen er samme-bar entry og stop: K2 åbner på en bar og rammer
+        stoppet i samme gennemløb. Entry får barens etiket (fx 11:43), exit får
+        væguret (11:42:59) — og så vender rækkefølgen om.
+
+        Er der ingen bar (force-close, reconcile), falder den tilbage til vægur.
+        """
         if ticker not in self._positions:
             return
 
@@ -1348,7 +1368,7 @@ class Confluence2Live(BaseStrategy):
             await self._journal.log_trade_close(
                 trade_id    = trade_id,
                 exit_price  = price,
-                exit_time   = datetime.now(ET),
+                exit_time   = bar_time or datetime.now(ET),
                 exit_reason = reason,
                 pnl         = pnl,
                 payload     = {
