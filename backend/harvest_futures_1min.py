@@ -69,7 +69,11 @@ HARVEST_DIR   = Path("data_harvest")
 # maale. Micro-kontrakternes tyndere overnight-volumen kan give en stoejende
 # range-maaling netop dér hvor signalet skal vaere rent. Hvilken serie der er bedst
 # at MAALE paa, er et aabent spoergsmaal; vi handler micro'erne uanset.
-EXCHANGE = {"MES": "CME", "M2K": "CME", "ES": "CME", "RTY": "CME"}
+# ⚠ MNQ staar eksplicit. Den ville ogsaa ramme "CME" via .get()-defaulten, men
+# et symbol der virker ved et held, ser ud praecis som et der er tjekket — og
+# naeste symbol med en anden boers ville fejle uden at nogen forstod hvorfor.
+# MNQ = Micro E-mini Nasdaq-100, CME, multiplikator 2 (se futures_katalog.py).
+EXCHANGE = {"MES": "CME", "M2K": "CME", "MNQ": "CME", "ES": "CME", "RTY": "CME"}
 QUARTERLY_MONTHS = (3, 6, 9, 12)       # mar/jun/sep/dec
 FRONT_MONTH_MAX_DAYS = 95              # en kontrakt er front-maaned ~ét kvartal foer udloeb;
                                        # datoer laengere foer dens udloeb hoerer til en TIDLIGERE
