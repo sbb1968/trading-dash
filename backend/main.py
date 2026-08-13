@@ -5589,12 +5589,44 @@ PRACTICE_DIR = Path(os.environ.get("PRACTICE_DIR", "C:/projects/trading_practice
 #
 # Saet PRACTICE_URL naar oevebanen koerer et andet sted end lokalt:
 #     PRACTICE_URL=http://iben-algo:8100
-PRACTICE_URL = os.environ.get("PRACTICE_URL", f"http://127.0.0.1:{PRACTICE_PORT}")
+def _practice_url_default() -> str:
+    """Den adresse en BRUGER skal bruge — ikke nødvendigvis den vi selv ville taste.
+
+    ⚠ 127.0.0.1 ER FORKERT FOR STUDIO. Studio serveres fra algoserveren, men
+    KØRER i browseren hos den der kigger. Sender vi "127.0.0.1:8100" til Ibens
+    browser, peger den på HENDES maskine — hvor der ingen øvebane er. Adressen
+    så rigtig ud i svaret og var forkert hos modtageren.
+
+    ⚠ Men maskinnavnet er ikke altid rigtigt heller: binder øvebanen kun til
+    127.0.0.1 (standarden, og korrekt på en udviklingsmaskine), svarer
+    `vaertsnavn:8100` ikke. Derfor MÅLER vi det i stedet for at vælge en regel:
+    svarer maskinnavnet, er det den adresse der virker begge steder fra.
+    """
+    import socket as _s
+    vaert = _s.gethostname().lower()
+    for kandidat in (f"http://{vaert}:{PRACTICE_PORT}",):
+        t = _s.socket()
+        t.settimeout(0.8)
+        try:
+            if t.connect_ex((vaert, PRACTICE_PORT)) == 0:
+                return kandidat
+        except OSError:
+            pass
+        finally:
+            t.close()
+    return f"http://127.0.0.1:{PRACTICE_PORT}"
+
+
+PRACTICE_URL = os.environ.get("PRACTICE_URL") or _practice_url_default()
 
 # ⚠ Kan DENNE backend starte oevebanen? Kun hvis den koerer samme sted.
 # Peger PRACTICE_URL paa en anden maskine, kan vi hverken maale eller starte
 # den herfra — og et svar paa det spoergsmaal ville vaere loegn.
-PRACTICE_LOKAL = "127.0.0.1" in PRACTICE_URL or "localhost" in PRACTICE_URL
+#
+# ⚠ Maskinens EGET navn taeller som lokalt. Uden det ville en algoserver der
+# selv koerer oevebanen melde "lokal: false" og naegte at starte den.
+PRACTICE_LOKAL = ("127.0.0.1" in PRACTICE_URL or "localhost" in PRACTICE_URL
+                  or __import__("socket").gethostname().lower() in PRACTICE_URL.lower())
 
 # ⚠ ÉN definition. Stod tjekket to steder (status og start), ville de kunne
 # drive fra hinanden — og saa ville status sige "data findes" mens start
