@@ -593,13 +593,26 @@ export function Menubar({
   // "Kunne ikke nå backenden på 127.0.0.1:8000 — kører den?" — mens backenden
   // havde svaret helt fint et øjeblik før. En fejlmeddelelse der peger på det
   // forkerte, sender fejlsøgningen det forkerte sted hen.
+  // ⚠ SKRÅSTREGEN ER IKKE KOSMETIK. Tauri matcher med glob PÅ SELVE STRENGEN
+  // (tauri-plugin-opener/src/scope.rs: `url: glob::Pattern` … `url.matches(u)`),
+  // og glob'ens `*` krydser ikke '/'. Mønsteret "http://127.0.0.1:8100/*"
+  // matcher derfor IKKE "http://127.0.0.1:8100" — skråstregen skal stå der
+  // bogstaveligt. Backenden normaliserer også, men frontenden må ikke afhænge
+  // af hvilken backend-version der svarer: en maskine der ikke er genstartet
+  // ville ellers ramme afvisningen igen.
+  function medSkraastreg(u: string) {
+    const efterVaert = u.split("://")[1] ?? "";
+    return efterVaert.includes("/") ? u : u + "/";
+  }
+
   async function aabn(url: string) {
+    const adresse = medSkraastreg(url);
     try {
-      await openUrl(url);
+      await openUrl(adresse);
     } catch (err) {
-      alert(`Kunne ikke åbne ${url}\n\n${err}\n\n`
+      alert(`Kunne ikke åbne ${adresse}\n\n${err}\n\n`
           + "Adressen skal stå i src-tauri/capabilities/default.json "
-          + "(opener:allow-open-url) — og mønstrene dér kræver en sti, "
+          + "(opener:allow-open-url) — og mønstrene dér matches med glob, "
           + "så adressen skal ende på '/'.");
     }
   }
