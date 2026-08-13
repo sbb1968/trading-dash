@@ -80,12 +80,9 @@ const ALL_WIN_SHORTCUTS: WinEntry[] = NON_CHART_GROUPS.flatMap(g => g.items);
 // 127.0.0.1 ville på en workstation kun vise den lokale maskine (intet replikeret arkiv).
 const STUDIO_URL = "http://iben-algo:8000/studio";
 
-// Oevebanen (trading_practice) er en SEPARAT app paa port 8100.
-// ⚠ Den koerer paa den maskine hvor DATA ligger — ikke paa algoserveren.
-// bar_cache (521 MB) og data_harvest (466 MB) er gitignorerede, saa et
-// git pull paa algoserveren giver koden men ikke barerne. Derfor 127.0.0.1
-// og ikke iben-algo, modsat Studio ovenfor.
-const PRACTICE_URL = "http://127.0.0.1:8100";
+// ⚠ INGEN HARDKODET URL. Oevebanen kan koere lokalt eller paa algoserveren,
+// og backenden ved hvilken (PRACTICE_URL). Stod adressen ogsaa her, ville en
+// flytning kraeve to rettelser — og den ene ville blive glemt.
 
 // ── Temaer ────────────────────────────────────────────────────
 const THEMES: { id: string; label: string; dot: string; group: string }[] = [
@@ -595,7 +592,10 @@ export function Menubar({
     setOevebaneStarter(true);
     try {
       const s = await fetch("http://127.0.0.1:8000/practice/status").then(r => r.json());
-      if (s.koerer) { await openUrl(PRACTICE_URL); return; }
+      // ⚠ Koerer oevebanen et andet sted (fx algoserveren), kan vi hverken
+      // maale eller starte den herfra — saa aabner vi den bare.
+      if (!s.lokal) { await openUrl(s.url); return; }
+      if (s.koerer) { await openUrl(s.url); return; }
       if (!s.installeret) {
         alert(`Øvebanen findes ikke på denne maskine. Forventet: ${s.sti}`);
         return;
@@ -608,7 +608,7 @@ export function Menubar({
       }
       const r = await fetch("http://127.0.0.1:8000/practice/start", { method: "POST" });
       if (!r.ok) { alert("Kunne ikke starte øvebanen: " + (await r.text())); return; }
-      await openUrl(PRACTICE_URL);
+      await openUrl(s.url);
     } catch (err) {
       alert("Kunne ikke nå backenden på 127.0.0.1:8000 — kører den? " + err);
     } finally {

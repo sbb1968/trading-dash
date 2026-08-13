@@ -1579,12 +1579,12 @@
                  oevebanen paa DEN MASKINE MAN SIDDER VED.
                  ⚠ Og derfor er der ingen status-kontrol her: en kontrol fra
                  Studio ville maale ALGOSERVERENS port 8100, ikke brugerens. -->
-            <a href="http://127.0.0.1:8100" target="_blank" rel="noopener"
+            <a href="#" target="_blank" rel="noopener"
                id="oevebane-link"
-               title="Åbn Trading Practice på DIN maskine (port 8100). Den skal køre lokalt — Studio kan ikke se om den gør."
+               title="Åbn Trading Practice">
                style="background:#1a1a1a; color:#f0f0f0; border:1px solid #4a4a4a;
                       border-radius:4px; padding:8px 12px; font-size:14px;
-                      text-decoration:none; white-space:nowrap;">🎯 Øvebane</a>
+                      text-decoration:none; white-space:nowrap;>🎯 Øvebane</a>
             <span id="konto-maerke"></span>
             <div class="identity" id="identity">Indlæser identitet...</div>
         </div>
@@ -5467,6 +5467,26 @@
         // ─────────────────────────────────────────────────────
         checkAuthAndStart();
     </script>
+<script>
+// ⚠ ADRESSEN HENTES FRA BACKENDEN, ikke hardkodet. Oevebanen kan flytte til
+// algoserveren, og en kopi af URL'en her ville betyde to steder at rette.
+// Studio serveres af den samme backend der kender PRACTICE_URL.
+(async () => {
+  const a = document.getElementById("oevebane-link");
+  if (!a) return;
+  try {
+    const s = await (await fetch("/practice/status")).json();
+    a.href = s.url;
+    a.title = s.lokal
+      ? "Åbn Trading Practice på DIN maskine (" + s.url + "). Den skal køre lokalt."
+      : "Åbn Trading Practice (" + s.url + ")";
+  } catch (e) {
+    // ⚠ Svarer backenden ikke, saettes ingen adresse — en knap der foerer til
+    // "#" er aabenlyst i stykker, mens en forkert adresse ser rigtig ud.
+    a.title = "Kunne ikke hente øvebanens adresse fra backenden";
+  }
+})();
+</script>
 </body>
 
 </html>

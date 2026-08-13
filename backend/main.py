@@ -5579,9 +5579,22 @@ async def risk_config_set(request: Request):
 # algoserveren, måler den ALGOSERVERENS port 8100 — ikke den maskine brugeren
 # sidder ved. Studio-knappen spørger derfor slet ikke; den åbner bare
 # 127.0.0.1:8100 hos den der klikker.
-PRACTICE_PORT = 8100
-PRACTICE_DIR = Path("C:/projects/trading_practice")
-PRACTICE_URL = f"http://127.0.0.1:{PRACTICE_PORT}"
+PRACTICE_PORT = int(os.environ.get("PRACTICE_PORT", "8100"))
+PRACTICE_DIR = Path(os.environ.get("PRACTICE_DIR", "C:/projects/trading_practice"))
+
+# ⚠ ÉT STED. URL'en stod hardkodet baade i Menubar.tsx og i studio/index.html,
+# og oevebanen skal kunne flytte til algoserveren. To hardkodede kopier ville
+# betyde to steder at rette — og den ene ville blive glemt.
+# Frontends spoerger nu /practice/status og bruger den URL den svarer med.
+#
+# Saet PRACTICE_URL naar oevebanen koerer et andet sted end lokalt:
+#     PRACTICE_URL=http://iben-algo:8100
+PRACTICE_URL = os.environ.get("PRACTICE_URL", f"http://127.0.0.1:{PRACTICE_PORT}")
+
+# ⚠ Kan DENNE backend starte oevebanen? Kun hvis den koerer samme sted.
+# Peger PRACTICE_URL paa en anden maskine, kan vi hverken maale eller starte
+# den herfra — og et svar paa det spoergsmaal ville vaere loegn.
+PRACTICE_LOKAL = "127.0.0.1" in PRACTICE_URL or "localhost" in PRACTICE_URL
 
 
 def _practice_svarer(timeout: float = 0.6) -> bool:
@@ -5598,16 +5611,23 @@ def _practice_svarer(timeout: float = 0.6) -> bool:
 
 @app.get("/practice/status")
 async def practice_status():
-    """Kører øvebanen på DENNE maskine?"""
+    """Hvor kører øvebanen, og kører den?
+
+    ⚠ `koerer` og `installeret` er kun meningsfulde naar oevebanen er LOKAL.
+    Peger PRACTICE_URL paa en anden maskine, sendes de som None frem for at
+    lyve: at maale sin egen port 8100 og kalde det "koerer" ville vaere et
+    svar paa et andet spoergsmaal end det der blev stillet.
+    """
     findes = (PRACTICE_DIR / "app.py").exists()
     return {
-        "koerer": _practice_svarer(),
-        "installeret": findes,
+        "lokal": PRACTICE_LOKAL,
+        "koerer": _practice_svarer() if PRACTICE_LOKAL else None,
+        "installeret": findes if PRACTICE_LOKAL else None,
         "url": PRACTICE_URL,
-        "sti": str(PRACTICE_DIR),
+        "sti": str(PRACTICE_DIR) if PRACTICE_LOKAL else None,
         # ⚠ Uden data er der ingenting at øve på, og appen ville starte og
         # vise en tom vælger. Bedre at sige det end at lade brugeren gætte.
-        "har_data": (Path(__file__).parent / "bar_cache").is_dir(),
+        "har_data": (Path(__file__).parent / "bar_cache").is_dir() if PRACTICE_LOKAL else None,
     }
 
 
@@ -5618,6 +5638,13 @@ async def practice_start():
     ⚠ Ingen parametre fra kaldet. Stien og kommandoen er hårdkodede — en rute
     der kan starte processer, må ikke kunne starte HVILKEN SOM HELST proces.
     """
+    # ⚠ Nægt at "starte" noget der koerer et andet sted. Uden den her vagt
+    # ville knappen starte en LOKAL oevebane paa en maskine uden data, mens
+    # brugeren troede den talte med algoserveren.
+    if not PRACTICE_LOKAL:
+        raise HTTPException(409,
+            f"oevebanen koerer ikke lokalt ({PRACTICE_URL}) — den kan kun startes "
+            f"paa den maskine den er installeret paa")
     if _practice_svarer():
         return {"ok": True, "koerte_allerede": True, "url": PRACTICE_URL}
     app_py = PRACTICE_DIR / "app.py"
