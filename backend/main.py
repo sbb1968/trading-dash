@@ -5596,6 +5596,11 @@ PRACTICE_URL = os.environ.get("PRACTICE_URL", f"http://127.0.0.1:{PRACTICE_PORT}
 # den herfra — og et svar paa det spoergsmaal ville vaere loegn.
 PRACTICE_LOKAL = "127.0.0.1" in PRACTICE_URL or "localhost" in PRACTICE_URL
 
+# ⚠ ÉN definition. Stod tjekket to steder (status og start), ville de kunne
+# drive fra hinanden — og saa ville status sige "data findes" mens start
+# naegtede, eller omvendt. Og som variabel kan proeven faktisk proeve vagten.
+PRACTICE_DATA = Path(__file__).parent / "bar_cache"
+
 
 def _practice_svarer(timeout: float = 0.6) -> bool:
     import socket
@@ -5627,7 +5632,7 @@ async def practice_status():
         "sti": str(PRACTICE_DIR) if PRACTICE_LOKAL else None,
         # ⚠ Uden data er der ingenting at øve på, og appen ville starte og
         # vise en tom vælger. Bedre at sige det end at lade brugeren gætte.
-        "har_data": (Path(__file__).parent / "bar_cache").is_dir() if PRACTICE_LOKAL else None,
+        "har_data": PRACTICE_DATA.is_dir() if PRACTICE_LOKAL else None,
     }
 
 
@@ -5650,6 +5655,20 @@ async def practice_start():
     app_py = PRACTICE_DIR / "app.py"
     if not app_py.exists():
         raise HTTPException(404, f"oevebanen findes ikke: {app_py}")
+
+    # ⚠ NAEGT AT STARTE EN OEVEBANE UDEN DATA. Uden bar_cache starter appen
+    # fint og viser en tom vaelger — men den opretter ogsaa SIN EGEN
+    # handler.db, og saa har maskinen en anden fremdrift end algoserverens.
+    # De to divergerer lydloest, og ingen opdager det foer tallene ikke passer.
+    #
+    # Det sker praecis naar PRACTICE_URL er glemt paa en maskine der skulle
+    # pege paa algoserveren. En fejlmeddelelse er langt bedre end en tom
+    # oevebane med sin egen historik.
+    if not PRACTICE_DATA.is_dir():
+        raise HTTPException(409,
+            "der er ingen markedsdata paa denne maskine (bar_cache mangler). "
+            "Oevebanen koerer paa algoserveren — saet PRACTICE_URL="
+            "http://iben-algo:8100 foer backenden startes.")
 
     import subprocess
     venv_py = PRACTICE_DIR / "venv" / "Scripts" / "python.exe"
