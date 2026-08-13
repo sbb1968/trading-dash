@@ -1081,6 +1081,17 @@ class TrendJoinLive(BaseStrategy):
             self._mfe[ticker] = max(self._mfe[ticker], bar.high)
         if ticker in self._mae:
             self._mae[ticker] = min(self._mae[ticker], bar.low)
+
+        # ⚠ GEM SENESTE PRIS — se samme kommentar i algo_buythedip.py.
+        # Uden den kan Studio ikke vise urealiseret P&L for TrendJoin-positioner
+        # paa noget tidspunkt, heller ikke midt i en aaben session.
+        _tid = pos.get("trade_id")
+        if _tid and self._journal:
+            await self._journal.update_trade_state(
+                trade_id      = _tid,
+                current_price = bar.close,
+            )
+
         entry, R, stop = pos["entry"], pos["R"], pos["stop"]
 
         # STOP-FIRST (pessimistisk)

@@ -797,6 +797,18 @@ class RelStyrkeLive(BaseStrategy):
             if ticker in self._mae:
                 self._mae[ticker] = min(self._mae[ticker], new_bar.low)
 
+            # ⚠ GEM SENESTE PRIS. Denne løkke HENTEDE allerede barerne — den
+            # skrev bare aldrig prisen videre. RelStyrke holder til EOD uden
+            # stop eller target, så uden dette felt kan man ikke se hvordan en
+            # position ligger, i de timer hvor det er den eneste information
+            # der findes om den.
+            _tid = (self._positions.get(ticker) or {}).get("trade_id")
+            if _tid and self._journal:
+                await self._journal.update_trade_state(
+                    trade_id      = _tid,
+                    current_price = new_bar.close,
+                )
+
     # -------------------------------------------------------------
     # Shadow-snapshot — emit hele tvaersnittet (selection-alpha-beviset)
     # -------------------------------------------------------------

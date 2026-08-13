@@ -965,6 +965,21 @@ class BuyTheDipLive(BaseStrategy):
             self._mfe[ticker] = max(self._mfe[ticker], bar.high)
         if ticker in self._mae:
             self._mae[ticker] = min(self._mae[ticker], bar.low)
+
+        # ⚠ GEM SENESTE PRIS. Uden den stod BuyTheDip-positioner uden aktuel
+        # pris i Studio, og urealiseret P&L kunne slet ikke regnes for dem —
+        # ikke kun uden for aabningstid, men ALTID. Maalt 13-08: REPL stod to
+        # gange i oversigten, med pris i Konfluens 2's raekke og uden i
+        # RelStyrkes. Samme symbol, samme sekund; forskellen var hvilken
+        # strategi der ejede raekken.
+        # Samme moenster som algo_confluence2.py.
+        _tid = pos.get("trade_id")
+        if _tid and self._journal:
+            await self._journal.update_trade_state(
+                trade_id      = _tid,
+                current_price = bar.close,
+            )
+
         if bar.low <= pos["stop"]:
             await self._close(ticker, pos["stop"], "stop")
         elif bar.high >= pos["target"]:

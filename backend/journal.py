@@ -126,7 +126,12 @@ class Journal:
 
         # Idempotent migration: skema-ændringer rammer kun NYE db'er (CREATE
         # TABLE IF NOT EXISTS), så eksisterende db'er får nye kolonner her.
-        for col_ddl in ("current_price REAL", "paper INTEGER NOT NULL DEFAULT 1"):
+        # ⚠ current_price_ts: HVORNAAR prisen blev skrevet. Uden den kan en pris
+        # fra i gaar ikke skelnes fra én fra tre sekunder siden — og Studio
+        # regner urealiseret P&L af den og viser tallet som aktuelt. Det er
+        # vaerre end en manglende pris, fordi det ser rigtigt ud.
+        for col_ddl in ("current_price REAL", "current_price_ts TEXT",
+                        "paper INTEGER NOT NULL DEFAULT 1"):
             try:
                 await self._db.execute(f"ALTER TABLE trades ADD COLUMN {col_ddl}")
                 await self._db.commit()
@@ -582,6 +587,11 @@ class Journal:
         if current_price is not None:
             sets.append("current_price = ?")
             params.append(current_price)
+            # ⚠ ALTID sammen med prisen, aldrig separat. Kunne de skrives hver
+            # for sig, ville de kunne komme ud af trit — og et tidsstempel der
+            # ikke hoerer til prisen er vaerre end ingen.
+            sets.append("current_price_ts = ?")
+            params.append(datetime.now(timezone.utc).isoformat(timespec="seconds"))
 
         if not sets:
             return True  # ingenting at opdatere — ikke en fejl

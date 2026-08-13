@@ -2807,12 +2807,39 @@
                 return box("#f59e0b",
                     `⚠ Live konto-data utilgængelig — ${why}. Aktuel pris og urealiseret P&L kan ikke vises (tjek at TWS er logget ind og at backenden kører).`);
             }
-            const missing = openViews.filter(v => v.lastPrice == null).length;
-            if (missing > 0) {
+            // ⚠ INGEN GÆTTEDE ÅRSAGER. Der stod før "markedet er sandsynligvis
+            // lukket" — men intet i denne funktion måler markedstid. Den så kun
+            // at prisen manglede og fandt på en forklaring.
+            //
+            // Målt 13-08: 5 af 8 positioner manglede pris mens markedet var
+            // åbent for tre af dem. Mønstret fulgte STRATEGIEN, ikke uret:
+            // Konfluens 2 havde pris, BuyTheDip og RelStyrke havde ikke. REPL
+            // stod endda to gange — med pris i K2-rækken og uden i
+            // RelStyrke-rækken, samme symbol, samme sekund.
+            //
+            // Årsagen er at `current_price` er et GEMT felt som strategien selv
+            // skal skrive, og kun Konfluens 2, Europa- og US-reversion gør det.
+            const uden = openViews.filter(v => v.lastPrice == null);
+            if (uden.length > 0) {
+                const symboler = [...new Set(uden.map(v => v.sym))].join(", ");
                 return box("#f59e0b",
-                    `⚠ Afventer live pris for ${missing} af ${openViews.length} ${openViews.length === 1 ? "position" : "positioner"} — markedet er sandsynligvis lukket eller dataen er forsinket.`);
+                    `⚠ ${uden.length} af ${openViews.length} positioner mangler aktuel pris: `
+                  + `<b>${symboler}</b>. Enten har strategien ikke gemt en pris `
+                  + `(BuyTheDip, RelStyrke og TrendJoin gør det ikke), eller der `
+                  + `er ingen live-kurs for symbolet lige nu.`);
             }
-            return "";
+            // ⚠ OG NÅR DER ER EN PRIS PÅ ALLE, ER DET IKKE DET SAMME SOM AT DEN
+            // ER AKTUEL. `current_price` har intet tidsstempel i journalen, så
+            // en pris skrevet i går kl. 11:50 vises præcis som én skrevet for tre
+            // sekunder siden — og urealiseret P&L regnes af den. Det er værre end
+            // en manglende pris, fordi tallet ser rigtigt ud.
+            //
+            // Så længe feltet er uden tidsstempel, kan denne stribe ikke skelne.
+            // Fjern denne besked når `current_price_ts` findes og alderen vises
+            // ved hver enkelt række.
+            return box("#6b7280",
+                "Priserne herunder er senest gemte værdier fra strategierne. "
+              + "De har intet tidsstempel, så en gammel pris kan ikke skelnes fra en ny.");
         }
 
         function renderOversigt(today, open, snap) {
