@@ -1,0 +1,278 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Signal-evaluering — slår indikatorerne basisraten ved fald i MES?
+// Pine Script v5 · Søren, august 2026
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// FORMÅL: afgøre om et signal har prædiktiv værdi, eller om det bare ser godt
+// ud fordi faldet ville være kommet alligevel.
+//
+// ⚠ DET AFGØRENDE TAL ER LØFTET, ikke præcisionen. Et signal med 20 %
+// præcision lyder godt indtil man ser at faldet sker på 19 % af ALLE barer.
+// Løft = præcision / basisrate. Under 1,2 er der intet at komme efter.
+//
+// ⚠ TRE TING PINE IKKE KAN, og som derfor ligger i analyse/signal_eval.cjs:
+//   1. Skrive CSV. Her kan man kun eksportere de PLOTTEDE serier
+//      (Chart → ⋮ → Export chart data), og det er derfor rå-loggen plottes.
+//   2. Sweepe 9 (N,X)-kombinationer × 14 signaler i én kørsel.
+//   3. Dele data i to halvdele og rapportere ud-af-prøve.
+// Node-værktøjet gør alle tre på 25 måneders data. DETTE script er til at
+// holde øje med ÉN opsætning live på chartet.
+//
+// ⚠ INGEN BAGKLOGSKAB PÅ HØJERE TIDSRAMMER. `htf()` bruger expr[1] med
+// lookahead_on — det er Pines eneste ikke-genmalende idiom: man får den
+// SENESTE LUKKEDE bar fra den højere tidsramme. Bruger man den ufærdige,
+// kender man fremtiden, og så ser ethvert signal godt ud.
+//
+// ⚠ TALLENE ER FORSINKET MED (N + Forspring) BARER. En hændelse kan først
+// bedømmes når de N barer er faldet, og et signal først når dets vindue er
+// løbet ud. Tælleren står derfor stille i starten og halter altid bagefter.
+// Det er ikke en fejl — det er prisen for ikke at kigge fremad.
+// ═══════════════════════════════════════════════════════════════════════════
+//@version=5
+indicator("Signal-evaluering (MES)", overlay = false, max_bars_back = 5000)
+
+// ── DEL 1: hvad er en hændelse? ────────────────────────────────────────────
+grp1 = "Del 1 — hændelsen"
+N = input.int(10, "N — barer frem", minval = 1, maxval = 100, group = grp1,
+     tooltip = "Prisen skal falde X % inden for N barer, målt fra denne bars luk")
+X = input.float(0.5, "X — fald i procent", minval = 0.01, step = 0.1, group = grp1)
+LEAD = input.int(10, "Maks forspring (barer)", minval = 0, maxval = 50, group = grp1,
+     tooltip = "Hvor mange barer efter signalet hændelsen må begynde, for at " +
+               "signalet regnes som 'gik forud'. ⚠ Basisraten måles på SAMME " +
+               "vindue — ellers sammenligner man 11 chancer mod 1, og så får " +
+               "ALT et løft omkring 5.")
+
+// ── Analysevindue og nyhedsvinduer ─────────────────────────────────────────
+grp2 = "Del 4 — nyhedsvinduer"
+brugVindue = input.bool(true, "Kun 08:00–16:00 ET", group = grp2)
+slip       = input.int(15, "± minutter om nyhedstidspunkt", minval = 0, group = grp2)
+udelukNyhed = input.bool(false, "UDELUK nyhedsvinduerne fra statistikken", group = grp2,
+     tooltip = "Kør scriptet to gange — med og uden — og sammenlign løftet. " +
+               "Falder det markant, ligger værdien i nyhederne.")
+
+etMin = hour(time, "America/New_York") * 60 + minute(time, "America/New_York")
+iVindue = not brugVindue or (etMin >= 8 * 60 and etMin < 16 * 60)
+
+naerVed(int h, int m) => math.abs(etMin - (h * 60 + m)) <= slip
+iNyhed = naerVed(8, 30) or naerVed(10, 0) or naerVed(14, 0) or
+         naerVed(9, 30) or naerVed(16, 0)
+
+gyldig = iVindue and (not udelukNyhed or not iNyhed) and not na(close[N + LEAD])
+
+// ── Indikatorerne ──────────────────────────────────────────────────────────
+// ⚠ SAMME DEFINITIONER SOM PÅ IBENS SKÆRM. Tærsklerne er indikatorernes egne
+// (Cipher B's 53/60, cockpittets ±2, ADX 25) — ikke tal der er justeret
+// bagefter for at få tabellen til at se pæn ud. Det ville være kurvetilpasning
+// i sin reneste form.
+grp3 = "Indikatorer"
+zLen  = input.int(30, "Cockpit lookback", group = grp3)
+zGrns = input.float(2.0, "Cockpit z-grænse", step = 0.25, group = grp3)
+wtCh  = input.int(9,  "WT kanal", group = grp3)
+wtAvg = input.int(12, "WT gennemsnit", group = grp3)
+wtMa  = input.int(3,  "WT signal", group = grp3)
+wtOB  = input.float(53, "WT overkøbt", group = grp3)
+rvLen = input.int(20, "RVOL lookback", group = grp3)
+rvMin = input.float(1.5, "RVOL grænse", step = 0.1, group = grp3)
+
+// ⚠ IKKE-GENMALENDE HØJERE TIDSRAMME. expr[1] + lookahead_on giver den
+// seneste LUKKEDE HTF-bar. Uden [1] ville man læse en bar der stadig danner
+// sig — altså fremtiden set fra den bar man står på.
+htfZ(string tf) =>
+    request.security(syminfo.tickerid, tf,
+        ((close - ta.sma(close, zLen)) / ta.stdev(close, zLen, true))[1],
+        lookahead = barmerge.lookahead_on)
+
+z15 = htfZ("15")
+z5  = htfZ("5")
+z60 = htfZ("60")
+z2  = (close - ta.sma(close, zLen)) / ta.stdev(close, zLen, true)
+
+// WaveTrend (LazyBear, som i Cipher B)
+esa = ta.ema(hlc3, wtCh)
+de  = ta.ema(math.abs(hlc3 - esa), wtCh)
+ci  = de == 0 ? 0.0 : (hlc3 - esa) / (0.015 * de)
+wt1 = ta.ema(ci, wtAvg)
+wt2 = ta.sma(wt1, wtMa)
+
+// ⚠ ta.sma(volume[1], len) — de FOREGÅENDE barer. Med volume[0] i snittet
+// trækker en volumeneksplosion sit eget sammenligningsgrundlag op, og RVOL
+// bliver for lav præcis når den betyder mest.
+rvol = ta.sma(volume[1], rvLen) > 0 ? volume / ta.sma(volume[1], rvLen) : na
+[diP, diM, adx] = ta.dmi(14, 14)
+[macdL, macdS, macdH] = ta.macd(close, 12, 26, 9)
+
+// ── Signalerne ─────────────────────────────────────────────────────────────
+grp4 = "Signal der måles"
+valg = input.string("rvol_roed", "Signal", group = grp4, options = [
+     "wt_kryds_ned", "wt_kryds_ned_ob", "z15_over_graense", "z15_retur",
+     "z2_over_graense", "macd_hist_neg", "rvol_roed", "adx_over_25",
+     "z15_og_wt_ned", "KONTROL_rvol_groen"])
+
+wtNed   = ta.crossunder(wt1, wt2)
+sigWt   = wtNed
+sigWtOB = wtNed and wt2 >= wtOB
+sigZ15  = z15 >= zGrns
+sigZ15r = z15 < zGrns and z15[1] >= zGrns
+sigZ2   = z2 >= zGrns
+sigMacd = ta.crossunder(macdH, 0)
+sigRvol = not na(rvol) and rvol >= rvMin and close < open
+sigAdx  = adx >= 25
+sigKonf = sigZ15 and wtNed
+// ⚠ KONTROLLEN. Virker den GRØNNE udgave lige så godt, måler RVOL
+// VOLATILITET og ikke retning — og så er "signalet" en misforståelse.
+// På 25 måneders MES gav rød 1,39 og grøn 1,29. Kontrollen vandt næsten.
+sigGroen = not na(rvol) and rvol >= rvMin and close > open
+
+sig = switch valg
+    "wt_kryds_ned"       => sigWt
+    "wt_kryds_ned_ob"    => sigWtOB
+    "z15_over_graense"   => sigZ15
+    "z15_retur"          => sigZ15r
+    "z2_over_graense"    => sigZ2
+    "macd_hist_neg"      => sigMacd
+    "rvol_roed"          => sigRvol
+    "adx_over_25"        => sigAdx
+    "z15_og_wt_ned"      => sigKonf
+    => sigGroen
+
+// ── DEL 1: hændelsen, evalueret N barer forsinket ─────────────────────────
+// ⚠ ta.lowest(low, N) dækker bar t-N+1 … t. Sammenholdt med close[N] er det
+// præcis "faldt prisen X % inden for N barer efter bar t-N's luk".
+// Målt fra LUKKEKURSEN, ikke fra low: man kan ikke handle på et low man ikke
+// har set.
+evStart = not na(close[N]) and (ta.lowest(low, N) - close[N]) / close[N] <= -X / 100
+
+// Er der en hændelsesstart i vinduet [0 … LEAD] barer tilbage i evStart-serien?
+// Det svarer til: begyndte en hændelse inden for LEAD barer EFTER signalbaren.
+hit = ta.highest(evStart ? 1 : 0, LEAD + 1) > 0
+
+// Signalbaren hører til (N + LEAD) barer tilbage — alt andet ville kræve
+// data der ikke findes endnu.
+sigBar   = sig[N + LEAD]
+gyldigBar = gyldig[N + LEAD]
+
+// Forspring: største k i 0…LEAD med evStart[k] = den TIDLIGSTE hændelse.
+forspring() =>
+    int ud = na
+    for k = LEAD to 0
+        if evStart[k]
+            ud := LEAD - k
+            break
+    ud
+
+// ── Tællere ────────────────────────────────────────────────────────────────
+var int nBarer     = 0
+var int nBasis     = 0        // gyldige barer der efterfølges af en hændelse
+var int nSig       = 0
+var int nSigHit    = 0
+var int nEv        = 0
+var int nEvMedSig  = 0
+var array<int> leads = array.new_int()
+
+if barstate.isconfirmed and gyldigBar
+    nBarer += 1
+    if hit
+        nBasis += 1
+    if sigBar
+        nSig += 1
+        if hit
+            nSigHit += 1
+            f = forspring()
+            if not na(f)
+                array.push(leads, f)
+
+// Recall: af hændelserne — hvor mange havde signalet inden for LEAD barer før?
+// Hændelsesstarten ligger N barer tilbage; signalet i [N … N+LEAD].
+if barstate.isconfirmed and evStart and gyldig[N]
+    nEv += 1
+    if ta.barssince(sig)[N] <= LEAD
+        nEvMedSig += 1
+
+// ── Nøgletal ───────────────────────────────────────────────────────────────
+basisrate = nBarer > 0 ? nBasis / nBarer : na
+precision = nSig   > 0 ? nSigHit / nSig  : na
+recall    = nEv    > 0 ? nEvMedSig / nEv : na
+loeft     = not na(basisrate) and basisrate > 0 and not na(precision) ?
+            precision / basisrate : na
+// ⚠ EN GROV SORTERING, IKKE EN P-VÆRDI. Nabobarer deler næsten hele deres
+// fremtidsvindue, så observationerne er ikke uafhængige og z'en overvurderer.
+zVal = nSig > 0 and not na(basisrate) and basisrate > 0 and basisrate < 1 ?
+       (precision - basisrate) / math.sqrt(basisrate * (1 - basisrate) / nSig) : na
+medianLead = array.size(leads) > 0 ? array.median(leads) : na
+
+// ── DEL 2: rå-log til eksport ─────────────────────────────────────────────
+// Chart → ⋮ → Export chart data giver én CSV med alle plottede serier pr. bar.
+// display.data_window holder dem ude af selve grafen.
+visLog = input.bool(true, "Plot rå-log (til Export chart data)", group = "Del 2 — log")
+plot(visLog ? z2  : na, "z 2m",  display = display.data_window)
+plot(visLog ? z5  : na, "z 5m",  display = display.data_window)
+plot(visLog ? z15 : na, "z 15m", display = display.data_window)
+plot(visLog ? z60 : na, "z 1h",  display = display.data_window)
+plot(visLog ? wt1 : na, "wt1",   display = display.data_window)
+plot(visLog ? wt2 : na, "wt2",   display = display.data_window)
+plot(visLog ? macdL : na, "macd",   display = display.data_window)
+plot(visLog ? macdS : na, "signal", display = display.data_window)
+plot(visLog ? macdH : na, "hist",   display = display.data_window)
+plot(visLog ? rvol  : na, "rvol",   display = display.data_window)
+plot(visLog ? adx   : na, "adx",    display = display.data_window)
+plot(visLog ? etMin - 570 : na, "min siden 09:30", display = display.data_window)
+plot(visLog ? (iNyhed ? 1 : 0) : na, "i nyhedsvindue", display = display.data_window)
+plot(visLog ? (sig ? 1 : 0) : na, "signal", display = display.data_window)
+plot(visLog ? (evStart ? 1 : 0) : na, "haendelse startede (N bar siden)",
+     display = display.data_window)
+
+// ── På grafen: løftet over tid ────────────────────────────────────────────
+// ⚠ Kurven er kumulativ og støjer voldsomt i starten. Den er til at se om
+// tallet er faldet til ro, ikke til at aflæse et niveau tidligt.
+plot(loeft, "Løft (kumulativt)", color = na(loeft) ? na :
+     loeft >= 1.2 ? color.new(color.green, 0) :
+     loeft >= 1.0 ? color.new(color.orange, 0) : color.new(color.red, 0),
+     linewidth = 2)
+hline(1.0, "Basisraten", color = color.gray, linestyle = hline.style_dashed)
+hline(1.2, "Krav", color = color.new(color.green, 60), linestyle = hline.style_dotted)
+bgcolor(iNyhed and not udelukNyhed ? color.new(color.blue, 92) : na, title = "Nyhedsvindue")
+
+// ── DEL 3 + 5: tabellen ────────────────────────────────────────────────────
+var table tb = table.new(position.top_right, 2, 12,
+     border_width = 1, frame_width = 1, frame_color = color.gray)
+
+f2(float v) => na(v) ? "—" : str.tostring(v, "#.##")
+fp(float v) => na(v) ? "—" : str.tostring(v * 100, "#.#") + " %"
+
+if barstate.islast
+    dom = nSig < 30 ? "for få (n<30)" :
+          na(loeft) ? "—" :
+          loeft >= 1.2 and zVal >= 3 ? "SLÅR basisraten" :
+          loeft >= 1.0 ? "ingen forskel" : "DÅRLIGERE end basis"
+    domFarve = nSig < 30 ? color.gray :
+               na(loeft) ? color.gray :
+               loeft >= 1.2 and zVal >= 3 ? color.green :
+               loeft >= 1.0 ? color.orange : color.red
+
+    table.cell(tb, 0, 0, valg, bgcolor = color.new(color.blue, 70),
+               text_color = color.white)
+    table.cell(tb, 1, 0, "N=" + str.tostring(N) + "  X=" + str.tostring(X) + "%",
+               bgcolor = color.new(color.blue, 70), text_color = color.white)
+
+    table.cell(tb, 0, 1, "Basisrate");     table.cell(tb, 1, 1, fp(basisrate))
+    table.cell(tb, 0, 2, "Precision");     table.cell(tb, 1, 2, fp(precision))
+    table.cell(tb, 0, 3, "LØFT");          table.cell(tb, 1, 3, f2(loeft),
+               text_color = domFarve)
+    table.cell(tb, 0, 4, "Recall");        table.cell(tb, 1, 4, fp(recall))
+    table.cell(tb, 0, 5, "Median forspring"); table.cell(tb, 1, 5,
+               na(medianLead) ? "—" : str.tostring(medianLead, "#.#") + " barer")
+    table.cell(tb, 0, 6, "z (grov)");      table.cell(tb, 1, 6, f2(zVal))
+    table.cell(tb, 0, 7, "Antal signaler"); table.cell(tb, 1, 7, str.tostring(nSig))
+    table.cell(tb, 0, 8, "Antal hændelser"); table.cell(tb, 1, 8, str.tostring(nEv))
+    table.cell(tb, 0, 9, "Bedømte barer"); table.cell(tb, 1, 9, str.tostring(nBarer))
+    table.cell(tb, 0, 10, udelukNyhed ? "UDEN nyhedsvinduer" : "MED nyhedsvinduer",
+               text_color = color.silver)
+    table.cell(tb, 1, 10, "", text_color = color.silver)
+    table.cell(tb, 0, 11, "DOM", bgcolor = color.new(domFarve, 75))
+    table.cell(tb, 1, 11, dom, bgcolor = color.new(domFarve, 75))
+
+// ── Markeringer ────────────────────────────────────────────────────────────
+plotshape(sig, "Signal", shape.triangledown, location.top,
+          color.new(color.orange, 20), size = size.tiny)
+plotshape(evStart, "Hændelse begyndte (N barer siden)", shape.xcross,
+          location.bottom, color.new(color.red, 20), size = size.tiny)
