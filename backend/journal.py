@@ -189,6 +189,51 @@ class Journal:
     # Skrivning
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Ikke-endelige tal — den fejl der taog hele Log-fanen med sig
+    # ------------------------------------------------------------------
+    #
+    # ⚠ RODAARSAGEN, NAVNGIVET. `json.dumps(payload, default=str)` har
+    # allow_nan=True som standard og skriver en NaN som det BARE TOKEN `NaN`.
+    # Det er ikke gyldig JSON. Pythons `json.loads` accepterer det alligevel og
+    # giver en float tilbage — saa laesningen ser rigtig ud. Foerst i HTTP-laget
+    # braender det: Starlettes JSONResponse bruger allow_nan=False, kaster
+    # ValueError, og HELE svaret bliver 500.
+    #
+    # Konkret felt paa algoserveren: `universe_selected` fra Konfluens 2 og
+    # BuyTheDip, i `payload.meta.rows[*]` — de raa skaermer-raekker fra
+    # TradingView, hvor et manglende noegletal kommer igennem som NaN.
+    #
+    # ⚠ SPRAENGRADIUS. Foer tog ét ubrugeligt tal hele tidsvinduet med sig, saa
+    # Studios Log-fane var tom for hele dage. Nu renses PR. FELT: vaerdien
+    # bliver None, stien skrives i `_ikke_endelige_felter`, og resten af
+    # baade eventet og vinduet leveres. En fejl maa ikke ramme bredere end sin
+    # egen aarsag.
+    #
+    # ⚠ RENSNINGEN ER FULDSTAENDIG VED KONSTRUKTION. json.loads kan kun
+    # producere dict/list/str/int/float/bool/None, og float er den eneste af dem
+    # der kan vaere ikke-endelig. Der findes altsaa ikke en anden type der kan
+    # slippe forbi.
+    @staticmethod
+    def _rens_ikke_endelige(obj, sti: str = ""):
+        """Returnér (renset kopi, liste af stier der blev renset)."""
+        import math as _m
+        stier: list[str] = []
+
+        def gaa(o, s):
+            if isinstance(o, float):
+                if _m.isfinite(o):
+                    return o
+                stier.append(f"{s or '(rod)'} = {o!r}")
+                return None
+            if isinstance(o, dict):
+                return {k: gaa(v, f"{s}.{k}" if s else k) for k, v in o.items()}
+            if isinstance(o, list):
+                return [gaa(v, f"{s}[{i}]") for i, v in enumerate(o)]
+            return o
+
+        return gaa(obj, sti), stier
+
     async def log_event(
         self,
         source:       str,
@@ -220,6 +265,17 @@ class Journal:
             now_utc   = datetime.now(timezone.utc)
             now_local = datetime.now().astimezone()
             _konto, _paper = _paper_flag(ibkr_account, paper)
+
+            # ⚠ RENS FØR SKRIVNING. Ellers laegges der en NaN i databasen som
+            # ingen laeser kan levere ud igen — og den bliver liggende for
+            # altid. Feltet der blev renset, navngives i selve eventet, saa
+            # kilden kan findes bagefter uden at gaette.
+            payload, _urene = self._rens_ikke_endelige(payload or {})
+            if _urene:
+                payload["_ikke_endelige_felter"] = _urene
+                logger.warning(
+                    f"[Journal] {source}/{event_type}: {len(_urene)} ikke-endelige "
+                    f"tal renset foer skrivning — {_urene[:3]}")
 
             await self._db.execute(
                 """
@@ -316,6 +372,14 @@ class Journal:
                         payload = json.loads(r[5] or "{}")
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
+                    # ⚠ OGSAA PAA LAESESIDEN. Skrivesiden er rettet, men de
+                    # events der ALLEREDE ligger med NaN i databasen forsvinder
+                    # ikke af den grund — og det er dem der har gjort Log-fanen
+                    # utilgaengelig for hele dage. Uden rensning her ville
+                    # rettelsen foerst virke for fremtidige events.
+                    payload, urene = self._rens_ikke_endelige(payload)
+                    if urene:
+                        payload["_ikke_endelige_felter"] = urene
                     rows.append({
                         "ts_utc":     r[0],
                         "ts_local":   r[1],
