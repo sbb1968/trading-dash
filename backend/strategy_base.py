@@ -47,6 +47,13 @@ class OrderRequest:
     limit_price:   Optional[float] = None
     asset_class:   str = "equity"        # "equity", "forex", "cfd"
     reason:        str = ""              # Hvorfor vil strategien handle (til log)
+    # ⚠ DEFAULT False, OG DET ER MED VILJE. Flaget styrer entry-spærringen, og
+    # en glemt markering skal fejle i den UFARLIGE retning: en ordre der ved en
+    # fejl regnes som en LUKNING slipper igennem (som i dag), mens en lukning
+    # der ved en fejl blev regnet som en åbning ville blive blokeret — og så
+    # sidder man fast i en position man ikke kan komme ud af. Kun de seks
+    # entry-kaldesteder sætter den til True.
+    aabner:        bool = False
 
 
 @dataclass
@@ -139,6 +146,13 @@ class BaseStrategy(ABC):
 
         self._open_positions: dict = {}
         self._start_time: Optional[datetime] = None
+
+        # ⚠ SPÆRRING AF NYE ÅBNINGER. Sættes af en kontrol der IKKE bestod —
+        # foreløbig kun opstarts-reconcile. Strengen er GRUNDEN, ikke et bool:
+        # står den i loggen som "SPÆRRET: reconcile-timeout efter 2 forsøg",
+        # kan man se hvorfor uden at lede. None = ikke spærret.
+        # Lukninger og stops er UPÅVIRKEDE — se request_order.
+        self._entry_spaerret: Optional[str] = None
 
         # Lag B-diagnostik: husker hver akties sidste afvisnings-streng,
         # så vi KUN logger når begrundelsen ændrer sig. Nulstilles dagligt
@@ -320,12 +334,46 @@ class BaseStrategy(ABC):
             "position_size":  getattr(self.config, "max_position_size", 0.0),
         }.get(key, 0.0) or 0.0)
 
+    def spaer_entries(self, grund: str) -> None:
+        """Bloker NYE positioner. Eksisterende beskyttelse røres ikke."""
+        if self._entry_spaerret != grund:
+            logger.error(f"[{self.name}] ⛔ SPÆRRET for nye entries: {grund}")
+        self._entry_spaerret = grund
+
+    def ophaev_entry_spaerring(self) -> None:
+        """Ophæv spærringen — kun når den kontrol der spærrede, er bestået.
+
+        ⚠ ALDRIG som en oprydning eller et 'nu er der gået lang tid'. En
+        spærring der bliver ophævet af tid frem for af en bestået kontrol, er
+        en kontrol der ikke kan fejle — samme sygdom, ny forklædning.
+        """
+        if self._entry_spaerret:
+            logger.info(f"[{self.name}] ✅ Spærring ophævet "
+                        f"(var: {self._entry_spaerret})")
+        self._entry_spaerret = None
+
     async def request_order(self, order: OrderRequest) -> bool:
         if self._risk_manager is None:
             logger.error(f"[{self.name}] Ingen RiskManager — ordre afvist")
             return False
 
         if self.status != StrategyStatus.RUNNING:
+            return False
+
+        # ⚠ EN KONTROL DER FEJLER, MÅ IKKE BETYDE "FORTSÆT SOM OM DEN BESTOD".
+        # Reconcile ved opstart havde præcis den udgang: "Reconciliation timeout
+        # — fortsætter til handel". Den 13-08 løb K2 og BuyTheDip tør for tid
+        # (32 s mod et budget på 30), og strategierne handlede videre oven på
+        # positioner de ikke vidste eksisterede. At hæve budgettet flytter
+        # klippekanten; det fjerner den ikke.
+        #
+        # Nu spærres ÅBNINGER. Lukninger og stops røres ikke — beskyttelsen af
+        # det man allerede ejer, må aldrig afhænge af at en anden kontrol bestod.
+        if order.aabner and self._entry_spaerret:
+            await self._log(
+                f"⛔ Entry afvist — strategien er SPÆRRET: {self._entry_spaerret}. "
+                f"Eksisterende positioner beskyttes fortsat.", level="error")
+            self.stats.orders_rejected += 1
             return False
 
         if self.stats.open_positions >= self.config.max_open_positions:

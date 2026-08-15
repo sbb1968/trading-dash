@@ -92,6 +92,8 @@ CLOSE_FILL_WAIT_SEC      = 8
 FORCE_CLOSE_MAX_ATTEMPTS = 4
 FORCE_CLOSE_RETRY_DELAY  = 4
 RECONCILE_TIMEOUT_SEC    = 30
+RECONCILE_MAX_FORSOEG    = 3    # genforsøg foer strategien spaerres (T2b)
+RECONCILE_BACKOFF_SEC    = 5    # pause x forsoegsnummer mellem genforsoeg
 NEWS_MAX_AGE_HOURS       = 20    # katalysator skal være frisk (overnight + premarket)
 BAR_DURATION             = "7200 S"   # ~2t 5m-bars pr. fetch (nok til swing/HOD/LOD)
 BAR_SIZE                 = "5 mins"
@@ -337,11 +339,38 @@ class TrendJoinLive(BaseStrategy):
             logger.warning("[TrendJoin] _trading_loop kører allerede — afbryder ny start")
             return
         self._status("started", "Algoritme starter — Trend Join Long (gap-and-go m. nyheder)")
-        try:
-            await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)
-        except asyncio.TimeoutError:
-            logger.error(f"[TrendJoin] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) — springer over")
-            self._status("started", "Reconciliation timeout — fortsætter til handel")
+        # ⚠ GENFORSØG, OG SPÆRRING HVIS DET STADIG IKKE LYKKES.
+        # Før stod her "springer over, fortsætter til handel": en kontrol hvis
+        # fejl blev behandlet som en beståelse. Den 13-08 løb K2 og BuyTheDip
+        # tør for tid (32 s mod 30) og handlede videre oven på fem positioner
+        # de ikke vidste eksisterede.
+        #
+        # ⚠ ET FORSØG ER IKKE ET FORSØG. Reconcile fejler typisk på et feed der
+        # lige er kommet op; et par sekunder senere svarer det. Derfor backoff.
+        # ⚠ OG SPÆRRINGEN OPHÆVES KUN AF EN BESTÅET RECONCILE — aldrig af tid.
+        _rec_ok = False
+        _spaerret_foer = self._entry_spaerret
+        for _forsoeg in range(1, RECONCILE_MAX_FORSOEG + 1):
+            try:
+                await asyncio.wait_for(self._reconcile_orphans(),
+                                       timeout=RECONCILE_TIMEOUT_SEC)
+                _rec_ok = True
+                break
+            except asyncio.TimeoutError:
+                logger.error(f"[TrendJoin] reconcile-timeout "
+                             f"({RECONCILE_TIMEOUT_SEC}s), forsøg "
+                             f"{_forsoeg}/{RECONCILE_MAX_FORSOEG}")
+                if _forsoeg < RECONCILE_MAX_FORSOEG:
+                    await asyncio.sleep(RECONCILE_BACKOFF_SEC * _forsoeg)
+        if _rec_ok and self._entry_spaerret == _spaerret_foer:
+            self.ophaev_entry_spaerring()
+        else:
+            _grund = (f"reconcile-timeout efter {RECONCILE_MAX_FORSOEG} forsøg "
+                      f"a {RECONCILE_TIMEOUT_SEC}s")
+            self.spaer_entries(_grund)
+            self._status("started",
+                         f"⛔ SPÆRRET for nye entries — {_grund}. "
+                         f"Eksisterende positioner beskyttes fortsat.")
         # Nulstil dagens state + diagnostik
         self._ctx.clear(); self._vetted.clear(); self._done_today.clear()
         self.universe = []
@@ -366,10 +395,12 @@ class TrendJoinLive(BaseStrategy):
             await self._reconcile_orphans_impl()
         except Exception as e:
             logger.exception(f"[TrendJoin] reconcile fejlede (best-effort, ignoreret): {e}")
+            self.spaer_entries("reconcile fejlede (undtagelse)")
             self._status("started", "Reconciliation sprang fejlet over — fortsætter til handel")
 
     async def _reconcile_orphans_impl(self) -> None:
         if self.conn is None or not self.conn.connected:
+            self.spaer_entries("reconcile ikke koert — IBKR ikke forbundet")
             self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
             return
         open_rows = []
@@ -389,6 +420,7 @@ class TrendJoinLive(BaseStrategy):
             logger.warning("[TrendJoin] reconciliation: positions-feed upålideligt "
                            "(tom/timeout ved opstart) — springer over for ikke at "
                            "forældreløsgøre en ægte position")
+            self.spaer_entries("reconcile ikke koert — positions-feed upaalideligt")
             self._status("started", "Reconciliation sprunget over — positions-feed upålideligt")
             return
         ibkr_by_ticker = {(p.get("ticker") or "").upper(): (p.get("position") or 0)
@@ -977,7 +1009,8 @@ class TrendJoinLive(BaseStrategy):
         order = OrderRequest(
             strategy_name=self.name, ticker=ticker, action="BUY", quantity=shares,
             order_type="MKT", asset_class="equity",
-            reason=f"TrendJoin gap {ctx.get('gap_pct', 0):+.1f}% katalysator")
+            reason=f"TrendJoin gap {ctx.get('gap_pct', 0):+.1f}% katalysator",
+            aabner=True)
         if self._risk_manager:
             if not await self.request_order(order):
                 return

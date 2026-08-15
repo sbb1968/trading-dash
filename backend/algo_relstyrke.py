@@ -139,6 +139,8 @@ CLOSE_FILL_WAIT_SEC      = 8
 FORCE_CLOSE_MAX_ATTEMPTS = 4
 FORCE_CLOSE_RETRY_DELAY  = 4
 RECONCILE_TIMEOUT_SEC    = 30
+RECONCILE_MAX_FORSOEG    = 3    # genforsøg foer strategien spaerres (T2b)
+RECONCILE_BACKOFF_SEC    = 5    # pause x forsoegsnummer mellem genforsoeg
 HOLD_BAR_DURATION        = "7200 S"   # ~2t 1m-bars pr. fetch (til hold-forensik MFE/MAE)
 HOLD_BAR_SIZE            = "1 min"
 
@@ -235,11 +237,38 @@ class RelStyrkeLive(BaseStrategy):
             logger.warning("[RelStyrke] _trading_loop koerer allerede — afbryder ny start")
             return
         self._status("started", "Algoritme starter — Relativ Styrke (tvaersnitlig RS, long-only)")
-        try:
-            await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)
-        except asyncio.TimeoutError:
-            logger.error(f"[RelStyrke] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) — springer over")
-            self._status("started", "Reconciliation timeout — fortsaetter til handel")
+        # ⚠ GENFORSØG, OG SPÆRRING HVIS DET STADIG IKKE LYKKES.
+        # Før stod her "springer over, fortsætter til handel": en kontrol hvis
+        # fejl blev behandlet som en beståelse. Den 13-08 løb K2 og BuyTheDip
+        # tør for tid (32 s mod 30) og handlede videre oven på fem positioner
+        # de ikke vidste eksisterede.
+        #
+        # ⚠ ET FORSØG ER IKKE ET FORSØG. Reconcile fejler typisk på et feed der
+        # lige er kommet op; et par sekunder senere svarer det. Derfor backoff.
+        # ⚠ OG SPÆRRINGEN OPHÆVES KUN AF EN BESTÅET RECONCILE — aldrig af tid.
+        _rec_ok = False
+        _spaerret_foer = self._entry_spaerret
+        for _forsoeg in range(1, RECONCILE_MAX_FORSOEG + 1):
+            try:
+                await asyncio.wait_for(self._reconcile_orphans(),
+                                       timeout=RECONCILE_TIMEOUT_SEC)
+                _rec_ok = True
+                break
+            except asyncio.TimeoutError:
+                logger.error(f"[RelStyrke] reconcile-timeout "
+                             f"({RECONCILE_TIMEOUT_SEC}s), forsøg "
+                             f"{_forsoeg}/{RECONCILE_MAX_FORSOEG}")
+                if _forsoeg < RECONCILE_MAX_FORSOEG:
+                    await asyncio.sleep(RECONCILE_BACKOFF_SEC * _forsoeg)
+        if _rec_ok and self._entry_spaerret == _spaerret_foer:
+            self.ophaev_entry_spaerring()
+        else:
+            _grund = (f"reconcile-timeout efter {RECONCILE_MAX_FORSOEG} forsøg "
+                      f"a {RECONCILE_TIMEOUT_SEC}s")
+            self.spaer_entries(_grund)
+            self._status("started",
+                         f"⛔ SPÆRRET for nye entries — {_grund}. "
+                         f"Eksisterende positioner beskyttes fortsat.")
 
         # position_size = notional PR. NAVN (samme betydning som K2's "kapital/handel"), saa en
         # Relativ Styrke-position er lige saa stor som en K2-position. Samlet = pr-navn x TOP_K.
@@ -280,6 +309,7 @@ class RelStyrkeLive(BaseStrategy):
             await self._reconcile_orphans_impl()
         except Exception as e:
             logger.exception(f"[RelStyrke] reconcile fejlede (best-effort, ignoreret): {e}")
+            self.spaer_entries("reconcile fejlede (undtagelse)")
             self._status("started", "Reconciliation sprang fejlet over — fortsaetter til handel")
 
     async def _reconcile_orphans_impl(self) -> None:
@@ -288,6 +318,7 @@ class RelStyrkeLive(BaseStrategy):
         et levn. IBKR samme vej & |net|>=antal → luk vores andel (reconcile_flatten);
         IBKR flad → fantom (reconcile_phantom, ingen ordre); ellers observe-only."""
         if self.conn is None or not self.conn.connected:
+            self.spaer_entries("reconcile ikke koert — IBKR ikke forbundet")
             self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
             return
         open_rows = []
@@ -307,6 +338,7 @@ class RelStyrkeLive(BaseStrategy):
             logger.warning("[RelStyrke] reconciliation: positions-feed upaalideligt "
                            "(tom/timeout ved opstart) — springer over for ikke at "
                            "foraeldreloesgoere en aegte position")
+            self.spaer_entries("reconcile ikke koert — positions-feed upaalideligt")
             self._status("started", "Reconciliation sprunget over — positions-feed upaalideligt")
             return
         ibkr_by_ticker = {
@@ -701,7 +733,8 @@ class RelStyrkeLive(BaseStrategy):
         order = OrderRequest(
             strategy_name=self.name, ticker=ticker, action="BUY", quantity=shares,
             order_type="MKT", asset_class="equity",
-            reason=f"RelStyrke early_rs {early_rs*100:+.2f}% rank {rank}")
+            reason=f"RelStyrke early_rs {early_rs*100:+.2f}% rank {rank}",
+            aabner=True)
         if self._risk_manager:
             if not await self.request_order(order):
                 return

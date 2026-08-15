@@ -122,6 +122,8 @@ HEARTBEAT_INTERVAL_SEC = 300
 # force_close (15:45 ET) til markedslukning (16:00 ET) — ~15 min, rigeligt.
 CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
 RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
+RECONCILE_MAX_FORSOEG    = 3    # genforsøg foer strategien spaerres (T2b)
+RECONCILE_BACKOFF_SEC    = 5    # pause x forsoegsnummer mellem genforsoeg
 FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger (fase 1)
 FORCE_CLOSE_RETRY_DELAY  = 4    # sek mellem genforsøg (fase 1 + 2)
 LATE_CLOSE_MAX_MIN       = 20   # sekundær cap på fase 2's feed-gated vente (ved tvangsluk
@@ -266,12 +268,38 @@ class Confluence2Live(BaseStrategy):
         # faktiske og rapporterer afvigelser.
         # Reconcile er best-effort OG tidsbegrænset: hverken en fejl (try/except i
         # _reconcile_orphans) eller en hang (timeout her) må blokere handelsstarten.
-        try:
-            await asyncio.wait_for(self._reconcile_orphans(), timeout=RECONCILE_TIMEOUT_SEC)
-        except asyncio.TimeoutError:
-            logger.error(f"[Konfluens 2] reconcile-timeout ({RECONCILE_TIMEOUT_SEC}s) "
-                         f"— springer over, fortsætter til handel")
-            self._status("started", "Reconciliation timeout — fortsætter til handel")
+        # ⚠ GENFORSØG, OG SPÆRRING HVIS DET STADIG IKKE LYKKES.
+        # Før stod her "springer over, fortsætter til handel": en kontrol hvis
+        # fejl blev behandlet som en beståelse. Den 13-08 løb K2 og BuyTheDip
+        # tør for tid (32 s mod 30) og handlede videre oven på fem positioner
+        # de ikke vidste eksisterede.
+        #
+        # ⚠ ET FORSØG ER IKKE ET FORSØG. Reconcile fejler typisk på et feed der
+        # lige er kommet op; et par sekunder senere svarer det. Derfor backoff.
+        # ⚠ OG SPÆRRINGEN OPHÆVES KUN AF EN BESTÅET RECONCILE — aldrig af tid.
+        _rec_ok = False
+        _spaerret_foer = self._entry_spaerret
+        for _forsoeg in range(1, RECONCILE_MAX_FORSOEG + 1):
+            try:
+                await asyncio.wait_for(self._reconcile_orphans(),
+                                       timeout=RECONCILE_TIMEOUT_SEC)
+                _rec_ok = True
+                break
+            except asyncio.TimeoutError:
+                logger.error(f"[Konfluens 2] reconcile-timeout "
+                             f"({RECONCILE_TIMEOUT_SEC}s), forsøg "
+                             f"{_forsoeg}/{RECONCILE_MAX_FORSOEG}")
+                if _forsoeg < RECONCILE_MAX_FORSOEG:
+                    await asyncio.sleep(RECONCILE_BACKOFF_SEC * _forsoeg)
+        if _rec_ok and self._entry_spaerret == _spaerret_foer:
+            self.ophaev_entry_spaerring()
+        else:
+            _grund = (f"reconcile-timeout efter {RECONCILE_MAX_FORSOEG} forsøg "
+                      f"a {RECONCILE_TIMEOUT_SEC}s")
+            self.spaer_entries(_grund)
+            self._status("started",
+                         f"⛔ SPÆRRET for nye entries — {_grund}. "
+                         f"Eksisterende positioner beskyttes fortsat.")
 
         await self._prepare_universe()
         self._loop_task = asyncio.create_task(self._trading_loop())
@@ -294,6 +322,7 @@ class Confluence2Live(BaseStrategy):
             await self._reconcile_orphans_impl()
         except Exception as e:
             logger.exception(f"[Konfluens 2] reconcile fejlede (best-effort, ignoreret): {e}")
+            self.spaer_entries("reconcile fejlede (undtagelse)")
             self._status("started", "Reconciliation sprang fejlet over — fortsætter til handel")
 
     async def _reconcile_orphans_impl(self) -> None:
@@ -322,6 +351,7 @@ class Confluence2Live(BaseStrategy):
         Best-effort: en fejl her må ikke blokere dagens handel.
         """
         if self.conn is None or not self.conn.connected:
+            self.spaer_entries("reconcile ikke koert — IBKR ikke forbundet")
             self._status("started", "Reconciliation sprunget over — IBKR ikke forbundet")
             return
 
@@ -345,6 +375,7 @@ class Confluence2Live(BaseStrategy):
             logger.warning("[Konfluens 2] reconciliation: positions-feed upålideligt "
                            "(tom/timeout ved opstart) — springer over for ikke at "
                            "forældreløsgøre en ægte position")
+            self.spaer_entries("reconcile ikke koert — positions-feed upaalideligt")
             self._status("started", "Reconciliation sprunget over — positions-feed upålideligt")
             return
         ibkr_by_ticker = {
@@ -1101,6 +1132,7 @@ class Confluence2Live(BaseStrategy):
             order_type="MKT",
             asset_class="equity",
             reason=f"Konfluens 2 impuls-entry score={score} bricks={bricks}",
+            aabner=True,
         )
 
         if self._risk_manager:
