@@ -64,6 +64,18 @@ TOP15_EOD_RETRY_UNTIL_ET  = dtime(1, 30)   # 07:30 dansk — foer Europa-reversi
 DAYTRADING_START_ET       = dtime(9,  0)   # 15:00 dansk — daytrading movers (pre-market)
 DAYTRADING_RETRY_UNTIL_ET = dtime(9, 18)   # foer K2 auto-start (09:20 ET)
 
+# ── Reconcile som SELVSTAENDIG kontrol (KUN algoserveren) ────────────────────
+# ⚠ OPSTARTS-RECONCILE ER IKKE NOK. Den 13-08 loeb den toer for tid, og fem
+# positioner fra 12-08 stod aabne i to doegn foer nogen opdagede det. En kontrol
+# der kun koerer ét sted, har ét sted at fejle.
+#
+# ⚠ EFTER MARKEDSLUKNING, ikke under handel. manual_reconcile.py naegter med
+# vilje at koere mens en strategi handler; det samme gaelder her. 16:15 ET er
+# 15 minutter efter luk — efter tvangslukningen 15:30 og efter at strategierne
+# er stoppet, men foer natten saa en aaben position ikke overlever til naeste dag.
+RECONCILE_START_ET       = dtime(16, 15)   # 22:15 dansk
+RECONCILE_RETRY_UNTIL_ET = dtime(18, 0)    # transient fejl genforsoeges til 18:00 ET
+
 # Ugentligt regime-fingeraftryk (KUN algoserveren). Rent OFFLINE paa cache -> ingen TWS-afhaengighed.
 # Koerer efter reset_daily (00:05 ET) og top15_eod (00:15 ET) saa de ikke overlapper. Kun ugens
 # foerste handelsdag (run_on=is_first_trading_day_of_week).
@@ -238,6 +250,7 @@ class AlgoScheduler:
         run_top15_eod_fn:  Optional[Callable[[], Awaitable]] = None,
         run_daytrading_fn: Optional[Callable[[], Awaitable]] = None,
         run_regime_fn:     Optional[Callable[[], Awaitable[bool]]] = None,
+        run_reconcile_fn:  Optional[Callable[[], Awaitable[bool]]] = None,
         run_relstyrke_eval_fn: Optional[Callable[[], Awaitable[bool]]] = None,
         instance_role:     str = "algoserver",
     ):
@@ -249,6 +262,7 @@ class AlgoScheduler:
         self._run_top15_eod  = run_top15_eod_fn   # swing + buyhold (morgen)
         self._run_daytrading = run_daytrading_fn  # daytrading movers (naer US-aaben)
         self._run_regime     = run_regime_fn      # ugentligt regime-fingeraftryk (offline)
+        self._run_reconcile  = run_reconcile_fn   # dagligt reconcile efter markedslukning
         self._run_relstyrke_eval = run_relstyrke_eval_fn  # efter-luk shadow-eval (Route B-bevis)
         # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
         # På workstation skal pre_flight_check og reset_daily fortsat køre,
@@ -283,6 +297,10 @@ class AlgoScheduler:
                          window_end_et=TOP15_EOD_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("generate_daytrading_top15", DAYTRADING_START_ET, self._job_generate_daytrading,
                          window_end_et=DAYTRADING_RETRY_UNTIL_ET, retry_until_success=True),
+            ScheduledJob("reconcile_efter_luk", RECONCILE_START_ET,
+                         self._job_reconcile_efter_luk,
+                         window_end_et=RECONCILE_RETRY_UNTIL_ET,
+                         retry_until_success=True),
             ScheduledJob("generate_regime_fingerprint", REGIME_START_ET, self._job_generate_regime_fingerprint,
                          window_end_et=REGIME_RETRY_UNTIL_ET, retry_until_success=True,
                          run_on=is_first_trading_day_of_week),
@@ -537,6 +555,36 @@ class AlgoScheduler:
         """Daytrading movers taet paa US-aabning (intradag — kraever aktivt marked/pre-market)."""
         return await self._run_top15_job(
             "generate_daytrading_top15", self._run_daytrading, DAYTRADING_RETRY_UNTIL_ET)
+
+    async def _job_reconcile_efter_luk(self) -> bool:
+        """Afstem journal mod broker EFTER markedslukning — uafhaengigt af opstart.
+
+        ⚠ DEN FINDES FORDI OPSTARTS-RECONCILE HAR ÉT STED AT FEJLE. Den 13-08
+        loeb den toer for tid paa to strategier, og fem positioner fra 12-08 stod
+        aabne i to doegn. Det her er den anden kontrol, paa et andet tidspunkt,
+        med et andet fejlmoenster.
+
+        ⚠ KUN ALGOSERVEREN. Den ejer handelskontoen; en workstation ville
+        afstemme mod et feed den ikke handler paa.
+
+        ⚠ OG DEN LUKKER IKKE BLINDT. Den genbruger hver strategis EGEN
+        _reconcile_orphans (samme adfaerd som opstart): kun strategiens egne
+        journal-rows, aldrig positioner uden journal-spor.
+
+        True = faerdig for i dag. False = transient fejl, genforsoeges i vinduet.
+        """
+        if self._instance_role != "algoserver":
+            logger.info("[Scheduler] reconcile_efter_luk sprunget over — ikke algoserver")
+            return True
+        if self._run_reconcile is None:
+            logger.warning("[Scheduler] Ingen run_reconcile_fn injiceret — springer over")
+            return True
+        ok = await self._run_reconcile()
+        if ok:
+            logger.info("[Scheduler] Reconcile efter markedslukning gennemfoert")
+        else:
+            logger.warning("[Scheduler] Reconcile efter luk fejlede — genforsoeger i vinduet")
+        return ok
 
     async def _job_generate_regime_fingerprint(self) -> bool:
         """Ugentligt regime-fingeraftryk. KUN algoserveren (serverer til alle maskiner, som

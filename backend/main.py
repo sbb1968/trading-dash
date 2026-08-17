@@ -672,6 +672,14 @@ async def startup():
             await notifier.alert_backend_error(f"relstyrke_shadow_eval fejl: {e}")
             return False
 
+    async def run_reconcile_efter_luk() -> bool:
+        """Scheduler-krogen. Selve logikken bor i reconcile_job.py — den skal
+        kunne PRØVES, og en closure inde i en 200 linjers startup-rutine kan
+        kun naas gennem serveren. Se noten i reconcile_job.py."""
+        from reconcile_job import reconcile_alle_strategier
+        return await reconcile_alle_strategier(
+            strategy_manager._strategies, StrategyStatus.RUNNING)
+
     algo_scheduler = AlgoScheduler(
         start_algo_fn     = start_algo,
         stop_algo_fn      = stop_algo,
@@ -681,6 +689,7 @@ async def startup():
         run_top15_eod_fn  = generate_top15_eod,
         run_daytrading_fn = generate_daytrading_top15,
         run_regime_fn     = run_regime_fingerprint,
+        run_reconcile_fn  = run_reconcile_efter_luk,
         run_relstyrke_eval_fn = run_relstyrke_shadow_eval,
         instance_role     = identity.instance_role,
     )

@@ -121,7 +121,16 @@ HEARTBEAT_INTERVAL_SEC = 300
 # og genforsøger ufyldte. Budgettet skal passe inden for runway'en fra
 # force_close (15:45 ET) til markedslukning (16:00 ET) — ~15 min, rigeligt.
 CLOSE_FILL_WAIT_SEC      = 8    # sek place_paper_order venter på fyldning af en lukke-ordre
-RECONCILE_TIMEOUT_SEC    = 30   # maks sekunder opstarts-reconcile må tage før den springes over
+# ⚠ BUDGETTET ER MAALT, IKKE GAETTET. 70 opstarter paa algoserveren 3.-15. august:
+#     median 0,0 s · p90 0,4 s · max (uden for timeouts) 0,5 s
+# Alt over 0,5 s stammer fra 13-08, og dér er tallet PRAECIS 30,0 s — altsaa
+# timeout'en selv. Fordelingen er todelt: enten er reconcile faerdig paa under
+# et sekund, eller ogsaa HAENGER den.
+#
+# ⚠ DERFOR VILLE ET STOERRE BUDGET IKKE HAVE HJULPET. K2's "32 sekunder" var
+# 30 s timeout plus opstart — ikke 32 sekunders arbejde. 30 s er allerede ~60
+# gange p90. Tallet er ikke problemet; udgangen var. Se genforsoeg og spaerring.
+RECONCILE_TIMEOUT_SEC    = 30   # ~60x maalt p90 — rigeligt, se noten ovenfor
 RECONCILE_MAX_FORSOEG    = 3    # genforsøg foer strategien spaerres (T2b)
 RECONCILE_BACKOFF_SEC    = 5    # pause x forsoegsnummer mellem genforsoeg
 FORCE_CLOSE_MAX_ATTEMPTS = 4    # antal gange _close_all genforsøger ufyldte lukninger (fase 1)
