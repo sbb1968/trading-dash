@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 import tempfile
@@ -65,6 +66,26 @@ def laes(p: Path) -> list[list[str]]:
 BLOK = 1000
 
 
+def _blokhash(raekker: list[list[str]]) -> str:
+    """⚠ STABIL PÅ TVÆRS AF PROCESSER. Første udgave brugte Pythons indbyggede
+    hash(), og den er SALTET pr. proces for strenge (PYTHONHASHSEED). Billedet
+    blev taget i én proces og sammenligningen kørt i en anden, så ALLE ti filer
+    blev meldt som ændrede — også tre der var bit-for-bit urørte. Værktøjet
+    skrev "V1 kan IKKE erklæres lukket" med fuld overbevisning, og det var
+    forkert.
+
+    ⚠ OG KONTROLFIKSTURET KUNNE IKKE SE DET, fordi det kørte i SAMME proces som
+    den kontrol det prøvede. Et fikstur skal krydse de samme grænser som den
+    rigtige måling — ellers er der en hel klasse fejl det pr. konstruktion er
+    blindt for. Det er tiende gang samme sygdom dukker op i dette projekt, og
+    første gang i mit eget kontrolfikstur.
+    """
+    h = hashlib.blake2b(digest_size=16)
+    for r in raekker:
+        h.update(("".join(r) + "").encode("utf-8"))
+    return h.hexdigest()
+
+
 def billede_af(p: Path, graense: int | None = None) -> dict:
     """Øjebliksbillede. `graense` = hash kun de første N rækker.
 
@@ -84,7 +105,7 @@ def billede_af(p: Path, graense: int | None = None) -> dict:
             "sidste": (r[1:] if r and not r[0][0][:1].isdigit() else r)[-1][0] if fuld else None,
             # ⚠ Hele indholdet gemmes ikke — VIX_1min er 114 MB. En hash pr.
             # 1.000 rækker lokaliserer en ændring uden at bære filen rundt.
-            "blokke": [hash(tuple(tuple(x) for x in krop[i:i+BLOK]))
+            "blokke": [_blokhash(krop[i:i+BLOK])
                        for i in range(0, len(krop), BLOK)]}
 
 
@@ -143,10 +164,12 @@ def sammenlign() -> int:
     fejl_i_alt = 0
 
     print("DEL A — harvesten kørt to gange\n")
+    bedoemt = 0
     for p in datafiler():
         if p.name not in foer:
             print(f"  ?    {p.name}: ny fil siden billedet (ikke bedømt)")
             continue
+        bedoemt += 1
         efter = billede_af(p)
         f = doem_fil(foer[p.name], p)
         nye = efter["raekker"] - foer[p.name]["raekker"]
@@ -156,6 +179,17 @@ def sammenlign() -> int:
         for x in f:
             print(f"         ⚠ {x}")
         fejl_i_alt += len(f)
+
+    # ⚠ NUL BEDØMTE FILER ER IKKE NUL OVERTRÆDELSER. Med et tomt øjebliksbillede
+    # sammenlignede løkken ingenting, fandt ingen fejl — og værktøjet skrev
+    # "IDEMPOTENS BEVIST". Det er præcis den fejlklasse hele projektet er
+    # organiseret omkring at undgå, denne gang i kontrollen selv.
+    if bedoemt == 0:
+        print("  ⚠ INGEN filer blev bedømt — øjebliksbilledet er tomt eller")
+        print("     hører til andre filer. Der er intet bevist.")
+        fejl_i_alt += 1
+    else:
+        print(f"\n  {bedoemt} filer bedømt.")
 
     # ── DEL B: kan kontrollen overhovedet fejle? ────────────────────────────
     print("\nDEL B — kontrolfikstur: et input der SKAL dumpe\n")
@@ -190,6 +224,31 @@ def sammenlign() -> int:
         print("       kalde enhver korrekt daglig opdatering en fejl)")
     else:
         print(f"  FEJL en ægte ny bar blev afvist: {tilvaekst[0]}")
+        fejl_i_alt += 1
+
+    # ── DEL C: krydser fiksturet de samme grænser som målingen? ────────────
+    # ⚠ DEN FEJL DEL B IKKE KUNNE SE. Del B kører i ÉN proces; den rigtige
+    # måling tager billedet i én og sammenligner i en anden. Med Pythons
+    # saltede hash() var alt derfor "ændret" — også tre filer der var
+    # bit-for-bit urørte — og Del B bestod alligevel.
+    #
+    # Et fikstur der ikke krydser de samme grænser som målingen, er pr.
+    # konstruktion blindt for en hel klasse fejl.
+    print("\nDEL C — samme fil, ny proces: giver billedet det samme?\n")
+    import subprocess
+    prog = ("import sys; sys.argv=['x']; import pathlib; "
+            "import vol_idempotens_test as v; "
+            "print(v.billede_af(pathlib.Path(sys.argv[0] if False else r'%s'))['blokke'][0])" % a)
+    ude = subprocess.run([sys.executable, "-c", prog], capture_output=True,
+                         text=True, cwd=str(HER))
+    her = billede_af(a)["blokke"][0]
+    der = ude.stdout.strip()
+    if der == her:
+        print(f"  OK   samme blokhash i to processer ({str(her)[:20]}…)")
+    else:
+        print("  FEJL hashen ændrer sig mellem processer:")
+        print(f"       her: {str(her)[:24]}   anden proces: {der[:24]}")
+        print("       → DEL A ville melde ALT som ændret, også urørte filer.")
         fejl_i_alt += 1
 
     print("\n" + "═" * 70)
