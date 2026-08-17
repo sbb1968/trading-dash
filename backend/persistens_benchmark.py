@@ -139,6 +139,39 @@ def er_pr_dag(barer: dict[date, list[tuple[float, float]]],
     return ud, revision
 
 
+def naeste_handelsdag(d: date) -> date:
+    from datetime import timedelta
+    n = d + timedelta(days=1)
+    for _ in range(12):                      # laengste US-helligdagsbro
+        if er_handelsdag(n):
+            return n
+        n += timedelta(days=1)
+    return n
+
+
+def naboliste(er: dict[date, float], dage: list[date]):
+    """Par KUN faktiske nabo-handelsdage.
+
+    ⚠ FOERSTE UDGAVE PAREDE NABOINDGANGE I DEN FILTREREDE LISTE. Naar en halv
+    dag udelades, bliver "i gaar" da forrige handelsdag FOER den — altsaa to
+    dage tilbage. Det ramte 32 af 2.991 par (1,1 %).
+    #
+    ⚠ Og de 32 er ikke tilfaeldige: halve dage klumper om helligdage, saa de
+    forkerte par er SYSTEMATISK udvalgte. Med 1,1 % kan de ikke vende et
+    fortegn med det KI — men en rettelse foretaget EFTER kandidattallene
+    foreligger, kan ikke skelnes fra tuning. Derfor nu.
+    """
+    par, sprunget = [], 0
+    haves = set(dage)
+    for i in range(len(dage) - 1):
+        d, e = dage[i], dage[i + 1]
+        if naeste_handelsdag(d) != e:
+            sprunget += 1
+            continue
+        par.append((er[d], er[e]))
+    return par, sprunget
+
+
 # ── Statistik ───────────────────────────────────────────────────────────────
 def spearman(x: list[float], y: list[float]) -> float:
     def rang(v):
@@ -208,8 +241,7 @@ def main() -> int:
             er = {d: v for d, v in er.items() if d <= UDVIKLING_SLUT}
 
         dage = sorted(er)
-        # par kun NABO-handelsdage; et hul må ikke blive til et "i går"
-        par = [(er[dage[i]], er[dage[i + 1]]) for i in range(len(dage) - 1)]
+        par, sprunget = naboliste(er, dage)
         x = [p[0] for p in par]
         y = [p[1] for p in par]
 
@@ -226,7 +258,8 @@ def main() -> int:
         print(f"   ER: median {st.median(er.values()):.4f}"
               f" · middel {st.mean(er.values()):.4f}"
               f" · spredning {st.pstdev(er.values()):.4f}")
-        print(f"   par (d → d+1): {len(par):,}")
+        print(f"   par (d → d+1): {len(par):,}"
+              f"   · {sprunget} par sprunget over (ikke nabo-handelsdage)")
 
         rho = spearman(x, y)
         print(f"\n   Spearman ER(d) → ER(d+1)   rho {rho:+.4f}")
@@ -238,8 +271,19 @@ def main() -> int:
 
     print("\n" + "═" * 78)
     print("Det er BENCHMARKEN. Ingen kandidatprædiktor findes endnu i koden.")
-    print("En kandidat skal slå disse tal med et KI95 der udelukker nul til")
-    print("sin fordel — ellers er svaret: brug gårsdagens ER.")
+    print("")
+    print("⚠ BEDØM PÅ |rho|, IKKE PÅ rho (Revision A). Med en NEGATIV benchmark")
+    print("  ville 'slå benchmarkens Spearman' være opfyldt af et møntkast:")
+    print("  0,00 vinder over -0,08 med 0,08. En kandidat på +0,05 vinder med")
+    print("  0,13 uden at være værd at handle på — en kontrol hvis udfald er")
+    print("  strukturelt gunstigt.")
+    print("")
+    print("  Benchmarkens BRUGBARE styrke er |rho|. En stabil negativ")
+    print("  sammenhæng er lige så anvendelig som en positiv af samme")
+    print("  størrelse; man vender fortegnet i aflæsningen.")
+    print("  Fortegnsstabilitet hen over gitteret 1/5/15-min er et")
+    print("  SELVSTÆNDIGT krav — skifter fortegnet, er prædiktoren ubrugelig")
+    print("  uanset |rho|.")
     print("═" * 78)
     return 0
 
