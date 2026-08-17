@@ -696,6 +696,36 @@ async def startup():
     await algo_scheduler.start()
     print("[Server] Algo-scheduler startet — autonom dagsplan aktiv")
 
+    # ── Øvebanen følger backenden ──────────────────────────────────────────
+    # ⚠ SØRENS KRAV, ORDRET: "naar trading dash virker, saa virker trading
+    # practice ogsaa". Foer var oevebanen en loesrevet proces startet i haanden;
+    # den doede hver gang nogen genstartede backenden eller loggede af RDP, og
+    # ingen opdagede det foer knappen ikke virkede. Det skete 17-08.
+    #
+    # ⚠ VAGTEN ER PRACTICE_LOKAL, ikke "er vi algoserveren". Peger PRACTICE_URL
+    # paa en anden maskine, starter vi INTET — ellers ville Ibens workstation
+    # rejse sin egen oevebane med sin egen handler.db, og de to fremdrifter
+    # ville divergere lydloest. Den vagt findes allerede i
+    # start_practice_proces(); her stoler vi paa den frem for at gentage den.
+    #
+    # ⚠ OG DEN MAA ALDRIG VAELTE BACKENDEN. En oevebane er en bekvemmelighed;
+    # handelssystemet er det ikke. Enhver fejl logges og sluges — men den
+    # LOGGES, saa en manglende oevebane ikke er tavs.
+    async def _rejs_oevebanen():
+        try:
+            ok, besked = await start_practice_proces()
+            if ok:
+                print(f"[Server] Trading Practice: {besked} — {practice_url_nu()}")
+            else:
+                print(f"[Server] Trading Practice ikke startet: {besked}")
+        except Exception as e:
+            logger.warning(f"[Server] Trading Practice: opstart fejlede ({e})")
+
+    # ⚠ Som baggrundsopgave. start_practice_proces venter op til 20 sekunder
+    # paa at porten svarer, og backenden maa ikke staa stille imens — mindst
+    # af alt paa en morgen hvor strategierne skal starte 09:20 ET.
+    asyncio.create_task(_rejs_oevebanen())
+
     # DEAKTIVERET 2026-05-17 — Iben vil kun se TWS-offline og dagens resultat
     # await notifier.send(
     #     message  = f"Backend startet på {identity.instance_display_name}. Autonom drift aktiv.",
@@ -5638,6 +5668,25 @@ def _med_skraastreg(u: str) -> str:
     return u if u.rstrip().endswith("/") or "/" in u.split("://", 1)[-1] else u + "/"
 
 
+# ⚠ MAALT VED HVERT KALD, IKKE ÉN GANG VED OPSTART. Foer var det en
+# modul-konstant, og saa laa fejlen lige for: starter backenden mens oevebanen
+# er nede, maaler den 127.0.0.1 og bliver ved med at udlevere dén adresse —
+# ogsaa efter at oevebanen er oppe igen. Studio sendte da folk til deres EGEN
+# maskine. Det skete 17-08.
+#
+# ⚠ Det er samme fejlklasse som resten af listen: en maaling frosset i ét
+# oejeblik, praesenteret som nutid. En vaerdi der KAN aendre sig, maa ikke
+# fanges i en konstant.
+#
+# PRACTICE_URL beholdes som "adressen ved opstart" fordi PRACTICE_LOKAL
+# udledes af den, og den ROLLE (er oevebanen vores?) aendrer sig ikke i
+# processens levetid — det er kun PORTENS TILSTAND der goer.
+def practice_url_nu() -> str:
+    """Adressen lige nu. Env-variablen vinder; ellers maales der forfra."""
+    fast = os.environ.get("PRACTICE_URL")
+    return _med_skraastreg(fast) if fast else _med_skraastreg(_practice_url_default())
+
+
 PRACTICE_URL = _med_skraastreg(os.environ.get("PRACTICE_URL") or _practice_url_default())
 
 # ⚠ Kan DENNE backend starte oevebanen? Kun hvis den koerer samme sted.
@@ -5681,7 +5730,8 @@ async def practice_status():
         "lokal": PRACTICE_LOKAL,
         "koerer": _practice_svarer() if PRACTICE_LOKAL else None,
         "installeret": findes if PRACTICE_LOKAL else None,
-        "url": PRACTICE_URL,
+        # ⚠ Maalt nu, ikke ved opstart. Se practice_url_nu().
+        "url": practice_url_nu(),
         "sti": str(PRACTICE_DIR) if PRACTICE_LOKAL else None,
         # ⚠ Uden data er der ingenting at øve på, og appen ville starte og
         # vise en tom vælger. Bedre at sige det end at lade brugeren gætte.
@@ -5689,59 +5739,78 @@ async def practice_status():
     }
 
 
-@app.post("/practice/start")
-async def practice_start():
-    """Start øvebanen hvis den ikke allerede kører.
+async def start_practice_proces() -> tuple[bool, str]:
+    """Start oevebanen hvis den ikke koerer. (ok, besked).
 
-    ⚠ Ingen parametre fra kaldet. Stien og kommandoen er hårdkodede — en rute
-    der kan starte processer, må ikke kunne starte HVILKEN SOM HELST proces.
+    ⚠ ÉN implementering, brugt baade af /practice/start og af backendens
+    opstart. To kopier ville drive fra hinanden — og den ene ville saette
+    TRADING_PRACTICE_HOST mens den anden glemte det, saa oevebanen startede
+    men kun kunne naas af maskinen selv. `koerer` ville da vaere True og
+    problemet SE loest ud.
     """
-    # ⚠ Nægt at "starte" noget der koerer et andet sted. Uden den her vagt
-    # ville knappen starte en LOKAL oevebane paa en maskine uden data, mens
-    # brugeren troede den talte med algoserveren.
     if not PRACTICE_LOKAL:
-        raise HTTPException(409,
-            f"oevebanen koerer ikke lokalt ({PRACTICE_URL}) — den kan kun startes "
-            f"paa den maskine den er installeret paa")
+        return False, f"oevebanen koerer et andet sted ({PRACTICE_URL})"
     if _practice_svarer():
-        return {"ok": True, "koerte_allerede": True, "url": PRACTICE_URL}
+        return True, "koerte allerede"
     app_py = PRACTICE_DIR / "app.py"
     if not app_py.exists():
-        raise HTTPException(404, f"oevebanen findes ikke: {app_py}")
-
-    # ⚠ NAEGT AT STARTE EN OEVEBANE UDEN DATA. Uden bar_cache starter appen
-    # fint og viser en tom vaelger — men den opretter ogsaa SIN EGEN
-    # handler.db, og saa har maskinen en anden fremdrift end algoserverens.
-    # De to divergerer lydloest, og ingen opdager det foer tallene ikke passer.
-    #
-    # Det sker praecis naar PRACTICE_URL er glemt paa en maskine der skulle
-    # pege paa algoserveren. En fejlmeddelelse er langt bedre end en tom
-    # oevebane med sin egen historik.
+        return False, f"findes ikke: {app_py}"
     if not PRACTICE_DATA.is_dir():
-        raise HTTPException(409,
-            "der er ingen markedsdata paa denne maskine (bar_cache mangler). "
-            "Oevebanen koerer paa algoserveren — saet PRACTICE_URL="
-            "http://iben-algo:8100 foer backenden startes.")
+        return False, ("ingen markedsdata (bar_cache mangler) — saet "
+                       "PRACTICE_URL til algoserveren foer backenden startes")
 
     import subprocess
     venv_py = PRACTICE_DIR / "venv" / "Scripts" / "python.exe"
     exe = str(venv_py) if venv_py.exists() else sys.executable
+
+    # ⚠ BINDINGEN SKAL SAETTES HER, ikke i et RDP-vindue. Algoserveren
+    # serverer oevebanen til ALLE maskiner, saa den skal binde bredt; en
+    # workstation skal ikke, for dér er 127.0.0.1 det sikre.
+    #
+    # ⚠ Uden det her startede knappen en oevebane som kun algoserveren selv
+    # kunne naa — og meldte succes. En handling der rapporterer at den lykkedes
+    # uden at have opnaaet det man bad om, er samme sygdom som resten.
+    miljoe = dict(os.environ)
+    if identity.instance_role == "algoserver":
+        miljoe["TRADING_PRACTICE_HOST"] = "0.0.0.0"
+
     try:
-        subprocess.Popen([exe, str(app_py)], cwd=str(PRACTICE_DIR),
+        subprocess.Popen([exe, str(app_py)], cwd=str(PRACTICE_DIR), env=miljoe,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception as e:
-        raise HTTPException(500, f"kunne ikke starte oevebanen: {e}")
+        return False, f"kunne ikke starte: {e}"
 
     # ⚠ Vent til den SVARER, ikke bare til processen er startet. Indekset
     # indlaeses ved opstart (~16.500 sessioner), saa der gaar et par sekunder
-    # foer porten er aaben — og en browser der aabnes for tidligt, viser en
-    # fejlside som brugeren opfatter som at knappen ikke virker.
+    # foer porten er aaben.
     import asyncio as _a
     for _ in range(40):                      # op til ~20 sekunder
         await _a.sleep(0.5)
         if _practice_svarer():
-            return {"ok": True, "koerte_allerede": False, "url": PRACTICE_URL}
-    raise HTTPException(504, "oevebanen startede, men svarede ikke inden for 20 sekunder")
+            return True, "startet"
+    return False, "startede, men svarede ikke inden for 20 sekunder"
+
+
+@app.post("/practice/start")
+async def practice_start():
+    """Start oevebanen hvis den ikke allerede koerer.
+
+    ⚠ Ingen parametre fra kaldet. Stien og kommandoen er haardkodede — en
+    rute der kan starte processer, maa ikke kunne starte HVILKEN SOM HELST.
+
+    Selve starten bor i start_practice_proces(), som backendens opstart ogsaa
+    bruger. Se noten dér om hvorfor det ikke maa vaere to kopier.
+    """
+    if not PRACTICE_LOKAL:
+        raise HTTPException(409,
+            f"oevebanen koerer ikke lokalt ({PRACTICE_URL}) — den kan kun startes "
+            f"paa den maskine den er installeret paa")
+    koerte_allerede = _practice_svarer()
+    ok, besked = await start_practice_proces()
+    if not ok:
+        raise HTTPException(409 if "data" in besked or "findes ikke" in besked else 504,
+                            besked)
+    return {"ok": True, "koerte_allerede": koerte_allerede, "url": practice_url_nu()}
 
 
 @app.get("/studio")
