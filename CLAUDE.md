@@ -96,6 +96,9 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 
 | `data/` | 14+ CSV-filer med historiske kursdata |
 
+| `eco_kalender.py` | Oekonomisk kalender for MES: hoest fra ForexFactory, tier-filter, `/eco/*`, eksport til Trading Practice |
+| `kalender_tier.py` | Hvilke event-titler vises (tier 1/2) og hvad de hedder hos andre kilder |
+| `eco_kilde_probe.md` | Hvad kilde-proben viste — raekkevidde, actual, rate-graenser, daekningshuller |
 | `docs/` | PDF-guides serveret af /docs (auto-listende; `NN\_`-praefiks styrer raekkefoelge) |
 
 

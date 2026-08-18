@@ -82,6 +82,24 @@ RECONCILE_RETRY_UNTIL_ET = dtime(18, 0)    # transient fejl genforsoeges til 18:
 REGIME_START_ET       = dtime(0, 30)   # 06:30 dansk, mandag morgen
 REGIME_RETRY_UNTIL_ET = dtime(3, 0)    # transient fejl (fx fil-laas) genforsoeges til 03:00 ET
 
+# ── Oekonomisk kalender (eco_kalender.py) ────────────────────────────────────
+# Dagligt, og FOER oevevinduet aabner 08:00 dansk (= 02:00 ET). 01:00 ET er 07:00
+# dansk — efter den natlige backend-genstart (~06:00 dansk) og foer Europa-reversions
+# prep 01:50 ET.
+#
+# ⚠ KOERER PAA ALLE MASKINER, ikke kun algoserveren. Oekonomiske events er ikke
+# maskinspecifikke — CPI falder samme tidspunkt uanset hvilken peer man kigger fra
+# (specens §5.1). Ét HTTP-kald pr. maskine pr. dag er langt under rate-graensen, og
+# til gengaeld virker Eco Calendar-siden paa en workstation uden at haenge paa at
+# algoserveren svarer. En laeseflade der kraever en anden maskine, er nede naar den
+# maskine er nede.
+#
+# ⚠ HOESTEN ER DET UIGENKALDELIGE. Feedet daekker kun indevaerende uge, saa en dag
+# uden hoest er en dag der ikke kan hentes igen bagud fra dén vej. Derfor et bredt
+# genforsoegs-vindue: fejler nettet kl. 07, proeves der igen indtil 11 dansk.
+ECO_START_ET       = dtime(1, 0)    # 07:00 dansk
+ECO_RETRY_UNTIL_ET = dtime(5, 0)    # 11:00 dansk
+
 # Auto-start af Relativ Styrke (spor D, KUN algoserveren — instance-guard som K2/BTD/TJL).
 # Forskudt EFTER de tre andre US-starter (K2 09:20, BTD 09:22, TJL 09:25) saa pre-flight/scan
 # ikke rammer TWS samtidig (pacing). Strategien tager EEN beslutning ved 09:46 ET (naar 09:45-
@@ -251,6 +269,7 @@ class AlgoScheduler:
         run_daytrading_fn: Optional[Callable[[], Awaitable]] = None,
         run_regime_fn:     Optional[Callable[[], Awaitable[bool]]] = None,
         run_reconcile_fn:  Optional[Callable[[], Awaitable[bool]]] = None,
+        run_eco_kalender_fn: Optional[Callable[[], Awaitable[bool]]] = None,
         run_relstyrke_eval_fn: Optional[Callable[[], Awaitable[bool]]] = None,
         instance_role:     str = "algoserver",
     ):
@@ -263,6 +282,7 @@ class AlgoScheduler:
         self._run_daytrading = run_daytrading_fn  # daytrading movers (naer US-aaben)
         self._run_regime     = run_regime_fn      # ugentligt regime-fingeraftryk (offline)
         self._run_reconcile  = run_reconcile_fn   # dagligt reconcile efter markedslukning
+        self._run_eco_kalender = run_eco_kalender_fn  # daglig oekonomisk kalender (alle maskiner)
         self._run_relstyrke_eval = run_relstyrke_eval_fn  # efter-luk shadow-eval (Route B-bevis)
         # Auto-start jobs (start_algo, daily_summary) kører KUN på algoserveren.
         # På workstation skal pre_flight_check og reset_daily fortsat køre,
@@ -301,6 +321,8 @@ class AlgoScheduler:
                          self._job_reconcile_efter_luk,
                          window_end_et=RECONCILE_RETRY_UNTIL_ET,
                          retry_until_success=True),
+            ScheduledJob("eco_kalender", ECO_START_ET, self._job_eco_kalender,
+                         window_end_et=ECO_RETRY_UNTIL_ET, retry_until_success=True),
             ScheduledJob("generate_regime_fingerprint", REGIME_START_ET, self._job_generate_regime_fingerprint,
                          window_end_et=REGIME_RETRY_UNTIL_ET, retry_until_success=True,
                          run_on=is_first_trading_day_of_week),
@@ -584,6 +606,26 @@ class AlgoScheduler:
             logger.info("[Scheduler] Reconcile efter markedslukning gennemfoert")
         else:
             logger.warning("[Scheduler] Reconcile efter luk fejlede — genforsoeger i vinduet")
+        return ok
+
+    async def _job_eco_kalender(self) -> bool:
+        """Daglig hoest af oekonomiske events. Ingen instance-guard — se noten ved
+        ECO_START_ET om hvorfor alle maskiner hoester deres egen kopi.
+
+        ⚠ EN FEJLET HOEST SKAL SES. Returnerer False ved fejl, saa jobbet
+        genforsoeges i vinduet, og fejler den hele vejen, staar den i eco_hoest med
+        ok=0 og faar /eco/status til at melde stale. Fejler jobbet stille i en uge,
+        mister vi en uges historik permanent — det er praecis den fejlklasse
+        fingeraftryks-jobbet ramte 3/8 og 10/8 uden at nogen opdagede det.
+        """
+        if self._run_eco_kalender is None:
+            logger.warning("[Scheduler] Ingen run_eco_kalender_fn injiceret — springer over")
+            return True
+        ok = await self._run_eco_kalender()
+        if ok:
+            logger.info("[Scheduler] Oekonomisk kalender hoestet")
+        else:
+            logger.warning("[Scheduler] Eco-kalender-hoest fejlede — genforsoeger i vinduet")
         return ok
 
     async def _job_generate_regime_fingerprint(self) -> bool:

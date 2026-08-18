@@ -349,6 +349,63 @@
         .dk-date-row { display: flex; align-items: center; gap: 4px; }
         .dk-date-row input[type="text"] { flex: 1; min-width: 0; }
         .dk-date-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; padding: 0; border: 0; }
+        /* ── Eco Calendar ────────────────────────────────────────────────
+           FARVE BAERER ALDRIG BETYDNING ALENE. Hvert event har en TEKST-etiket
+           (TIER 1 / TIER 2), og de to prikformer i maanedsgitteret er
+           forskellige: tier 1 er FYLDT, tier 2 er en RING. Siden skal kunne
+           laeses af farveblinde og i sort/hvid — en side hvor det eneste skel
+           er roed mod gul, er ulaeselig for cirka hver tolvte mand.
+
+           (Specens §6.2 beder ogsaa om at proeve mod Studios 12 temaer. Studio
+           HAR ingen temaer — nul forekomster af "theme"/"tema" i filen. De 12
+           temaer hoerer til Trading Dashs React-app. Farverne herunder er derfor
+           faste og valgt til Studios ene moerke flade.) */
+        .eco-tier1 { background:#7f1d1d; color:#fecaca; border:1px solid #b91c1c; }
+        .eco-tier2 { background:#3f3f46; color:#d4d4d8; border:1px solid #52525b; }
+        .eco-tier-etiket {
+            font-size:10px; font-weight:700; letter-spacing:0.8px;
+            padding:2px 7px; border-radius:3px; white-space:nowrap;
+        }
+        .eco-oevevindue {
+            font-size:10px; font-weight:700; letter-spacing:0.8px;
+            padding:2px 7px; border-radius:3px; white-space:nowrap;
+            background:#14532d; color:#bbf7d0; border:1px solid #16a34a;
+        }
+        .eco-tid {
+            font-variant-numeric: tabular-nums; font-feature-settings:"tnum";
+            font-size:15px; font-weight:600; color:#e5e5e5; min-width:52px;
+        }
+        .eco-tid-ukendt { color:#8a8a8a; font-style:italic; font-weight:400; }
+        .eco-raekke {
+            display:flex; align-items:center; gap:12px;
+            padding:9px 0; border-bottom:1px solid #333;
+        }
+        .eco-raekke:last-child { border-bottom:none; }
+        .eco-tal { font-variant-numeric: tabular-nums; font-size:12px; color:#b0b0b0; }
+        .eco-gitter {
+            display:grid; grid-template-columns:repeat(7, 1fr); gap:4px; margin-top:10px;
+        }
+        .eco-dag {
+            aspect-ratio:1/1; min-height:44px; border:1px solid #3a3a3a; border-radius:5px;
+            background:#262626; cursor:pointer; padding:4px;
+            display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+            font-size:12px; color:#c8c8c8;
+        }
+        .eco-dag:hover { border-color:#6b7280; }
+        .eco-dag.eco-valgt { border-color:#3b82f6; background:#1e293b; }
+        .eco-dag.eco-i-dag { box-shadow: inset 0 0 0 1px #a16207; }
+        .eco-dag.eco-udenfor { opacity:0.30; cursor:default; }
+        .eco-dag.eco-lukket { background:#1c1c1c; color:#777; }
+        .eco-prikker { display:flex; gap:3px; margin-top:3px; flex-wrap:wrap; justify-content:center; }
+        /* FYLDT = tier 1 · RING = tier 2. Formen, ikke farven, er skellet. */
+        .eco-prik1 { width:7px; height:7px; border-radius:50%; background:#ef4444; }
+        .eco-prik2 { width:7px; height:7px; border-radius:50%; border:1.5px solid #a1a1aa; }
+        .eco-advarsel {
+            background:#4a3a1a; border:1px solid #a16207; color:#fde68a;
+            padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:14px;
+        }
+        .eco-frisk { font-size:12px; color:#9a9a9a; }
+
         .dk-cal-btn {
             flex: 0 0 auto; cursor: pointer; font-size: 15px; line-height: 1;
             padding: 6px 9px; border-radius: 5px; color: #f0f0f0;
@@ -1606,6 +1663,7 @@
         <button data-page="status">Status</button>
         <button data-page="analysis">Analyse</button>
         <button data-page="log">Log</button>
+        <button data-page="ecokalender">Eco Calendar</button>
     </nav>
 
     <main>
@@ -2088,6 +2146,10 @@
         let oversigtTimer = null;
         let ibkrKontoTimer = null;
         let journalTimer = null;
+        // Eco Calendar taeller ned til naeste event. ⚠ Deklareret HER sammen med de
+        // oevrige, saa switchPage kan rydde den — en timer der ikke ryddes, laekker
+        // naar man forlader siden og bliver ved med at kalde et DOM der er vaek.
+        let ecoTimer = null;
 
         document.getElementById("nav").addEventListener("click", e => {
             const btn = e.target.closest("button[data-page]");
@@ -2110,6 +2172,7 @@
             if (oversigtTimer) { clearInterval(oversigtTimer); oversigtTimer = null; }
             if (journalTimer) { clearInterval(journalTimer); journalTimer = null; }
             if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+            if (ecoTimer) { clearInterval(ecoTimer); ecoTimer = null; }
 
             // Luk Log-fanens WebSocket når vi forlader fanen
             stopLogStream();
@@ -2129,6 +2192,7 @@
             else if (page === "journal") showJournal();
             else if (page === "log") showLog();
             else if (page === "docs") showDocs();
+            else if (page === "ecokalender") showEcoKalender();
             // 'account' (Konto) og 'strategies' (Strategier) er fjernet — falder til
             // Oversigt hvis en gammel gemt tilstand stadig peger derhen.
             else if (page === "account" || page === "strategies") showOversigt();
@@ -2468,6 +2532,261 @@
         function openDocPdf(name) {
             // Studio kører i en browser → åbn PDF'en i en ny fane (systemets PDF-visning).
             window.open("/docs/file/" + encodeURIComponent(name), "_blank", "noopener");
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ECO CALENDAR — planlagte events der kan flytte MES
+        // ═══════════════════════════════════════════════════════════════
+        // ⚠ EN FEJLET HOEST OG EN STILLE DAG MAA ALDRIG SE ENS UD. Alle
+        // /eco/-svar baerer `stale`; er det sat, staar der en advarsel OVER
+        // indholdet frem for at siden roligt viser "ingen events". Det er
+        // projektets tilbagevendende fejlklasse, og den mest tillidsvaekkende
+        // maade at tage fejl paa.
+        //
+        // ⚠ NEDTAELLINGEN REGNES I BROWSEREN, ikke af serverens `minutter_til`.
+        // Serverens tal er maalt da svaret blev lavet og fryser derefter — en
+        // nedtaelling der staar stille er vaerre end ingen nedtaelling.
+        let ecoData = { events: [], stale: false, sidsteHoest: null };
+        let ecoValgtDato = null;
+        let ecoMaaned = null;      // foerste i den viste maaned
+
+        const ecoEsc = s => (s == null ? "" : String(s))
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+        function ecoIsoIdag() {
+            // Dansk kalenderdato. toISOString() ville give UTC og skifte dag
+            // kl. 02:00 dansk om sommeren — altsaa midt i oevevinduets optakt.
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        }
+
+        function ecoMinutterTil(tsUtc) {
+            if (!tsUtc) return null;
+            const t = Date.parse(tsUtc);
+            if (isNaN(t)) return null;
+            return Math.round((t - Date.now()) / 60000);
+        }
+
+        function ecoNedtaelling(min) {
+            if (min == null) return "";
+            if (min < 0) return "overstaaet";
+            if (min < 60) return `om ${min} min`;
+            const t = Math.floor(min / 60), m = min % 60;
+            if (t < 24) return `om ${t} t ${m} min`;
+            return `om ${Math.floor(t / 24)} d ${t % 24} t`;
+        }
+
+        function ecoTierEtiket(tier) {
+            const k = tier === 1 ? "eco-tier1" : "eco-tier2";
+            return `<span class="eco-tier-etiket ${k}">TIER ${tier}</span>`;
+        }
+
+        function ecoRaekke(e) {
+            if (e.pladsholder) {
+                // Sprængradius: ét ubrugeligt event tager ikke resten med sig.
+                return `<div class="eco-raekke">
+                    <span class="eco-tid eco-tid-ukendt">— : —</span>
+                    <span style="color:#fca5a5;">⚠ ubrugelig raekke — ${ecoEsc(e.fejl)}</span>
+                </div>`;
+            }
+            // ⚠ Kun-dato-events vises som "— : —", ALDRIG med et gaettet
+            // klokkeslaet. Et gaettet tidspunkt paa CPI er vaerre end intet.
+            const tid = e.har_klokkeslet
+                ? `<span class="eco-tid">${ecoEsc(e.klokke_dk)}</span>`
+                : `<span class="eco-tid eco-tid-ukendt">— : —</span>`;
+            const tal = [
+                e.forecast ? `prog. ${ecoEsc(e.forecast)}` : null,
+                e.previous ? `forrige ${ecoEsc(e.previous)}` : null,
+                e.actual ? `<b style="color:#e5e5e5;">faktisk ${ecoEsc(e.actual)}</b>` : null,
+            ].filter(Boolean).join(" · ");
+            return `<div class="eco-raekke">
+                ${tid}
+                ${ecoTierEtiket(e.tier)}
+                <span style="flex:1;min-width:0;">${ecoEsc(e.titel)}</span>
+                ${e.i_oevevindue ? `<span class="eco-oevevindue">● ØVEVINDUE</span>` : ""}
+                <span class="eco-tal">${tal}</span>
+            </div>`;
+        }
+
+        function ecoDagsPanel() {
+            const dato = ecoValgtDato || ecoIsoIdag();
+            const iDag = dato === ecoIsoIdag();
+            const dagens = ecoData.events.filter(e => e.dato_dk === dato);
+            const overskrift = iDag ? "I dag" : new Date(dato + "T12:00:00")
+                .toLocaleDateString("da-DK", { weekday: "long", day: "numeric", month: "long" });
+
+            if (dagens.length) {
+                return `<div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">
+                        <div style="font-size:16px;font-weight:700;color:#e5e5e5;">
+                            ${ecoEsc(overskrift)} <span class="muted" style="font-size:13px;">${dato}</span></div>
+                        <div class="muted" style="font-size:13px;">${dagens.length} event${dagens.length === 1 ? "" : "s"}</div>
+                    </div>
+                    ${dagens.map(ecoRaekke).join("")}
+                </div>`;
+            }
+
+            // Ingen events: SIG det, og vis hvad der saa er naeste.
+            const naeste = ecoData.events
+                .filter(e => e.ts_utc && Date.parse(e.ts_utc) > Date.now())
+                .sort((a, b) => a.ts_utc.localeCompare(b.ts_utc))[0];
+            const naesteHtml = naeste
+                ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #333;">
+                     <div class="muted" style="font-size:12px;margin-bottom:6px;">NÆSTE</div>
+                     ${ecoRaekke(naeste)}
+                     <div style="margin-top:6px;color:#93c5fd;font-size:13px;">
+                       ${ecoEsc(naeste.dato_dk)} — <span id="eco-nedtaelling"
+                          data-ts="${ecoEsc(naeste.ts_utc)}">${ecoNedtaelling(ecoMinutterTil(naeste.ts_utc))}</span></div>
+                   </div>`
+                : `<div class="muted" style="margin-top:10px;">Ingen kommende events i vinduet.</div>`;
+            return `<div class="card">
+                <div style="font-size:16px;font-weight:700;color:#e5e5e5;margin-bottom:8px;">
+                    ${ecoEsc(overskrift)} <span class="muted" style="font-size:13px;">${dato}</span></div>
+                <div class="muted">Ingen tier 1- eller tier 2-events denne dag.</div>
+                ${naesteHtml}
+            </div>`;
+        }
+
+        function ecoMaanedsGitter() {
+            const foerste = ecoMaaned || (() => { const d = new Date(); d.setDate(1); return d; })();
+            const aar = foerste.getFullYear(), md = foerste.getMonth();
+            const iDag = ecoIsoIdag();
+
+            // Vinduets graenser — man skal ikke kunne bladre ud i tomheden.
+            const graenseFra = new Date(); graenseFra.setDate(graenseFra.getDate() - 45);
+            const graenseTil = new Date(); graenseTil.setDate(graenseTil.getDate() + 45);
+
+            const pr = {};
+            for (const e of ecoData.events) {
+                if (!e.dato_dk) continue;
+                (pr[e.dato_dk] = pr[e.dato_dk] || []).push(e);
+            }
+
+            // Mandag foerst (da-DK).
+            const start = new Date(aar, md, 1);
+            const skub = (start.getDay() + 6) % 7;
+            const celler = [];
+            for (let i = 0; i < skub; i++) celler.push(null);
+            const dageIMd = new Date(aar, md + 1, 0).getDate();
+            for (let d = 1; d <= dageIMd; d++) celler.push(new Date(aar, md, d));
+
+            const html = celler.map(d => {
+                if (!d) return `<div class="eco-dag eco-udenfor"></div>`;
+                const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                const udenfor = d < graenseFra || d > graenseTil;
+                const ev = pr[iso] || [];
+                const prikker = ev.slice(0, 6).map(e =>
+                    `<span class="${e.tier === 1 ? "eco-prik1" : "eco-prik2"}"
+                           title="${ecoEsc(e.titel)}"></span>`).join("");
+                const klasser = ["eco-dag"];
+                if (udenfor) klasser.push("eco-udenfor");
+                if (iso === (ecoValgtDato || iDag)) klasser.push("eco-valgt");
+                if (iso === iDag) klasser.push("eco-i-dag");
+                return `<div class="${klasser.join(" ")}"
+                             ${udenfor ? "" : `data-eco-dato="${iso}"`}>
+                    <div>${d.getDate()}</div>
+                    <div class="eco-prikker">${prikker}</div>
+                </div>`;
+            }).join("");
+
+            const navn = foerste.toLocaleDateString("da-DK", { month: "long", year: "numeric" });
+            return `<div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <button id="eco-forrige" class="dk-cal-btn" title="Forrige måned">◀</button>
+                    <div style="font-weight:700;color:#e5e5e5;text-transform:capitalize;">${ecoEsc(navn)}</div>
+                    <button id="eco-naeste" class="dk-cal-btn" title="Næste måned">▶</button>
+                </div>
+                <div class="eco-gitter" style="font-size:11px;color:#8a8a8a;margin-bottom:0;">
+                    ${["ma", "ti", "on", "to", "fr", "lø", "sø"].map(x =>
+                        `<div style="text-align:center;">${x}</div>`).join("")}
+                </div>
+                <div class="eco-gitter">${html}</div>
+                <div style="margin-top:12px;display:flex;gap:18px;align-items:center;font-size:12px;color:#a0a0a0;">
+                    <span style="display:flex;gap:6px;align-items:center;">
+                        <span class="eco-prik1"></span> fyldt = TIER 1</span>
+                    <span style="display:flex;gap:6px;align-items:center;">
+                        <span class="eco-prik2"></span> ring = TIER 2</span>
+                </div>
+            </div>`;
+        }
+
+        function ecoTegn() {
+            const content = document.getElementById("content");
+            // ⚠ FRISKHEDEN STAAR I UI'ET, ikke kun i loggen. Er hoesten gammel,
+            // skal man se det FOER man laeser dagens events — ellers laeser man
+            // en rolig dag der i virkeligheden er en tavs jobfejl.
+            const advarsel = ecoData.stale
+                ? `<div class="eco-advarsel">
+                     ⚠ <b>Kalenderen er ikke frisk.</b>
+                     ${ecoData.sidsteHoest
+                        ? `Sidste vellykkede høst: ${ecoEsc(ecoData.sidsteHoest.replace("T", " ").replace("Z", " UTC"))}
+                           (${ecoData.alderTimer} timer siden).`
+                        : "Der er aldrig hentet noget."}
+                     Dagens events kan mangle — dette er <b>ikke</b> det samme som en rolig dag.
+                   </div>`
+                : "";
+            const frisk = ecoData.sidsteHoest
+                ? `<div class="eco-frisk">Sidste høst: ${ecoEsc(ecoData.sidsteHoest.replace("T", " ").replace("Z", " UTC"))}</div>`
+                : "";
+            content.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                    <div class="section-title">Eco Calendar</div>${frisk}
+                </div>
+                ${advarsel}
+                ${ecoDagsPanel()}
+                ${ecoMaanedsGitter()}`;
+
+            content.querySelectorAll("[data-eco-dato]").forEach(el =>
+                el.addEventListener("click", () => {
+                    ecoValgtDato = el.dataset.ecoDato;
+                    ecoTegn();
+                }));
+            const forrige = document.getElementById("eco-forrige");
+            const naeste = document.getElementById("eco-naeste");
+            if (forrige) forrige.addEventListener("click", () => {
+                const d = ecoMaaned || new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+                ecoMaaned = d; ecoTegn();
+            });
+            if (naeste) naeste.addEventListener("click", () => {
+                const d = ecoMaaned || new Date(); d.setDate(1); d.setMonth(d.getMonth() + 1);
+                ecoMaaned = d; ecoTegn();
+            });
+        }
+
+        async function showEcoKalender() {
+            const content = document.getElementById("content");
+            content.innerHTML = `<div class="section-title">Eco Calendar</div>
+                <div class="card"><div class="empty">Henter kalender...</div></div>`;
+            ecoValgtDato = null;
+            ecoMaaned = null;
+            try {
+                const res = await authFetch("/eco/events?tier=2");
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const d = await res.json();
+                ecoData = {
+                    events: d.events || [],
+                    stale: !!d.stale,
+                    sidsteHoest: d.sidste_hoest,
+                    alderTimer: d.alder_timer,
+                };
+            } catch (e) {
+                content.innerHTML = `<div class="section-title">Eco Calendar</div>
+                    <div class="card"><div class="error">
+                        Kunne ikke hente kalenderen: ${ecoEsc(e.message)}<br>
+                        <span style="font-size:13px;">Det er en FEJL, ikke en rolig dag.
+                        Kør <code>python eco_kalender.py --hoest</code> i backend-mappen,
+                        eller se <code>/eco/status</code>.</span>
+                    </div></div>`;
+                return;
+            }
+            ecoTegn();
+            // Nedtaellingen opdateres hvert minut. Ryddes af switchPage.
+            ecoTimer = setInterval(() => {
+                const el = document.getElementById("eco-nedtaelling");
+                if (!el) return;
+                el.textContent = ecoNedtaelling(ecoMinutterTil(el.dataset.ts));
+            }, 30000);
         }
 
         function showPlaceholder(page) {

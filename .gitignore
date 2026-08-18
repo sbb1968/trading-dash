@@ -234,3 +234,10 @@ analyse/signal_eval_ud/
 # uge mod en kilde der rate-limiter. Den committes derfor MED vilje — modsat
 # vol_cache og data_harvest, som altid kan hentes forfra.
 !backend/kalender_cache/
+
+# eco_export: eksporten til Trading Practice og droploggen er BEGGE afledte af
+# eco_events-tabellen og hoestes/genskabes lokalt paa hver maskine
+# (`python eco_kalender.py --hoest`, `--omklassificer`). Modsat
+# backend/kalender_cache/events.json, der ER committet fordi ForexFactorys feed
+# kun daekker indevaerende uge og de raekker ikke kan hentes igen ad dén vej.
+backend/eco_export/

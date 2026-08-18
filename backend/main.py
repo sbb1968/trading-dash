@@ -672,6 +672,36 @@ async def startup():
             await notifier.alert_backend_error(f"relstyrke_shadow_eval fejl: {e}")
             return False
 
+    async def run_eco_kalender() -> bool:
+        """Daglig hoest af oekonomiske events (eco_kalender.py --hoest).
+
+        Subprocess som regime-fingeraftrykket: hoesten laver netvaerkskald og
+        skriver til databasen, og den skal ikke kunne haenge backendens event-loop
+        eller vaelte den hvis ForexFactory svarer maerkeligt. Returnerer True ved
+        rc==0. Best-effort: al fejl fanges og rapporteres, propagerer aldrig.
+        """
+        import sys
+        from pathlib import Path
+        backend_dir = Path(__file__).parent
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "eco_kalender.py", "--hoest",
+                cwd=str(backend_dir),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            if proc.returncode != 0:
+                await notifier.alert_backend_error(
+                    f"eco_kalender rc={proc.returncode}: {out.decode(errors='replace')[-500:]}")
+                return False
+            return True
+        except asyncio.TimeoutError:
+            await notifier.alert_backend_error("eco_kalender timeout (>180s)")
+            return False
+        except Exception as e:
+            await notifier.alert_backend_error(f"eco_kalender fejl: {e}")
+            return False
+
     async def run_reconcile_efter_luk() -> bool:
         """Scheduler-krogen. Selve logikken bor i reconcile_job.py — den skal
         kunne PRØVES, og en closure inde i en 200 linjers startup-rutine kan
@@ -691,6 +721,7 @@ async def startup():
         run_regime_fn     = run_regime_fingerprint,
         run_reconcile_fn  = run_reconcile_efter_luk,
         run_relstyrke_eval_fn = run_relstyrke_shadow_eval,
+        run_eco_kalender_fn = run_eco_kalender,
         instance_role     = identity.instance_role,
     )
     await algo_scheduler.start()
@@ -2944,6 +2975,67 @@ async def docs_file(name: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Dokumentet findes ikke")
     return FileResponse(str(target), media_type="application/pdf")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Oekonomisk kalender — planlagte events der kan flytte MES
+# ═══════════════════════════════════════════════════════════════════
+# Tynde wrappere. AL logik bor i eco_kalender.py; main.py er 5.900 linjer og 76
+# ruter i forvejen, og en modul-graense er den eneste der holder.
+#
+# ⚠ INGEN `?archive=`. Studios authFetch tilfoejer kun arkiv-parameteren paa
+# `/journal/`-stier, og saadan skal det blive: oekonomiske events er ikke
+# maskinspecifikke — CPI falder paa samme tidspunkt uanset hvilken peer man
+# kigger fra. Tilfoej ikke `/eco/` til den regel.
+#
+# ⚠ ALLE SVAR BAERER `stale`. En fejlet hoest og en stille dag maa aldrig se ens
+# ud. Uden flaget ville en uges tavs jobfejl vise sig som "ingen events" — og
+# det er den mest tillidsvaekkende maade at tage fejl paa.
+import eco_kalender
+from contextlib import closing
+
+
+def _eco_svar(nyttelast: dict) -> dict:
+    """Laeg friskheds-oplysningen paa ethvert svar."""
+    with closing(eco_kalender.forbind_laes()) as con:
+        st = eco_kalender.status(con)
+    return {**nyttelast, "stale": st["stale"], "sidste_hoest": st["sidste_hoest"],
+            "alder_timer": st["alder_timer"]}
+
+
+@app.get("/eco/events", dependencies=[Depends(require_studio_auth)])
+async def eco_events(fra: str | None = None, til: str | None = None, tier: int = 2):
+    """Events i intervallet. Default = det rullende vindue (+/- 45 dage)."""
+    with closing(eco_kalender.forbind_laes()) as con:
+        e = eco_kalender.hent_events(con, fra, til, max_tier=tier)
+    return _eco_svar({"events": e, "count": len(e), "fra": fra, "til": til, "tier": tier})
+
+
+@app.get("/eco/dag/{dato}", dependencies=[Depends(require_studio_auth)])
+async def eco_dag(dato: str):
+    """Én dags events (dansk dato), sorteret paa klokkeslaet."""
+    try:
+        datetime.strptime(dato, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, f"ugyldig dato: {dato!r} (ventede YYYY-MM-DD)")
+    with closing(eco_kalender.forbind_laes()) as con:
+        e = eco_kalender.hent_dag(con, dato)
+    return _eco_svar({"dato": dato, "events": e, "count": len(e)})
+
+
+@app.get("/eco/naeste", dependencies=[Depends(require_studio_auth)])
+async def eco_naeste(tier: int = 1):
+    """Naeste kommende event + minutter til."""
+    with closing(eco_kalender.forbind_laes()) as con:
+        n = eco_kalender.naeste(con, max_tier=tier)
+    return _eco_svar({"event": n, "tier": tier})
+
+
+@app.get("/eco/status", dependencies=[Depends(require_studio_auth)])
+async def eco_status():
+    """Sidste vellykkede hoest pr. kilde, daekning, droppede titler."""
+    with closing(eco_kalender.forbind_laes()) as con:
+        return eco_kalender.status(con)
 
 
 # ═══════════════════════════════════════════════════════════════════

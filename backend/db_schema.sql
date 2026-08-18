@@ -134,3 +134,55 @@ CREATE TABLE IF NOT EXISTS dagsnoter (
 -- eksisterende database er CREATE TABLE IF NOT EXISTS en no-op, saa kolonnen
 -- findes ikke endnu, og et CREATE INDEX ... ON trades(paper) her faar backenden
 -- til at naegte at starte med "no such column: paper".
+
+
+-- ── Oekonomisk kalender (eco_kalender.py) ────────────────────────────────────
+-- Planlagte events der kan flytte MES. Noeglet paa DATA-TID (ts_utc), aldrig paa
+-- koerselstid: hentetid staar kun i foerst_set/sidst_bekraeftet, saa to hoester
+-- af den samme uge giver identisk base.
+--
+-- `har_klokkeslet` er ikke pynt. Et event fra en kun-dato-kilde maa ikke vises
+-- med opdigtet tid og maa ikke taelle som "i oevevinduet". Et gaettet klokkeslaet
+-- paa CPI er vaerre end intet.
+--
+-- `forecast_ved_release` fryses ved foerste `actual` og overskrives aldrig.
+-- Forecast revideres frem til udgivelsen; en historik man ikke gemte, kan ikke
+-- rekonstrueres bagefter.
+--
+-- ⚠ BLOKKEN MELLEM MARKOERERNE ER IDENTISK MED eco_kalender.SKEMA.
+-- test_eco_kalender.py sammenligner de to, saa de ikke kan drive fra hinanden i
+-- stilhed. Aendres den ene, skal den anden med.
+-- >>> ECO_SKEMA
+CREATE TABLE IF NOT EXISTS eco_events (
+    ts_utc                TEXT NOT NULL,
+    titel                 TEXT NOT NULL,
+    land                  TEXT NOT NULL,
+    ts_dk                 TEXT NOT NULL,
+    dato_dk               TEXT NOT NULL,
+    klokke_dk             TEXT,
+    tier                  INTEGER NOT NULL,
+    begrundelse           TEXT NOT NULL,
+    kilde                 TEXT NOT NULL,
+    kilde_vigtighed       TEXT,
+    forecast              TEXT,
+    previous              TEXT,
+    actual                TEXT,
+    forecast_ved_release  TEXT,
+    har_klokkeslet        INTEGER NOT NULL,
+    i_oevevindue          INTEGER NOT NULL,
+    foerst_set            TEXT NOT NULL,
+    sidst_bekraeftet      TEXT NOT NULL,
+    PRIMARY KEY (ts_utc, titel, land)
+);
+CREATE INDEX IF NOT EXISTS idx_eco_dato ON eco_events(dato_dk);
+CREATE INDEX IF NOT EXISTS idx_eco_tier ON eco_events(tier);
+
+CREATE TABLE IF NOT EXISTS eco_hoest (
+    ts_utc   TEXT    NOT NULL,
+    kilde    TEXT    NOT NULL,
+    ok       INTEGER NOT NULL,
+    antal    INTEGER NOT NULL,
+    besked   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eco_hoest_kilde ON eco_hoest(kilde, ts_utc);
+-- <<< ECO_SKEMA
