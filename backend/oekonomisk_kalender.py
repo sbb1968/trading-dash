@@ -195,21 +195,31 @@ def flet(nye: list[dict]) -> tuple[int, int]:
     return ny, opd
 
 
-def vis(dato: str, kun_usd: bool = True, mindst: str = "Medium") -> None:
-    RANG = {"High": 3, "Medium": 2, "Low": 1, None: 0}
+def vis(dato: str, kun_usd: bool = True, max_tier: int = 2) -> None:
+    """Dagens events. `max_tier=2` viser tier 1 og 2; `0` viser alt.
+
+    ⚠ TIER STYRER VISNINGEN, IKKE ForexFactorys impact-kolonne. De to er ikke
+    det samme: maalt paa ugen 9.-15. august er de uenige om 12 af 29
+    USD-events. FF kalder Retail Sales "Medium" (vi: tier 1, fordi forbruget er
+    to tredjedele af oekonomien), og obligationsauktioner "Low" (vi: tier 2,
+    fordi en svag auktion loefter renten og traekker MES ned inden for faa
+    minutter). Var de to altid enige, tilfoejede vores tabel ingenting.
+    """
+    from kalender_tier import tier
     e = [x for x in laes_cache().values() if x["dato_et"] == dato]
     if kun_usd:
         e = [x for x in e if x["valuta"] == VIGTIG_VALUTA]
-    if mindst:
-        e = [x for x in e if RANG.get(x["impact"], 0) >= RANG[mindst]]
+    if max_tier:
+        e = [x for x in e if 0 < tier(x["navn"]) <= max_tier]
     e.sort(key=lambda x: x["dateline"])
     if not e:
         print(f"  (ingen events {dato} med de filtre)")
         return
     ugedag = dt.date.fromisoformat(dato).strftime("%A")
     print(f"\n{ugedag} {dato}   ({len(e)} events)")
-    print(f"  {'ET':6}{'DK':6}{'impact':8}{'begivenhed':40}{'prog.':>9}{'forrige':>9}{'faktisk':>9}")
-    print("  " + "─" * 87)
+    print(f"  {'ET':6}{'DK':6}{'T':3}{'impact':8}{'begivenhed':38}"
+          f"{'prog.':>9}{'forrige':>9}{'faktisk':>9}")
+    print("  " + "─" * 89)
     for x in e:
         # ⚠ DK udledes af ET-tidsstemplet, ikke af et fast +6. EU og USA
         # skifter sommertid på FORSKELLIGE datoer, så forskellen er 6 timer i
@@ -217,7 +227,9 @@ def vis(dato: str, kun_usd: bool = True, mindst: str = "Medium") -> None:
         import pytz
         t = _et(x["dateline"])
         dk = t.astimezone(pytz.timezone("Europe/Copenhagen")).strftime("%H:%M")
-        print(f"  {x['tid_et']:6}{dk:6}{(x['impact'] or '—'):8}{x['navn'][:38]:40}"
+        from kalender_tier import tier as _t
+        print(f"  {x['tid_et']:6}{dk:6}{_t(x['navn']):<3}{(x['impact'] or '—'):8}"
+              f"{x['navn'][:36]:38}"
               f"{(x['forecast'] or '—'):>9}{(x['previous'] or '—'):>9}"
               f"{(x['actual'] or '—'):>9}")
 
@@ -240,6 +252,6 @@ if __name__ == "__main__":
         print(f"uge {a.uge or a.fra_fil}: {n} nye, {o} opdateret · "
               f"cache: {len(laes_cache())} events")
     if a.vis:
-        vis(a.vis, kun_usd=not a.alle, mindst=None if a.alle else "Medium")
+        vis(a.vis, kun_usd=not a.alle, max_tier=0 if a.alle else 2)
     if not any((a.hent, a.uge, a.fra_fil, a.vis)):
         ap.print_help()
