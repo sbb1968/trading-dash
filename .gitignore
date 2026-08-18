@@ -228,3 +228,9 @@ backend/.algoserver_vagt.json
 # med `node analyse/signal_eval.cjs`. Konklusionen staar i analyse/SIGNAL_EVAL.md,
 # som ER committet — det er DEN der skal kunne laeses uden at koere noget.
 analyse/signal_eval_ud/
+
+# ⚠ Kalender-cachen ER data vi ikke kan hente igen: ForexFactorys JSON-feed
+# giver kun INDEVAERENDE uge, saa en tabt historik kraever en HTML-hoest pr.
+# uge mod en kilde der rate-limiter. Den committes derfor MED vilje — modsat
+# vol_cache og data_harvest, som altid kan hentes forfra.
+!backend/kalender_cache/
