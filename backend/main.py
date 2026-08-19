@@ -1011,6 +1011,42 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
                     continue
 
+                # ── SALGSVAGT ────────────────────────────────────────────
+                # ⚠ HER, FOER ORDREN. Den gamle kontrol (`exit_uden_aaben_entry`)
+                # fyrede EFTER fyldningen, og en hændelse i loggen kan ikke tage
+                # pengene tilbage. Paa DUQ441063 kostede det 460 dollar i
+                # fejlbogfoering over tre dage — se noten ved
+                # manuel_forensik.kontroller_salg.
+                #
+                # ⚠ Vagten spoerger BROKEREN, ikke journalen. At journalen ikke
+                # kender positionen er ikke farligt — at brokeren ikke HAR den er.
+                if action == "SELL":
+                    import manuel_forensik as _mf
+                    _ok, _besked, _detaljer = await _mf.kontroller_salg(
+                        ibkr, ticker, shares)
+                    # Kun det der IKKE er hverdag logges: en afvisning, eller et
+                    # salg vi ikke kunne kontrollere. Et godkendt, kontrolleret
+                    # salg fylder ikke loggen — ellers drukner de to andre.
+                    if not _ok:
+                        await journal.log_event(
+                            ibkr_account = getattr(ibkr, "account", "") or None,
+                            source="manual_watchlist", event_type=_mf.SALGSVAGT_EVENT,
+                            symbol=ticker,
+                            payload={"shares": shares, "besked": _besked, **_detaljer})
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": f"Salg afvist: {_besked}",
+                        }))
+                        continue
+                    if not _detaljer.get("kontrolleret"):
+                        await journal.log_event(
+                            ibkr_account = getattr(ibkr, "account", "") or None,
+                            source="manual_watchlist",
+                            event_type=_mf.SALGSVAGT_UKONTROLLERET,
+                            symbol=ticker,
+                            payload={"shares": shares, **_detaljer})
+
                 try:
                     result = await ibkr.place_paper_order(
                         ticker=ticker,

@@ -215,6 +215,84 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SALGSVAGT — kontrollen skal ligge FOER ordren, ikke efter fyldningen
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⚠ ANLEDNINGEN, MAALT PAA DUQ441063 17.-19. AUGUST 2026
+#
+#   17-08 13:34:37  SELL 1 MES @ 7797,25  ->  "exit_uden_aaben_entry"
+#
+# Salget fyldte. Der var ingen aaben raekke. Systemet NAVNGAV problemet korrekt i
+# loggen — og gik videre. Fra det sekund var journalen én kontrakt ude af fase med
+# brokeren, og alt derefter blev maerket forkert:
+#
+#   17-08 16:22  koeb bogfoert som NY long   ->  lukkede i virkeligheden shorten
+#   18-08 15:01  salg bogfoert som exit -406,25  ->  aabnede i virkeligheden en short
+#   19-08 06:39  Soeren koeber manuelt for at flade ud  ->  slet ikke i journalen
+#
+# Journalen sagde -493,75 hvor brokeren sagde -33,75. PRAECIS 460 DOLLAR forkert,
+# og ingen af de fire hændelser var en kodefejl i sig selv — de var alle
+# foelgevirkninger af den ene kontrol der loggede i stedet for at stoppe.
+#
+# Det er forekomst nr. 12 af projektets faste fejlklasse: EN KONTROL HVIS FEJL
+# BEHANDLES SOM EN BESTAAELSE. `exit_uden_aaben_entry` fyrer EFTER fyldningen —
+# pengene er allerede flyttet, og en hændelse i loggen kan ikke tage dem tilbage.
+#
+# ⚠ HVORFOR VAGTEN SPOERGER BROKEREN OG IKKE JOURNALEN
+# De to spoergsmaal er forskellige, og kun det ene er farligt:
+#   · journalen kender den ikke, brokeren HAR den   -> et lovligt salg af en
+#     ujournaliseret position. SKAL tillades; det er netop oprydning.
+#   · brokeren har den IKKE                         -> salget AABNER en short.
+# Den gamle kontrol stillede det foerste spoergsmaal. Kun det andet betyder noget.
+#
+# ⚠ HVORFOR AFVIS OG IKKE BESKAER
+# Watchlist-vinduet er long-only ved konstruktion: `registrer_entry` kaldes kun paa
+# BUY og skriver altid side="long". Der findes ingen vej til at bogfoere en short.
+# En beskaeret ordre ville stiltiende gøre noget andet end det brugeren bad om; en
+# afvisning siger det. Vil man handle short manuelt, er det en ny funktion — ikke
+# en omgaaelse af den her.
+
+SALGSVAGT_EVENT = "salg_afvist_ville_aabne_short"
+SALGSVAGT_UKONTROLLERET = "salg_uden_positionskontrol"
+
+
+async def kontroller_salg(ibkr, symbol: str, shares: int) -> tuple[bool, str, dict]:
+    """Maa dette salg sendes? -> (ok, besked, detaljer).
+
+    ⚠ ET UPAALIDELIGT OPSLAG AFVISER IKKE. `get_positions_reliable()` siger selv i
+    sin docstring at reliable=False ikke maa tolkes som "fladt", og den regel gaelder
+    ogsaa den anden vej: kan vi ikke laese positionen, ved vi ikke at salget er
+    forkert.
+
+    Afvejningen er ikke symmetrisk, og det er derfor den falder saadan ud:
+      · at forhindre nogen i at lukke en position de FAKTISK har = ubegraenset risiko
+      · at komme til at aabne en 1-lot short ved et uheld  = begraenset og opdageligt
+    Derfor: tillad, men MAERK det. Et hul man kan se i loggen er ikke det samme som
+    det hul vi lukker her.
+    """
+    if ibkr is None or not getattr(ibkr, "connected", False):
+        return True, "", {"kontrolleret": False, "grund": "ikke forbundet"}
+    try:
+        poss, paalideligt = await ibkr.get_positions_reliable()
+    except Exception as e:
+        return True, "", {"kontrolleret": False, "grund": f"opslag fejlede: {e}"}
+    if not paalideligt:
+        return True, "", {"kontrolleret": False, "grund": "positionsopslag upaalideligt"}
+
+    netto = sum(float(p.get("position") or 0)
+                for p in poss if p.get("ticker") == symbol)
+    detaljer = {"kontrolleret": True, "netto_hos_broker": netto, "salg": shares}
+
+    if netto >= shares:
+        return True, "", detaljer
+    if netto <= 0:
+        return False, (f"Brokeren har ingen {symbol}-position (netto {netto:g}). "
+                       f"Et salg paa {shares} ville AABNE en short — og "
+                       f"watchlist-vinduet kan ikke bogfoere en short."), detaljer
+    return False, (f"Brokeren har kun {netto:g} {symbol}. Et salg paa {shares} ville "
+                   f"efterlade en short paa {shares - netto:g}."), detaljer
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # EXIT
 # ═══════════════════════════════════════════════════════════════════════════════
 async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
@@ -227,14 +305,38 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
     """
     aaben = await find_aaben(journal, symbol)
     if aaben is None:
-        # Ikke en fejl: et salg uden en aaben manuel entry er et salg af noget vi
-        # ikke har logget. Det skal registreres, ikke skjules.
+        # ⚠ DET HER STOD FOER SOM "ikke en fejl". Det var forkert, og det kostede
+        # 460 dollar i fejlbogfoering paa DUQ441063 — se noten ved kontroller_salg.
+        #
+        # Naar vi naar hertil, ER handlen sket. Salgsvagten skulle have stoppet den
+        # foer ordren blev sendt; naar den alligevel slap igennem, er der to
+        # muligheder, og BEGGE kraever at et menneske kigger:
+        #   · positionen blev aabnet et andet sted (algo eller direkte i TWS)
+        #     -> journalen mangler en raekke, og parringen bagefter bliver forkert
+        #   · der var slet ingen position -> vi har lige aabnet en short
+        # Derfor en ALARM og ikke kun en linje i loggen. En hændelse ingen laeser,
+        # er ikke en kontrol.
+        payload = {"shares": shares, "fill": fill_pris, "ibkr_order_id": ordre_id,
+                   "note": "salg uden en aaben manuel entry — positionen kan vaere "
+                           "aabnet af en algo eller direkte i TWS, ELLER salget har "
+                           "aabnet en short"}
         await journal.log_event(
             source=KILDE, event_type="exit_uden_aaben_entry", symbol=symbol,
-            payload={"shares": shares, "fill": fill_pris, "ibkr_order_id": ordre_id,
-                     "note": "salg uden en aaben manuel entry — positionen kan vaere "
-                             "aabnet af en algo eller direkte i TWS"},
+            payload=payload,
         )
+        try:
+            import notifier
+            await notifier.alert_backend_error(
+                f"{symbol}: salg paa {shares} fyldt @ {fill_pris} UDEN aaben manuel "
+                f"entry (ordre {ordre_id}). Journalen er nu muligvis ude af fase med "
+                f"brokeren — tjek positionen.")
+        except Exception as e:
+            # Alarmen maa aldrig vaelte ordre-stien. Men at den fejlede skal ogsaa
+            # kunne ses, ellers er vi tilbage ved tavshed.
+            logger.error(f"[ManuelForensik] alarm om {symbol} kunne ikke sendes: {e}")
+            await journal.log_event(
+                source=KILDE, event_type="alarm_fejlede", symbol=symbol,
+                payload={"anledning": "exit_uden_aaben_entry", "fejl": str(e)})
         return None
 
     trade_id = aaben["trade_id"]
