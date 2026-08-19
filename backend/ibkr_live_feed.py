@@ -146,7 +146,16 @@ class IBKRLiveFeed:
             logger.exception(f"[LiveFeed] Loop-fejl: {e}")
 
     async def _vent_paa_foerste_pris(self) -> int:
-        """Antal symboler med en brugbar pris. Gaar videre saa snart der er én."""
+        """Antal symboler med en brugbar pris. Gaar videre saa snart der er én.
+
+        ⚠ VENTETIDEN ANNONCERES. Uden linjen nedenfor staar vinduet helt stille i
+        op til 20 sekunder efter at abonnementerne er sendt — og det ligner en
+        opstart der er faerdig. Tre genstarter i traek blev kopieret ud af
+        konsollen FOER beslutningen faldt, netop derfor. En kontrol der arbejder i
+        tavshed, ser ud som en kontrol der ikke findes.
+        """
+        logger.info(f"[LiveFeed] venter op til {OPSTART_TAALMODIGHED_SEC:.0f} s paa "
+                    f"foerste pris fra {len(self._tickers)} symboler ...")
         ventet = 0.0
         while ventet < OPSTART_TAALMODIGHED_SEC:
             await asyncio.sleep(OPSTART_POLL_SEC)
