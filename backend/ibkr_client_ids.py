@@ -83,6 +83,10 @@ SCRIPTS: dict[str, int] = {
     "vol_kvartalsjob.py":            18,
     "vol_harvest.py":                79,
     "regime_univers_backfill.py":    76,
+    # Read-only broker-opslag paa konto 2 (DUQ441063). Koerer mod Ibens TWS,
+    # hvor backenden bruger 200 og ordre-forbindelsen 201 — derfor et lavt,
+    # ledigt id her frem for noget i naerheden af dem.
+    "duq_forensik.py":               21,
 }
 
 
