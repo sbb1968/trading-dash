@@ -1093,6 +1093,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         action=action,
                         quantity=shares,
                         order_type="MKT",
+                        # ⚠ FOER STOD DER INTET HER, og default er "vent 1 sekund
+                        # og se hvad status siger". Tre ordrer blev afskrevet som
+                        # ordre_ikke_fyldt paa det ene kig (29, 67, 76) — alle tre
+                        # fyldte, og ordre-trackeren fik dem bekraeftet af IBKR.
+                        # Journalen fik aldrig en raekke.
+                        #
+                        # ⚠ Og det HER er ikke loesningen alene: femten sekunder
+                        # er stadig en klippekant, og en ordre kan fylde paa det
+                        # sekstende. Den strukturelle del er afstemningen nedenfor,
+                        # som ingen deadline har. Se manuel_forensik.
+                        await_fill_sec=MANUEL_FYLD_VENT_SEC,
                         # Markerer MANUEL oprindelse, saa handlen er tilskrivbar i
                         # regnskabet. Uden den ville den vaere ejerloes paa praecis
                         # samme maade som SHAZ.
@@ -1227,17 +1238,39 @@ async def websocket_endpoint(websocket: WebSocket):
                             symbol=ticker,
                             payload={"fase": action, "fejl": str(e)})
                 else:
-                    # Ikke fyldt (fx status "Inactive") — ingen handel at logge.
-                    # Det er ikke en fejl, men det skal staa der, saa en manglende
-                    # trades-raekke kan forklares frem for at undre.
+                    # ⚠ HED FOER "ordre_ikke_fyldt" — OG DET VAR EN PAASTAND.
+                    # Tre gange skrev den en ordre af der bagefter fyldte (29, 67,
+                    # 76). Vi kan konstatere at den IKKE VAR FYLDT DA VI SAA
+                    # EFTER; vi kan ikke konstatere at den aldrig fylder.
+                    # Navnet siger nu hvad vi ved, og statusfeltet siger hvornaar.
                     await journal.log_event(
                         # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
                         ibkr_account = getattr(ibkr, 'account', '') or None,
-                        source="manual", event_type="ordre_ikke_fyldt",
+                        source="manual", event_type="ordre_uafklaret",
                         symbol=ticker,
                         payload={"action": action, "shares": shares,
                                  "status": result.get("status"),
-                                 "filled": result.get("filled")})
+                                 "filled": result.get("filled"),
+                                 "order_id": order_id,
+                                 "ventede_sek": MANUEL_FYLD_VENT_SEC,
+                                 "note": "ikke fyldt inden for ventetiden — kan "
+                                         "stadig fylde. Afstemmes mod "
+                                         "ordre-trackeren, som foelger op."})
+
+                # ── AFSTEMNING UDEN DEADLINE ────────────────────────────────
+                # ⚠ Koeres uanset udfaldet, ogsaa naar ordren fyldte pent. Den
+                # spoerger ordre-trackeren — som BLIVER ved med at foelge op —
+                # om der findes bekraeftede fyldninger journalen ikke har et spor
+                # af, og raaber op hvis der goer. Det er den del der ikke har en
+                # klippekant: en ordre der fylder i morgen, bliver fanget i
+                # morgen.
+                try:
+                    import manuel_forensik as _mf2
+                    _ordrer = await get_tracker().get_all_orders(
+                        ibkr, period_hours=72, sources=MANUAL_ORDER_SOURCES)
+                    await _mf2.alarmer_om_ubogfoerte(journal, _ordrer)
+                except Exception as e:
+                    logger.warning(f"[WS] afstemning mod ordre-trackeren fejlede: {e}")
 
     except WebSocketDisconnect:
         pass  # Normal frakobling
@@ -1353,6 +1386,11 @@ class CancelOrderRequest(BaseModel):
 # registreres stadig i trackeren (orders_log.json) til dagens_log/journal, men hoerer
 # ikke til her — de ses i dagens_log/Studio.
 MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual"}
+
+# Hvor laenge en manuel ordre faar lov at fylde foer vi holder op med at kigge.
+# En MES-markedsordre fylder paa under et sekund; femten er rigelig margin uden
+# at et klik haenger. ⚠ Tallet er IKKE en garanti — se noten ved kaldet.
+MANUEL_FYLD_VENT_SEC = 15.0
 
 
 async def handels_forbindelse():
@@ -3077,6 +3115,21 @@ def _eco_svar(nyttelast: dict) -> dict:
         st = eco_kalender.status(con)
     return {**nyttelast, "stale": st["stale"], "sidste_hoest": st["sidste_hoest"],
             "alder_timer": st["alder_timer"]}
+
+
+@app.get("/journal/manuel-afstemning", dependencies=[Depends(require_studio_auth)])
+async def journal_manuel_afstemning(timer: int = 336):
+    """Bekraeftede manuelle fyldninger uden spor i journalen.
+
+    Read-only. Retter intet — se noten i manuel_forensik.afstem_mod_tracker om
+    hvorfor en kontrol der ogsaa reparerer, skjuler hvor slem skaden var.
+    """
+    import manuel_forensik as _mf
+    ibkr = strategy_manager.get_ibkr()
+    ordrer = await get_tracker().get_all_orders(
+        ibkr, period_hours=timer, sources=MANUAL_ORDER_SOURCES)
+    r = await _mf.afstem_mod_tracker(journal, ordrer)
+    return {**r, "timer": timer}
 
 
 @app.get("/eco/events", dependencies=[Depends(require_studio_auth)])

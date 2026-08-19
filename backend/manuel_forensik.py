@@ -44,6 +44,7 @@ forensik-snapshots kan kun parres med handlen heuristisk paa ticker+tid
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -212,6 +213,127 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
             payload={"fase": "entry", "trade_id": trade_id, "fejl": str(e)},
         )
     return trade_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AFSTEMNING MOD ORDRE-TRACKEREN — kontrollen uden deadline
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⚠ ANLEDNINGEN: TRE ORDRER AFSKREVET SOM "IKKE FYLDT", ALLE FYLDT
+#
+#   13-08 16:45  ordre 29  ordre_ikke_fyldt (PreSubmitted)  ->  Filled @ 7827,25
+#   17-08 15:31  ordre 67  ordre_ikke_fyldt (PreSubmitted)  ->  Filled @ 7808,75
+#   18-08 16:30  ordre 76  ordre_ikke_fyldt (PendingSubmit) ->  Filled @ 7730,75
+#
+# Journalen kiggede paa ordrestatus ÉN gang, ~1 sekund efter afsendelsen, og
+# skrev ordren af. Ordre-trackeren fulgte op og fik alle tre bekraeftet af IBKR.
+# De to systemer stod side om side paa samme maskine med hvert sit svar, og
+# INGEN sammenlignede dem.
+#
+# ⚠ AT VENTE LAENGERE ER IKKE LOESNINGEN — DET FLYTTER KLIPPEKANTEN.
+# `place_paper_order(await_fill_sec=...)` gaar fra ét kig til femten sekunders
+# kig, og det havde fanget alle tre. Men en ordre kan fylde paa det sekstende.
+# Det er praecis fejlen fra reconcile-timeouten: budgettet var 30 sekunder, K2
+# brugte 32, og konsekvensen af at loebe toer var at fortsaette som om man bestod.
+#
+# Derfor TO ting, og den anden er den strukturelle:
+#   1. vent paa fyldningen i stedet for at gaette (await_fill_sec i main.py)
+#   2. DENNE afstemning, som ingen deadline har: den spoerger bagefter, uanset
+#      hvor lang tid der gik, om trackeren kender en bekraeftet fyldning som
+#      journalen ikke har et spor af.
+#
+# ⚠ DEN RETTER IKKE NOGET. Den rapporterer. At bogfoere en trade-raekke ud fra en
+# loes fill kraever at man parrer entry med exit — og det er netop dér journalen
+# allerede kom galt afsted. En kontrol der ogsaa reparerer, skjuler hvor slem
+# skaden var.
+#
+# ⚠ MATCHET ER DETERMINISTISK, IKKE FUZZY. `ibkr_order_id` staar i trade-raekkens
+# payload (skrevet af registrer_entry/registrer_exit), saa der sammenlignes paa
+# id — ikke paa "symbol + pris + nogenlunde samme tid". Et fuzzy match ville
+# parre to MES-handler til samme pris paa samme minut, og fejlen ville vaere
+# usynlig indtil den kostede noget.
+
+async def _bogfoerte_ordre_ider(journal) -> set:
+    """Ordre-id'er journalen HAR et spor af (entry eller exit)."""
+    ider: set = set()
+    try:
+        db = journal.db
+        if db is None:
+            return ider
+        async with db.execute(
+            "SELECT payload FROM trades WHERE source = ? AND payload IS NOT NULL",
+            (KILDE,)) as cur:
+            raekker = await cur.fetchall()
+    except Exception as e:
+        logger.error(f"[ManuelForensik] kunne ikke laese trades: {e}")
+        return ider
+    for (raa,) in raekker:
+        try:
+            p = json.loads(raa) if isinstance(raa, str) else (raa or {})
+        except Exception:
+            continue
+        for noegle in ("ibkr_order_id", "ibkr_order_id_exit"):
+            v = p.get(noegle)
+            if v is not None:
+                ider.add(str(v))
+    return ider
+
+
+async def afstem_mod_tracker(journal, tracker_ordrer: list) -> dict:
+    """Bekraeftede fyldninger uden spor i journalen.
+
+    `tracker_ordrer` er OrdersTracker.get_all_orders()-formatet. Kun manuelle
+    kilder er relevante — algoernes handler bogfoeres ad en anden vej.
+    """
+    bogfoerte = await _bogfoerte_ordre_ider(journal)
+    ubogfoerte, set_i_alt = [], 0
+    for o in tracker_ordrer or []:
+        if o.get("source") not in ("manual_watchlist", KILDE):
+            continue
+        if not o.get("bekraeftet") or float(o.get("filled") or 0) <= 0:
+            continue
+        set_i_alt += 1
+        if str(o.get("order_id")) not in bogfoerte:
+            ubogfoerte.append({
+                "order_id": o.get("order_id"),
+                "tid": o.get("placed_at"),
+                "ticker": o.get("ticker"),
+                "action": o.get("action"),
+                "filled": o.get("filled"),
+                "avg_fill": o.get("avg_fill"),
+                "status": o.get("status"),
+            })
+    return {"bekraeftede_fills": set_i_alt,
+            "bogfoerte_ordre_ider": len(bogfoerte),
+            "ubogfoerte": sorted(ubogfoerte, key=lambda x: str(x["tid"]))}
+
+
+async def alarmer_om_ubogfoerte(journal, tracker_ordrer: list) -> dict:
+    """Koer afstemningen og RAAB OP hvis der er huller.
+
+    ⚠ En afstemning ingen laeser, er ikke en kontrol. Derfor samme alarmvej som
+    exit_uden_aaben_entry — og hændelsen i journalen, saa den kan findes bagefter.
+    """
+    r = await afstem_mod_tracker(journal, tracker_ordrer)
+    if not r["ubogfoerte"]:
+        return r
+    await journal.log_event(
+        source=KILDE, event_type="fills_uden_journalspor",
+        symbol=(r["ubogfoerte"][0].get("ticker") or None),
+        payload=r)
+    try:
+        import notifier
+        linjer = ", ".join(f"{u['action']} {u['filled']:g} {u['ticker']} @ "
+                           f"{u['avg_fill']} (ordre {u['order_id']})"
+                           for u in r["ubogfoerte"][:5])
+        await notifier.alert_backend_error(
+            f"{len(r['ubogfoerte'])} bekraeftede fyldning(er) uden spor i "
+            f"journalen: {linjer}")
+    except Exception as e:
+        logger.error(f"[ManuelForensik] alarm om ubogfoerte fills fejlede: {e}")
+        await journal.log_event(
+            source=KILDE, event_type="alarm_fejlede",
+            payload={"anledning": "fills_uden_journalspor", "fejl": str(e)})
+    return r
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
