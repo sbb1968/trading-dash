@@ -45,14 +45,25 @@ echo  Mappe:  %CD%
 echo  Logfil: %LOGFILE%
 echo ==========================================================
 echo.
-REM ⚠ INGEN omdirigering her, og ingen tee. En tee ville kraeve en
-REM PowerShell-pipe midt i opstarten, og den aendrer baade Ctrl+C og
-REM procestraeet paa en server der skal koere hele dagen. Vinduet ER loggen i
-REM denne tilstand; boot-stien ovenfor skriver stadig fil.
-python -u -m uvicorn main:app --host 0.0.0.0 --port 8000
+REM ⚠ FOERSTE UDGAVE SKREV INGEN FIL I DENNE TILSTAND, men printede alligevel
+REM "Logfil: ..." i headeren ovenfor. Filen fandtes ikke, og et
+REM   Get-ChildItem logs\backend_*.log ^| Sort LastWriteTime ^| Select -Last 1
+REM fandt derfor den FORRIGE koersels log — altsaa udskrift fra foer den
+REM genstart man lige havde lavet. En header der peger paa en fil der ikke
+REM skrives, er en paastand uden daekning.
+REM
+REM Nu tee'es der: skaerm OG fil. Se logtee.py om hvorfor det ikke er
+REM PowerShells Tee-Object.
+echo Starting backend at %date% %time% > "%LOGFILE%"
+echo Working dir: %CD% >> "%LOGFILE%"
+echo. >> "%LOGFILE%"
+python -u -m uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | python -u logtee.py "%LOGFILE%"
 echo.
 echo ==========================================================
-echo  BACKENDEN ER STOPPET  (exitkode %errorlevel%)
-echo  Vinduet bliver staaende saa fejlen kan laeses.
+echo  BACKENDEN ER STOPPET
+echo  Aarsagen staar i de sidste linjer ovenfor, og i logfilen:
+echo  %LOGFILE%
 echo ==========================================================
+REM ⚠ INTET EXITNUMMER HER. Efter et roer er %errorlevel% SIDSTE leds kode,
+REM altsaa logtee's — ikke uvicorns. Et forkert tal er vaerre end intet tal.
 pause
