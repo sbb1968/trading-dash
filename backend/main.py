@@ -206,6 +206,11 @@ async def broadcast_strategy(message: dict):
         strategy_clients.remove(client)
 
 
+# Tickere watchlisten har bedt om, når der ikke er et lokalt feed.
+# ⚠ Deklareret FOER _feed_gav_op og _uden_feed, som begge skriver i den.
+_proxy_symboler: set[str] = set()
+
+
 # ── IBKR live feed ────────────────────────────────────────────
 async def start_ibkr_feed():
     global ibkr_conn, live_feed, live_feed_task
@@ -222,11 +227,48 @@ async def start_ibkr_feed():
 
         print("[LiveFeed] Bruger delt IBKR-forbindelse — starter live feed")
 
-        live_feed      = IBKRLiveFeed(ibkr_conn, broadcast, alert_engine)
+        live_feed      = IBKRLiveFeed(ibkr_conn, broadcast, alert_engine,
+                                      paa_doedt_feed=_feed_gav_op)
         live_feed_task = asyncio.create_task(live_feed.start())
 
     except Exception as e:
         _uden_feed(f"Fejl: {e}")
+
+
+async def _feed_gav_op(hvorfor: str, watchlist_symboler: list[str]) -> bool:
+    """Det lokale feed leverer ikke. Overtager kursproxyen? (True = ja).
+
+    ⚠ VALGET TRAEFFES HER, IKKE I FEEDET. Feedet ved at det ikke faar priser;
+    kun main.py ved om der findes et alternativ. Findes der ikke et, skal feedet
+    BLIVE KOERENDE — et tomt feed er ikke daarligere end intet feed, men et
+    nedlagt feed kan ikke komme sig hvis forbindelsen retter sig.
+    Se `_giv_op` i ibkr_live_feed.py.
+
+    Anledningen (Ibens workstation, 19-08): hendes TWS er forbundet paa en konto
+    UDEN markedsdata-abonnement -- abonnementet ligger paa konto 1, som
+    algoserveren bruger. Hvert af de 20 abonnementer blev afvist med 10197 /
+    162, og feedet meldte alligevel "Streaming startet". Kursproxyen nedenfor var
+    bygget praecis til den maskine og blev aldrig taget i brug, fordi systemet
+    troede den lokale vej lykkedes.
+    """
+    global live_feed
+    kan_overdrage = (accounts.identity.replication_target_url
+                     and accounts.identity.instance_role != "algoserver"
+                     and not accounts.identity.mock_feed)
+    if not kan_overdrage:
+        return False
+
+    # ⚠ live_feed = None ER selve omstillingen. WS-haandteringen af
+    # `watchlist_subscribe` vaelger vej paa netop den variabel: er den None,
+    # havner symbolerne i _proxy_symboler i stedet. Uden den linje ville
+    # watchlisten blive ved med at tale til et doedt feed.
+    live_feed = None
+    if watchlist_symboler:
+        _proxy_symboler.update(watchlist_symboler)
+    print(f"[LiveFeed] {hvorfor} — overdrager til kursproxyen mod algoserveren"
+          + (f" ({', '.join(watchlist_symboler)} med over)" if watchlist_symboler else ""))
+    _uden_feed(hvorfor)
+    return True
 
 
 def _uden_feed(hvorfor: str) -> None:
@@ -265,8 +307,6 @@ def _uden_feed(hvorfor: str) -> None:
               "ubrugeligt — start TWS, eller sæt replication.target_url.")
 
 
-# Tickere watchlisten har bedt om, når der ikke er et lokalt feed.
-_proxy_symboler: set[str] = set()
 PROXY_INTERVAL = 5.0
 
 
