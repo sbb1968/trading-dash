@@ -13,7 +13,7 @@ REM 1) Backend allerede oppe (port bundet)?
 powershell -NoProfile -Command "try{(New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',8000);exit 0}catch{exit 1}"
 if errorlevel 1 (
   echo Backend ikke oppe - starter den paa port 8000...
-  start "Trading Dash Backend" cmd /k call "%~dp0backend\start_backend.bat"
+  start "Trading Dash Backend" cmd /k call "%~dp0backend\start_backend.bat" --synlig
 )
 
 REM 2) Vent paa at backenden SVARER paa HTTP (ikke kun port-bind) - op til 120 sek.
