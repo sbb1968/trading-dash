@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 r"""
-test_salgsvagt.py — et manuelt salg maa ikke kunne aabne en short
+test_salgsvagt.py — en manuel ordre maa ikke kunne VENDE positionen
 ════════════════════════════════════════════════════════════════════════════════
 DEN 17. AUGUST 2026 KL. 13:34:37 STOD DER I LOGGEN:
 
@@ -22,6 +22,13 @@ ene kontrol der loggede i stedet for at stoppe.
 Den gamle spurgte JOURNALEN ("kender jeg en aaben raekke?"). Det er det forkerte
 spoergsmaal: kender journalen den ikke, men brokeren HAR den, er salget lovligt —
 det er netop oprydning. Vagten spoerger derfor BROKEREN.
+
+⚠ REGLEN BLEV RETTET 25-08. Foerste udgave afviste ethvert salg der ville aabne
+en short, fordi vinduet ikke kunne BOGFOERE en short. Det gjorde en MANGEL til et
+FORBUD mod noget helt normalt, og Iben stod midt i en handelsdag og kunne ikke
+handle MES. Manglen er lukket i stedet — vinduet bogfoerer nu begge retninger — og
+tilbage staar den beskyttelse der betoed noget: en ordre maa ikke VENDE
+positionen, for det kan én raekke ikke repraesentere.
 
 ⚠ OG DEN MODSATTE VEJ ER LIGE SAA VIGTIG. En vagt der ogsaa spaerrede LUKNINGER
 ville fange én i en position man ikke kan komme ud af — vaerre end fejlen den
@@ -106,19 +113,19 @@ def test_lovlige_salg_slipper_igennem():
     """⚠ VIGTIGST AF ALT: vagten maa ikke kunne fange nogen i en position."""
     print("\n[1] Lovlige salg — vagten maa ALDRIG spaerre en aegte lukning")
 
-    ok, besked, d = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", 1)]), "MES", 1))
+    ok, besked, d = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 1)]), "MES", "SELL", 1))
     kraev(ok and d["kontrolleret"], "brokeren har 1, salg af 1 -> tilladt")
 
-    ok, _, _ = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", 3)]), "MES", 1))
+    ok, _, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 3)]), "MES", "SELL", 1))
     kraev(ok, "brokeren har 3, salg af 1 (delvis) -> tilladt")
 
-    ok, _, _ = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", 3)]), "MES", 3))
+    ok, _, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 3)]), "MES", "SELL", 3))
     kraev(ok, "brokeren har 3, salg af 3 (hele) -> tilladt")
 
     # ⚠ DEN GAMLE KONTROL HAVDE DEN HER BAGLAENS. Journalen kender ikke
     # positionen, men brokeren HAR den — det er en ujournaliseret position der
     # ryddes op, ikke en fejl. Vagten spoerger brokeren og ser derfor rigtigt.
-    ok, _, d = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", 1)]), "MES", 1))
+    ok, _, d = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 1)]), "MES", "SELL", 1))
     kraev(ok, "position hos broker UDEN journalraekke -> tilladt (det er oprydning)")
 
 
@@ -130,41 +137,64 @@ def test_upaalideligt_opslag_spaerrer_ikke():
         (FakeIBKR([], connected=False), "ikke forbundet"),
         (FakeIBKR([], rejs=True), "opslaget rejser"),
     ):
-        ok, _, d = asyncio.run(mf.kontroller_salg(ibkr, "MES", 1))
+        ok, _, d = asyncio.run(mf.kontroller_ordre(ibkr, "MES", "SELL", 1))
         kraev(ok, f"{hvad} -> salget tillades (ingen faelde)")
         kraev(d["kontrolleret"] is False and d.get("grund"),
               f"{hvad} -> markeret som ukontrolleret MED grund")
 
     # ⚠ Og en TOM men PAALIDELIG liste er noget helt andet end et fejlet opslag.
     # Blandes de to sammen, er vagten enten blind eller en faelde.
-    ok, _, d = asyncio.run(mf.kontroller_salg(FakeIBKR([], paalideligt=True), "MES", 1))
-    kraev(not ok and d["kontrolleret"] is True,
-          "tom MEN paalidelig liste -> AFVIST (ikke det samme som et fejlet opslag)")
+    # ⚠ Efter 25-08 er BEGGE tilladt (en flad konto + salg aabner bare en short),
+    # saa forskellen kan ikke laengere ses paa ok/afvist. Den skal stadig kunne
+    # ses — ellers ville "vi kunne ikke maale" og "vi maalte nul" smelte sammen.
+    ok, _, d = asyncio.run(mf.kontroller_ordre(FakeIBKR([], paalideligt=True), "MES", "SELL", 1))
+    kraev(ok and d["kontrolleret"] is True and d["netto_hos_broker"] == 0,
+          "tom MEN paalidelig liste -> MAALT til 0 (ikke 'kunne ikke maale')")
 
 
-def test_salg_der_ville_aabne_short_afvises():
-    """De kendt-negative — herunder selve hændelsen fra 17-08."""
-    print("\n[3] Salg der ville aabne en short")
+def test_short_kan_aabnes():
+    """⚠ RETTET 25-08. Foer afviste vagten ethvert salg der ville aabne en short,
+    fordi vinduet ikke kunne BOGFOERE en short. Det gjorde en mangel til et
+    forbud — og Iben stod midt i en handelsdag og kunne ikke handle. Manglen er
+    lukket (routingen i main.py bogfoerer nu begge retninger), saa forbuddet er
+    vaek."""
+    print("\n[3] Short kan aabnes")
+    ok, _, d = asyncio.run(mf.kontroller_ordre(FakeIBKR([]), "MES", "SELL", 1))
+    kraev(ok, "flad konto, salg af 1 -> TILLADT (aabner en short)")
+    kraev(d["netto_hos_broker"] == 0, "og nettoet er maalt, ikke gaettet")
 
-    # ⚠ 17-08 13:34:37 GENSPILLET. Brokeren var flad; salget fyldte alligevel.
-    ok, besked, d = asyncio.run(mf.kontroller_salg(FakeIBKR([]), "MES", 1))
-    kraev(not ok, "brokeren flad, salg af 1 -> AFVIST (17-08 13:34:37 genspillet)")
-    kraev("AABNE en short" in besked, "og beskeden siger hvorfor")
-    kraev(d["netto_hos_broker"] == 0, "og den siger hvad brokeren faktisk har")
+    ok, _, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", -1)]), "MES", "SELL", 1))
+    kraev(ok, "allerede short -1, salg af 1 -> TILLADT (foeger til)")
 
-    ok, besked, _ = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", 1)]), "MES", 2))
-    kraev(not ok, "brokeren har 1, salg af 2 -> AFVIST")
-    kraev("short paa 1" in besked, "og den siger hvor stor shorten ville blive")
+    ok, _, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 1)]), "MES", "BUY", 1))
+    kraev(ok, "allerede long 1, koeb af 1 -> TILLADT (foeger til)")
 
-    ok, _, _ = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("MES", -1)]), "MES", 1))
-    kraev(not ok, "allerede short -1, salg af 1 -> AFVIST (ville goere den vaerre)")
+    ok, _, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", -2)]), "MES", "BUY", 2))
+    kraev(ok, "short -2, koeb af 2 -> TILLADT (daekker praecis)")
 
-    # ⚠ EN ANDEN TICKERS POSITION TAELLER IKKE. Uden symbolfiltret ville en aaben
-    # M2K-position have godkendt et MES-salg — og fejlen ville vaere usynlig indtil
-    # den kostede noget.
-    ok, _, d = asyncio.run(mf.kontroller_salg(FakeIBKR([pos("M2K", 5)]), "MES", 1))
-    kraev(not ok and d["netto_hos_broker"] == 0,
-          "M2K-position godkender IKKE et MES-salg")
+
+def test_flip_afvises():
+    """⚠ DEN BESKYTTELSE DER FAKTISK BETOED NOGET. Vinduets raekker er
+    én-vejs: en ordre der baade lukker den ene vej og aabner den anden, kan ikke
+    bogfoeres. Det var praecis over-salget 31-07 — en lang position solgt for
+    meget, som endte som en ejerloes short."""
+    print("\n[3b] Ordrer der ville VENDE positionen")
+
+    ok, besked, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", 1)]), "MES", "SELL", 2))
+    kraev(not ok, "long 1, salg af 2 -> AFVIST (ville vende til short 1)")
+    kraev("short paa 1" in besked, "og beskeden siger hvor stor vendingen ville blive")
+    kraev("Luk foerst" in besked, "og hvad man skal goere i stedet")
+
+    ok, besked, _ = asyncio.run(mf.kontroller_ordre(FakeIBKR([pos("MES", -1)]), "MES", "BUY", 3))
+    kraev(not ok, "short -1, koeb af 3 -> AFVIST (ville vende til long 2)")
+    kraev("long paa 2" in besked, "og den regner vendingen rigtigt ud")
+
+    # ⚠ EN ANDEN TICKERS POSITION TAELLER IKKE. Uden symbolfiltret ville M2K's
+    # +5 blive lagt til MES' -1, og koebet ville se harmloest ud.
+    ok, _, d = asyncio.run(mf.kontroller_ordre(
+        FakeIBKR([pos("MES", -1), pos("M2K", 5)]), "MES", "BUY", 3))
+    kraev(not ok and d["netto_hos_broker"] == -1,
+          "M2K-position blandes IKKE ind i MES' netto")
 
 
 def test_alarm_ved_exit_uden_aaben_entry():
@@ -226,7 +256,7 @@ if __name__ == "__main__":
     print("test_salgsvagt — begge retninger proeves")
     for f in (test_lovlige_salg_slipper_igennem,
               test_upaalideligt_opslag_spaerrer_ikke,
-              test_salg_der_ville_aabne_short_afvises,
+              test_short_kan_aabnes, test_flip_afvises,
               test_alarm_ved_exit_uden_aaben_entry,
               test_alarmfejl_vaelter_ikke_ordrestien):
         f()
@@ -238,4 +268,5 @@ if __name__ == "__main__":
         sys.exit(1)
     print("ALLE KONTROLLER BESTAAET")
     print("  · et aegte salg kan ALTID sendes (ingen faelde)")
-    print("  · et salg der ville aabne en short kan IKKE (17-08 genspillet)")
+    print("  · en SHORT kan aabnes og bogfoeres (rettet 25-08)")
+    print("  · en ordre der ville VENDE positionen kan IKKE")

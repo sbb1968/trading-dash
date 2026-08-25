@@ -367,17 +367,21 @@ async def alarmer_om_ubogfoerte(journal, tracker_ordrer: list) -> dict:
 # Den gamle kontrol stillede det foerste spoergsmaal. Kun det andet betyder noget.
 #
 # ⚠ HVORFOR AFVIS OG IKKE BESKAER
-# Watchlist-vinduet er long-only ved konstruktion: `registrer_entry` kaldes kun paa
-# BUY og skriver altid side="long". Der findes ingen vej til at bogfoere en short.
-# En beskaeret ordre ville stiltiende gøre noget andet end det brugeren bad om; en
-# afvisning siger det. Vil man handle short manuelt, er det en ny funktion — ikke
-# en omgaaelse af den her.
+# En beskaeret ordre ville stiltiende goere noget andet end det brugeren bad om;
+# en afvisning siger det.
+#
+# ⚠ RETTET 25-08: her stod at vinduet var "long-only ved konstruktion", og at
+# short derfor maatte afvises. Det var sandt om bogfoeringen den dag, men det
+# gjorde en MANGEL til et FORBUD — og et forbud mod noget helt normalt. Iben stod
+# midt i en handelsdag og kunne ikke aabne en short paa MES. Manglen er lukket i
+# stedet: vinduet bogfoerer nu begge retninger.
 
-SALGSVAGT_EVENT = "salg_afvist_ville_aabne_short"
+SALGSVAGT_EVENT = "ordre_afvist_ville_vende_position"
 SALGSVAGT_UKONTROLLERET = "salg_uden_positionskontrol"
 
 
-async def kontroller_salg(ibkr, symbol: str, shares: int) -> tuple[bool, str, dict]:
+async def kontroller_ordre(ibkr, symbol: str, action: str,
+                           shares: int) -> tuple[bool, str, dict]:
     """Maa dette salg sendes? -> (ok, besked, detaljer).
 
     ⚠ ET UPAALIDELIGT OPSLAG AFVISER IKKE. `get_positions_reliable()` siger selv i
@@ -402,16 +406,35 @@ async def kontroller_salg(ibkr, symbol: str, shares: int) -> tuple[bool, str, di
 
     netto = sum(float(p.get("position") or 0)
                 for p in poss if p.get("ticker") == symbol)
-    detaljer = {"kontrolleret": True, "netto_hos_broker": netto, "salg": shares}
+    salg = (action or "").upper() == "SELL"
+    detaljer = {"kontrolleret": True, "netto_hos_broker": netto,
+                "action": action, "antal": shares}
 
-    if netto >= shares:
-        return True, "", detaljer
-    if netto <= 0:
-        return False, (f"Brokeren har ingen {symbol}-position (netto {netto:g}). "
-                       f"Et salg paa {shares} ville AABNE en short — og "
-                       f"watchlist-vinduet kan ikke bogfoere en short."), detaljer
-    return False, (f"Brokeren har kun {netto:g} {symbol}. Et salg paa {shares} ville "
-                   f"efterlade en short paa {shares - netto:g}."), detaljer
+    # ⚠ REGLEN ER "VEND IKKE POSITIONEN I ÉN ORDRE", ikke "aabn aldrig en short".
+    #
+    # Den foerste udgave (19-08) afviste ethvert salg der ville aabne en short,
+    # med den begrundelse at watchlist-vinduet ikke kunne BOGFOERE en short. Det
+    # var sandt om koden — men det gjorde en bogfoeringsmangel til et forbud mod
+    # en helt normal handling. Paa MES er short lige saa almindelig som long, og
+    # 25-08 stod Iben og kunne ikke handle.
+    #
+    # Nu kan shorten bogfoeres (se routingen i main.py), og forbuddet er
+    # overfloedigt. Tilbage staar den beskyttelse der faktisk betoed noget:
+    # vinduet kan holde ÉN position ad gangen, saa en ordre der baade lukker den
+    # ene vej og aabner den anden, kan ikke repraesenteres. Praecis dét var
+    # over-salget 31-07: en lang position solgt for meget, som endte som en
+    # ejerloes short.
+    if salg and netto > 0 and shares > netto:
+        return False, (f"Brokeren har {netto:g} {symbol}. Et salg paa {shares} ville "
+                       f"lukke den OG aabne en short paa {shares - netto:g} i samme "
+                       f"ordre — det kan vinduet ikke bogfoere. Luk foerst, "
+                       f"aabn saa."), detaljer
+    if not salg and netto < 0 and shares > -netto:
+        return False, (f"Brokeren er short {-netto:g} {symbol}. Et koeb paa {shares} "
+                       f"ville daekke den OG aabne en long paa {shares + netto:g} i "
+                       f"samme ordre — det kan vinduet ikke bogfoere. Luk foerst, "
+                       f"aabn saa."), detaljer
+    return True, "", detaljer
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

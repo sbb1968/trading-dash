@@ -1060,10 +1060,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 #
                 # ⚠ Vagten spoerger BROKEREN, ikke journalen. At journalen ikke
                 # kender positionen er ikke farligt — at brokeren ikke HAR den er.
-                if action == "SELL":
+                if True:
                     import manuel_forensik as _mf
-                    _ok, _besked, _detaljer = await _mf.kontroller_salg(
-                        ibkr, ticker, shares)
+                    _ok, _besked, _detaljer = await _mf.kontroller_ordre(
+                        ibkr, ticker, action, shares)
                     # Kun det der IKKE er hverdag logges: en afvisning, eller et
                     # salg vi ikke kunne kontrollere. Et godkendt, kontrolleret
                     # salg fylder ikke loggen — ellers drukner de to andre.
@@ -1076,7 +1076,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_text(json.dumps({
                             "type": "ibkr_order_result", "success": False,
                             "ticker": ticker, "action": action, "shares": shares,
-                            "error": f"Salg afvist: {_besked}",
+                            "error": f"Ordre afvist: {_besked}",
                         }))
                         continue
                     if not _detaljer.get("kontrolleret"):
@@ -1215,15 +1215,31 @@ async def websocket_endpoint(websocket: WebSocket):
                 if filled_qty > 0 and fill_pris > 0:
                     try:
                         import manuel_forensik
-                        if action == "BUY":
-                            await manuel_forensik.registrer_entry(
-                                journal, ibkr, symbol=ticker, side="long",
+                        # ⚠ RETNINGEN AFGOERES AF DEN AABNE RAEKKE, ikke af BUY/SELL.
+                        # Foer var det hardkodet: BUY = entry(long), SELL = exit.
+                        # Det gjorde to ting umulige — at AABNE en short (et salg
+                        # blev bogfoert som en exit af noget der ikke fandtes, se
+                        # exit_uden_aaben_entry 17-08), og at DAEKKE en short (et
+                        # koeb ville have aabnet en ny long-raekke oven i den).
+                        #
+                        # Nu: findes der en aaben manuel raekke, og gaar ordren den
+                        # MODSATTE vej, er det en exit. Ellers er det en entry, og
+                        # siden foelger ordren.
+                        _aaben = await manuel_forensik.find_aaben(journal, ticker)
+                        _side = (_aaben or {}).get("side", "").lower()
+                        _lukker = (_aaben is not None and
+                                   ((_side == "long" and action == "SELL") or
+                                    (_side == "short" and action == "BUY")))
+                        if _lukker:
+                            await manuel_forensik.registrer_exit(
+                                journal, ibkr, symbol=ticker,
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
                                 et_tz=ET_TZ)
                         else:
-                            await manuel_forensik.registrer_exit(
+                            await manuel_forensik.registrer_entry(
                                 journal, ibkr, symbol=ticker,
+                                side="long" if action == "BUY" else "short",
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
                                 et_tz=ET_TZ)
