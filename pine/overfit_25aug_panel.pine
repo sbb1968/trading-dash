@@ -1,0 +1,170 @@
+//@version=6
+// ════════════════════════════════════════════════════════════════════════════
+//  Overfit 25-08-2026 — PANEL: de fire betingelser, raat aflaeseligt
+// ════════════════════════════════════════════════════════════════════════════
+//  Foelgesvend til `overfit_25aug.pine`. Strategien ligger paa PRISEN (VWAP,
+//  entry/exit-markoerer); det her ligger i et EGET vindue under den og viser de
+//  tre oscillatorer beslutningen bygger paa.
+//
+//  ⚠ HVORFOR TO SCRIPTS. wt2 gaar cirka ±100, RSI og ADX 0-100, VWAP ligger
+//  omkring 7690. Fire skalaer i samme rude giver enten en flad streg eller en
+//  ulaeselig graf. TradingView kan ikke sende ét plot fra et overlay-script ned
+//  i en anden rude, saa opdelingen er ikke et valg — det er hvad platformen
+//  tillader.
+//
+//  ⚠ KODEN ER DUBLERET MED VILJE, OG DET ER EN RISIKO.
+//  `wt2Beregn()` og `htf()` staar ordret i BEGGE filer. Pine har ingen lokale
+//  includes; en delt udgave skulle publiceres som library paa TradingView.
+//  Aendrer du den ene, SKAL du aendre den anden — ellers viser panelet noget
+//  andet end strategien handler paa, og det er den vaerste slags fejl: to
+//  billeder der begge ser rigtige ud.
+//
+//  ⚠ WT1 ER MED FOR KONTEKSTENS SKYLD — ingen af de fire betingelser bruger
+//  den. Cipher B laeses paa krydset mellem wt1 og wt2, saa den hoerer med naar
+//  man skal vurdere hvad der skete; men det er wt2 alene der udloeser.
+//
+//  SAET DEN PAA SAMME 1-MINUTTERS MES-CHART som strategien.
+// ════════════════════════════════════════════════════════════════════════════
+indicator("Overfit 25-08-2026 · PANEL · wt1/wt2 · RSI · ADX", overlay = false)
+
+g1 = "Betingelser (skal matche strategien)"
+wtTF     = input.timeframe("2",  "Cipher B tidsramme", group = g1)
+wtEkst   = input.float(70,       "wt2 ekstrem (±)",    group = g1, step = 5)
+rsiTF    = input.timeframe("5",  "RSI tidsramme",      group = g1)
+rsiLav   = input.int(29,         "RSI long under",     group = g1)
+rsiHoej  = input.int(70,         "RSI short over",     group = g1)
+adxTF    = input.timeframe("5",  "ADX tidsramme",      group = g1)
+adxMin   = input.int(26,         "ADX over",           group = g1)
+vwapTF   = input.timeframe("1",  "VWAP tidsramme",     group = g1)
+
+g2 = "Vis"
+visWT   = input.bool(true,  "wt1 og wt2", group = g2)
+visRSI  = input.bool(true,  "RSI",        group = g2)
+visADX  = input.bool(true,  "ADX",        group = g2)
+
+// ── Cipher B's WaveTrend — ORDRET som i overfit_25aug.pine ──────────────────
+// chLen 9 · avgLen 12 · maLen 3 paa hlc3, som i projektets indikatorer.js.
+wtBeregn() =>
+    src = hlc3
+    esa = ta.ema(src, 9)
+    de  = ta.ema(math.abs(src - esa), 9)
+    ci  = de == 0 ? 0.0 : (src - esa) / (0.015 * de)
+    w1  = ta.ema(ci, 12)
+    w2  = ta.sma(w1, 3)
+    [w1, w2]
+
+adxBeregn() =>
+    [_p, _m, a] = ta.dmi(14, 14)
+    a
+
+// ── Ikke-genmalende hentning — ORDRET som i overfit_25aug.pine ──────────────
+// expr[1] + lookahead_on = sidste LUKKEDE bar paa tidsrammen. Og en tidsramme
+// lig chartens forskydes IKKE (ellers ville 1m-VWAP'en halte én bar bagud).
+htf(_tf, _expr, _lokal) =>
+    _tf == timeframe.period ? _lokal :
+         request.security(syminfo.tickerid, _tf, _expr[1], lookahead = barmerge.lookahead_on)
+
+[wt1Lokal, wt2Lokal] = wtBeregn()
+rsiLokal  = ta.rsi(close, 14)
+adxLokal  = adxBeregn()
+vwapLokal = ta.vwap(hlc3)
+
+wt1   = htf(wtTF,   wt1Lokal,  wt1Lokal)
+wt2   = htf(wtTF,   wt2Lokal,  wt2Lokal)
+rsiV  = htf(rsiTF,  rsiLokal,  rsiLokal)
+adxV  = htf(adxTF,  adxLokal,  adxLokal)
+vwapV = htf(vwapTF, vwapLokal, vwapLokal)
+
+// ── De fire betingelser ─────────────────────────────────────────────────────
+gyldig  = not na(wt2) and not na(rsiV) and not na(adxV) and not na(vwapV)
+b1Long  = wt2  <= -wtEkst
+b2Long  = rsiV <= rsiLav
+b3      = adxV >= adxMin
+b4Long  = close < vwapV
+b1Short = wt2  >= wtEkst
+b2Short = rsiV >= rsiHoej
+b4Short = close > vwapV
+
+alleLong  = gyldig and b1Long  and b2Long  and b3 and b4Long
+alleKort  = gyldig and b1Short and b2Short and b3 and b4Short
+antalLong = (b1Long ?1:0)+(b2Long ?1:0)+(b3?1:0)+(b4Long ?1:0)
+antalKort = (b1Short?1:0)+(b2Short?1:0)+(b3?1:0)+(b4Short?1:0)
+antal     = math.max(antalLong, antalKort)
+
+// ── Kurverne ────────────────────────────────────────────────────────────────
+// ⚠ SAMME AKSE. wt2 gaar ±100, RSI og ADX 0-100 — de tre kan deles om én
+// skala, og alle taersklerne (±70 · 29 · 70 · 26) ligger i det synlige baand.
+// Det er dét der goer panelet aflaeseligt uden fire y-akser.
+plot(visWT  ? wt1  : na, "wt1 (Cipher B)", color.new(#21baf3, 0),  1)
+plot(visWT  ? wt2  : na, "wt2 (Cipher B)", color.new(#c33ee1, 0),  2)
+plot(visRSI ? rsiV : na, "RSI",            color.new(#e2a400, 0),  2)
+plot(visADX ? adxV : na, "ADX",            color.new(#8b949e, 0),  2)
+
+// Taerskellinjer — hver med sit navn, saa man kan se HVILKEN graense man er ved
+hline(0, "nul", color.new(color.gray, 60), hline.style_dotted)
+plot(visWT  ?  wtEkst  : na, "wt2 +70 (short)", color.new(#c33ee1, 55), 1, plot.style_linebr)
+plot(visWT  ? -wtEkst  : na, "wt2 -70 (long)",  color.new(#c33ee1, 55), 1, plot.style_linebr)
+plot(visRSI ?  rsiHoej : na, "RSI 70 (short)",  color.new(#e2a400, 55), 1, plot.style_linebr)
+plot(visRSI ?  rsiLav  : na, "RSI 29 (long)",   color.new(#e2a400, 55), 1, plot.style_linebr)
+plot(visADX ?  adxMin  : na, "ADX 26",          color.new(#8b949e, 55), 1, plot.style_linebr)
+
+// ── VWAP-benet: en boolsk betingelse, saa den vises som en tilstand ─────────
+// ⚠ IKKE som en kurve. `close − vwap` er ±10 point og ville ligge som en flad
+// streg ved nul i et 0-100-panel. Betingelsen er et fortegn, ikke en stoerrelse,
+// og et baand i bunden siger dét direkte.
+vwapFarve = not gyldig ? na : b4Long ? color.new(color.lime, 55) :
+            b4Short ? color.new(color.red, 55) : na
+bgcolor(vwapFarve, title = "VWAP-benet (groen: pris under · roed: over)")
+
+// ── Hvor mange holdt? ───────────────────────────────────────────────────────
+// ⚠ DET ER HER OVERFITTET BLIVER SYNLIGT. Store dele af dagen har TRE af fire;
+// den fjerde er alt der skiller "tre handler" fra "ingen". Flyt en taerskel
+// nogle faa enheder og se hvor mange orange striber der bliver til signaler.
+plotshape(gyldig and antal == 3 and not (alleLong or alleKort), "3 af 4",
+     shape.circle, location.bottom, color.new(color.orange, 20), size = size.tiny)
+plotshape(alleLong,  "ALLE FIRE — long",  shape.triangleup,   location.bottom,
+     color.new(color.lime, 0),  size = size.small)
+plotshape(alleKort,  "ALLE FIRE — short", shape.triangledown, location.bottom,
+     color.new(color.red, 0),   size = size.small)
+
+// ── Aflaesning i Data Window ────────────────────────────────────────────────
+plotchar(wt1,   "wt1",                  "", location.top)
+plotchar(wt2,   "wt2",                  "", location.top)
+plotchar(rsiV,  "RSI",                  "", location.top)
+plotchar(adxV,  "ADX",                  "", location.top)
+plotchar(vwapV, "VWAP",                 "", location.top)
+plotchar(close - vwapV, "pris - VWAP",  "", location.top)
+plotchar(antal, "betingelser opfyldt",  "", location.top)
+
+// ── Tabel: status lige nu, betingelse for betingelse ────────────────────────
+// ⚠ Den fortaeller HVILKEN betingelse der er den bindende. Uden den staar man
+// med fire kurver og skal regne ud hvad der manglede — og det er netop dét
+// spoergsmaal man har, hver gang der IKKE kom en handel.
+// ⚠ Funktionerne skal staa i GLOBALT scope. Pine tillader ikke en
+// funktionsdefinition inde i en if-blok — det er en oversaettelsesfejl, ikke en
+// stilsag.
+ok(b)  => b ? "✔" : "✘"
+far(b) => b ? color.new(color.green, 70) : color.new(color.red, 80)
+
+var table t = table.new(position.top_right, 3, 6, border_width = 1)
+if barstate.islast
+    table.cell(t, 0, 0, "betingelse", bgcolor = color.new(color.gray, 60), text_size = size.small)
+    table.cell(t, 1, 0, "long",       bgcolor = color.new(color.gray, 60), text_size = size.small)
+    table.cell(t, 2, 0, "short",      bgcolor = color.new(color.gray, 60), text_size = size.small)
+    table.cell(t, 0, 1, "wt2 " + str.tostring(wt2, "#.0") + " (" + wtTF + "m)", text_size = size.small)
+    table.cell(t, 1, 1, ok(b1Long),  bgcolor = far(b1Long),  text_size = size.small)
+    table.cell(t, 2, 1, ok(b1Short), bgcolor = far(b1Short), text_size = size.small)
+    table.cell(t, 0, 2, "RSI " + str.tostring(rsiV, "#.0") + " (" + rsiTF + "m)", text_size = size.small)
+    table.cell(t, 1, 2, ok(b2Long),  bgcolor = far(b2Long),  text_size = size.small)
+    table.cell(t, 2, 2, ok(b2Short), bgcolor = far(b2Short), text_size = size.small)
+    table.cell(t, 0, 3, "ADX " + str.tostring(adxV, "#.0") + " (" + adxTF + "m)", text_size = size.small)
+    table.cell(t, 1, 3, ok(b3), bgcolor = far(b3), text_size = size.small)
+    table.cell(t, 2, 3, ok(b3), bgcolor = far(b3), text_size = size.small)
+    table.cell(t, 0, 4, "pris-VWAP " + str.tostring(close - vwapV, "#.2"), text_size = size.small)
+    table.cell(t, 1, 4, ok(b4Long),  bgcolor = far(b4Long),  text_size = size.small)
+    table.cell(t, 2, 4, ok(b4Short), bgcolor = far(b4Short), text_size = size.small)
+    table.cell(t, 0, 5, "I ALT", bgcolor = color.new(color.gray, 60), text_size = size.small)
+    table.cell(t, 1, 5, str.tostring(antalLong) + "/4",
+         bgcolor = far(antalLong == 4), text_size = size.small)
+    table.cell(t, 2, 5, str.tostring(antalKort) + "/4",
+         bgcolor = far(antalKort == 4), text_size = size.small)

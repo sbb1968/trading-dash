@@ -19,6 +19,17 @@
 //  ── EXIT ───────────────────────────────────────────────────────────────────
 //    stop 24 point · target 49 point · ellers loeber den
 //
+//  ── ⚠ OSCILLATORERNE LIGGER I ET ANDET SCRIPT ─────────────────────────────
+//  `overfit_25aug_panel.pine` viser wt1, wt2, RSI og ADX med deres taerskler i
+//  et eget vindue. De kan ikke ligge her: wt2 gaar ±100, RSI og ADX 0-100, og
+//  prisen omkring 7690 — fire skalaer i samme rude giver enten en flad streg
+//  eller en ulaeselig graf. TradingView kan ikke sende et plot fra et
+//  overlay-script ned i en anden rude.
+//
+//  ⚠ `wt2Beregn()` og `htf()` staar ORDRET i begge filer. Pine har ingen lokale
+//  includes. Aendrer du den ene, SKAL du aendre den anden — ellers viser panelet
+//  noget andet end strategien handler paa.
+//
 //  ⚠ KOER DEN PAA 1-MINUTTERS MES. Alt andet giver andre tal: VWAP-betingelsen
 //  er defineret paa 1m, og fyldningen sker paa naeste 1-min bars aabning.
 //
