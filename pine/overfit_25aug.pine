@@ -1,0 +1,181 @@
+//@version=6
+// ════════════════════════════════════════════════════════════════════════════
+//  Overfit 25-08-2026 — de fire betingelser, alle samtidig
+// ════════════════════════════════════════════════════════════════════════════
+//  ⚠ DEN HER STRATEGI ER IKKE MENT TIL AT HANDLE EFTER.
+//  Den er resultatet af 18 millioner parameterkombinationer soegt paa ÉT doegn
+//  MES (25. august 2026). Paa den dag gav den 3 handler, 3 vindere, 551 USD.
+//  Paa dagen foer gav den NUL handler — betingelserne udloeste aldrig.
+//  Den er lavet for at kunne SES paa charten, ikke for at blive brugt.
+//
+//  ── DE FIRE BETINGELSER (alle skal holde paa samme bar) ────────────────────
+//    1. Cipher B's wt2 paa 2m forbi ±70
+//    2. RSI(14) paa 5m under 29 (long) / over 70 (short)
+//    3. ADX(14,14) paa 5m over 26
+//    4. prisen paa rette side af VWAP paa 1m
+//       ⚠ MEAN REVERSION: long kraever pris UNDER VWAP, short OVER.
+//         Sammen med oversolgt RSI og wt2 i bunden er retningen konsistent.
+//
+//  ── EXIT ───────────────────────────────────────────────────────────────────
+//    stop 24 point · target 49 point · ellers loeber den
+//
+//  ⚠ KOER DEN PAA 1-MINUTTERS MES. Alt andet giver andre tal: VWAP-betingelsen
+//  er defineret paa 1m, og fyldningen sker paa naeste 1-min bars aabning.
+//
+//  ── ⚠ HVORFOR DEN IKKE RAMMER MINE TAL PAA OEREN ──────────────────────────
+//  Tre grunde, og de er alle aegte forskelle — ikke fejl:
+//    · TradingViews MES-data er en ANDEN kilde end IBKR's. Baade priser og
+//      volumen afviger, og volumen gaar direkte ind i VWAP.
+//    · `ta.vwap` ankrer paa TradingViews sessionsdefinition. Min egen VWAP
+//      ankrer eksplicit 18:00 ET (CME-handelsdagen). Ligner hinanden, men er
+//      ikke garanteret identiske.
+//    · Backtesten fyldte paa naeste bars aabning med 1 tick slippage; Pine
+//      bruger sin egen model.
+//  Forvent samme HANDLER paa omtrent samme tidspunkter — ikke samme oere.
+// ════════════════════════════════════════════════════════════════════════════
+strategy("Overfit 25-08-2026 · MES · 4 betingelser",
+     overlay              = true,
+     initial_capital      = 10000,
+     default_qty_type     = strategy.fixed,
+     default_qty_value    = 1,
+     pyramiding           = 0,
+     calc_on_every_tick   = false,
+     process_orders_on_close = false,
+     slippage             = 1,                       // 1 tick = 0,25 point
+     commission_type      = strategy.commission.cash_per_order,
+     commission_value     = 0.62)                    // maalt paa DUQ441063
+
+// ── Parametre (vaerdierne fra soegningen) ───────────────────────────────────
+g1 = "Betingelser"
+wtTF     = input.timeframe("2",  "Cipher B tidsramme",        group = g1)
+wtEkst   = input.float(70,       "wt2 ekstrem (±)",           group = g1, step = 5)
+rsiTF    = input.timeframe("5",  "RSI tidsramme",             group = g1)
+rsiLav   = input.int(29,         "RSI long under",            group = g1)
+rsiHoej  = input.int(70,         "RSI short over",            group = g1)
+adxTF    = input.timeframe("5",  "ADX tidsramme",             group = g1)
+adxMin   = input.int(26,         "ADX over",                  group = g1)
+vwapTF   = input.timeframe("1",  "VWAP tidsramme",            group = g1)
+
+g2 = "Exit"
+stopPt   = input.float(24, "Stop (point)",   group = g2, step = 0.25)
+maalPt   = input.float(49, "Target (point)", group = g2, step = 0.25)
+
+g3 = "Vindue"
+brugDato = input.bool(true,  "Begraens til ét doegn", group = g3)
+fraTid   = input.time(timestamp("25 Aug 2026 00:00 +0200"), "Fra", group = g3)
+tilTid   = input.time(timestamp("25 Aug 2026 23:00 +0200"), "Til", group = g3)
+
+// ── Cipher B's WaveTrend ────────────────────────────────────────────────────
+// ⚠ PRAECIS som i projektets indikatorer.js: chLen 9, avgLen 12, maLen 3 paa
+// hlc3. Ikke LazyBears 21 — VuManChu Cipher B bruger 12, og det er dén der
+// blev sweepet. Et andet tal giver et andet wt2 og dermed andre handler.
+wt2Beregn() =>
+    src = hlc3
+    esa = ta.ema(src, 9)
+    de  = ta.ema(math.abs(src - esa), 9)
+    // ⚠ de == 0 betyder "ingen bevaegelse overhovedet". JS-udgaven giver NA
+    // dér; Pine faar 0, fordi en na ind i ta.ema forgifter hele serien bagefter.
+    // Bevidst afvigelse paa et tilfaelde der i praksis ikke forekommer paa MES.
+    ci  = de == 0 ? 0.0 : (src - esa) / (0.015 * de)
+    wt1 = ta.ema(ci, 12)
+    ta.sma(wt1, 3)
+
+adxBeregn() =>
+    [_p, _m, a] = ta.dmi(14, 14)
+    a
+
+// ── ⚠ IKKE-GENMALENDE HENTNING AF HOEJERE TIDSRAMMER ───────────────────────
+// `expr[1]` + `lookahead_on` giver den SIDST LUKKEDE bar paa tidsrammen —
+// baade historisk og i realtid. Det er praecis dét backtesten brugte.
+//
+// Uden [1] ville man se den 5-min bars endelige RSI mens baren stadig dannes,
+// altsaa kende dens luk foer den er sket. Strategien ville se strålende ud paa
+// historik og opfoere sig anderledes live. Det er den mest udbredte fejl i
+// MTF-Pine, og den er usynlig indtil man handler efter den.
+//
+// ⚠ OG EN TIDSRAMME LIG CHARTENS MAA IKKE FORSKYDES. `request.security` med
+// samme tidsramme OG [1] giver FORRIGE bar — altsaa en bar for lidt. I
+// backtesten betoed tf=1 paa en 1-min serie ingen forskydning overhovedet, og
+// VWAP-betingelsen er netop defineret paa 1m. Uden det her skel ville
+// VWAP-benet halte én bar bagud, og handlerne flytte sig.
+htf(_tf, _expr, _lokal) =>
+    _tf == timeframe.period ? _lokal :
+         request.security(syminfo.tickerid, _tf, _expr[1], lookahead = barmerge.lookahead_on)
+
+wt2Lokal  = wt2Beregn()
+rsiLokal  = ta.rsi(close, 14)
+adxLokal  = adxBeregn()
+vwapLokal = ta.vwap(hlc3)
+
+wt2   = htf(wtTF,   wt2Lokal,  wt2Lokal)
+rsiV  = htf(rsiTF,  rsiLokal,  rsiLokal)
+adxV  = htf(adxTF,  adxLokal,  adxLokal)
+vwapV = htf(vwapTF, vwapLokal, vwapLokal)
+
+// ── De fire betingelser ─────────────────────────────────────────────────────
+gyldig = not na(wt2) and not na(rsiV) and not na(adxV) and not na(vwapV)
+
+b1Long  = wt2  <= -wtEkst
+b2Long  = rsiV <= rsiLav
+b3      = adxV >= adxMin                    // retningsloes: gaelder begge veje
+b4Long  = close < vwapV
+
+b1Short = wt2  >= wtEkst
+b2Short = rsiV >= rsiHoej
+b4Short = close > vwapV
+
+iVindue = not brugDato or (time >= fraTid and time <= tilTid)
+
+// ⚠ AND, ikke en score. Alle fire skal holde paa SAMME bar — det var
+// betingelsen sweepet arbejdede under, og en "mindst 3 af 4" ville vaere en
+// anden strategi med andre handler.
+langSignal = gyldig and iVindue and b1Long  and b2Long  and b3 and b4Long
+kortSignal = gyldig and iVindue and b1Short and b2Short and b3 and b4Short
+
+// ── Ordrer ──────────────────────────────────────────────────────────────────
+// ⚠ Ingen pyramiding, og long/short er gensidigt udelukkende — vinduet holder
+// ÉN position ad gangen, som i backtesten. Uden det ville en lang stribe
+// signaler bygge en position op og goere tallene uigenkendelige.
+if langSignal and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+if kortSignal and strategy.position_size == 0
+    strategy.entry("Short", strategy.short)
+
+if strategy.position_size > 0
+    strategy.exit("L-ud", "Long",
+         stop  = strategy.position_avg_price - stopPt,
+         limit = strategy.position_avg_price + maalPt)
+if strategy.position_size < 0
+    strategy.exit("S-ud", "Short",
+         stop  = strategy.position_avg_price + stopPt,
+         limit = strategy.position_avg_price - maalPt)
+
+// ⚠ TVANGSLUK VED VINDUETS SLUT. En aaben position maa ikke kunne skjule et
+// tab — det var reglen i backtesten, og uden den ville sidste handel se gratis
+// ud. Samme regel som i trading_practice.
+if brugDato and time > tilTid and strategy.position_size != 0
+    strategy.close_all("vinduet slut")
+
+// ── Visning: hvad holdt hvornaar ───────────────────────────────────────────
+plot(vwapV, "VWAP (1m)", color.new(color.purple, 0), 1)
+
+plotshape(langSignal, "Long-signal", shape.triangleup,   location.belowbar,
+     color.new(color.lime, 0), size = size.tiny)
+plotshape(kortSignal, "Short-signal", shape.triangledown, location.abovebar,
+     color.new(color.red, 0),  size = size.tiny)
+
+// ⚠ Baggrunden viser hvor MANGE af de fire der holdt — saa man kan se HVOR
+// taet dagen var paa flere handler, og hvilken betingelse der plejer at vaere
+// den bindende. Det er dét der goer overfittet synligt: naesten alle barer har
+// tre af fire.
+antalLong  = (b1Long  ? 1 : 0) + (b2Long  ? 1 : 0) + (b3 ? 1 : 0) + (b4Long  ? 1 : 0)
+antalKort  = (b1Short ? 1 : 0) + (b2Short ? 1 : 0) + (b3 ? 1 : 0) + (b4Short ? 1 : 0)
+antal      = math.max(antalLong, antalKort)
+bgcolor(gyldig and iVindue and antal == 3 ? color.new(color.orange, 90) : na,
+     title = "3 af 4 holdt")
+
+// Aflaesning i Data Window — de raa tal bag beslutningen
+plotchar(wt2,  "wt2 (2m)",  "", location.top)
+plotchar(rsiV, "RSI (5m)",  "", location.top)
+plotchar(adxV, "ADX (5m)",  "", location.top)
+plotchar(antal, "betingelser opfyldt", "", location.top)
