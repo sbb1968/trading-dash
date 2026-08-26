@@ -1,0 +1,136 @@
+{
+ "sum": 580.1,
+ "antal": 10,
+ "evalueringer": 7182921,
+ "p": {
+  "dir": 0,
+  "brugZ": true,
+  "tfZ": 1,
+  "zIn": 1.4,
+  "brugKryds": false,
+  "brugWt": false,
+  "tfCB": 15,
+  "wtEkst": 60,
+  "brugRSI": false,
+  "tfRSI": 1,
+  "rsiLav": 23,
+  "rsiHoej": 85,
+  "brugMACD": false,
+  "tfMACD": 5,
+  "brugRV": false,
+  "tfRV": 5,
+  "rvolMin": 3.1,
+  "brugADX": false,
+  "tfADX": 15,
+  "adxMin": 38,
+  "adxOver": true,
+  "brugVWAP": false,
+  "tfVWAP": 5,
+  "brugTid": false,
+  "tidFra": 24,
+  "tidTil": 77,
+  "brugTid2": false,
+  "tid2Fra": 148,
+  "tid2Til": 907,
+  "dir2": 2,
+  "sl": 9.5,
+  "tp": 43.5,
+  "brugTrail": false,
+  "trailStart": 1.75,
+  "trailAfst": 3.75,
+  "tidsstop": 137,
+  "brugModsat": false
+ },
+ "handler": [
+  {
+   "ind": 1261,
+   "ud": 1398,
+   "side": "short",
+   "entry": 7676.5,
+   "exit": 7660.5,
+   "grund": "tid",
+   "pnl": 76.26
+  },
+  {
+   "ind": 1399,
+   "ud": 1536,
+   "side": "long",
+   "entry": 7660.5,
+   "exit": 7673.25,
+   "grund": "tid",
+   "pnl": 60.01
+  },
+  {
+   "ind": 1537,
+   "ud": 1674,
+   "side": "short",
+   "entry": 7673.25,
+   "exit": 7676.5,
+   "grund": "tid",
+   "pnl": -19.99
+  },
+  {
+   "ind": 1675,
+   "ud": 1812,
+   "side": "long",
+   "entry": 7676.5,
+   "exit": 7688.5,
+   "grund": "tid",
+   "pnl": 56.26
+  },
+  {
+   "ind": 1817,
+   "ud": 1954,
+   "side": "long",
+   "entry": 7685.25,
+   "exit": 7708,
+   "grund": "tid",
+   "pnl": 110.01
+  },
+  {
+   "ind": 1955,
+   "ud": 2092,
+   "side": "short",
+   "entry": 7708,
+   "exit": 7703.75,
+   "grund": "tid",
+   "pnl": 17.51
+  },
+  {
+   "ind": 2118,
+   "ud": 2250,
+   "side": "short",
+   "entry": 7706.25,
+   "exit": 7662.75,
+   "grund": "target",
+   "pnl": 213.76
+  },
+  {
+   "ind": 2251,
+   "ud": 2388,
+   "side": "long",
+   "entry": 7676.75,
+   "exit": 7688.5,
+   "grund": "tid",
+   "pnl": 55.01
+  },
+  {
+   "ind": 2391,
+   "ud": 2528,
+   "side": "long",
+   "entry": 7687.25,
+   "exit": 7686.75,
+   "grund": "tid",
+   "pnl": -6.24
+  },
+  {
+   "ind": 2529,
+   "ud": 2639,
+   "side": "long",
+   "entry": 7686.5,
+   "exit": 7690.75,
+   "grund": "vinduet_slut",
+   "pnl": 17.51
+  }
+ ]
+}
