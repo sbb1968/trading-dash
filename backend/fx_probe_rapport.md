@@ -13,8 +13,9 @@ historik kommer ind gennem præcis den forbindelse vi har. Der skal ingen ny
 adapter til for at *nå* markedet.
 
 **Hvad er gearingen?** **Ikke målt endnu — og jeg nægter at gætte.** whatIf
-svarede tomt for FX, men **også for MES**, hvis margin vi kender. Så er det
-apparatet der er nede, ikke FX der mangler margin. Målingen kræver åbent
+svarede tomt for FX, men **også for MES og AAPL**, hvor vi har både margin vi
+kender og abonnement vi har. Så er det apparatet der er nede, ikke FX der
+mangler margin — og det er ikke kontoens prisdata. Målingen kræver åbent
 marked; FX åbner søndag 23:15 dansk tid.
 
 ⚠ **Det vigtigste fund er ikke gearingen.** Det er at `get_positions_reliable()`
@@ -133,6 +134,42 @@ ingen margin på spot FX"*. Den ville have været forkert, den ville have været
 begrundet i 48 målinger, og den ville have været umulig at gennemskue bagefter.
 Det er projektets tilbagevendende fejlklasse: **en kontrol hvis fejl behandles
 som en beslutning.**
+
+### Hvorfor er apparatet nede? Tre hypoteser, ét forsøg
+
+"Lukket marked" var først en formodning. Søren rejste den rigtige indvending —
+kunne det være **manglende prisdata på kontoen**? Det er en anden forklaring
+med helt andre konsekvenser, så den blev afgjort med et diskriminerende forsøg
+i stedet for et skøn:
+
+| | H1 lukket marked | H2 manglende prisdata | H3 whatIf generelt i stykker |
+|---|---|---|---|
+| Forudsigelse | intet virker | virker dér hvor vi HAR abonnement | intet virker |
+
+**AAPL er nøglen:** kontoen har NASDAQ/NYSE-abonnement. Virker whatIf dér mens
+futures og FX fejler, er det H2.
+
+```
+AAPL     type=LIVE   bid=-1  ask=-1  last=nan  close=314.58
+MES      type=LIVE   bid=-1  ask=-1  last=nan  close=7742.5
+EURUSD   type=LIVE   bid=-1  ask=-1  last=nan  close=1.1652
+
+AAPL   MKT BUY 10        TOM
+AAPL   LMT BUY 10 @200   TOM
+MES    MKT BUY 1         TOM
+EURUSD MKT BUY 25000     TOM
+```
+
+**H2 er udelukket.** whatIf fejler også på AAPL, hvor TWS selv melder
+`marketDataType = LIVE`. Kontoens abonnementer er altså i orden, og valget
+mellem DUN748991, DUQ441063 og DUO509856 er uden betydning for dette
+spørgsmål.
+
+⚠ Og `bid = −1`, `ask = −1`, `last = NaN` på **alle tre** aktivklasser peger
+direkte på årsagen: der findes ingen aktuelle kurser, kun sidste `close`.
+whatIf kan ikke beregne margin uden en kurs. **H1 er dermed understøttet, ikke
+blot formodet** — men den endelige bekræftelse er stadig at målingen lykkes
+når markedet åbner.
 
 ### Ét ægte spor, som skal genprøves
 
