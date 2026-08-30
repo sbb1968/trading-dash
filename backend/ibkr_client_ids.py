@@ -87,6 +87,9 @@ SCRIPTS: dict[str, int] = {
     # hvor backenden bruger 200 og ordre-forbindelsen 201 — derfor et lavt,
     # ledigt id her frem for noget i naerheden af dem.
     "duq_forensik.py":               21,
+    # FX-proben (spec 30-08-2026). Read-only + whatIf; ordrer kun med
+    # --tillad-ordre. Koerer mod en PAPER-port, aldrig live.
+    "fx_probe.py":                   22,
 }
 
 
