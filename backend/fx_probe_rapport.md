@@ -12,11 +12,17 @@ paper-kontoen, alle fjorten par kvalificerer på IDEALPRO, og kurser og
 historik kommer ind gennem præcis den forbindelse vi har. Der skal ingen ny
 adapter til for at *nå* markedet.
 
-**Hvad er gearingen?** **Ikke målt endnu — og jeg nægter at gætte.** whatIf
-svarede tomt for FX, men **også for MES og AAPL**, hvor vi har både margin vi
-kender og abonnement vi har. Så er det apparatet der er nede, ikke FX der
-mangler margin — og det er ikke kontoens prisdata. Målingen kræver åbent
-marked; FX åbner søndag 23:15 dansk tid.
+**Hvad er gearingen?** **Ikke målt — men vi ved nu at spørgsmålet måske er
+forkert stillet.** Alle 48 whatIf-kald på spot FX blev **aktivt afvist** med
+kode 201: *"FX trade would expose account to currency leverage."* Samme kode,
+samme tekst, to uafhængige kørsler. Kontrolinstrumentet MES blev i samme
+kørsel *tavst* tomt — to forskellige fejltilstande, side om side.
+
+Kontoen er bekræftet **Retail hos IBIE**, hvor ESMA-loftet er 30:1 på majors.
+At gearet spot FX alligevel afvises peger på at spot hos os er
+*valutaveksling*, og at gearet FX-eksponering ligger i **Forex CFD** — et
+andet produkt med egen tilladelse. Det skal bekræftes med åbent marked
+(søndag 23:15) før det bogføres.
 
 ⚠ **Det vigtigste fund er ikke gearingen.** Det er at `get_positions_reliable()`
 lover at en tom liste betyder *"kontoen er FAKTISK flad"* — og at det løfte
@@ -82,17 +88,43 @@ tilfældigt tal.
 | Cushion | 1 |
 | FullInitMarginReq | 0,00 USD |
 | FxCashBalance | 0,00 |
-| **Juridisk enhed** | **—** |
-| **Retail / professionel** | **—** |
+| **Juridisk enhed** | **IBIE — Interactive Brokers Ireland** ✔ |
+| **MiFID-kategori** | **Retail Client** ✔ |
+| Account Type (live U22652219) | Margin · IBKR Pro · bopæl Danmark |
 
-**Bestå-kriteriet er ikke opfyldt, og det er svaret:** API'et eksponerer
-hverken juridisk enhed (IBIE vs. IBLLC) eller ESMA-klassifikation.
-`AccountType` siger kontoform, ikke regulatorisk status. **Skal bekræftes
-manuelt i Client Portal** før gearingstallet fra P2 kan fortolkes — det er
-netop klassifikationen der afgør om 30:1-loftet gælder.
+**Bestå-kriteriet er opfyldt — men ikke via API'et.** `reqAccountSummary`
+eksponerer hverken juridisk enhed eller MiFID-kategori; `AccountType` siger
+kontoform, ikke regulatorisk status. Begge blev bekræftet manuelt i Client
+Portal 30-08-2026: domænet er `interactivebrokers.**ie**`, og
+*Settings → MiFID Client Category* siger ordret *"Interactive Brokers currently
+treats you as a Retail Client entitled to the highest level of regulatory
+protection."*
 
-⚠ Bemærk `BuyingPower / NetLiquidation = 6,67`. Det er aktie-købekraft på en
-paper-konto, ikke et FX-tal, og må ikke læses som FX-gearing.
+### ⚠ Det gør P2 til en falsificerbar test i stedet for en aflæsning
+
+Retail under IBIE betyder at ESMA's produktintervention gælder, og dermed at
+gearingen har et **loft vi kan forudsige før vi måler**:
+
+| Par | ESMA-kategori | Forventet loft | Forventet initial margin |
+|---|---|---|---|
+| EURUSD, GBPUSD, USDJPY, USDCHF, USDCAD | major | 30:1 | 3,33 % |
+| **AUDUSD, NZDUSD** | **ikke-major** | **20:1** | **5 %** |
+| EURDKK | ikke-major | 20:1 | 5 % |
+
+⚠ **ESMA's "major" er snævrere end dagligsprogets:** par sammensat af to af
+{USD, EUR, JPY, GBP, CAD, CHF}. **AUD og NZD er ikke med.** AUDUSD og NZDUSD er
+altså ikke-majors under reglen, selv om enhver handelsplatform kalder dem
+majors. Det er probens skarpeste enkeltforudsigelse, og den er lagt ind i
+koden (`esma_forventning()`) så P2 selv sammenligner målt mod forventet.
+
+⚠ **Loftet er et loft, ikke et løfte.** IBKR må kræve *mere* end reglens
+minimum, og gør det ofte. Måler vi 3,33 %, er reglen bindende; måler vi mere,
+er det IBKR's husmargin. Begge dele er svar. Men **mindre end 3,33 % ville
+betyde at en af antagelserne er forkert** — og det er dét der gør det til en
+test.
+
+⚠ Bemærk `BuyingPower / NetLiquidation = 6,67` på paper-kontoen. Det er
+aktie-købekraft, ikke et FX-tal, og må ikke læses som FX-gearing.
 
 ---
 
@@ -112,12 +144,13 @@ også JPY-krydserne (0,005 mod pip 0,01). Tick-gitteret er ikke pip-gitteret.
 
 ---
 
-## P2 · Gearingsmålingen — ⚠ IKKE BESVARET
+## P2 · Gearingsmålingen — ⚠ IKKE MÅLT, MEN IKKE UDEN SVAR
 
-**48 whatIf-kald på spot FX + 3 på Forex CFD. Alle tomme.**
+**48 whatIf-kald på spot FX + 3 på Forex CFD.** Første kørsel gav tomme svar
+hele vejen igennem.
 
-Det ser ud som et fund. Det er det ikke — og apparat-kontrollen er grunden til
-at rapporten kan sige det:
+Det ser ud som et fund — *"kontoen får ingen margin på spot FX"*, begrundet i
+48 målinger. Apparat-kontrollen er grunden til at rapporten ikke skrev det:
 
 ```
 apparat-kontrol: ⚠ NEDE
@@ -129,11 +162,14 @@ apparat-kontrol: ⚠ NEDE
 handler hver uge. Når den måling fejler, er instrumentet i stykker — og et
 tomt FX-svar bærer så ingen information om FX.
 
-Uden kontrolgruppen ville denne rapport have indeholdt sætningen *"kontoen får
-ingen margin på spot FX"*. Den ville have været forkert, den ville have været
-begrundet i 48 målinger, og den ville have været umulig at gennemskue bagefter.
-Det er projektets tilbagevendende fejlklasse: **en kontrol hvis fejl behandles
-som en beslutning.**
+Uden kontrolgruppen ville sætningen være røget i rapporten som et fund. Den
+ville have været umulig at gennemskue bagefter. Det er projektets
+tilbagevendende fejlklasse: **en kontrol hvis fejl behandles som en
+beslutning.**
+
+⚠ Men kontrollen var kun det halve arbejde. Den forhindrede en forkert
+konklusion — den afdækkede ikke at proben samtidig **kasserede sit eget
+vigtigste svar**. Det gjorde næste afsnit.
 
 ### Hvorfor er apparatet nede? Tre hypoteser, ét forsøg
 
@@ -171,23 +207,47 @@ whatIf kan ikke beregne margin uden en kurs. **H1 er dermed understøttet, ikke
 blot formodet** — men den endelige bekræftelse er stadig at målingen lykkes
 når markedet åbner.
 
-### Ét ægte spor, som skal genprøves
+### ⚠ RETTELSE: der var to slags tomme svar, og proben blandede dem sammen
 
-I den første rekognoscering (før apparat-kontrollen var bygget) svarede TWS på
-FX-whatIf med:
+Ovenstående var kun halvdelen af sandheden, og fejlen var min. `whatIfOrderAsync`
+resolverer sin future på `openOrderEnd`, men fejlbeskeden ankommer et øjeblik
+**senere** på `errorEvent`. Jeg aflæste fejlopsamleren med det samme — så et
+**aktivt afvist** kald blev bogført som `tomt_uden_fejl`.
+
+Det er præcis den skelnen hele P2 hænger på:
+
+| Status | Betydning |
+|---|---|
+| `tomt_uden_fejl` | apparatet kunne ikke regne — ingen information |
+| `afvist` + kode | IBKR sagde aktivt nej, med en begrundelse — **information** |
+
+Med 0,4 sekunders ventetid før aflæsningen ser billedet helt anderledes ud:
+
+```
+alle 48 spot-FX-kald   ->  afvist, kode 201, samme tekst hver gang
+MES (kontrol)          ->  tomt_uden_fejl, INGEN fejlkode
+CFD 25k / 100k         ->  tomt_uden_fejl
+CFD 500k               ->  afvist
+```
 
 ```
 Error 201: Order rejected - reason: FX trade would expose account to currency leverage.
 ```
 
-Det er en **FX-specifik** afvisningstekst, ikke en generisk. Den optrådte ikke
-ved MES. Den kan pege på at kontoen har spot-FX til *valutaveksling* men ikke
-til *gearet eksponering* — men den optrådte ikke konsistent ved gentagelse, og
-den kan ikke skelnes fra en lukket-marked-artefakt endnu.
+**48 ud af 48, uden undtagelse, i to uafhængige kørsler.** Det er ikke en
+lukket-marked-artefakt: MES bliver tavst tomt i samme kørsel, mens FX bliver
+aktivt afvist. De to fejltilstande optræder side om side og skiller sig ad.
 
-**Skal genprøves som det allerførste når markedet åbner.** Hvis den holder, er
-gearingssvaret ikke et tal, men "ingen — kontoen tillader ikke gearet FX", og
-så bortfalder resten af sporet.
+⚠ **Hypotesen det peger på:** for en retail-klient hos IBIE er spot FX
+begrænset til *valutaveksling* — man må konvertere det man har, men ikke tage
+gearet eksponering. Den gearede FX-adgang ligger i så fald i **Forex CFD**,
+som er et andet produkt med egen tilladelse. Det ville forklare hvorfor CFD'en
+opfører sig anderledes end spot i tabellen ovenfor, og det ville gøre
+CFD-sammenligningen til P2's afgørende måling frem for en fodnote.
+
+**Men det er stadig en hypotese.** Den skal bekræftes med åbent marked, før
+den bogføres. Fejl 201 kan i princippet også udløses af at margin ikke kan
+beregnes uden kurser.
 
 ### Pip-regnestykket fra samtalen
 

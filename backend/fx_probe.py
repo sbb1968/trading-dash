@@ -84,6 +84,34 @@ P2_PAR = MAJORS + ["EURDKK"]
 
 MANGLER = None   # S6: manglende data er None -> "—" i rapporten. Aldrig 0.
 
+# ── ESMA-forventningen (praeregistreret, bekraeftet 30-08-2026) ────────────
+# Client Portal: juridisk enhed IBIE (interactivebrokers.ie), MiFID-kategori
+# "Retail Client". Dermed gaelder ESMA's produktintervention, og gearingen har
+# et LOFT vi kan forudsige FOER vi maaler:
+#
+#   major     30:1  ->  3,33 % initial margin
+#   ikke-major 20:1  ->  5,00 %
+#
+# ⚠ ESMA's "major" er snaevrere end dagligsprogets: par sammensat af TO af
+# {USD, EUR, JPY, GBP, CAD, CHF}. AUD og NZD er IKKE med — AUDUSD og NZDUSD er
+# altsaa ikke-majors under reglen, selv om enhver handelsplatform kalder dem
+# majors. Det er den skarpeste enkeltforudsigelse proben kan afproeve.
+#
+# ⚠ LOFTET ER ET LOFT, IKKE ET LOEFTE. IBKR maa kraeve MERE end reglens
+# minimum (husmargin), og goer det ofte. Maaler vi 3,33 %, er reglen bindende;
+# maaler vi mere, er det IBKR's egen margin. Begge dele er svar — men "mindre
+# end 3,33 %" ville betyde at en af mine antagelser er forkert.
+ESMA_MAJOR_VALUTAER = {"USD", "EUR", "JPY", "GBP", "CAD", "CHF"}
+
+
+def esma_forventning(par: str) -> dict:
+    """Forventet gearingsloft for et par under ESMA, for en retail-klient."""
+    basis, kvot = par[:3], par[3:]
+    major = basis in ESMA_MAJOR_VALUTAER and kvot in ESMA_MAJOR_VALUTAER
+    return {"esma_major": major,
+            "forventet_gearing": 30 if major else 20,
+            "forventet_margin_pct": 3.33 if major else 5.00}
+
 
 def pip_stoerrelse(par: str) -> float:
     """JPY-par kvoteres i to decimaler; pip er 0,01 og ikke 0,0001."""
@@ -156,6 +184,16 @@ async def whatif(ib: IB, ct: Contract, order, f: Fejlopsamler) -> dict:
         r = await asyncio.wait_for(ib.whatIfOrderAsync(ct, order), timeout=25)
     except asyncio.TimeoutError:
         return {"status": "timeout", "fejl": [], "felter": {}}
+
+    # ⚠ LAD FEJLEN NAA FREM FOER DEN AFLAESES.
+    # whatIfOrderAsync' future resolverer paa openOrderEnd, men fejlbeskeden
+    # (fx 201 "FX trade would expose account to currency leverage") ankommer
+    # et oejeblik SENERE paa errorEvent. Aflaeses opsamleren med det samme,
+    # staar der ingen fejl — og et AFVIST kald bogfoeres som "tomt_uden_fejl".
+    # Det er netop den skelnen hele P2 haenger paa: tomt uden fejl = apparatet
+    # er nede; tomt MED fejl 201 = et fund om FX. Uden ventetiden ville proben
+    # kassere sit eget vigtigste svar.
+    await asyncio.sleep(0.4)
 
     fejl = [{"kode": k, "tekst": m} for k, m in f.relevante()]
     if isinstance(r, list):
@@ -288,10 +326,46 @@ async def p1(ib: IB, f: Fejlopsamler) -> dict:
 
 
 # ── P2 · gearingsmaalingen ─────────────────────────────────────────────────
+async def _basis_i_usd(ib: IB, valuta: str) -> float | None:
+    """Kurs fra en basisvaluta til USD. None hvis den ikke kan hentes.
+
+    ⚠ NOEDVENDIG FOR AT GEARINGEN BLIVER RIGTIG. Ordrestoerrelsen er i
+    BASISVALUTA (25.000 EUR), men marginen kommer i kontoens valuta (USD).
+    Deler man de to tal direkte, faar man gearingen ganget med vekselkursen —
+    for EURUSD 25,7:1 i stedet for 30:1. Tallet ville se ud som om det
+    modsagde ESMA-loftet, og fejlen ville vaere usynlig fordi resultatet
+    ligger i et troevaerdigt leje.
+    """
+    if valuta == "USD":
+        return 1.0
+    c = Forex(f"{valuta}USD")
+    try:
+        await ib.qualifyContractsAsync(c)
+    except Exception:
+        return None
+    ib.reqMarketDataType(3)
+    t = ib.reqMktData(c, "", True, False)
+    for _ in range(12):
+        await asyncio.sleep(0.5)
+        if t.midpoint() == t.midpoint() or t.close == t.close:
+            break
+    kurs = next((float(x) for x in (t.midpoint(), t.last, t.close)
+                 if x == x and x), None)
+    ib.cancelMktData(c)
+    return kurs
+
+
 async def p2(ib: IB, f: Fejlopsamler) -> dict:
     app = await apparat_kontrol(ib, f)
     print(f"  apparat-kontrol: {'OK' if app['apparatet_virker'] else '⚠ NEDE'}")
     print(f"    {app['betydning']}")
+
+    # Kurser til notional-omregningen, hentet ÉN gang.
+    kurser: dict[str, float | None] = {}
+    for basis in {p[:3] for p in P2_PAR}:
+        kurser[basis] = await _basis_i_usd(ib, basis)
+    print(f"  basiskurser mod USD: "
+          + ", ".join(f"{k}={v(x)}" for k, x in sorted(kurser.items())))
 
     maalinger = []
     for par in P2_PAR:
@@ -306,15 +380,29 @@ async def p2(ib: IB, f: Fejlopsamler) -> dict:
             for side in ("BUY", "SELL"):
                 r = await whatif(ib, c, MarketOrder(side, qty), f)
                 im = r["felter"].get("initMarginChange")
-                gearing = MANGLER
-                if im:
+                kurs = kurser.get(par[:3])
+                notional_usd = round(qty * kurs, 2) if kurs else MANGLER
+                gearing = margin_pct = dom = MANGLER
+                if im and notional_usd:
                     try:
-                        # Notional i basisvaluta; omregnes til USD i rapporten.
-                        gearing = round(float(qty) / abs(float(im)), 1) if float(im) else MANGLER
+                        m = abs(float(im))
+                        if m:
+                            gearing = round(notional_usd / m, 1)
+                            margin_pct = round(100 * m / notional_usd, 2)
                     except (ValueError, ZeroDivisionError):
-                        gearing = MANGLER
+                        pass
+                forv = esma_forventning(par)
+                if gearing is not MANGLER:
+                    # ⚠ Loftet er et loft. Mere margin end reglen = IBKR's egen
+                    # husmargin (normalt). MINDRE = en af antagelserne er gal.
+                    if gearing <= forv["forventet_gearing"] * 1.02:
+                        dom = ("som ventet" if gearing >= forv["forventet_gearing"] * 0.95
+                               else "strammere end ESMA-loftet (husmargin)")
+                    else:
+                        dom = "⚠ HOEJERE END ESMA-LOFTET — antagelse gal"
                 maalinger.append({
                     "par": par, "side": side, "enheder": qty,
+                    "basiskurs_usd": kurs, "notional_usd": notional_usd,
                     "status": r["status"], "fejl": r["fejl"],
                     "initMarginChange": im,
                     "maintMarginChange": r["felter"].get("maintMarginChange"),
@@ -322,9 +410,14 @@ async def p2(ib: IB, f: Fejlopsamler) -> dict:
                     "commissionCurrency": r["felter"].get("commissionCurrency"),
                     "warningText": r["felter"].get("warningText"),
                     "implicit_gearing": gearing,
+                    "margin_pct": margin_pct,
+                    "esma": forv,
+                    "dom": dom,
                 })
                 print(f"  {par} {side} {qty:>7}  {r['status']:16} "
-                      f"initM={v(im)}  gearing={v(gearing)}")
+                      f"initM={v(im)}  gearing={v(gearing)}:1 "
+                      f"({v(margin_pct)} %)  forventet {forv['forventet_gearing']}:1"
+                      f"  {v(dom)}")
 
     # CFD-sammenligningen (spec P2 punkt 5)
     cfd_ud = []
@@ -341,18 +434,36 @@ async def p2(ib: IB, f: Fejlopsamler) -> dict:
         cfd_ud.append({"status": "kunne_ikke_kvalificeres", "fejl": str(e)})
 
     maalt = [m for m in maalinger if m["status"] == "maalt"]
-    if not app["apparatet_virker"]:
+
+    # ⚠ TO FORSKELLIGE TOMME SVAR, OG DE BETYDER IKKE DET SAMME.
+    #   tomt_uden_fejl  -> apparatet kunne ikke regne (lukket marked)
+    #   afvist          -> IBKR sagde aktivt nej, med en begrundelse
+    # Et apparat der er nede forklarer det FOERSTE. Det forklarer ikke en
+    # eksplicit, konsistent afvisning — den baerer information uanset.
+    afvist = [m for m in maalinger if m["status"] == "afvist"]
+    koder = {fe["kode"] for m in afvist for fe in (m["fejl"] or [])}
+    tekster = {fe["tekst"] for m in afvist for fe in (m["fejl"] or [])}
+    ensartet = len(afvist) == len([m for m in maalinger if m["status"] != "maalt"]) \
+        and len(koder) == 1
+
+    if maalt:
+        eur = [m for m in maalt if m["par"] == "EURUSD" and m["side"] == "BUY"]
+        svar = (f"EURUSD BUY: {eur[0]['implicit_gearing']}:1 "
+                f"({eur[0]['margin_pct']} % margin) — {eur[0]['dom']}" if eur else
+                f"{len(maalt)} maalinger lykkedes; se tabellen.")
+    elif afvist and ensartet:
+        svar = (f"ALLE {len(afvist)} spot-FX-kald AFVIST med samme kode {koder}: "
+                f"{'; '.join(sorted(tekster))[:160]}. "
+                "⚠ Det er en aktiv afvisning, ikke et tomt svar — den staar selv "
+                "om apparatet er nede. Men den skal BEKRAEFTES med aabent marked, "
+                "foer den bogfoeres som 'kontoen tillader ikke gearet spot FX'.")
+    elif afvist:
+        svar = (f"{len(afvist)} kald afvist, resten tomt. Blandet billede — "
+                "se tabellen og koer igen med aabent marked.")
+    elif not app["apparatet_virker"]:
         svar = ("KAN IKKE BESVARES. whatIf svarede ikke paa kontrolinstrumentet "
                 "MES heller — apparatet er nede (sandsynligvis lukket marked). "
                 "Et tomt FX-svar er derfor ikke et udsagn om FX.")
-    elif not maalt:
-        svar = ("Apparatet virker, men ALLE FX-whatIf blev afvist. Det ER et fund: "
-                "kontoen faar ikke margin paa spot FX. Se fejlteksterne.")
-    else:
-        eur = [m for m in maalt if m["par"] == "EURUSD" and m["side"] == "BUY"]
-        svar = (f"EURUSD BUY: implicit gearing {eur[0]['implicit_gearing']}:1 "
-                f"(initMargin {eur[0]['initMarginChange']})" if eur else
-                f"{len(maalt)} maalinger lykkedes; se tabellen.")
     print(f"\n  → {v(svar)}")
 
     return {"apparat_kontrol": app, "spot_fx": maalinger, "forex_cfd": cfd_ud,
