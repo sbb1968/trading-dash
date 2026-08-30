@@ -395,6 +395,56 @@ async def _vent_paa_slut(handel, sekunder: int = 60) -> bool:
     return False
 
 
+async def _annuller_og_verificer(ib: IB, handel, sekunder: int = 20) -> dict:
+    """⚠ EN ORDRE DER IKKE FYLDTE SKAL VAEK, IKKE BARE FORLADES.
+
+    En markedsordre lagt paa et lukket marked staar 'PreSubmitted' og fylder
+    naar markedet aabner — timer senere, uden nogen til at lukke den. Scriptet
+    ville forlaenge sig selv til en ejerloes position. Det er samme fejlklasse
+    som over-salget 31-07: en ordre man troede var faerdig, fordi man holdt op
+    med at kigge.
+    """
+    if handel.orderStatus.status in ("Filled", "Cancelled", "ApiCancelled"):
+        return {"handling": "ingen", "slutstatus": handel.orderStatus.status}
+    ib.cancelOrder(handel.order)
+    for _ in range(sekunder):
+        await asyncio.sleep(1)
+        if handel.orderStatus.status in ("Cancelled", "ApiCancelled", "Filled"):
+            break
+    return {"handling": "annulleret", "slutstatus": handel.orderStatus.status,
+            "⚠": (None if handel.orderStatus.status in ("Cancelled", "ApiCancelled")
+                  else "ORDREN ER IKKE BEKRAEFTET ANNULLERET — tjek TWS MANUELT")}
+
+
+def _markedet_er_aabent(detaljer, nu: datetime | None = None) -> tuple[bool, str]:
+    """⚠ P3 MAA IKKE LAEGGE EN ORDRE IND I ET LUKKET MARKED.
+
+    Parser tradingHours i kontraktens EGEN tidszone. Kan tiden ikke afgoeres,
+    svares NEJ — en usikker aabningstid maa ikke blive til en ordre.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(detaljer.timeZoneId)
+    except Exception as e:
+        return False, f"kunne ikke afgoere tidszone ({detaljer.timeZoneId}): {e}"
+    nu = nu or datetime.now(tz)
+    for blok in (detaljer.tradingHours or "").split(";"):
+        if not blok or blok.endswith("CLOSED") or "-" not in blok:
+            continue
+        try:
+            a, b = blok.split("-")
+            start = datetime.strptime(a, "%Y%m%d:%H%M").replace(tzinfo=tz)
+            slut = datetime.strptime(b, "%Y%m%d:%H%M").replace(tzinfo=tz)
+        except ValueError:
+            continue
+        if start <= nu <= slut:
+            return True, f"aabent ({blok}, {detaljer.timeZoneId})"
+    naeste = next((b for b in (detaljer.tradingHours or "").split(";")
+                   if b and not b.endswith("CLOSED") and "-" in b), "—")
+    return False, (f"LUKKET. Nu er {nu:%Y-%m-%d %H:%M} {detaljer.timeZoneId}; "
+                   f"foerste blok i tradingHours er {naeste}")
+
+
 async def p3(ib: IB, f: Fejlopsamler, tillad_ordre: bool) -> dict:
     if not tillad_ordre:
         return {"status": "sprunget_over",
@@ -405,6 +455,21 @@ async def p3(ib: IB, f: Fejlopsamler, tillad_ordre: bool) -> dict:
     c = Forex(par)
     await ib.qualifyContractsAsync(c)
     qty = 25_000    # IDEALPRO-minimum jf. websted; minSize fra API er lavere
+
+    # ⚠ AABENT MARKED ER EN FORUDSAETNING, IKKE EN OMSTAENDIGHED.
+    # Uden denne port ville en markedsordre paa et lukket marked staa i koe og
+    # fylde ved aabning — timer senere, uden opsyn.
+    cds = await ib.reqContractDetailsAsync(c)
+    if not cds:
+        return {"status": "afbrudt", "grund": "ingen ContractDetails for EURUSD"}
+    aabent, forklaring = _markedet_er_aabent(cds[0])
+    print(f"  marked: {forklaring}")
+    if not aabent:
+        return {"status": "afbrudt_marked_lukket", "grund": forklaring,
+                "note": ("P3 laegger en AEGTE ordre. Paa et lukket marked ville "
+                         "den staa PreSubmitted og fylde ved aabning uden at "
+                         "nogen lukkede den igen. Koer efter FX-aabning."),
+                "udgangspunkt": await snapshot(ib)}
 
     trin = {"1_foer": await snapshot(ib)}
     print(f"  snapshot foer: positions={len(trin['1_foer']['positions'])}")
@@ -428,13 +493,23 @@ async def p3(ib: IB, f: Fejlopsamler, tillad_ordre: bool) -> dict:
         f.nulstil()
         luk = ib.placeOrder(c, MarketOrder("SELL", qty))
         lukket = await _vent_paa_slut(luk)
+        if not lukket:
+            # ⚠ Lukkeordren fyldte ikke. Annuller den, saa den ikke ligger og
+            # venter — og RAAB OP. Her er der en aaben position tilbage.
+            trin["3_annullering"] = await _annuller_og_verificer(ib, luk)
+            print("  ⚠⚠ LUKKEORDREN FYLDTE IKKE — der kan staa en AABEN "
+                  "position paa EURUSD. TJEK TWS.")
         print(f"  luk: status={luk.orderStatus.status} fyldt={lukket}")
         trin["3_efter_luk"] = await snapshot(ib)
         trin["3_ordrestatus"] = {"status": luk.orderStatus.status,
                                  "filled": luk.orderStatus.filled,
+                                 "lukket_verificeret": lukket,
                                  "fejl": [{"kode": k, "tekst": m} for k, m in f.relevante()]}
     else:
-        trin["3_efter_luk"] = {"note": "ingen fill at lukke", "positions": []}
+        # ⚠ Koebet fyldte ikke. Ordren skal VAEK — ikke bare forlades.
+        trin["2_annullering"] = await _annuller_og_verificer(ib, handel)
+        print(f"  koeb fyldte ikke -> {trin['2_annullering']}")
+        trin["3_efter_luk"] = await snapshot(ib)
 
     def diff(a: dict, b: dict) -> dict:
         ud: dict = {}
@@ -446,9 +521,27 @@ async def p3(ib: IB, f: Fejlopsamler, tillad_ordre: bool) -> dict:
                     ud[f"{felt}.{k}"] = {"foer": f0, "efter": f1}
         return ud
 
+    # ⚠ SLUTKONTROL, UANSET HVILKEN VEJ VI KOM HERTIL.
+    # Ingen efterladte ordrer, ingen efterladt eksponering. Kontrollen spoerger
+    # BROKEREN, ikke vores egen forestilling om hvad der skete.
+    await asyncio.sleep(2)
+    aabne = [o for o in await ib.reqAllOpenOrdersAsync()
+             if o.contract.secType == "CASH"]
+    slutkontrol = {
+        "aabne_fx_ordrer": [{"symbol": o.contract.symbol + o.contract.currency,
+                             "action": o.order.action, "antal": o.order.totalQuantity,
+                             "status": o.orderStatus.status} for o in aabne],
+        "rene_boeger": not aabne,
+    }
+    if aabne:
+        print(f"  ⚠⚠ {len(aabne)} AABEN FX-ORDRE TILBAGE EFTER KOERSEL — TJEK TWS")
+    else:
+        print("  slutkontrol: ingen aabne FX-ordrer tilbage")
+
     efter_koeb = trin.get("2_efter_koeb", {})
     ud = {
         "status": "koert", "par": par, "enheder": qty, "fyldt": fyldt,
+        "slutkontrol": slutkontrol,
         "trin": trin,
         "aendringer_ved_koeb": diff(trin["1_foer"], efter_koeb),
         "fx_i_positions": any(p["secType"] == "CASH"
