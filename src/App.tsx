@@ -772,7 +772,12 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
                   {vist("upl")    && <td style={R} className={plCls(uplAmt)}
                       title={uplAmt != null
-                        ? `(${usd(aktuel!)} − ${usd(b!.avgPrice)}) × ${b!.qty} × ${b!.mult} = ${uplAmt.toFixed(2)} USD`
+                        ? `(${usd(aktuel!)} − ${b!.avgPrice.toFixed(3)}) × ${b!.qty} × ${b!.mult} = ${uplAmt.toFixed(2)} USD
+
+`
+                          + `Koebsprisen er brokerens KOSTBASIS og indeholder entry-kurtagen — `
+                          + `derfor de skaeve decimaler. Exit-kurtagen er IKKE trukket fra endnu, `
+                          + `saa et salg nu giver lidt mindre.`
                         : posUkendt
                           ? "Positionen kunne ikke hentes fra brokeren — tallet er UKENDT, ikke nul"
                           : "Ingen aaben position i denne ticker"}>
