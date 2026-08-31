@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback} from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import { useMarketData } from "./useMarketData";
@@ -369,6 +369,17 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     return () => { levende = false; window.clearInterval(id); };
   }, []);
 
+  // ⚠ "Har raekken en aaben position?" — til ADVARSLER (halt-alarm, slet-bekraeftelse).
+  // Brokeren er sandheden naar den kan naas. Kan den IKKE naas, falder vi tilbage paa
+  // vores eget regnskab — for en advarsel skal "ukendt" opfoere sig som "holdt".
+  // At tabe en halt-alarm fordi backenden lige var nede, er en dyrere fejl end at
+  // faa en alarm for meget.
+  const harPosition = useCallback((ticker: string): boolean => {
+    const t = (ticker || "").toUpperCase();
+    if (brokerPos) return brokerPos[t] != null;
+    return Boolean(meta[t]?.bought);
+  }, [brokerPos, meta]);
+
   // Hold den markerede række gyldig: tom liste -> ingen; ellers klem ned i området
   // (linje 1 er default). Så er der altid netop én markeret linje når der er rækker.
   useEffect(() => {
@@ -457,7 +468,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     for (const t of watchlist) {
       const live = stocks.find(s => s.ticker === t);
       const isHalted = Boolean((live as any)?.halted) || simHalt.has(t);
-      const isHeld   = Boolean(meta[t]?.bought) || simHalt.has(t);   // ALT+H simulerer også "holdt"
+      const isHeld   = harPosition(t) || simHalt.has(t);   // ALT+H simulerer også "holdt"
       if (isHalted && isHeld) cur.add(t);
     }
     let fresh = false;
@@ -557,7 +568,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   }
 
   function removeRow(ticker: string) {
-    const pos = meta[ticker]?.bought;
+    const bp = brokerPos?.[ticker.toUpperCase()];
+    const pos = bp ? { qty: bp.qty } : (brokerPos ? null : meta[ticker]?.bought);
     const confirmOn = localStorage.getItem("confirm_delete_open") !== "false";   // default: bekræft
     if (pos && confirmOn &&
         !window.confirm(`${ticker} har en ÅBEN position (${pos.qty} stk). Fjern linjen alligevel?\n\n` +
@@ -580,7 +592,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // Tickers Iben HOLDER som lige nu er halted — til det tydelige top-banner.
   const haltedHeldTickers = watchedStocks.filter(s => {
     const t = s.ticker;
-    return (Boolean((s as any).halted) || simHalt.has(t)) && (Boolean(meta[t]?.bought) || simHalt.has(t));
+    return (Boolean((s as any).halted) || simHalt.has(t)) && (harPosition(t) || simHalt.has(t));
   }).map(s => s.ticker);
 
   const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
