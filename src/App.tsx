@@ -259,7 +259,7 @@ interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: numbe
 //      forhindre det; watchlisten spurgte det bare aldrig.
 // avg_cost fra /account/dash-snapshot er ALLEREDE omregnet fra IBKR's notionelle
 // avgCost til pris/point, saa den er sammenlignelig med live-prisen.
-interface BrokerPos { qty: number; avgPrice: number; mult: number; }
+interface BrokerPos { qty: number; avgPrice: number; mult: number; exitKurtage: number | null; }
 
 // ── Kolonnevalg fra Konfiguratoren ──────────────────────────────
 // localStorage's "storage"-event fyrer KUN i andre faner, ikke i den der skrev.
@@ -359,7 +359,10 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
           const qty = Number(p.position) || 0;
           const avg = Number(p.avg_cost);
           if (!t || qty === 0 || !Number.isFinite(avg)) continue;
-          ud[t] = { qty, avgPrice: avg, mult: Number(p.multiplier) || 1 };
+          // ⚠ null bevares som null. 0 ville paastaa at lukningen er gratis.
+          const ek = p.exit_kurtage;
+          ud[t] = { qty, avgPrice: avg, mult: Number(p.multiplier) || 1,
+                    exitKurtage: (ek === null || ek === undefined) ? null : Number(ek) };
         }
         setBrokerPos(ud);
       } catch { if (levende) setBrokerPos(null); }
@@ -733,7 +736,17 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               const aktuel = b ? live : null;   // Aktuel pris: kun naar der ER en position
               // ⚠ MULTIPLIKATOREN SKAL MED. MES er $5 pr. point; uden faktoren er
               // et 1-points tab -$1 i stedet for -$5. avgPrice er allerede pris/point.
-              const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty * b.mult : null;
+              //
+              // ⚠ OG HELE RUNDTUREN SKAL MED. avgPrice indeholder allerede
+              // entry-kurtagen (IBKR laegger den i kostbasis), men ikke exit-kurtagen.
+              // Uden den viser kolonnen et halvt nettet tal der LIGNER "hvad faar jeg
+              // hvis jeg lukker nu" uden at vaere det. Kolonnen svarer paa dét
+              // spoergsmaal — derfor traekkes den anden halvdel fra her.
+              const brutto = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty * b.mult : null;
+              // ⚠ Er kurtagen ikke maalt for instrumentet, traekkes INTET fra — og
+              // tooltip'en siger det. En manglende maaling maa ikke blive til et nul.
+              const uplAmt = brutto == null ? null
+                : brutto - (b!.exitKurtage ?? 0);
               const uplPct = (b && aktuel != null && b.avgPrice > 0) ? (aktuel - b.avgPrice) / b.avgPrice * 100 : null;
               const plCls = (v: number | null) => v == null ? "" : v >= 0 ? "positive" : "negative";
               const halted = !!(stock as any).halted || simHalt.has(stock.ticker);
@@ -772,12 +785,21 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
                   {vist("upl")    && <td style={R} className={plCls(uplAmt)}
                       title={uplAmt != null
-                        ? `(${usd(aktuel!)} − ${b!.avgPrice.toFixed(3)}) × ${b!.qty} × ${b!.mult} = ${uplAmt.toFixed(2)} USD
+                        ? `(${usd(aktuel!)} − ${b!.avgPrice.toFixed(3)}) × ${b!.qty} × ${b!.mult} = ${brutto!.toFixed(2)}
+`
+                          + (b!.exitKurtage != null
+                              ? `− exit-kurtage ${b!.exitKurtage.toFixed(2)} = ${uplAmt.toFixed(2)} USD
 
 `
-                          + `Koebsprisen er brokerens KOSTBASIS og indeholder entry-kurtagen — `
-                          + `derfor de skaeve decimaler. Exit-kurtagen er IKKE trukket fra endnu, `
-                          + `saa et salg nu giver lidt mindre.`
+                                + `Det er hvad du faar hvis du lukker NU. Koebsprisen er `
+                                + `brokerens kostbasis og indeholder allerede entry-kurtagen — `
+                                + `derfor decimalerne.`
+                              : `= ${uplAmt.toFixed(2)} USD
+
+`
+                                + `⚠ EXIT-KURTAGEN ER IKKE TRUKKET FRA — den er ikke maalt for `
+                                + `dette instrument (futures_katalog.kurtage_est). Et salg nu `
+                                + `giver lidt mindre end her.`)
                         : posUkendt
                           ? "Positionen kunne ikke hentes fra brokeren — tallet er UKENDT, ikke nul"
                           : "Ingen aaben position i denne ticker"}>

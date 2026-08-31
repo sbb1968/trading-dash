@@ -2,6 +2,7 @@ import asyncio
 import json
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+import futures_katalog as _fkat
 from fastapi.middleware.cors import CORSMiddleware
 
 from alert_engine import AlertEngine
@@ -5369,6 +5370,20 @@ async def account_snapshot(force_journal: bool = False):
                 pnl     = None
                 pnl_pct = None
 
+            # ⚠ EXIT-KURTAGEN. `pnl` ovenfor er nettet for den kurtage der ALLEREDE
+            # er betalt (IBKR laegger entry-kurtagen ind i avgCost), men ikke for den
+            # der skal betales ved lukning. Halvt nettet er en faelde: tallet ser ud
+            # som "hvad faar jeg hvis jeg lukker nu", og er det ikke.
+            # `pnl_netto` traekker rundturens anden halvdel fra.
+            # ⚠ None-KURTAGE BLIVER IKKE TIL 0. Er instrumentet ikke maalt, er
+            # pnl_netto None — og UI'et skal da vise pnl OG sige at exit-kurtagen
+            # mangler, ikke lade som om handlen er gratis at lukke.
+            _kurtage_side = _fkat.kurtage_pr_side(p["ticker"])
+            exit_kurtage = (round(_kurtage_side * abs(qty), 2)
+                            if _kurtage_side is not None else None)
+            pnl_netto = (round(pnl - exit_kurtage, 2)
+                         if (pnl is not None and exit_kurtage is not None) else None)
+
             enriched.append({
                 "ticker":     p["ticker"],
                 "position":   qty,
@@ -5378,6 +5393,8 @@ async def account_snapshot(force_journal: bool = False):
                 "last_price": price,
                 "pnl":        pnl,
                 "pnl_pct":    pnl_pct,
+                "exit_kurtage": exit_kurtage,
+                "pnl_netto":    pnl_netto,
             })
 
         result = {
@@ -5680,6 +5697,20 @@ async def account_dash_snapshot():
                 pnl     = None
                 pnl_pct = None
 
+            # ⚠ EXIT-KURTAGEN. `pnl` ovenfor er nettet for den kurtage der ALLEREDE
+            # er betalt (IBKR laegger entry-kurtagen ind i avgCost), men ikke for den
+            # der skal betales ved lukning. Halvt nettet er en faelde: tallet ser ud
+            # som "hvad faar jeg hvis jeg lukker nu", og er det ikke.
+            # `pnl_netto` traekker rundturens anden halvdel fra.
+            # ⚠ None-KURTAGE BLIVER IKKE TIL 0. Er instrumentet ikke maalt, er
+            # pnl_netto None — og UI'et skal da vise pnl OG sige at exit-kurtagen
+            # mangler, ikke lade som om handlen er gratis at lukke.
+            _kurtage_side = _fkat.kurtage_pr_side(p["ticker"])
+            exit_kurtage = (round(_kurtage_side * abs(qty), 2)
+                            if _kurtage_side is not None else None)
+            pnl_netto = (round(pnl - exit_kurtage, 2)
+                         if (pnl is not None and exit_kurtage is not None) else None)
+
             enriched.append({
                 "ticker":        p["ticker"],
                 "position":      qty,
@@ -5691,6 +5722,8 @@ async def account_dash_snapshot():
                 "market_value":  safe_float(price * qty * mult) if price is not None else None,
                 "pnl":           pnl,
                 "pnl_pct":       pnl_pct,
+                "exit_kurtage":  exit_kurtage,
+                "pnl_netto":     pnl_netto,
             })
 
         # Risiko-graenseforbrug pr. strategi (unik vaerdi — TWS kender ikke vores

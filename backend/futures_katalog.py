@@ -50,6 +50,26 @@ class FuturesInstrument:
     margin_est: float | None = None
     margin_maalt: str = ""      # YYYY-MM-DD
 
+    # ⚠ ESTIMAT, ligesom margin_est — og af samme grund maalt frem for slaaet op.
+    # Kurtage PR. KONTRAKT PR. SIDE i USD. En rundtur er altsaa 2 x dette tal.
+    #
+    # Hvorfor det ikke hentes live: `commissionReport` fra reqExecutions kom
+    # tilbage med 0.0 paa vores build, og `whatIfOrder` returnerer tomt paa denne
+    # TWS uanset om markedet er aabent (maalt 31-08-2026, baade MES og EURUSD).
+    # Ingen af de to API-veje kan altsaa levere tallet.
+    #
+    # Hvordan det saa MAALES: IBKR laegger kurtagen ind i positionens avgCost.
+    # Med en kendt fyldningspris er differensen kurtagen:
+    #     fyldning   BOT 1 MES @ 7704,00
+    #     avgCost    38520,61
+    #     7704 x 5 = 38520,00   ->   differens 0,61 = kurtagen
+    # `maal_futures_kurtage.py` gentager netop det regnestykke.
+    #
+    # None = IKKE MAALT. UI'et skal da vise P/L UDEN exit-kurtage og sige det —
+    # ikke gaette paa et tal fra et andet instrument.
+    kurtage_est: float | None = None
+    kurtage_maalt: str = ""     # YYYY-MM-DD
+
 
 # Multiplikatorerne er bekraeftet live mod reqPositions-avgCost (= pris x multiplier)
 # OG mod IBKRs egen kontrakt-spec (MESU6 har multiplier='5').
@@ -62,7 +82,8 @@ class FuturesInstrument:
 KATALOG: dict[str, FuturesInstrument] = {
     i.symbol: i for i in [
         FuturesInstrument("MES", "CME", 5.0, "Micro E-mini S&P 500",
-                          "CME_MINI:MES1!"),
+                          "CME_MINI:MES1!",
+                          kurtage_est=0.61, kurtage_maalt="2026-08-31"),
         FuturesInstrument("M2K", "CME", 5.0, "Micro E-mini Russell 2000",
                           "CME_MINI:M2K1!"),
         # ⚠ MULTIPLIER 2, IKKE 5. MNQ er den eneste af de tre mikroer med en anden
@@ -95,6 +116,17 @@ def multiplikator(ticker: str) -> float:
     """
     i = KATALOG.get(_norm(ticker))
     return i.multiplier if i else 1.0
+
+
+def kurtage_pr_side(ticker: str) -> float | None:
+    """Kurtage pr. kontrakt pr. side i USD. None = ikke maalt for dette instrument.
+
+    ⚠ None BETYDER NOGET og maa ikke laves om til 0,0 undervejs. 0,0 ville
+    paastaa at handlen er gratis; None siger at vi ikke ved det, og UI'et kan
+    saa vise et P/L uden exit-kurtage OG sige at det er dét det er.
+    """
+    i = KATALOG.get(_norm(ticker))
+    return i.kurtage_est if i else None
 
 
 def symboler() -> list[str]:

@@ -90,6 +90,8 @@ SCRIPTS: dict[str, int] = {
     # FX-proben (spec 30-08-2026). Read-only + whatIf; ordrer kun med
     # --tillad-ordre. Koerer mod en PAPER-port, aldrig live.
     "fx_probe.py":                   22,
+    # Maaler kurtage pr. kontrakt ud af avgCost-differensen. Read-only.
+    "maal_futures_kurtage.py":       23,
 }
 
 
