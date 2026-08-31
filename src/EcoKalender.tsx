@@ -69,6 +69,24 @@ function nedtaelling(min: number | null): string {
   return forbi ? `for ${tekst} siden` : `om ${tekst}`;
 }
 
+/** "i dag kl. 15:05" · "i morgen (tirsdag 01-09) kl. 15:05" · "torsdag 03-09 kl. 14:30".
+ *
+ *  ⚠ ABSOLUT TID ER HOVEDSVARET, IKKE NEDTAELLINGEN. "om 29 t 11 min" tvinger
+ *  laeseren til hovedregning — og Soeren regnede 15:14 hvor der stod 15:05,
+ *  fordi han regnede fra det tidspunkt han LAESTE det og ikke fra det tidspunkt
+ *  tallet blev dannet. Nedtaellingen er nu en parentes, ikke svaret. */
+function hvornaar(dato: string | null, klokke: string | null): string {
+  if (!dato) return "—";
+  const d = iDag();
+  const naevn = dato === d ? "i dag"
+    : dato === skiftDag(d, 1) ? `i morgen (${ugedag(dato)} ${kort(dato)})`
+    : dato === skiftDag(d, -1) ? `i går (${ugedag(dato)} ${kort(dato)})`
+    : `${ugedag(dato)} ${kort(dato)}`;
+  return klokke ? `${naevn} kl. ${klokke}` : `${naevn}, hele dagen`;
+}
+
+const kort = (dato: string) => dato.slice(8, 10) + "-" + dato.slice(5, 7);
+
 const ugedag = (dato: string) => {
   const [y, m, d] = dato.split("-").map(Number);
   return ["søndag", "mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag"][
@@ -82,9 +100,12 @@ export default function EcoKalender() {
   const [netfejl, setNetfejl] = useState("");
   const [visAlle, setVisAlle] = useState(false);   // tier 2 med eller ej
 
-  const hent = useCallback(async (d: string) => {
+  const hent = useCallback(async (d: string, tier: number) => {
     try {
-      const r = await fetch(`${API}/eco/dash-dag?dato=${d}`);
+      // ⚠ Samme tier til BEGGE dele. Ellers kan "naeste" vise et event der er
+      // filtreret vaek af listen nedenfor — praecis dét der skete med
+      // "FOMC Member Barr Speaks".
+      const r = await fetch(`${API}/eco/dash-dag?dato=${d}&tier=${tier}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setSvar(await r.json());
       setNetfejl("");
@@ -97,12 +118,13 @@ export default function EcoKalender() {
     }
   }, []);
 
-  useEffect(() => { setHenter(true); hent(dato); }, [dato, hent]);
+  const tier = visAlle ? 2 : 1;
+  useEffect(() => { setHenter(true); hent(dato, tier); }, [dato, tier, hent]);
   // Nedtællingen skal leve. Et minut er rigeligt — events har minutopløsning.
   useEffect(() => {
-    const id = window.setInterval(() => hent(dato), 60_000);
+    const id = window.setInterval(() => hent(dato, tier), 60_000);
     return () => window.clearInterval(id);
-  }, [dato, hent]);
+  }, [dato, tier, hent]);
 
   const erIDag = dato === iDag();
   const alle = svar?.events ?? [];
@@ -156,12 +178,21 @@ export default function EcoKalender() {
           <div style={{ fontSize: 10, color: "var(--text-muted)", letterSpacing: 0.4,
                         textTransform: "uppercase" }}>Næste</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <b style={{ fontSize: "1.08em" }}>{svar.naeste.klokke_dk ?? "—"}</b>
+            {/* ⚠ DATOEN SKAL MED. Uden den laeste "15:05" som i dag, mens
+                eventet laa i morgen — og saa kunne det ikke findes i listen. */}
+            <b style={{ fontSize: "1.06em" }}>
+              {hvornaar(svar.naeste.dato_dk, svar.naeste.klokke_dk)}
+            </b>
             <span style={{ fontWeight: 700 }}>{svar.naeste.titel}</span>
             <TierMaerke tier={svar.naeste.tier} />
-            <span style={{ color: "var(--accent)", fontWeight: 700 }}>
-              {nedtaelling(svar.naeste.minutter_til)}
+            <span style={{ color: "var(--text-muted)" }}>
+              ({nedtaelling(svar.naeste.minutter_til)})
             </span>
+            {svar.naeste.dato_dk && svar.naeste.dato_dk !== dato && (
+              <button onClick={() => setDato(svar.naeste!.dato_dk!)}
+                      style={{ ...knapStil, fontSize: 10 }}
+                      title="Gaa til den dag eventet ligger">gå til dagen →</button>
+            )}
           </div>
         </div>
       )}
@@ -179,12 +210,16 @@ export default function EcoKalender() {
           <table className="scanner-table" style={{ width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", width: 58 }}>Tid</th>
-                <th style={{ textAlign: "left" }}>Event</th>
-                <th style={{ textAlign: "right", width: 62 }}>Prognose</th>
-                <th style={{ textAlign: "right", width: 62 }}>Forrige</th>
-                <th style={{ textAlign: "right", width: 62 }}>Faktisk</th>
-                <th style={{ textAlign: "right", width: 92 }}>Om</th>
+                {/* ⚠ nowrap + bredde nok til overskriften. Uden det blev
+                    "Prognose" til "PROG..." og "Forrige" til "FORRI...", og en
+                    afkortet overskrift over en talkolonne er en gaade, ikke en
+                    etiket. */}
+                <th style={{ ...H, textAlign: "left", width: 64 }}>Tid</th>
+                <th style={{ ...H, textAlign: "left" }}>Event</th>
+                <th style={{ ...H, width: 78 }}>Prognose</th>
+                <th style={{ ...H, width: 74 }}>Forrige</th>
+                <th style={{ ...H, width: 74 }}>Faktisk</th>
+                <th style={{ ...H, width: 112 }}>Om</th>
               </tr>
             </thead>
             <tbody>
@@ -217,7 +252,9 @@ export default function EcoKalender() {
                                color: e.actual ? "var(--text-primary)" : "var(--text-muted)" }}>
                     {e.actual || "—"}
                   </td>
-                  <td style={{ textAlign: "right", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                  <td style={{ textAlign: "right", color: "var(--text-secondary)",
+                               whiteSpace: "nowrap" }}
+                      title={hvornaar(e.dato_dk, e.klokke_dk)}>
                     {nedtaelling(e.minutter_til)}
                   </td>
                 </tr>
@@ -242,6 +279,9 @@ export default function EcoKalender() {
 }
 
 // ── Småting ─────────────────────────────────────────────────────────────────
+// Talkolonnernes overskrifter: hoejrestillet og aldrig ombrudt.
+const H: React.CSSProperties = { textAlign: "right", whiteSpace: "nowrap" };
+
 const knapStil: React.CSSProperties = {
   background: "var(--bg-secondary)", border: "1px solid var(--border)",
   color: "var(--text-secondary)", borderRadius: 3, fontSize: 11,

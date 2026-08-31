@@ -72,6 +72,28 @@ def main() -> int:
     # tidspunkt kilden ikke har oplyst.
     kraev("hele dagen" in kilde, "events uden klokkeslaet vises som 'hele dagen'")
 
+    # ── ⚠ De to fejl Soeren fandt 31-08 ────────────────────────────────────
+    print("\n  ── absolut tid og tier-filter ──")
+    # 1. "15:05" uden dato laeste som I DAG, mens eventet laa i morgen.
+    kraev("function hvornaar" in kilde,
+          "der findes en hjaelper der siger HVORNAAR (dato + klokkeslaet)")
+    kraev("i morgen" in kilde and "i dag" in kilde,
+          "hvornaar() navngiver dagen ('i dag' / 'i morgen')")
+    m = re.search(r"NÆSTE|Næste", kilde)
+    kraev(m is not None, "der findes et 'Naeste'-panel")
+    # Panelet SKAL bruge hvornaar(), ikke bare klokke_dk.
+    panel = kilde[kilde.find("svar.naeste &&"):][:1400]
+    kraev("hvornaar(svar.naeste.dato_dk" in panel,
+          "Naeste-panelet viser dato OG klokkeslaet, ikke kun klokkeslaet")
+    kraev("nedtaelling(svar.naeste.minutter_til)" in panel,
+          "nedtaellingen er der stadig — som parentes, ikke som hovedsvar")
+
+    # 2. 'naeste' skal foelge samme tier-filter som listen.
+    kraev("tier=${tier}" in kilde,
+          "vinduet sender sit tier-filter med i kaldet")
+    kraev("max_tier=max(1, min(2, tier))" in hoved,
+          "endpointet bruger det tier paa 'naeste' — ikke fast 2")
+
     # ── Datalaget svarer ───────────────────────────────────────────────────
     print("\n  ── datalaget ──")
     with contextlib.closing(eco_kalender.forbind_laes()) as con:

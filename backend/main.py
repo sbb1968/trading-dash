@@ -3195,8 +3195,14 @@ async def eco_status():
 # hvad "i dag" er naar kaldene krydser midnat — og saa staar der et event i
 # listen som "naeste" ikke kender.
 @app.get("/eco/dash-dag")
-async def eco_dash_dag(dato: str | None = None):
-    """Dagens events + naeste event + hoest-friskhed i ét svar."""
+async def eco_dash_dag(dato: str | None = None, tier: int = 2):
+    """Dagens events + naeste event + hoest-friskhed i ét svar.
+
+    ⚠ `tier` gaelder BEGGE dele. Sagde 'naeste' altid tier 2 mens listen var
+    filtreret til tier 1, kunne vinduet vise et kommende event man ikke kunne
+    finde nogen steder — og det skete: "FOMC Member Barr Speaks" stod som naeste
+    mens listen sagde "Kun tier 1". Filteret skal gaelde hele vinduet.
+    """
     dag = dato or datetime.now().strftime("%Y-%m-%d")
     try:
         datetime.strptime(dag, "%Y-%m-%d")
@@ -3205,7 +3211,7 @@ async def eco_dash_dag(dato: str | None = None):
     try:
         with closing(eco_kalender.forbind_laes()) as con:
             events = eco_kalender.hent_dag(con, dag)
-            naeste = eco_kalender.naeste(con, max_tier=2)
+            naeste = eco_kalender.naeste(con, max_tier=max(1, min(2, tier)))
             st = eco_kalender.status(con)
     except Exception as e:
         # ⚠ En fejl maa IKKE blive til en tom liste. Vinduet skal kunne skelne
@@ -3218,6 +3224,7 @@ async def eco_dash_dag(dato: str | None = None):
         "events": events,
         "count": len(events),
         "naeste": naeste,
+        "tier": tier,
         # ⚠ stale er svarets vigtigste felt: er hoesten gammel, skal vinduet
         # SIGE det frem for at vise en rolig dag.
         "stale": st.get("stale"),
