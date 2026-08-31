@@ -23,7 +23,8 @@ export type WindowId =
   | "sektorniche"
   | "strategirapport"
   | "firmainfo"
-  | "handelschart";
+  | "handelschart"
+  | "ecokalender";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
   watchlist:    "Watchlist",
@@ -58,6 +59,7 @@ export const WINDOW_LABELS: Record<WindowId, string> = {
   sektorniche:     "Sektorer",
   strategirapport: "Strategirapport",
   firmainfo:       "Firma-info",
+  ecokalender:     "Økonomisk kalender",
   handelschart:    "Handels-chart",
 };
 

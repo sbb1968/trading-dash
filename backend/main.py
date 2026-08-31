@@ -3184,6 +3184,49 @@ async def eco_status():
         return eco_kalender.status(con)
 
 
+# ── /eco/dash-dag — Trading Dash' morgenoverblik ────────────────────────────
+# ⚠ UDEN AUTH, som /account/dash-snapshot. Trading Dash koerer paa Ibens egen
+# maskine mod localhost og har ingen studio-token. Kraevede endpointet login,
+# ville vinduet vaere tomt hver morgen — og det tomme vindue ville ligne
+# "ingen events i dag".
+#
+# ⚠ ÉT KALD, IKKE TRE. Vinduet skal bruge dagens events, naeste event OG
+# hoestens friskhed. Hentes de hver for sig, kan de tre svar vaere uenige om
+# hvad "i dag" er naar kaldene krydser midnat — og saa staar der et event i
+# listen som "naeste" ikke kender.
+@app.get("/eco/dash-dag")
+async def eco_dash_dag(dato: str | None = None):
+    """Dagens events + naeste event + hoest-friskhed i ét svar."""
+    dag = dato or datetime.now().strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(dag, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, f"ugyldig dato: {dag!r} (ventede YYYY-MM-DD)")
+    try:
+        with closing(eco_kalender.forbind_laes()) as con:
+            events = eco_kalender.hent_dag(con, dag)
+            naeste = eco_kalender.naeste(con, max_tier=2)
+            st = eco_kalender.status(con)
+    except Exception as e:
+        # ⚠ En fejl maa IKKE blive til en tom liste. Vinduet skal kunne skelne
+        # "ingen events i dag" fra "kalenderen svarer ikke".
+        return {"ok": False, "dato": dag, "fejl": f"{type(e).__name__}: {e}",
+                "events": None, "naeste": None, "stale": None}
+    return {
+        "ok": True,
+        "dato": dag,
+        "events": events,
+        "count": len(events),
+        "naeste": naeste,
+        # ⚠ stale er svarets vigtigste felt: er hoesten gammel, skal vinduet
+        # SIGE det frem for at vise en rolig dag.
+        "stale": st.get("stale"),
+        "sidste_hoest": st.get("sidste_hoest"),
+        "hoest_alder_timer": st.get("alder_timer"),
+        "max_alder_timer": st.get("max_alder_timer"),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Handels-chart — bar-kontekst med entry/exit pr. lukket handel (Stage B + A)
 # Genskaber chartet algoen handlede paa (algoens egne bar-parametre). Read-only,

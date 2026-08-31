@@ -35,6 +35,7 @@ import { BuyHoldDetail } from "./BuyHoldDetail";
 import { DocsWindow } from "./DocsWindow";
 import { DagensLogWindow } from "./DagensLogWindow";
 import { HaltScanner } from "./HaltScanner";
+import EcoKalender from "./EcoKalender";
 import { HelpAssistant } from "./HelpAssistant";
 import { SwingTop15 } from "./SwingTop15";
 import { BuyHoldTop15 } from "./BuyHoldTop15";
@@ -1590,6 +1591,7 @@ export function renderWindowContent(id: WindowId, props: {
     case "docs":    return <DocsWindow />;
     case "dagenslog": return <DagensLogWindow />;
     case "haltscanner": return <HaltScanner onSelectTicker={props.onSelectTicker} />;
+    case "ecokalender": return <EcoKalender />;
     case "assistent": return <HelpAssistant />;
     case "swingtop15": return <SwingTop15 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;
     case "buyholdtop15": return <BuyHoldTop15 onSelectTicker={props.onSelectTicker} onOpenDetail={props.onOpenDetail} />;

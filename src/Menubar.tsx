@@ -54,6 +54,9 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
     { id: "regimefingerprint", shortcut: "N" },   // Regime-fingeraftryk (ugentligt)
     { id: "sektorniche",    shortcut: "K" },   // Sektorer & nicher
     { id: "firmainfo",      shortcut: "F" },   // Firma-info for valgt ticker
+    // Morgenoverblik: dagens oekonomiske events. Data har vaeret i drift siden
+    // 18-08; det var kun vejen ind i Trading Dash der manglede.
+    { id: "ecokalender",    shortcut: "Ø" },
   ]},
   { label: "Analyse", icon: "🎯", items: [
     { id: "swing",          shortcut: "W" },   // Swing-scores
