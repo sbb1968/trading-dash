@@ -100,12 +100,13 @@ export const WATCHLIST_COLUMNS = [
   // cache som alle andre vinduer — saa navnet er NOEJAGTIGT ens overalt.
   { id: "navn",     label: "Navn"        },
   { id: "pris",     label: "Pris"        },
+  // Ur. P/L staar lige efter Pris — de to tal aflaeses sammen.
+  { id: "upl",      label: "Ur. P/L"     },
   { id: "stk",      label: "Stk"         },
   { id: "handel",   label: "Handel (KØB/SÆLG)" },
   { id: "koebspris", label: "Købspris"    },
   { id: "aktuel",   label: "Aktuel pris" },
   { id: "beholdning", label: "Beholdning" },
-  { id: "upl",      label: "Ur. P/L"     },
   { id: "uplpct",   label: "Ur. P/L %"   },
 ];
 

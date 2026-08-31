@@ -241,7 +241,25 @@ function playHaltAlarm() {
 }
 
 // ── Watchlist Panel ───────────────────────────────────────────
+// `bought` er vores EGET regnskab, akkumuleret af de fills denne browser tilfaeldigvis
+// saa, og gemt i localStorage. Det bruges stadig til UI-tilstand (er raekken "koebt"),
+// men det MAA IKKE laengere vaere kilden til Koebspris, Beholdning og P/L — se BrokerPos.
 interface WatchMeta { addPrice?: number; bought?: { avgPrice: number; qty: number }; }
+
+// ⚠ POSITIONEN KOMMER FRA BROKEREN, IKKE FRA VORES EGET REGNSKAB.
+// Watchlisten viste 31-08 "Ur. P/L $-115.00" paa en MES hvor brokeren havde
+// 1 kontrakt @ 7704,12 og prisen stod i 7703 — det rigtige svar var -$5,60.
+// To fejl paa én gang:
+//   1. localStorage-regnskabet var drevet fra virkeligheden (det havde qty=2 @
+//      7760,50). Det er et tal der ser autoritativt ud og aldrig er tjekket mod
+//      brokeren — samme fejlklasse som fantom-positionerne i reconcile.
+//   2. Multiplikatoren manglede helt. futures_katalog.py's egen indledning
+//      advarer ordret mod den: "glemt i MULTIPLIER -> P&L regnes med 1,0 ...
+//      Journalen ser rigtig ud og er forkert." Kataloget blev bygget for at
+//      forhindre det; watchlisten spurgte det bare aldrig.
+// avg_cost fra /account/dash-snapshot er ALLEREDE omregnet fra IBKR's notionelle
+// avgCost til pris/point, saa den er sammenlignelig med live-prisen.
+interface BrokerPos { qty: number; avgPrice: number; mult: number; }
 
 // ── Kolonnevalg fra Konfiguratoren ──────────────────────────────
 // localStorage's "storage"-event fyrer KUN i andre faner, ikke i den der skrev.
@@ -318,6 +336,38 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     try { return JSON.parse(localStorage.getItem("watchlist_meta") || "{}"); } catch { return {}; }
   });
   useEffect(() => { localStorage.setItem("watchlist_meta", JSON.stringify(meta)); }, [meta]);
+
+  // ── Positioner fra brokeren ─────────────────────────────────────────────
+  // ⚠ null betyder "ikke hentet / backend svarer ikke" og {} betyder "hentet,
+  // ingen positioner". De to MAA ikke blandes sammen: den foerste skal vise en
+  // tankestreg, den anden en tom raekke. En manglende hentning der vises som
+  // "ingen position" ville paastaa at kontoen er flad — praecis den fejl
+  // get_positions_reliable() findes for at undgaa i backenden.
+  const [brokerPos, setBrokerPos] = useState<Record<string, BrokerPos> | null>(null);
+  useEffect(() => {
+    let levende = true;
+    async function hent() {
+      try {
+        const r = await fetch("http://127.0.0.1:8000/account/dash-snapshot");
+        if (!r.ok) throw new Error(String(r.status));
+        const d = await r.json();
+        if (!levende) return;
+        if (!d.ok || !Array.isArray(d.positions)) { setBrokerPos(null); return; }
+        const ud: Record<string, BrokerPos> = {};
+        for (const p of d.positions) {
+          const t = String(p.ticker ?? "").toUpperCase();
+          const qty = Number(p.position) || 0;
+          const avg = Number(p.avg_cost);
+          if (!t || qty === 0 || !Number.isFinite(avg)) continue;
+          ud[t] = { qty, avgPrice: avg, mult: Number(p.multiplier) || 1 };
+        }
+        setBrokerPos(ud);
+      } catch { if (levende) setBrokerPos(null); }
+    }
+    hent();
+    const id = window.setInterval(hent, 5000);
+    return () => { levende = false; window.clearInterval(id); };
+  }, []);
 
   // Hold den markerede række gyldig: tom liste -> ingen; ellers klem ned i området
   // (linje 1 er default). Så er der altid netop én markeret linje når der er rækker.
@@ -647,12 +697,15 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               <th style={{ textAlign: "left" }}>Ticker</th>
               {vist("navn")       && <th style={{ textAlign: "left" }}>Navn</th>}
               {vist("pris")       && <th style={R}>Pris</th>}
+              {/* Ur. P/L staar bevidst LIGE til hoejre for Pris: det er de to tal
+                  man aflaeser sammen, og med Stk/Handel imellem skulle blikket
+                  hoppe over to kolonner der ikke er tal. */}
+              {vist("upl")        && <th style={R}>Ur. P/L</th>}
               {vist("stk")        && <th style={{ textAlign: "center", width: 76 }}>Stk</th>}
               {vist("handel")     && <th style={{ textAlign: "center", width: 130 }}>Handel</th>}
               {vist("koebspris")  && <th style={R}>Købspris</th>}
               {vist("aktuel")     && <th style={R}>Aktuel pris</th>}
               {vist("beholdning") && <th style={R}>Beholdning</th>}
-              {vist("upl")        && <th style={R}>Ur. P/L</th>}
               {vist("uplpct")     && <th style={R}>Ur. P/L %</th>}
               <th></th>
             </tr>
@@ -661,10 +714,14 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
             {watchedStocks.length === 0 && <tr><td colSpan={3 + WATCHLIST_COLUMNS.filter(c => vist(c.id)).length} className="watchlist-empty">Ingen aktier endnu</td></tr>}
             {watchedStocks.map((stock, i) => {
               const m = meta[stock.ticker] || {};
-              const b = m.bought;   // udfyldes i næste trin (ordre-sporing / fills)
+              // ⚠ Positionen er BROKERENS, ikke vores eget localStorage-regnskab.
+              const b = brokerPos ? (brokerPos[stock.ticker] ?? null) : null;
+              const posUkendt = brokerPos === null;   // backend svarer ikke -> "—", ikke "flad"
               const live = stock.price > 0 ? stock.price : null;
-              const aktuel = b ? live : null;   // Aktuel pris: kun efter køb
-              const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty : null;
+              const aktuel = b ? live : null;   // Aktuel pris: kun naar der ER en position
+              // ⚠ MULTIPLIKATOREN SKAL MED. MES er $5 pr. point; uden faktoren er
+              // et 1-points tab -$1 i stedet for -$5. avgPrice er allerede pris/point.
+              const uplAmt = (b && aktuel != null) ? (aktuel - b.avgPrice) * b.qty * b.mult : null;
               const uplPct = (b && aktuel != null && b.avgPrice > 0) ? (aktuel - b.avgPrice) / b.avgPrice * 100 : null;
               const plCls = (v: number | null) => v == null ? "" : v >= 0 ? "positive" : "negative";
               const halted = !!(stock as any).halted || simHalt.has(stock.ticker);
@@ -701,6 +758,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                     {navne[stock.ticker] || "—"}
                   </td>}
                   {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
+                  {vist("upl")    && <td style={R} className={plCls(uplAmt)}
+                      title={uplAmt != null
+                        ? `(${usd(aktuel!)} − ${usd(b!.avgPrice)}) × ${b!.qty} × ${b!.mult} = ${uplAmt.toFixed(2)} USD`
+                        : posUkendt
+                          ? "Positionen kunne ikke hentes fra brokeren — tallet er UKENDT, ikke nul"
+                          : "Ingen aaben position i denne ticker"}>
+                    {uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>}
                   {vist("stk") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
                       ref={el => { stkRefs.current[i] = el; }}
@@ -735,7 +799,6 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   {vist("koebspris")  && <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>}
                   {vist("aktuel")     && <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>}
                   {vist("beholdning") && <td style={R}>{b ? b.qty : "—"}</td>}
-                  {vist("upl")    && <td style={R} className={plCls(uplAmt)}>{uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>}
                   {vist("uplpct") && <td style={R} className={plCls(uplPct)}>{uplPct != null ? `${uplPct >= 0 ? "+" : ""}${uplPct.toFixed(2)}%` : "—"}</td>}
                   <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); removeRow(stock.ticker); }}>✕</button></td>
                 </tr>
