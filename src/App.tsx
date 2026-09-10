@@ -345,6 +345,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // "ingen position" ville paastaa at kontoen er flad — praecis den fejl
   // get_positions_reliable() findes for at undgaa i backenden.
   const [brokerPos, setBrokerPos] = useState<Record<string, BrokerPos> | null>(null);
+  // ⚠ HVORFOR vi ikke kan naa brokeren — ikke bare AT vi ikke kan.
+  // 10-09 stod Ibens watchlist med "—" i P/L uden nogen synlig grund, fordi
+  // Gateway'en paa 4002 var faldet. Tankestregen var korrekt (vi kendte ikke
+  // tallet), men den var TAVS: forklaringen laa i en tooltip, og en tooltip er
+  // ubrugelig midt i en handel. Hun opdagede det foerst da et SALG fejlede.
+  // En dash der har mistet brokeren skal sige det hoejt, ikke vise en streg.
+  const [brokerFejl, setBrokerFejl] = useState<string>("");
   useEffect(() => {
     let levende = true;
     async function hent() {
@@ -353,7 +360,12 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
         if (!r.ok) throw new Error(String(r.status));
         const d = await r.json();
         if (!levende) return;
-        if (!d.ok || !Array.isArray(d.positions)) { setBrokerPos(null); return; }
+        if (!d.ok || !Array.isArray(d.positions)) {
+          setBrokerPos(null);
+          setBrokerFejl(String(d.error || "backenden kunne ikke naa IBKR"));
+          return;
+        }
+        setBrokerFejl("");
         const ud: Record<string, BrokerPos> = {};
         for (const p of d.positions) {
           const t = String(p.ticker ?? "").toUpperCase();
@@ -366,7 +378,13 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                     exitKurtage: (ek === null || ek === undefined) ? null : Number(ek) };
         }
         setBrokerPos(ud);
-      } catch { if (levende) setBrokerPos(null); }
+      } catch (e) {
+        if (levende) {
+          setBrokerPos(null);
+          setBrokerFejl(e instanceof Error ? `backenden svarer ikke (${e.message})`
+                                           : "backenden svarer ikke");
+        }
+      }
     }
     hent();
     const id = window.setInterval(hent, 5000);
@@ -651,6 +669,15 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
           maxLength={24} />
       </div>
       {error && <div className="watchlist-error">{error}</div>}
+      {/* ⚠ SYNLIG, IKKE I EN TOOLTIP. Naar brokeren ikke kan naas, er BAADE
+          Ur. P/L, Koebspris og Beholdning ukendte — og handelsknapperne vil
+          fejle. Det skal staa foer hun opdager det ved at forsoege et salg. */}
+      {brokerFejl && (
+        <div className="watchlist-error">
+          ⚠ Kan ikke naa brokeren: {brokerFejl}. <b>Ur. P/L, Købspris og
+          Beholdning er UKENDTE</b> — ikke nul. Køb/salg vil sandsynligvis også fejle.
+        </div>
+      )}
       {/* ⚠ HJAELPELINJEN MAA IKKE LOVE EN AFTRAEKKER DER ER SLAAET FRA.
           Maalt paa Ibens workstation 11-08: kolonnevalget stod tomt, saa
           `handel` var skjult og K/S dermed deaktiveret (se handelAktiv) — men
