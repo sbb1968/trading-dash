@@ -1020,7 +1020,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 _ordre_fejl = ""
                 if ordre_forbindelse.konfigureret():
                     try:
-                        ibkr = await ordre_forbindelse.hent()
+                        # ⚠ tving=True: her venter et MENNESKE paa svaret.
+                        # Afkoelingen findes for at bremse pollere, ikke for at
+                        # faa Iben til at vente 20 sekunder paa at maatte saelge.
+                        ibkr = await ordre_forbindelse.hent(tving=True)
                     except ordre_forbindelse.OrdreForbindelseFejl as e:
                         # En spaerret vagt maa IKKE falde tilbage til den delte
                         # forbindelse — saa ville ordren lande paa en anden konto

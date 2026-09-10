@@ -217,6 +217,17 @@ class IBKRConnection:
             return True
         except Exception as e:
             self._connect_attempted = False
+            # ⚠ RYD OP EFTER ET MISLYKKET FORSOEG.
+            # connectAsync kan naa at aabne socket'en foer den fejler (forkert
+            # port, API slaaet fra, id optaget). Droppes objektet uden
+            # disconnect, bliver klienten liggende med SIT clientId — og
+            # naeste forsoeg med samme id kan da blive afvist af den grund
+            # alene. Maalt 10-09: watchlistens 5-sekunders polling gav ~170
+            # forsoeg paa 14 minutter, hvert med clientId 201 og uden oprydning.
+            try:
+                self.ib.disconnect()
+            except Exception:
+                pass
             logger.error(f"❌ Forbindelsesfejl: {e}")
             return False
 

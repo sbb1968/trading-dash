@@ -35,6 +35,7 @@ Alle tre kan udløses på kommando, og `test_ordre_forbindelse.py` viser det.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 import accounts
@@ -54,6 +55,23 @@ class OrdreForbindelseFejl(Exception):
 
 
 _forbindelse: Optional[IBKRConnection] = None
+
+# ── ⚠ AFKOELING EFTER EN FEJLET FORBINDELSE ────────────────────────────────
+# `hent()` laaser ikke — den nulstiller og proever forfra. Det er rigtigt naar
+# den kaldes af et menneske, men forkert naar den kaldes af en poller.
+#
+# Maalt 10-09-2026 paa Ibens workstation: Gateway'en faldt 15:59, og
+# watchlisten henter /account/dash-snapshot hvert 5. sekund. Paa en maskine med
+# ordre_forbindelse gaar det kald GENNEM denne funktion, saa der blev forsoegt
+# ~170 forbindelser paa 14 minutter — alle med samme clientId (201). Da
+# Gateway'en kom op igen, blev forbindelsen stadig afvist.
+#
+# Afkoelingen goer at en poller hoejst udloeser ét forsoeg pr. AFKOELING_SEK.
+# Et menneske der trykker Saelg skal derimod IKKE vente: ordrestien kalder
+# hent(tving=True) og gaar uden om afkoelingen.
+AFKOELING_SEK = 20.0
+_sidste_fejl_tid: float = 0.0
+_sidste_fejl: str = ""
 
 
 def konfigureret() -> bool:
@@ -77,9 +95,13 @@ def verificer_profil(profil: dict) -> None:
             f"ikke sat. Ordreforbindelsen oprettes IKKE.")
 
 
-async def hent(genforbind: bool = True) -> IBKRConnection:
-    """Den skrivende forbindelse, klar til brug. Kaster hvis en vagt spærrer."""
-    global _forbindelse
+async def hent(genforbind: bool = True, tving: bool = False) -> IBKRConnection:
+    """Den skrivende forbindelse, klar til brug. Kaster hvis en vagt spærrer.
+
+    `tving=True` går uden om afkølingen. Brug det når et MENNESKE venter på
+    svaret (en ordre), aldrig fra noget der poller.
+    """
+    global _forbindelse, _sidste_fejl_tid, _sidste_fejl
 
     profil = accounts.ordre_forbindelse()
     if profil is None:
@@ -90,9 +112,18 @@ async def hent(genforbind: bool = True) -> IBKRConnection:
     verificer_profil(profil)                                    # V2, før connect
 
     if _forbindelse is not None and _forbindelse.connected:
+        _sidste_fejl_tid, _sidste_fejl = 0.0, ""
         return _forbindelse
     if not genforbind:
         raise OrdreForbindelseFejl("ordreforbindelsen er nede")
+
+    # ⚠ Afkoeling — se noten ved AFKOELING_SEK.
+    if not tving and _sidste_fejl:
+        gaaet = time.monotonic() - _sidste_fejl_tid
+        if gaaet < AFKOELING_SEK:
+            raise OrdreForbindelseFejl(
+                f"{_sidste_fejl} (forsoegt for {gaaet:.0f} s siden; "
+                f"proever igen om {AFKOELING_SEK - gaaet:.0f} s)")
 
     _forbindelse = IBKRConnection(
         paper_trading=not profil.get("tillad_live"),
@@ -104,10 +135,20 @@ async def hent(genforbind: bool = True) -> IBKRConnection:
     )
     ok = await _forbindelse.connect()
     if not ok or not _forbindelse.connected:
+        # ⚠ Luk det mislykkede objekt frem for bare at slippe det. Ellers bliver
+        # klienten liggende med clientId 201 og spaerrer for naeste forsoeg.
+        try:
+            _forbindelse.disconnect()
+        except Exception:
+            pass
         _forbindelse = None
-        raise OrdreForbindelseFejl(
-            f"kunne ikke forbinde til Gateway på {profil['host']}:{profil['port']} "
-            f"— kører den, og er API'et slået til?")
+        _sidste_fejl = (f"kunne ikke forbinde til Gateway på "
+                        f"{profil['host']}:{profil['port']} — kører den, og er "
+                        f"API'et slået til?")
+        _sidste_fejl_tid = time.monotonic()
+        raise OrdreForbindelseFejl(_sidste_fejl)
+
+    _sidste_fejl_tid, _sidste_fejl = 0.0, ""
 
     # ── V1: kontobekræftelse ────────────────────────────────────────────────
     styrede = [a.strip().upper() for a in (_forbindelse.ib.managedAccounts() or [])]
@@ -137,7 +178,8 @@ async def hent(genforbind: bool = True) -> IBKRConnection:
 
 
 async def luk() -> None:
-    global _forbindelse
+    global _forbindelse, _sidste_fejl_tid, _sidste_fejl
+    _sidste_fejl_tid, _sidste_fejl = 0.0, ""
     if _forbindelse is not None:
         try:
             _forbindelse.disconnect()      # synkron — ikke await
