@@ -34,6 +34,7 @@ Alle tre kan udløses på kommando, og `test_ordre_forbindelse.py` viser det.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -56,22 +57,62 @@ class OrdreForbindelseFejl(Exception):
 
 _forbindelse: Optional[IBKRConnection] = None
 
-# ── ⚠ AFKOELING EFTER EN FEJLET FORBINDELSE ────────────────────────────────
-# `hent()` laaser ikke — den nulstiller og proever forfra. Det er rigtigt naar
-# den kaldes af et menneske, men forkert naar den kaldes af en poller.
+# ── ⚠ ÉN AD GANGEN. Kapløbet der laaste Gateway'en ude ─────────────────────
+# Tre kaldere deler denne funktion: /orders/list (Ordre-vinduet),
+# /account/dash-snapshot (watchlisten, hvert 5. sekund) og selve ordrevejen.
+# De kan vaere inde samtidig, og foer laasen var udfaldet dette:
 #
-# Maalt 10-09-2026 paa Ibens workstation: Gateway'en faldt 15:59, og
-# watchlisten henter /account/dash-snapshot hvert 5. sekund. Paa en maskine med
-# ordre_forbindelse gaar det kald GENNEM denne funktion, saa der blev forsoegt
-# ~170 forbindelser paa 14 minutter — alle med samme clientId (201). Da
-# Gateway'en kom op igen, blev forbindelsen stadig afvist.
+#   1. A kommer ind, bygger en IBKRConnection og venter paa connect().
+#   2. Under den `await` kommer B ind, ser at objektet ikke er `connected` endnu,
+#      og bygger sit EGET — med samme clientId (201).
+#   3. En af dem faar 326 "client id is already in use", og dens oprydning
+#      nulstillede modulets `_forbindelse` — altsaa ogsaa VINDEREN, som stadig
+#      var forbundet og stadig holdt 201. Den blev forældreløs: ingen kunne naa
+#      den, og ingen lukkede den.
+#   4. Derefter fik hvert eneste forsoeg 326, fordi vi selv sad paa id'et.
+#
+# Maalt 10-09-2026 i backend_2026-09-10_15-52.log: kl. 15:52:25 lykkedes en
+# forbindelse ("Konto: ['DUQ441063']") og blev kasseret i samme sekund. Kl.
+# 15:52:47 lykkedes endnu en — den holdt syv sekunder. De fire backend-sessioner
+# den dag overlappede ikke, saa kollisionen kom IKKE fra to processer. Den kom
+# herfra.
+#
+# Afkoelingen nedenfor daempede frekvensen, men lukkede ikke kapløbet: ordrevejen
+# kalder `hent(tving=True)` og gaar med vilje uden om afkoelingen. Et menneske
+# der trykker Saelg kunne altsaa stadig kollidere med en poller.
+#
+# ⚠ Laasen kan faa en ordre til at vente. Det er det rigtige bytte: connectAsync
+# har timeout=15, saa ventetiden er begraenset — og alternativet er ikke en
+# hurtigere ordre, men et nyt 326 der spaerrer forbindelsen for alle.
+_laas = asyncio.Lock()
+
+# ── ⚠ AFKOELING EFTER EN FEJLET FORBINDELSE ────────────────────────────────
+# Maalt 10-09-2026 paa Ibens workstation: watchlisten henter
+# /account/dash-snapshot hvert 5. sekund. Paa en maskine med ordre_forbindelse
+# gaar det kald GENNEM denne funktion, saa der blev forsoegt ~170 forbindelser
+# paa 14 minutter — alle med samme clientId (201).
 #
 # Afkoelingen goer at en poller hoejst udloeser ét forsoeg pr. AFKOELING_SEK.
-# Et menneske der trykker Saelg skal derimod IKKE vente: ordrestien kalder
-# hent(tving=True) og gaar uden om afkoelingen.
+# Et menneske der trykker Saelg skal derimod IKKE vente paa den: ordrestien
+# kalder hent(tving=True). Den springer afkoelingen over — men IKKE laasen.
 AFKOELING_SEK = 20.0
 _sidste_fejl_tid: float = 0.0
 _sidste_fejl: str = ""
+
+
+def _spaer(besked: str) -> OrdreForbindelseFejl:
+    """Notér fejlen, saa afkoelingen daekker den, og returnér den til `raise`.
+
+    ⚠ OGSAA NAAR EN VAGT SPAERRER. Foer gjaldt afkoelingen kun connect-fejl, saa
+    en Gateway paa den FORKERTE konto blev forbundet og lukket igen hvert 5.
+    sekund af watchlistens polling — en ny session hvert femte sekund, med samme
+    clientId, mod noget vi allerede vidste vi ikke ville bruge. Et menneske
+    rammes ikke: ordrestien bruger tving=True og faar fejlen med det samme.
+    """
+    global _sidste_fejl_tid, _sidste_fejl
+    _sidste_fejl     = besked
+    _sidste_fejl_tid = time.monotonic()
+    return OrdreForbindelseFejl(besked)
 
 
 def konfigureret() -> bool:
@@ -111,81 +152,109 @@ async def hent(genforbind: bool = True, tving: bool = False) -> IBKRConnection:
 
     verificer_profil(profil)                                    # V2, før connect
 
+    # Den hurtige vej, uden laas. `_forbindelse` tildeles kun ét sted — inde i
+    # laasen, og foerst naar forbindelsen er oprettet OG alle vagter passeret —
+    # saa det her er enten en brugbar forbindelse eller None. Aldrig en halvfaerdig.
     if _forbindelse is not None and _forbindelse.connected:
         _sidste_fejl_tid, _sidste_fejl = 0.0, ""
         return _forbindelse
     if not genforbind:
         raise OrdreForbindelseFejl("ordreforbindelsen er nede")
 
-    # ⚠ Afkoeling — se noten ved AFKOELING_SEK.
-    if not tving and _sidste_fejl:
-        gaaet = time.monotonic() - _sidste_fejl_tid
-        if gaaet < AFKOELING_SEK:
-            raise OrdreForbindelseFejl(
-                f"{_sidste_fejl} (forsoegt for {gaaet:.0f} s siden; "
-                f"proever igen om {AFKOELING_SEK - gaaet:.0f} s)")
+    async with _laas:                       # ⚠ se noten ved _laas
+        # Spoerg igen. Ventede vi paa laasen, kan den der havde den vaere
+        # lykkedes i mellemtiden — og saa skal vi IKKE bygge én mere med samme
+        # clientId. Det var praecis den ekstra forbindelse der gav 326.
+        if _forbindelse is not None and _forbindelse.connected:
+            _sidste_fejl_tid, _sidste_fejl = 0.0, ""
+            return _forbindelse
 
-    _forbindelse = IBKRConnection(
-        paper_trading=not profil.get("tillad_live"),
-        account=profil["konto"],
-        host=profil["host"],
-        port=profil["port"],
-        client_id=CLIENT_ID,
-        kraev_konto=True,     # §3.2: en glemt konto skal fejle, ikke gaettes
-    )
-    ok = await _forbindelse.connect()
-    if not ok or not _forbindelse.connected:
-        # ⚠ Luk det mislykkede objekt frem for bare at slippe det. Ellers bliver
-        # klienten liggende med clientId 201 og spaerrer for naeste forsoeg.
-        try:
-            _forbindelse.disconnect()
-        except Exception:
-            pass
-        _forbindelse = None
-        _sidste_fejl = (f"kunne ikke forbinde til Gateway på "
-                        f"{profil['host']}:{profil['port']} — kører den, og er "
-                        f"API'et slået til?")
-        _sidste_fejl_tid = time.monotonic()
-        raise OrdreForbindelseFejl(_sidste_fejl)
+        # ⚠ Afkoeling — se noten ved AFKOELING_SEK. Tjekkes INDE i laasen, saa
+        # en poller der ventede paa et forsoeg der netop fejlede, arver
+        # afkoelingen frem for straks at starte sit eget.
+        if not tving and _sidste_fejl:
+            gaaet = time.monotonic() - _sidste_fejl_tid
+            if gaaet < AFKOELING_SEK:
+                raise OrdreForbindelseFejl(
+                    f"{_sidste_fejl} (forsoegt for {gaaet:.0f} s siden; "
+                    f"proever igen om {AFKOELING_SEK - gaaet:.0f} s)")
 
-    _sidste_fejl_tid, _sidste_fejl = 0.0, ""
-
-    # ── V1: kontobekræftelse ────────────────────────────────────────────────
-    styrede = [a.strip().upper() for a in (_forbindelse.ib.managedAccounts() or [])]
-    if profil["konto"] not in styrede:
-        _forbindelse.disconnect()      # synkron — ikke await
-        _forbindelse = None
-        raise OrdreForbindelseFejl(
-            f"⚠ FORKERT KONTO. Gatewayen på port {profil['port']} styrer "
-            f"{styrede or '(ingen)'}, ikke {profil['konto']}. Ingen ordrer sendes. "
-            f"Er Gatewayen logget ind som {profil.get('bruger') or 'den rigtige bruger'}?")
-
-    # ── V2 igen, nu mod det IBKR faktisk melder ─────────────────────────────
-    # Konfigurationen kan sige ét og virkeligheden noget andet; her er det
-    # virkeligheden der tjekkes.
-    for k in styrede:
-        if not k.startswith("D") and not profil.get("tillad_live"):
-            _forbindelse.disconnect()      # synkron — ikke await
+        # Et doedt objekt fra sidste gang holder stadig clientId 201. Luk det
+        # her, hvor vi ved at ingen andre bruger det.
+        if _forbindelse is not None:
+            try:
+                _forbindelse.disconnect()
+            except Exception:
+                pass
             _forbindelse = None
-            raise OrdreForbindelseFejl(
-                f"⚠ Gatewayen styrer en LIVE-konto ({k}) og tillad_live er ikke "
-                f"sat. Forbindelsen lukkes.")
 
-    logger.info(f"[Ordre] forbundet {profil['host']}:{profil['port']} "
-                f"clientId={CLIENT_ID} konto={profil['konto']} (kun ordrer, "
-                f"ingen markedsdata)")
-    return _forbindelse
+        # ⚠ BYGGES LOKALT. Modulets `_forbindelse` roeres ikke foer alt er i
+        # orden — ellers ville en samtidig kalder se et objekt der endnu ikke er
+        # forbundet, og en fejlet oprydning kunne kassere en anden kalders
+        # fungerende forbindelse.
+        ny = IBKRConnection(
+            paper_trading=not profil.get("tillad_live"),
+            account=profil["konto"],
+            host=profil["host"],
+            port=profil["port"],
+            client_id=CLIENT_ID,
+            kraev_konto=True,     # §3.2: en glemt konto skal fejle, ikke gaettes
+        )
+        ok = await ny.connect()
+        if not ok or not ny.connected:
+            # ⚠ Luk det mislykkede objekt frem for bare at slippe det. Ellers bliver
+            # klienten liggende med clientId 201 og spaerrer for naeste forsoeg.
+            try:
+                ny.disconnect()
+            except Exception:
+                pass
+            _sidste_fejl = (f"kunne ikke forbinde til Gateway på "
+                            f"{profil['host']}:{profil['port']} — kører den, og er "
+                            f"API'et slået til?")
+            _sidste_fejl_tid = time.monotonic()
+            raise OrdreForbindelseFejl(_sidste_fejl)
+
+        # ── V1: kontobekræftelse ────────────────────────────────────────────
+        styrede = [a.strip().upper() for a in (ny.ib.managedAccounts() or [])]
+        if profil["konto"] not in styrede:
+            ny.disconnect()                # synkron — ikke await
+            raise _spaer(
+                f"⚠ FORKERT KONTO. Gatewayen på port {profil['port']} styrer "
+                f"{styrede or '(ingen)'}, ikke {profil['konto']}. Ingen ordrer sendes. "
+                f"Er Gatewayen logget ind som {profil.get('bruger') or 'den rigtige bruger'}?")
+
+        # ── V2 igen, nu mod det IBKR faktisk melder ─────────────────────────
+        # Konfigurationen kan sige ét og virkeligheden noget andet; her er det
+        # virkeligheden der tjekkes.
+        for k in styrede:
+            if not k.startswith("D") and not profil.get("tillad_live"):
+                ny.disconnect()            # synkron — ikke await
+                raise _spaer(
+                    f"⚠ Gatewayen styrer en LIVE-konto ({k}) og tillad_live er ikke "
+                    f"sat. Forbindelsen lukkes.")
+
+        logger.info(f"[Ordre] forbundet {profil['host']}:{profil['port']} "
+                    f"clientId={CLIENT_ID} konto={profil['konto']} (kun ordrer, "
+                    f"ingen markedsdata)")
+        # ⚠ FOERST HER. En vagt der spaerrer maa ikke efterlade en global der
+        # peger paa en lukket forbindelse.
+        _forbindelse = ny
+        _sidste_fejl_tid, _sidste_fejl = 0.0, ""
+        return _forbindelse
 
 
 async def luk() -> None:
+    # ⚠ Under laasen. Ellers kunne vi lukke en forbindelse `hent()` var midt i at
+    # tage i brug — og efterlade clientId 201 optaget af et objekt ingen ejer.
     global _forbindelse, _sidste_fejl_tid, _sidste_fejl
-    _sidste_fejl_tid, _sidste_fejl = 0.0, ""
-    if _forbindelse is not None:
-        try:
-            _forbindelse.disconnect()      # synkron — ikke await
-        except Exception as e:
-            logger.warning(f"[Ordre] kunne ikke lukke pænt: {e}")
-        _forbindelse = None
+    async with _laas:
+        _sidste_fejl_tid, _sidste_fejl = 0.0, ""
+        if _forbindelse is not None:
+            try:
+                _forbindelse.disconnect()      # synkron — ikke await
+            except Exception as e:
+                logger.warning(f"[Ordre] kunne ikke lukke pænt: {e}")
+            _forbindelse = None
 
 
 def order_ref(hvem: str = "") -> str:
