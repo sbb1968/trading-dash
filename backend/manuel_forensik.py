@@ -49,6 +49,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from accounts import aktiv_konto
+
 logger = logging.getLogger(__name__)
 
 KILDE = "manual"                 # `source` i trades — samme vaerdi som REST-endpointet
@@ -121,22 +123,44 @@ def _byg_bar(ts, o, h, l, c, v):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Opslag: den aabne manuelle handel for en ticker
 # ═══════════════════════════════════════════════════════════════════════════════
-async def find_aaben(journal, symbol: str) -> Optional[dict]:
-    """Aeldste aabne manuelle handel for tickeren (FIFO), eller None.
+async def find_aaben(journal, symbol: str, konto: str = "") -> Optional[dict]:
+    """Aeldste aabne manuelle handel for tickeren PAA DEN KONTO (FIFO), eller None.
 
     FIFO fordi det er den konvention en handelsjournal normalt foelger, og fordi
     valget skal vaere forudsigeligt frem for smart.
+
+    ⚠ KONTOEN ER EN DEL AF NOEGLEN. Her stod foer kun `source` og `symbol`, saa
+    FIFO gik paa TVAERS af konti.
+
+    Maalt 11-09-2026: et salg af 1 MES paa DUN748991 blev bogfoert som exit paa
+    en aaben MES-handel fra dagen foer paa DUQ441063 — en anden konto, hos en
+    anden broker-forbindelse. To raekker blev forkerte i samme skrivning:
+    DUQ441063's position fremstod lukket med +146,25 (den var ikke roert), og
+    DUN748991's fremstod aaben (den var netop solgt). Regnestykket var rigtigt;
+    handlen var det ikke.
+
+    Salgsvagten fangede det ikke, og skal heller ikke: den spoerger BROKEREN om
+    positionen findes, og paa DUN748991 gjorde den. Fejlen laa alene i hvilken
+    journalraekke fyldningen blev knyttet til.
+
+    `konto` er den konto ordren FAKTISK gik igennem — kalderen henter den fra
+    forbindelsen, ikke fra konfigurationen, saa en ordre gennem ordre-Gatewayen
+    matches mod ordre-Gatewayens konto. Er den tom, falder vi tilbage paa
+    aktiv_konto(); vi matcher ALDRIG uden konto, for det var netop dét der
+    kunne knytte en fyldning til en fremmed konto.
     """
     try:
         db = journal.db
         if db is None:
             return None
+        kid = (konto or "").strip().upper() or aktiv_konto()
         async with db.execute(
             "SELECT trade_id, symbol, side, shares, entry_price, entry_time_utc "
             "FROM trades "
             "WHERE source = ? AND symbol = ? AND exit_time_utc IS NULL "
+            "  AND UPPER(ibkr_account) = ? "
             "ORDER BY entry_time_utc ASC LIMIT 1",
-            (KILDE, symbol.upper()),
+            (KILDE, symbol.upper(), kid),
         ) as cur:
             r = await cur.fetchone()
         if r is None:
@@ -448,7 +472,11 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
     Returnerer trade_id, eller None hvis der ikke var en aaben manuel handel —
     fx hvis positionen blev aabnet et andet sted end watchlist-vinduet.
     """
-    aaben = await find_aaben(journal, symbol)
+    # ⚠ Kontoen tages fra FORBINDELSEN ordren gik igennem — ikke fra
+    # konfigurationen. Paa en maskine med ordre-Gateway er den delte forbindelse
+    # en anden konto, og et opslag paa "maskinens konto" ville ramme forkert.
+    aaben = await find_aaben(journal, symbol,
+                             konto=getattr(ibkr, "account", "") or "")
     if aaben is None:
         # ⚠ DET HER STOD FOER SOM "ikke en fejl". Det var forkert, og det kostede
         # 460 dollar i fejlbogfoering paa DUQ441063 — se noten ved kontroller_salg.
