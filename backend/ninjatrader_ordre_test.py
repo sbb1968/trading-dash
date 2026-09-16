@@ -2,9 +2,35 @@
 """
 ninjatrader_ordre_test.py — kan ATI faktisk lægge en ordre?
 ════════════════════════════════════════════════════════════════════════════════
-Sidste ubesvarede spørgsmål i `ninjatrader_adgang.md`. Læsevejen er bevist
-(ATI pusher kontotilstand af sig selv); skrivevejen er ikke.
+Sidste ubesvarede spørgsmål i `ninjatrader_adgang.md`.
 
+⚠ TRANSPORTEN ER SKIFTET 16-09. Den første udgave sendte OIF-kommandoer på
+socket 36973 og fik intet svar. Årsagen er nu målt: **den socket er udgående.**
+NT8's egen log skriver `Server.AtiServer.ConnectNow` når vi forbinder og
+INTET når vi sender — den pusher kontotilstand ud, den tager ikke ordrer ind.
+
+Skrivevejen er **filer i `incoming\\`**, og fælden lå i filNAVNET:
+
+    oif.txt          ✓ behandlet
+    oif_probe.txt    ✓ behandlet
+    oif1.txt         ✓ behandlet
+    TDPROBE.oif.txt  ✗ "Unknown OIF file type"
+
+Navnet skal begynde med `oif`. Fejlbeskeden sagde "file **type**", ikke
+"unknown command" — og dét ord var hele nøglen. Med et forkert navn læses
+filen aldrig, uanset hvor rigtigt indholdet er.
+
+⚠ OG LOGGEN ER KVITTERINGEN. NT8 skriver hvad den gør med hver eneste
+OIF-kommando:
+
+    OIF, 'CANCEL;...' processing
+    OIF, 'CANCEL;...' order with ID/Name 'TDNOPE...' does not exist
+    OIF, 'PLACE;...'  holds unknown instrument 'XYZ_FINDES_IKKE_99'
+
+Uden den kanal fejlsøger man i blinde. Scriptet læser derfor logvinduet
+omkring hver kommando og viser det.
+
+────────────────────────────────────────────────────────────────────────────────
 ⚠ DER LÆGGES EN LIMITORDRE LANGT FRA MARKEDET, IKKE EN MARKEDSORDRE.
 
 Samme mønster som T4/T5 i `konto2_opsaetning.md`: en ordre der beviseligt ikke
@@ -35,18 +61,26 @@ OIF-FORMATET (NinjaTrader Automated Trading Interface)
 
     PLACE;<konto>;<instrument>;<BUY|SELL>;<antal>;<type>;<limit>;<stop>;
           <TIF>;<oco>;<ordre-id>;<strategi>;<strategi-id>
+    CANCEL;;;;;;;;;;<ordre-id>;;
 
-Instrumentnavnet er NT8's eget, aflæst i platformens log: `MES SEP26`, ikke
-IBKR's `MESU6` og ikke det rene `MES`.
+⚠ INSTRUMENTNAVNET er NT8's eget. `MES 09-26` (symbol + MM-YY) er NT8's
+futures-format. Er det forkert, siger loggen `holds unknown instrument '…'`
+og der oprettes INGEN ordre — så en forkert gætning er ufarlig, bare
+uproduktiv.
 """
 from __future__ import annotations
 
 import argparse
+import pathlib
 import socket
 import sys
 import time
 
 HOST, PORT = "127.0.0.1", 36973
+
+NT8 = pathlib.Path.home() / "Documents" / "NinjaTrader 8"
+INCOMING = NT8 / "incoming"
+LOGMAPPE = NT8 / "log"
 
 FORVENTET_KONTO = "DEMO8580770"
 MINDSTE_AFSTAND_PCT = 30.0
@@ -62,7 +96,9 @@ def hent_marked(ticker: str = "MES") -> float | None:
     ⚠ POINTEN ER AT DEN IKKE KOMMER FRA BRUGEREN. En afstandsvagt der regner på
     et tal man selv har tastet, kan ikke fange at tallet var forkert.
     """
-    import json, urllib.request
+    import json
+    import urllib.request
+
     import accounts
     maal = (accounts.identity.replication_target_url or "").rstrip("/")
     if not maal:
@@ -77,31 +113,86 @@ def hent_marked(ticker: str = "MES") -> float | None:
         return None
 
 
-def _forbind() -> socket.socket:
-    s = socket.socket()
-    s.settimeout(6)
-    s.connect((HOST, PORT))
-    return s
+# ── NT8's log: vores eneste kvittering ─────────────────────────────────────
+def _nyeste_log() -> pathlib.Path | None:
+    try:
+        filer = list(LOGMAPPE.glob("log.*.txt"))
+    except OSError:
+        return None
+    return max(filer, key=lambda p: p.stat().st_mtime) if filer else None
 
 
-def lyt(s: socket.socket, sekunder: float = 3.0) -> str:
-    """Alt hvad ATI pusher i vinduet, som læsbar tekst."""
+def _loglaengde(log: pathlib.Path | None) -> int:
+    if log is None:
+        return 0
+    try:
+        return len(log.read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        return 0
+
+
+def _nye_logliner(log: pathlib.Path | None, fra: int) -> list[str]:
+    if log is None:
+        return []
+    try:
+        return [l.strip() for l in
+                log.read_text(encoding="utf-8", errors="replace").splitlines()[fra:]
+                if l.strip()]
+    except OSError:
+        return []
+
+
+def send_oif(kommando: str, mrk: str) -> list[str]:
+    """Skriv én OIF-kommando og returnér hvad NT8 skrev om den.
+
+    ⚠ FILNAVNET SKAL BEGYNDE MED `oif` — ellers læses filen aldrig. Det var
+    fejlen 11-08, og den så ud som et formatproblem i indholdet.
+    """
+    log = _nyeste_log()
+    foer = _loglaengde(log)
+    fil = INCOMING / f"oif_td_{mrk}_{int(time.time() * 1000)}.txt"
+    INCOMING.mkdir(parents=True, exist_ok=True)
+    fil.write_text(kommando + "\n", encoding="ascii")
+
+    spist = False
+    for _ in range(12):
+        time.sleep(1)
+        if not fil.exists():
+            spist = True
+            break
+    if not spist:
+        # NT8 holder filen åben mens den behandles; kan vi ikke rydde op, så sig det.
+        try:
+            fil.unlink()
+            print(f"   ⚠ filen blev ikke behandlet ({fil.name}) — slettet igen")
+        except OSError:
+            print(f"   ⚠ filen ligger stadig og kan ikke slettes: {fil.name}")
+    time.sleep(1.2)   # loggen skrives et øjeblik efter
+    return [l for l in _nye_logliner(log, foer) if "OIF" in l or "rder" in l]
+
+
+# ── ATI-socket: KUN læsning ────────────────────────────────────────────────
+def lyt(sekunder: float = 4.0) -> str:
+    """Alt hvad ATI pusher i vinduet. ⚠ Der sendes aldrig noget på den her."""
+    try:
+        s = socket.create_connection((HOST, PORT), timeout=5)
+    except OSError as e:
+        return f"(ingen ATI-forbindelse: {e})"
+    s.settimeout(sekunder)
     buf = b""
     slut = time.time() + sekunder
-    while time.time() < slut:
-        try:
-            d = s.recv(8192)
-            if not d:
+    try:
+        while time.time() < slut:
+            try:
+                d = s.recv(8192)
+                if not d:
+                    break
+                buf += d
+            except socket.timeout:
                 break
-            buf += d
-        except socket.timeout:
-            pass
+    finally:
+        s.close()
     return buf.replace(b"\x00", b" ").decode(errors="replace")
-
-
-def send(s: socket.socket, kommando: str) -> str:
-    s.sendall(kommando.encode() + b"\r\n")
-    return lyt(s, 3.0)
 
 
 def ordrer_for(tekst: str, konto: str) -> str:
@@ -116,7 +207,8 @@ def ordrer_for(tekst: str, konto: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Kan ATI laegge en ordre?")
     ap.add_argument("--konto", default=FORVENTET_KONTO)
-    ap.add_argument("--instrument", default="MES SEP26")
+    # ⚠ NT8's eget futures-format: symbol + MM-YY.
+    ap.add_argument("--instrument", default="MES 09-26")
     ap.add_argument("--limit", type=float,
                     help="limitpris. Udelades den, saettes den til 60 %% af "
                          "markedet — men afstanden kontrolleres uanset")
@@ -140,11 +232,11 @@ def main() -> int:
     afstand = (marked - limit) / marked * 100
 
     print("=" * 78)
-    print(f"NT8 ATI ORDRE-TEST  ·  {HOST}:{PORT}"
+    print("NT8 ATI ORDRE-TEST  ·  OIF-fil i incoming\\"
           + ("" if args.udfoer else "  ·  PREVIEW"))
     print("=" * 78)
 
-    # ── V1 + V2 FØR der forbindes ───────────────────────────────────────────
+    # ── V1 + V2 FØR der skrives noget ───────────────────────────────────────
     if konto != FORVENTET_KONTO:
         print(f"\n⚠ V1 SPAERRER: kontoen er '{konto}', forventet "
               f"'{FORVENTET_KONTO}'.\n  Ret --konto bevidst hvis det er meningen.")
@@ -152,6 +244,9 @@ def main() -> int:
     if afstand < MINDSTE_AFSTAND_PCT:
         print(f"\n⚠ V2 SPAERRER: limit {limit} ligger kun {afstand:.1f} % under "
               f"markedet {marked} (hentet).\n  Kravet er {MINDSTE_AFSTAND_PCT} %.")
+        return 1
+    if not INCOMING.is_dir():
+        print(f"\n⚠ SPAERRER: {INCOMING} findes ikke — koerer NT8?")
         return 1
 
     kommando = (f"PLACE;{konto};{args.instrument};BUY;{args.antal};LIMIT;"
@@ -162,46 +257,50 @@ def main() -> int:
     print(f"  marked      {marked}  (hentet)  →  {afstand:.0f} % under  (V2 ✓)")
     print(f"  TIF         DAY  (V3 ✓ — aldrig GTC)")
     print(f"  ordre-id    {ordre_id}")
+    print(f"  fil         oif_td_place_*.txt   (⚠ navnet SKAL begynde med 'oif')")
     print(f"\n  {kommando}")
 
     if not args.udfoer:
         print("\n  PREVIEW — intet sendt. Koer igen med --udfoer.")
         return 0
 
-    s = _forbind()
+    ukendt_instrument = False
     try:
         print("\n1. Udgangspunkt — hvad staar der FOER?")
-        foer = lyt(s, 4.0)
-        print(f"   Orders|{konto}: '{ordrer_for(foer, konto)}'")
+        print(f"   Orders|{konto}: '{ordrer_for(lyt(4.0), konto)}'")
 
-        print("\n2. Sender PLACE")
-        svar = send(s, kommando)
-        print(f"   svar: {svar[:200]!r}")
+        print("\n2. Sender PLACE som OIF-fil")
+        for l in send_oif(kommando, "place") or ["   (ingen logsvar)"]:
+            print(f"   {l[:145]}")
+            if "unknown instrument" in l:
+                ukendt_instrument = True
+
+        if ukendt_instrument:
+            # ⚠ Der blev IKKE oprettet nogen ordre. Intet at annullere.
+            print(f"\n⚠ NT8 kender ikke instrumentet '{args.instrument}'.")
+            print("  Der er ikke oprettet nogen ordre — proev et andet navn.")
+            print("  NT8's futures-format er symbol + MM-YY, fx 'MES 12-26'.")
+            return 1
 
         print("\n3. Dukkede den op?")
-        efter = svar + lyt(s, 4.0)
+        efter = lyt(5.0)
         nu = ordrer_for(efter, konto)
         print(f"   Orders|{konto}: '{nu}'")
-        fandtes = ordre_id in efter or bool(nu)
-        print(f"   {'OK   ordren er synlig i stroemmen' if fandtes else '⚠ ikke set — se NT8s Orders-fane'}")
+        print(f"   {'OK   ordren er synlig i stroemmen' if nu else '⚠ ikke set — se NT8s Orders-fane'}")
 
     finally:
         # ── V4: annullér ALTID ──────────────────────────────────────────────
-        print("\n4. Annullerer (V4 — sker uanset hvad ovenfor viste)")
-        try:
-            svar = send(s, f"CANCEL;;;;;;;;;;{ordre_id};;")
-            print(f"   svar: {svar[:200]!r}")
-            rest = ordrer_for(svar + lyt(s, 4.0), konto)
-            print(f"   Orders|{konto} efter: '{rest}'")
-        except Exception as e:
-            print(f"   ⚠ ANNULLERING FEJLEDE: {type(e).__name__}: {e}")
-            print(f"   ⚠ TJEK NT8's Orders-fane MANUELT for {ordre_id}")
-        s.close()
+        if not ukendt_instrument:
+            print("\n4. Annullerer (V4 — sker uanset hvad ovenfor viste)")
+            try:
+                for l in send_oif(f"CANCEL;;;;;;;;;;{ordre_id};;", "cancel") \
+                        or ["   (ingen logsvar)"]:
+                    print(f"   {l[:145]}")
+                print(f"   Orders|{konto} efter: '{ordrer_for(lyt(5.0), konto)}'")
+            except Exception as e:
+                print(f"   ⚠ ANNULLERING FEJLEDE: {type(e).__name__}: {e}")
+                print(f"   ⚠ TJEK NT8's Orders-fane MANUELT for {ordre_id}")
 
-    print("\n" + "=" * 78)
-    print("⚠ Bekraeft i NinjaTraders Orders-fane at der ikke ligger noget")
-    print("  tilbage. Stroemmen er vores maaling, men platformen er sandheden.")
-    print("=" * 78)
     return 0
 
 
