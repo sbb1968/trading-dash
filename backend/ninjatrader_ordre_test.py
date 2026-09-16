@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import socket
 import sys
 import time
@@ -82,7 +83,16 @@ NT8 = pathlib.Path.home() / "Documents" / "NinjaTrader 8"
 INCOMING = NT8 / "incoming"
 LOGMAPPE = NT8 / "log"
 
-FORVENTET_KONTO = "DEMO8580770"
+# ⚠ Sim101 ER NT8's EGEN simulator og ruter INGEN STEDER.
+# DEMO8580770 er Tradovate-kontoen: den sender ud af huset og afviste vores
+# ordre med "Real-time market data required to trade this contract" (16-09
+# 07:56). Sim101 fylder mod NT8's egen feed og tog samme ordre igennem hele
+# livscyklussen paa ét sekund — Submitted → Accepted → Working → Cancelled.
+#
+# Skal Tradovate-vejen bruges senere, kraever den et CME-abonnement. Til at
+# bevise at kanalen virker, kraever den ingenting.
+SIM_KONTI = {"Sim101", "DEMO8580770"}
+FORVENTET_KONTO = "Sim101"
 MINDSTE_AFSTAND_PCT = 30.0
 
 
@@ -140,6 +150,40 @@ def _nye_logliner(log: pathlib.Path | None, fra: int) -> list[str]:
                 if l.strip()]
     except OSError:
         return []
+
+
+def afvent_ordre(log, fra: int, sekunder: int = 60) -> tuple[str, list[str]]:
+    """Vent til NT8 har AFGJORT ordren. Returnerer (sidste tilstand, logliner).
+
+    ⚠ DEN HER FUNKTION ER RETTELSEN AF EN VAGT DER IKKE VIRKEDE.
+    Første udgave annullerede så snart PLACE-filen var væk. Målt 16-09:
+
+        07:56:14  OIF 'PLACE;...' processing
+        07:56:40  OIF 'CANCEL;...' order with ID/Name '...' does not exist
+        07:56:41  Order ... New state='Rejected'
+
+    Annulleringen kom et halvt sekund FØR ordren blev oprettet og ramte intet.
+    At der alligevel ikke lå noget bagefter, skyldtes at ordren blev AFVIST —
+    ikke at vagten gjorde sit arbejde.
+    """
+    seneste = ""
+    for _ in range(sekunder):
+        time.sleep(1)
+        nye = _nye_logliner(log, fra)
+        for l in nye:
+            m = re.search(r"New state='(\w+)'", l)
+            if m and "Order=" in l:
+                seneste = m.group(1)
+        if seneste:
+            # Læs et øjeblik mere, så Accepted/Working/Rejected når med.
+            time.sleep(1.5)
+            nye = _nye_logliner(log, fra)
+            for l in nye:
+                m = re.search(r"New state='(\w+)'", l)
+                if m and "Order=" in l:
+                    seneste = m.group(1)
+            return seneste, nye
+    return "", _nye_logliner(log, fra)
 
 
 def send_oif(kommando: str, mrk: str) -> list[str]:
@@ -237,7 +281,7 @@ def main() -> int:
     print("=" * 78)
 
     # ── V1 + V2 FØR der skrives noget ───────────────────────────────────────
-    if konto != FORVENTET_KONTO:
+    if konto not in SIM_KONTI:
         print(f"\n⚠ V1 SPAERRER: kontoen er '{konto}', forventet "
               f"'{FORVENTET_KONTO}'.\n  Ret --konto bevidst hvis det er meningen.")
         return 1
@@ -270,10 +314,20 @@ def main() -> int:
         print(f"   Orders|{konto}: '{ordrer_for(lyt(4.0), konto)}'")
 
         print("\n2. Sender PLACE som OIF-fil")
+        _log = _nyeste_log()
+        _fra = _loglaengde(_log)
         for l in send_oif(kommando, "place") or ["   (ingen logsvar)"]:
             print(f"   {l[:145]}")
-            if "unknown instrument" in l:
-                ukendt_instrument = True
+
+        # ⚠ VENT PAA NT8's AFGOERELSE — behandlingen er ASYNKRON.
+        # Maalt 16-09: under 1 sekund paa Sim101, men 26 sekunder paa
+        # Tradovate-kontoen, fordi en bekraeftelses-popup ventede paa et
+        # menneske. En kontrol der antager at det gaar oejeblikkeligt, ser en
+        # ordre der endnu ikke findes — og konkluderer at alt er fint.
+        tilstand, linjer = afvent_ordre(_log, _fra)
+        print(f"   tilstand: {tilstand or '(NT8 sagde intet inden for 60 s)'}")
+        if any("unknown instrument" in l for l in linjer):
+            ukendt_instrument = True
 
         if ukendt_instrument:
             # ⚠ Der blev IKKE oprettet nogen ordre. Intet at annullere.
@@ -282,21 +336,38 @@ def main() -> int:
             print("  NT8's futures-format er symbol + MM-YY, fx 'MES 12-26'.")
             return 1
 
-        print("\n3. Dukkede den op?")
-        efter = lyt(5.0)
-        nu = ordrer_for(efter, konto)
-        print(f"   Orders|{konto}: '{nu}'")
-        print(f"   {'OK   ordren er synlig i stroemmen' if nu else '⚠ ikke set — se NT8s Orders-fane'}")
+        print("\n3. Hvilken tilstand naaede ordren?")
+        for l in linjer:
+            if "New state=" in l or "Native error" in l:
+                print(f"   {l[:200]}")
 
     finally:
         # ── V4: annullér ALTID ──────────────────────────────────────────────
+        # ⚠ RETTET 16-09. Foerste udgave annullerede PAA ORDRE-ID og gjorde det
+        # straks. Maalt samme dag:
+        #     07:56:14  OIF 'PLACE;...' processing
+        #     07:56:40  OIF 'CANCEL;...' order with ID/Name '...' does not exist
+        #     07:56:41  Order ... New state='Rejected'
+        # Annulleringen kom et halvt sekund FOER ordren blev oprettet og ramte
+        # intet. At der alligevel ikke laa noget bagefter, skyldtes at ordren
+        # blev AFVIST — ikke at vagten virkede. NT8 ventede 26 sekunder paa en
+        # bekraeftelses-popup, og vagten antog at behandlingen var oejeblikkelig.
+        #
+        # ⚠ OG ORDRE-ID'ET BED IKKE. Loggen viser Name='' selv om vi satte
+        # felt 11. Derfor annulleres der nu paa KONTO, ikke paa id.
+        # CANCELALLORDERS er scoped til den ene navngivne konto og roerer kun
+        # ordrer — aldrig positioner (det ville FLATTENEVERYTHING goere).
         if not ukendt_instrument:
-            print("\n4. Annullerer (V4 — sker uanset hvad ovenfor viste)")
+            print("\n4. Annullerer alt paa kontoen (V4 — sker uanset udfald)")
             try:
-                for l in send_oif(f"CANCEL;;;;;;;;;;{ordre_id};;", "cancel") \
+                for l in send_oif(f"CANCELALLORDERS;{konto};;;;;;;;;;;", "ryd") \
                         or ["   (ingen logsvar)"]:
-                    print(f"   {l[:145]}")
-                print(f"   Orders|{konto} efter: '{ordrer_for(lyt(5.0), konto)}'")
+                    print(f"   {l[:170]}")
+                time.sleep(2)
+                rest = [l for l in _nye_logliner(_nyeste_log(), 0)[-12:]
+                        if "New state=" in l]
+                for l in rest[-2:]:
+                    print(f"   {l[:170]}")
             except Exception as e:
                 print(f"   ⚠ ANNULLERING FEJLEDE: {type(e).__name__}: {e}")
                 print(f"   ⚠ TJEK NT8's Orders-fane MANUELT for {ordre_id}")
