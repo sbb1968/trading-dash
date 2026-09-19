@@ -276,20 +276,48 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
 # parre to MES-handler til samme pris paa samme minut, og fejlen ville vaere
 # usynlig indtil den kostede noget.
 
+class AfstemningUmulig(Exception):
+    """Afstemningen kunne ikke gennemfoeres — og det er IKKE det samme som
+    "ingen huller".
+
+    ⚠ Rejses frem for at returnere et tomt saet. Et tomt saet betyder
+    "journalen har bogfoert nul ordrer", og det faar hver bekraeftet fyldning
+    til at se ubogfoert ud. Praecis dét skete 31-08 -> 14-09: en forkert
+    kolonnenavn gav 35 falske alarmer i traek.
+    """
+
+
 async def _bogfoerte_ordre_ider(journal) -> set:
     """Ordre-id'er journalen HAR et spor af (entry eller exit)."""
     ider: set = set()
+    db = journal.db
+    if db is None:
+        # ⚠ Ingen db er IKKE "ingenting er bogfoert". Kalderen skal kunne
+        # skelne, saa vi kaster frem for at returnere et tomt saet.
+        raise AfstemningUmulig("journal.db er None — afstemning kan ikke koeres")
     try:
-        db = journal.db
-        if db is None:
-            return ider
+        # ⚠ KOLONNEN HEDDER payload_json. Her stod `payload`, som IKKE findes i
+        # skemaet. Forespoergslen kastede, undtagelsen blev fanget, og der blev
+        # returneret et TOMT saet — hvorefter hver eneste bekraeftede fyldning
+        # saa ubogfoert ud. Alarmen fyrede 35 gange mellem 31-08 og 14-09, hver
+        # gang med en push-notifikation, og hver gang forkert.
+        #
+        # Fejlen var logget hele tiden ("kunne ikke laese trades: no such
+        # column: payload") — men en fejl i en backend-log som ingen laeser,
+        # er ikke en advarsel.
+        #
+        # Det er projektets signaturfejl i renkultur: EN KONTROL HVIS FEJL
+        # BEHANDLES SOM ET FUND. Derfor kastes der nu i stedet for at svare
+        # tomt — se AfstemningUmulig.
         async with db.execute(
-            "SELECT payload FROM trades WHERE source = ? AND payload IS NOT NULL",
-            (KILDE,)) as cur:
+            "SELECT payload_json FROM trades "
+            "WHERE source = ? AND payload_json IS NOT NULL", (KILDE,)) as cur:
             raekker = await cur.fetchall()
+    except AfstemningUmulig:
+        raise
     except Exception as e:
         logger.error(f"[ManuelForensik] kunne ikke laese trades: {e}")
-        return ider
+        raise AfstemningUmulig(f"kunne ikke laese trades: {e}") from e
     for (raa,) in raekker:
         try:
             p = json.loads(raa) if isinstance(raa, str) else (raa or {})
@@ -337,7 +365,26 @@ async def alarmer_om_ubogfoerte(journal, tracker_ordrer: list) -> dict:
     ⚠ En afstemning ingen laeser, er ikke en kontrol. Derfor samme alarmvej som
     exit_uden_aaben_entry — og hændelsen i journalen, saa den kan findes bagefter.
     """
-    r = await afstem_mod_tracker(journal, tracker_ordrer)
+    try:
+        r = await afstem_mod_tracker(journal, tracker_ordrer)
+    except AfstemningUmulig as e:
+        # ⚠ RAAB OP OM AT VI IKKE VED DET. En afstemning der ikke kunne koeres
+        # maa hverken ligne "alt er fint" eller "alt er galt".
+        logger.error(f"[ManuelForensik] AFSTEMNING UMULIG: {e}")
+        await journal.log_event(
+            source=KILDE, event_type="afstemning_umulig",
+            payload={"fejl": str(e),
+                     "betydning": "hverken bekraeftet eller afkraeftet — "
+                                  "huller kan IKKE udelukkes"})
+        try:
+            import notifier
+            await notifier.alert_backend_error(
+                f"Manuel-afstemningen kunne ikke koeres: {e}. "
+                f"Ubogfoerte fyldninger kan ikke udelukkes.")
+        except Exception:
+            pass
+        return {"bekraeftede_fills": None, "bogfoerte_ordre_ider": None,
+                "ubogfoerte": [], "afstemning_umulig": str(e)}
     if not r["ubogfoerte"]:
         return r
     await journal.log_event(
