@@ -1132,3 +1132,43 @@ body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator:
 /* Gik ordren gennem den DELTE forbindelse, er det værd at bemærke — på en
    maskine med en separat ordre-Gateway betyder det at noget er galt. */
 .ordre-vej-delt { color: var(--neutral, #d9a441); font-weight: 700; }
+
+/* ── To watchlister: futures og aktier ──────────────────────────────────── */
+/* ⚠ DEN NEONGULE RAMME ER IKKE PYNT.
+   Begge paneler registrerer den samme globale keydown-lytter. Kun det AKTIVE
+   panel reagerer (se `erAktiv` i WatchlistPanel) — men brugeren kan ikke se
+   hvilket det er uden en markering. Et tryk paa K der lander i den forkerte
+   liste, lægger en ordre paa en forkert ticker. Rammen er derfor den eneste
+   synlige garanti for hvor tastetrykket havner. */
+.watchlist-container.watchlist-aktiv {
+  outline:        2px solid #d4ff00;          /* neongul */
+  outline-offset: -2px;
+  box-shadow:     inset 0 0 12px rgba(212, 255, 0, 0.18);
+}
+
+/* Variantbåndet: hvilken liste, og om den lytter. Står øverst, fordi det er
+   dét man skal vide FØR man trykker. */
+.watchlist-variantbaand {
+  display:        flex;
+  align-items:    center;
+  justify-content: space-between;
+  gap:            8px;
+  padding:        2px 8px;
+  font-size:      10px;
+  letter-spacing: 0.6px;
+  border-bottom:  1px solid var(--border);
+}
+.watchlist-variantnavn   { font-weight: 800; opacity: 0.75; }
+.watchlist-aktivmaerke   { color: #d4ff00; font-weight: 700; white-space: nowrap; }
+.watchlist-inaktivmaerke { color: var(--text-muted); font-style: italic; white-space: nowrap; }
+
+/* Aktie-listen skal kunne skelnes i øjenkrogen, ikke kun læses. */
+.watchlist-container.watchlist-stocks .watchlist-input {
+  background: #0a1319;
+  color:      #cfe8f5;
+}
+.watchlist-container.watchlist-stocks .scanner-table thead th {
+  background: #14252f;
+  color:      #9fc7da;
+}
+.watchlist-container.watchlist-stocks .watchlist-variantnavn { color: #7fd4f5; }

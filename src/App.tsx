@@ -81,7 +81,7 @@ function applyAllFonts() {
 }
 
 function getWindowType(id: WindowId): string {
-  if (id === "watchlist")    return "watchlist";
+  if (id === "watchlist" || id === "watchliststocks") return "watchlist";
   if (id.startsWith("chart")) return "chart";
   if (id === "level2")       return "level2";
   if (id === "timesales")    return "timesales";
@@ -306,13 +306,42 @@ function useKolonner(noegle: string, standard: string[]): string[] {
   return cols;
 }
 
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, cols }: {
+// ── To watchlister: futures og aktier ───────────────────────────────────────
+// Samme opbygning, hver sin liste af tickers, hver sin farve.
+//
+// ⚠ GENVEJENE ER HELE GRUNDEN TIL AT DER FINDES EN "AKTIV" LISTE.
+// Genvejslytteren er et `window.addEventListener("keydown")` INDE i panelet.
+// Med to paneler aabne fyrer den i BEGGE — et tryk paa K ville lægge to
+// ordrer, én i hver liste, paa hver sin ticker. Det er ikke en teoretisk
+// risiko: det ville ske ved det foerste tastetryk.
+//
+// Derfor: præcis ét panel er aktivt ad gangen, det er markeret med en NEONGUL
+// ramme, og de andre panelers genvejshaandtering returnerer med det samme.
+// Rammen er ikke pynt — den er den eneste maade at se hvor et tastetryk lander.
+type WatchVariant = "futures" | "stocks";
+
+const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: string }> = {
+  // Futures beholder den kendte moerke flade — det er den Iben kender.
+  futures: { bg: "var(--bg-surface)", tekst: "var(--text-primary)", etiket: "FUTURES" },
+  // Aktier faar en tydeligt anden, koelig flade. Forskellen skal kunne ses
+  // i oejenkrogen, ikke kun laeses i titellinjen.
+  stocks:  { bg: "#0f1b24",           tekst: "#cfe8f5",            etiket: "STOCKS" },
+};
+
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, cols, variant = "futures", erAktiv = true, onAktiver }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
   orderResult?: IbkrOrderResult | null;
   cols?: string[];
+  variant?: WatchVariant;
+  erAktiv?: boolean;
+  onAktiver?: () => void;
 }) {
+  const stil = WATCH_STIL[variant];
+  // ⚠ Hver liste har sit EGET regnskab i localStorage. Delte de noegle, ville
+  // en koebspris fra futures-listen dukke op paa en aktie med samme ticker.
+  const metaNoegle = variant === "futures" ? "watchlist_meta" : "watchlist_meta_stocks";
   // Kolonnevalget hentes her frem for at blive traadt gennem hele vinduestraeet.
   // Er der intet gemt, vises ALT — et vindue der mangler sin konfiguration skal
   // vise for meget, ikke for lidt.
@@ -334,9 +363,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // Side-kort pr. ticker: frossen "Pris" ved tilføj + (næste trin) køb-tilstand fra
   // Ibens konkrete ordre-fills (avgPrice/qty). Gemmes så det overlever genstart.
   const [meta, setMeta] = useState<Record<string, WatchMeta>>(() => {
-    try { return JSON.parse(localStorage.getItem("watchlist_meta") || "{}"); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(metaNoegle) || "{}"); } catch { return {}; }
   });
-  useEffect(() => { localStorage.setItem("watchlist_meta", JSON.stringify(meta)); }, [meta]);
+  useEffect(() => { localStorage.setItem(metaNoegle, JSON.stringify(meta)); }, [meta, metaNoegle]);
 
   // ── Positioner fra brokeren ─────────────────────────────────────────────
   // ⚠ null betyder "ikke hentet / backend svarer ikke" og {} betyder "hentet,
@@ -622,6 +651,10 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
 
   // Genveje: ALT+tal vælg række · K køb · S sælg (den valgte række, med dens Stk).
   shortcutRef.current = (e: KeyboardEvent) => {
+    // ⚠ KUN DEN AKTIVE LISTE LYTTER. Begge paneler registrerer den samme
+    // globale keydown; uden den her linje ville ét tryk paa K lægge to
+    // ordrer — én i hver liste, paa hver sin ticker.
+    if (!erAktiv) return;
     const tgt = e.target as HTMLElement | null;
     const inField = !!tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable);
     // ALT+H: slå simuleret halt til/fra på den valgte række (selv-test af halt-alarmen).
@@ -656,7 +689,18 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   };
 
   return (
-    <div className="watchlist-container">
+    <div className={`watchlist-container watchlist-${variant}${erAktiv ? " watchlist-aktiv" : ""}`}
+         style={{ background: stil.bg, color: stil.tekst }}
+         /* ⚠ onMouseDownCapture, ikke onClick: markeringen skal skifte FOER
+            en knap i panelet reagerer. Klikker man KOEB i den inaktive liste,
+            skal listen vaere aktiv naar ordren gaar — ikke bagefter. */
+         onMouseDownCapture={() => { if (!erAktiv) onAktiver?.(); }}>
+      <div className="watchlist-variantbaand">
+        <span className="watchlist-variantnavn">{stil.etiket}</span>
+        {erAktiv
+          ? <span className="watchlist-aktivmaerke">● AKTIV — genveje rammer denne</span>
+          : <span className="watchlist-inaktivmaerke">klik for at aktivere</span>}
+      </div>
       <div className="watchlist-add">
         <input className="watchlist-input" type="text" placeholder="Tilføj ticker (tryk Enter)" value={input}
           onChange={e => { setInput(e.target.value.toUpperCase()); setError(""); }}
@@ -1581,6 +1625,8 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
 export function renderWindowContent(id: WindowId, props: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (t: string) => void;
   watchlist: string[]; onAddTicker: (t: string) => void; onRemoveTicker: (t: string) => void;
+  watchlistStocks: string[]; onAddTickerStocks: (t: string) => void; onRemoveTickerStocks: (t: string) => void;
+  aktivWatch: "futures" | "stocks"; setAktivWatch: (v: "futures" | "stocks") => void;
   currentPrice: number;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
@@ -1588,7 +1634,14 @@ export function renderWindowContent(id: WindowId, props: {
   orderResult?: IbkrOrderResult | null;
 }) {
   switch(id) {
-    case "watchlist":   return <WatchlistPanel stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
+    case "watchlist":   return <WatchlistPanel variant="futures"
+                          erAktiv={props.aktivWatch === "futures"}
+                          onAktiver={() => props.setAktivWatch("futures")}
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
+    case "watchliststocks": return <WatchlistPanel variant="stocks"
+                          erAktiv={props.aktivWatch === "stocks"}
+                          onAktiver={() => props.setAktivWatch("stocks")}
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlistStocks} onAddTicker={props.onAddTickerStocks} onRemoveTicker={props.onRemoveTickerStocks} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
     case "chart3min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="3 min" />;
@@ -1656,6 +1709,16 @@ function App() {
   const [activeView, setActiveView]         = useState<ActiveView>("scanners");
   const [selectedTicker, setSelectedTicker] = useState<string>(() => localStorage.getItem("selectedTicker") || "NVDA");
   const [watchlist, setWatchlist]           = useState<string[]>(() => { const s = localStorage.getItem("watchlist"); return s ? JSON.parse(s) : ["NVDA","TSLA","AAPL"]; });
+  // ⚠ EGEN NOEGLE, TOM SOM UDGANGSPUNKT. Ibens eksisterende liste ligger under
+  // "watchlist" og skal blive der — den er nu futures-listen. Aktie-listen
+  // starter tom frem for at arve tre tickers ingen har bedt om.
+  const [watchlistStocks, setWatchlistStocks] = useState<string[]>(() => { const s = localStorage.getItem("watchlist_stocks"); return s ? JSON.parse(s) : []; });
+  useEffect(() => { localStorage.setItem("watchlist_stocks", JSON.stringify(watchlistStocks)); }, [watchlistStocks]);
+  // Hvilken liste genvejene rammer. Gemmes, saa den overlever en genstart —
+  // ellers ville den hoppe tilbage til futures hver morgen uden varsel.
+  const [aktivWatch, setAktivWatch] = useState<"futures" | "stocks">(() =>
+    (localStorage.getItem("watchlist_aktiv") as "futures" | "stocks") || "futures");
+  useEffect(() => { localStorage.setItem("watchlist_aktiv", aktivWatch); }, [aktivWatch]);
   const [layouts, setLayouts]               = useState<Layout[]>(() => {
     migrateLayoutsOnce(window.innerWidth, window.innerHeight);  // engangs-oprydning af gamle forurenede defaults
     return loadLayouts(window.innerWidth, window.innerHeight);
@@ -1796,6 +1859,11 @@ function App() {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker: (t: string) => setWatchlist(w => [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
+    watchlistStocks,
+    onAddTickerStocks: (t: string) => setWatchlistStocks(w => [...w, t]),
+    onRemoveTickerStocks: (t: string) => setWatchlistStocks(w => w.filter(x => x !== t)),
+    aktivWatch,
+    setAktivWatch,
     currentPrice,
     onAddWindow:   handleAddWindow,
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),

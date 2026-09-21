@@ -1,6 +1,7 @@
 // ── Window ID typer ───────────────────────────────────────────
 export type WindowId =
   | "watchlist"
+  | "watchliststocks"
   | "chart1min" | "chart2min" | "chart3min" | "chart5min" | "chart10min"
   | "chart15min" | "chart30min"
   | "chart1time" | "chart4time"
@@ -27,7 +28,8 @@ export type WindowId =
   | "ecokalender";
 
 export const WINDOW_LABELS: Record<WindowId, string> = {
-  watchlist:    "Watchlist",
+  watchlist:        "Watchlist Futures",
+  watchliststocks:  "Watchlist Stocks",
   chart1min:    "Chart 1 min",
   chart2min:    "Chart 2 min",
   chart3min:    "Chart 3 min",

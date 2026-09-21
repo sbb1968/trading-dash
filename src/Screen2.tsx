@@ -36,6 +36,17 @@ export default function Screen2() {
     const s = localStorage.getItem("watchlist");
     return s ? JSON.parse(s) : ["NVDA", "TSLA", "AAPL"];
   });
+  // ⚠ SAMME localStorage-noegler som skaerm 1, saa de to skaerme viser SAMME
+  // to lister. To skaerme med hver sit indhold under samme navn ville vaere
+  // vaerre end ingen skaerm 2.
+  const [watchlistStocks, setWatchlistStocks] = useState<string[]>(() => {
+    const s = localStorage.getItem("watchlist_stocks");
+    return s ? JSON.parse(s) : [];
+  });
+  useEffect(() => { localStorage.setItem("watchlist_stocks", JSON.stringify(watchlistStocks)); }, [watchlistStocks]);
+  const [aktivWatch, setAktivWatch] = useState<"futures" | "stocks">(() =>
+    (localStorage.getItem("watchlist_aktiv") as "futures" | "stocks") || "futures");
+  useEffect(() => { localStorage.setItem("watchlist_aktiv", aktivWatch); }, [aktivWatch]);
 
   const currentPrice = stocksArray.find(s => s.ticker === selectedTicker)?.price || 0;
 
@@ -170,6 +181,10 @@ export default function Screen2() {
     stocks: stocksArray, selectedTicker, onSelectTicker: setSelectedTicker, watchlist,
     onAddTicker:    (t: string) => setWatchlist(w => w.includes(t) ? w : [...w, t]),
     onRemoveTicker: (t: string) => setWatchlist(w => w.filter(x => x !== t)),
+    watchlistStocks,
+    onAddTickerStocks:    (t: string) => setWatchlistStocks(w => w.includes(t) ? w : [...w, t]),
+    onRemoveTickerStocks: (t: string) => setWatchlistStocks(w => w.filter(x => x !== t)),
+    aktivWatch, setAktivWatch,
     currentPrice,
     onAddWindow:    handleAddWindow,
     onCloseWindow:  (id: WindowId) => updateWindowState(id, { closed: true }),

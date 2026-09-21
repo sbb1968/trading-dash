@@ -48,6 +48,9 @@ const NON_CHART_GROUPS: { label: string; icon: string; items: WinEntry[] }[] = [
   ]},
   { label: "Markedsdata", icon: "📊", items: [
     { id: "watchlist",      shortcut: "A" },
+    // ⚠ To adskilte lister. Genvejene rammer kun den AKTIVE — den med
+    // neongul ramme. Klik i et vindue goer det aktivt.
+    { id: "watchliststocks", shortcut: "E" },
     { id: "level2",         shortcut: "L" },
     { id: "timesales",      shortcut: "M" },
     { id: "marketoverview", shortcut: "R" },
