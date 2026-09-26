@@ -239,6 +239,39 @@ def lyt(sekunder: float = 4.0) -> str:
     return buf.replace(b"\x00", b" ").decode(errors="replace")
 
 
+def ordre_status(tekst: str, ordre_id: str) -> str:
+    """Vores ordres tilstand, aflæst i ATI-strømmen.
+
+    ⚠ STRØMMEN KENDER VORES ID — LOGGEN GØR IKKE. NT8's log skriver `Name=''`
+    på hver ordre, og det fik os 16-09 til at konkludere at ordre-id'et ikke
+    bandt. Det gjorde det hele tiden; ATI pusher det som:
+
+        OrderStatus|TDPROBE1789538169 Rejected
+        Filled|TDPROBE1789538169 0
+        AvgFillPrice|TDPROBE1789538169 0
+
+    Den forkerte konklusion kostede os en V4 der annullerede hele kontoen i
+    stedet for én ordre — bredere end nødvendigt, og derfor dårligere.
+
+    ⚠ VERIFICERET 26-09 PÅ EN RIGTIG EFTERLADT ORDRE. Testkørslen 16-09 kl.
+    09:05 fejlede og efterlod `TDPROBE1789542345` **Working** på Sim101.
+    Den lå der i ti dage. En `CANCEL` på præcis det id ramte den:
+
+        OIF, 'CANCEL;;;;;;;;;;TDPROBE1789542345;;' processing
+        Order='b0c947dc…/Sim101'  New state='Cancel submitted'
+        Order='b0c947dc…/Sim101'  New state='Cancelled'
+
+    ⚠ OG EN TING MERE, SOM ER LET AT TAGE FEJL AF: strømmen er et
+    ØJEBLIKSBILLEDE, ikke en fuld opregning. Ordren stod **ikke** i det
+    snapshot jeg læste umiddelbart før annulleringen — men den fandtes.
+    At et id ikke ses i ét oplæg, beviser derfor ingenting; kun en
+    `OrderStatus|<id> <tilstand>` med en terminal tilstand gør.
+    Derfor behandler kalderen "" som IKKE-terminal og rydder bredere.
+    """
+    m = re.search(rf"OrderStatus\|{re.escape(ordre_id)}\s+(\S+)", tekst)
+    return m.group(1) if m else ""
+
+
 def ordrer_for(tekst: str, konto: str) -> str:
     """Den seneste Orders|<konto>-værdi i strømmen."""
     seneste = ""
@@ -358,16 +391,36 @@ def main() -> int:
         # CANCELALLORDERS er scoped til den ene navngivne konto og roerer kun
         # ordrer — aldrig positioner (det ville FLATTENEVERYTHING goere).
         if not ukendt_instrument:
-            print("\n4. Annullerer alt paa kontoen (V4 — sker uanset udfald)")
+            print(f"\n4. Annullerer {ordre_id} (V4 — sker uanset udfald)")
             try:
-                for l in send_oif(f"CANCELALLORDERS;{konto};;;;;;;;;;;", "ryd") \
+                for l in send_oif(f"CANCEL;;;;;;;;;;{ordre_id};;", "cancel") \
                         or ["   (ingen logsvar)"]:
                     print(f"   {l[:170]}")
                 time.sleep(2)
-                rest = [l for l in _nye_logliner(_nyeste_log(), 0)[-12:]
-                        if "New state=" in l]
-                for l in rest[-2:]:
-                    print(f"   {l[:170]}")
+
+                # ⚠ VERIFICÉR I STROEMMEN, IKKE I LOGGEN. NT8's log skriver
+                # Name='' paa ordren, saa vores id staar ikke dér — men
+                # ATI-strommen sporer den praecist:
+                #     OrderStatus|TDPROBE1789538169 Rejected
+                # Det var dét der afkraeftede "id'et bider ikke". Det gjorde
+                # det hele tiden; CANCEL ramte bare en ordre der endnu ikke
+                # fandtes, fordi behandlingen er asynkron.
+                status = ordre_status(lyt(6.0), ordre_id)
+                print(f"   status i stroemmen: {status or '(ikke set)'}")
+
+                # ⚠ SIDSTE UDVEJ, ikke foerste. CANCELALLORDERS rammer hele
+                # kontoen; den praecise annullering rammer kun vores egen
+                # ordre. Bredere end noedvendigt er ikke sikrere.
+                if status not in ("Cancelled", "Rejected", "Filled"):
+                    print("   ⚠ ikke bekraeftet annulleret — rydder HELE kontoen")
+                    for l in send_oif(f"CANCELALLORDERS;{konto};;;;;;;;;;;", "ryd") \
+                            or ["   (ingen logsvar)"]:
+                        print(f"   {l[:170]}")
+                    time.sleep(2)
+                    status = ordre_status(lyt(6.0), ordre_id)
+                    print(f"   status efter oprydning: {status or '(ikke set)'}")
+                    if status not in ("Cancelled", "Rejected", "Filled"):
+                        print(f"   ⚠⚠ TJEK NT8's Orders-fane MANUELT for {ordre_id}")
             except Exception as e:
                 print(f"   ⚠ ANNULLERING FEJLEDE: {type(e).__name__}: {e}")
                 print(f"   ⚠ TJEK NT8's Orders-fane MANUELT for {ordre_id}")
