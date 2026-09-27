@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ReconnectingWebSocket from "reconnecting-websocket";
+import type { Broker } from "./brokerruter";
 
 const WS_URL = "ws://127.0.0.1:8000/ws";
 
@@ -125,18 +126,31 @@ export function useMarketData() {
   }, []);
 
 
-  // ── IBKR direkte ordrer (fra watchlist-rækker) ──────────────
-  const ibkrBuy = useCallback((ticker: string, shares: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "ibkr_buy", ticker, shares }));
-    }
-  }, []);
+  // ── Manuelle ordrer fra watchlist-rækker ────────────────────
+  // ⚠ BROKEREN ER ET KRAV, IKKE EN INDSTILLING. Den udledes af HVILKEN liste
+  // klikket kom fra (Futures -> NT8, Stocks -> IBKR) og kan ikke vælges i
+  // brugerfladen. Iben skal ikke tage stilling til det pr. ordre.
+  //
+  // ⚠ OG DEN HAR INGEN DEFAULT — heller ikke i backenden. En manglende broker
+  // er en gammel exe, og så skal ordren SPÆRRES med den besked, ikke rutes et
+  // sted hen ingen har valgt. MES findes hos BEGGE brokere: en fejlrutet
+  // futures-ordre ville lande på IBKR til $2.863 initial margin i stedet for
+  // NT8's $50, og den slags må ikke kunne ske tavst. `git pull` henter ikke
+  // app.exe, så netop dén skævhed er sket før.
+  const sendOrdre = useCallback(
+    (action: "BUY" | "SELL", ticker: string, shares: number, broker: Broker) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: action === "BUY" ? "ordre_buy" : "ordre_sell",
+          ticker, shares, broker,
+        }));
+      }
+    }, []);
 
-  const ibkrSell = useCallback((ticker: string, shares: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "ibkr_sell", ticker, shares }));
-    }
-  }, []);
+  const ibkrBuy  = useCallback((ticker: string, shares: number, broker: Broker) =>
+    sendOrdre("BUY", ticker, shares, broker), [sendOrdre]);
+  const ibkrSell = useCallback((ticker: string, shares: number, broker: Broker) =>
+    sendOrdre("SELL", ticker, shares, broker), [sendOrdre]);
 
   const clearLastOrderResult = useCallback(() => setLastOrderResult(null), []);
 

@@ -89,7 +89,7 @@ class OrdersTracker:
 
     def record_placed(
         self,
-        order_id: int,
+        order_id,                   # int (IBKR) eller str (NT8's order_ref)
         source: str,                # "manual_watchlist" eller "Momentum ORB" osv.
         ticker: str,
         action: str,                # "BUY" eller "SELL"
@@ -97,6 +97,8 @@ class OrdersTracker:
         order_type: str = "MKT",
         limit_price: Optional[float] = None,
         ibkr_account: Optional[str] = None,
+        broker: str = "IBKR",
+        maalt: Optional[dict] = None,
     ) -> None:
         """Registrer en nyplaceret ordre.
 
@@ -104,9 +106,26 @@ class OrdersTracker:
         vide OM den overhovedet kan kende ordren: en ordre lagt gennem
         ordre-Gatewayen paa DUQ441063 findes ikke i en session der styrer
         DUN748991, og fravaeret af svar ligner "ingen aendring".
+
+        ⚠ `broker` FINDES FORDI BERIGELSEN KUN VIRKER FOR IBKR.
+        get_all_orders beriger fra `ib.trades()`. En NT8-ordre staar ikke der og
+        vil ALDRIG blive matchet — saa det optimistiske "Submitted" ville blive
+        staaende for evigt, ogsaa efter at NT8 havde fyldt den. Det er samme
+        fejlklasse som de to MES-ordrer 11-08, bare uden nogen der til sidst
+        retter den.
+
+        `maalt` er svaret vi allerede HAR fra ATI (status/filled/avg_fill). Naar
+        det er terminalt, skrives det som bekraeftet her og trackeren behoever
+        aldrig spoerge IBKR om en ordre IBKR ikke kender. Er det IKKE terminalt,
+        staar den som ubekraeftet og bliver UKENDT — hvilket er sandt.
         """
+        _m = maalt or {}
+        _terminal = str(_m.get("status") or "") in ("Filled", "Cancelled", "Rejected")
         entry = {
-            "order_id":    int(order_id),
+            # ⚠ IKKE int(). NT8's order_ref er en STRENG (NTM1790515), og
+            # int() ville kaste netop naar ordren er lagt og skal bogfoeres.
+            "order_id":    int(order_id) if isinstance(order_id, int)
+                           or str(order_id).lstrip("-").isdigit() else str(order_id),
             "source":      source,
             "ticker":      ticker.upper(),
             "action":      action.upper(),
@@ -120,11 +139,13 @@ class OrdersTracker:
             # `bekraeftet` skiller de to, saa et uafstemt gaet ikke kan staa som
             # faktum. Maalt 11-08: to MES-ordrer fra i gaar stod som "2 aabne"
             # med filled=0. De blev fyldt og lukket samme aften.
-            "status":      "Submitted",
-            "bekraeftet":  False,
-            "filled":      0,
-            "remaining":   int(shares),
-            "avg_fill":    0,
+            "status":      _m.get("status") or "Submitted",
+            "bekraeftet":  _terminal,
+            "filled":      int(_m.get("filled") or 0),
+            "remaining":   int(shares) - int(_m.get("filled") or 0),
+            "avg_fill":    float(_m.get("avg_fill") or 0),
+            # ⚠ Hvem der udfoerte. Styrer om berigelsen fra ib.trades() gaelder.
+            "broker":      broker.upper(),
         }
         self._entries.append(entry)
         _save_log(self._entries)
@@ -175,6 +196,12 @@ class OrdersTracker:
         # natlig genforbindelse/genstart i stedet for "UNKNOWN".
         dirty = False
         for e in recent:
+            if e.get("broker", "IBKR") != "IBKR":
+                # ⚠ IBKR KAN IKKE UDTALE SIG OM DENNE ORDRE. Den blev lagt et
+                # andet sted; dens status kom fra ATI og staar allerede i
+                # entryen. Et opslag her ville ikke finde noget, og "ingen svar"
+                # maa ikke blive til hverken "uaendret" eller "UKENDT".
+                continue
             live = live_status.get(e["order_id"])
             if live:
                 if live["status"] != e.get("status") or not e.get("bekraeftet"):
@@ -210,7 +237,13 @@ class OrdersTracker:
             status = e.get("status", "UNKNOWN")
             note = None
 
-            if not e.get("bekraeftet") and _parse_ts(e.get("placed_at")) < _OPSTART:
+            if (e.get("broker", "IBKR") != "IBKR" and not e.get("bekraeftet")):
+                # ATI naaede ikke en terminal status inden for vinduet. Det er
+                # UKENDT — men grunden er en anden end IBKR's sessionsgraense.
+                note = ("lagt via NinjaTrader; ATI meldte ingen terminal status "
+                        "inden for vinduet — tjek NT8's Orders-fane")
+                status = "UNKNOWN"
+            elif not e.get("bekraeftet") and _parse_ts(e.get("placed_at")) < _OPSTART:
                 e_konto = (e.get("ibkr_account") or "").upper()
                 if e_konto and konto_nu and e_konto != konto_nu:
                     note = (f"lagt paa {e_konto}; denne forbindelse styrer "

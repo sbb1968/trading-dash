@@ -951,11 +951,45 @@ async def websocket_endpoint(websocket: WebSocket):
                         logger.info(f"[Kursproxy] henter nu {', '.join(sorted(nye))} "
                                     f"fra algoserveren ({len(_proxy_symboler)} i alt)")
 
-            elif message["type"] in ("ibkr_buy", "ibkr_sell"):
-                # Manuel ordre fra watchlist-rækken — går DIREKTE til IBKR
-                # paper trading kontoen (ikke den lokale mock-portfolio).
-                action = "BUY" if message["type"] == "ibkr_buy" else "SELL"
+            elif message["type"] in ("ibkr_buy", "ibkr_sell",
+                                     "ordre_buy", "ordre_sell"):
+                # Manuel ordre fra en watchlist-raekke — gaar DIREKTE til
+                # brokeren (ikke den lokale mock-portfolio).
+                #
+                # ── HVILKEN BROKER ──────────────────────────────────────────
+                # Fastlaast 27-09-2026: Watchlist Futures -> NT8, Watchlist
+                # Stocks -> IBKR. Frontenden udleder den af HVILKEN liste
+                # klikket kom fra og skriver den i beskeden (se brokerruter.ts).
+                #
+                # ⚠ INGEN DEFAULT. MES kan handles hos BEGGE brokere, saa en
+                # fejlrutet futures-ordre er ikke en fejlmeddelelse — det er en
+                # rigtig position paa den forkerte konto, til $2.863 initial
+                # margin i stedet for NT8's $50. Mangler feltet, er det en
+                # forældet app.exe (`git pull` henter ikke exe'en — det er sket
+                # foer), og saa spaerres ordren med praecis den besked.
+                #
+                # De gamle typer `ibkr_buy`/`ibkr_sell` betyder IBKR og bliver
+                # ved med at goere det. De kan slettes naar begge maskiner er
+                # paa den nye exe.
+                action = "BUY" if message["type"].endswith("_buy") else "SELL"
                 ticker = str(message.get("ticker", "")).upper().strip()
+                if message["type"].startswith("ordre_"):
+                    broker = str(message.get("broker", "")).upper().strip()
+                else:
+                    broker = "IBKR"
+                if broker not in ("IBKR", "NT8"):
+                    await websocket.send_text(json.dumps({
+                        "type": "ibkr_order_result", "success": False,
+                        "ticker": ticker, "action": action,
+                        "shares": message.get("shares"),
+                        "error": (f"Ordren angav ingen gyldig broker "
+                                  f"({broker or 'tom'}) — Trading Dash er "
+                                  f"forældet paa denne maskine. Der er BEVIDST "
+                                  f"ingen standardbroker: MES findes hos baade "
+                                  f"IBKR og NinjaTrader. Laeg en frisk app.exe "
+                                  f"ind (den kommer IKKE med git pull)."),
+                    }))
+                    continue
                 try:
                     shares = int(message.get("shares", 0))
                 except (TypeError, ValueError):
@@ -997,141 +1031,278 @@ async def websocket_endpoint(websocket: WebSocket):
                     }))
                     continue
 
-                # ⚠ GENFORBIND FOERST. connect_ibkr() er selv-helende: er den
-                # eksisterende forbindelse doed, ryddes den op og der forbindes
-                # mod den friske TWS; lever den, er kaldet en hurtig no-op.
-                #
-                # Den manuelle REST-sti (/journal/manual-trade) har altid gjort
-                # dette. DENNE sti — knappen Iben faktisk bruger — gjorde ikke, og
-                # gav i stedet op med "start TWS". IBKR lukker forbindelsen hver
-                # nat, saa en backend der har koert siden i gaar staar med et doedt
-                # forbindelsesobjekt selvom TWS er logget ind og klar.
-                #
-                # Maalt 7/8-2026: tws_online=True, ibkr.connected=False. Beskeden
-                # sendte altsaa brugeren hen for at rette noget der ikke fejlede,
-                # mens den ene handling der ville have virket laa ét kald vaek.
-                # ⚠ ORDRER GAAR GENNEM DEN SKRIVENDE FORBINDELSE naar der er en.
-                # Kurser kommer fra den delte (laesende) forbindelse; ordrer fra en
-                # lokal Gateway paa den konto der handles. De to sloges om
-                # markedsdata-abonnementet — men en Gateway beder aldrig om data af
-                # sig selv, saa naar KUN den ene laeser, opstaar konflikten ikke.
-                # Se ordre_forbindelse.py.
-                ibkr = None
-                _ordre_fejl = ""
-                if ordre_forbindelse.konfigureret():
+                # ═══════════════════════════════════════════════════════════
+                # NT8-GRENEN — samme nedstroems, anden ordrevej
+                # ═══════════════════════════════════════════════════════════
+                # De to brokere moedes igen nede ved `result`. Alt derfra —
+                # svaret til frontend, trackeren, journalen og forensikken — er
+                # FAELLES. En kopi pr. broker ville drive fra hinanden inden for
+                # en maaned; samme begrundelse som `broker`-argumentet i
+                # manuel_forensik.
+                nt_result = None
+                nt_konto = ""
+                if broker == "NT8":
+                    import nt_forbindelse as _nt
+                    # ⚠ VAGTERNE FOER ALT ANDET. klar() koerer V1-V4: kontoen er
+                    # en kendt simulationskonto, den FINDES i ATI-stroemmen, ATI
+                    # er slaaet til, og der er ikke dukket en ukendt konto op.
                     try:
-                        # ⚠ tving=True: her venter et MENNESKE paa svaret.
-                        # Afkoelingen findes for at bremse pollere, ikke for at
-                        # faa Iben til at vente 20 sekunder paa at maatte saelge.
-                        ibkr = await ordre_forbindelse.hent(tving=True)
-                    except ordre_forbindelse.OrdreForbindelseFejl as e:
-                        # En spaerret vagt maa IKKE falde tilbage til den delte
-                        # forbindelse — saa ville ordren lande paa en anden konto
-                        # end den brugeren tror. Vi stopper i stedet.
+                        _profil = await asyncio.to_thread(_nt.klar)
+                    except (_nt.NtForbindelseFejl, _nt.NtTilstandUkendt) as e:
+                        # En spaerret vagt falder IKKE tilbage til IBKR. Iben bad
+                        # om en NT8-ordre; en IBKR-ordre er et andet svar paa et
+                        # andet spoergsmaal — og paa MES en 57 gange stoerre
+                        # marginbinding ($2.863 mod $50).
                         await websocket.send_text(json.dumps({
                             "type": "ibkr_order_result", "success": False,
                             "ticker": ticker, "action": action, "shares": shares,
-                            "error": f"Ordreforbindelsen er spaerret: {e}",
+                            "error": f"NinjaTrader-ordrevejen er spaerret: {e}",
                         }))
                         continue
-                else:
+                    nt_konto = _profil["konto"]
+
+                    # ⚠ KONTRAKTMAANEDEN HENTES FRA IBKR — OG DET ER BEVIDST.
+                    # NT8 vil have "MES 12-26". Der findes ingen lokal
+                    # rullekalender, og `nt_instrument()` naegter at gaette: en
+                    # konstant skrevet i august ville have virket i seks uger og
+                    # derefter vaeret TAVST forkert (MESU6 udloeb 18-09-2026).
+                    # Prisen er at NT8-ordrer kraever IBKR oppe — men bars og
+                    # indikatorer til forensikken kommer derfra alligevel, saa
+                    # koblingen er der i forvejen.
                     await strategy_manager.connect_ibkr(paper_trading=True)
                     ibkr = strategy_manager.get_ibkr()
-                if ibkr is None or not ibkr.connected:
-                    # Skeln de to tilfaelde. "start TWS" er forkert naar TWS koerer,
-                    # og sender brugeren hen for at rette noget der ikke fejler.
-                    _tws = bool(tws_watchdog and tws_watchdog.is_online)
-                    _hvorfor = ("TWS svarer paa porten, men API-forbindelsen kunne "
-                                "ikke oprettes — tjek Global Configuration → API → "
-                                "Enable ActiveX and Socket Clients") if _tws else \
-                               "TWS svarer ikke — er den startet og logget ind?"
-                    await websocket.send_text(json.dumps({
-                        "type":    "ibkr_order_result",
-                        "success": False,
-                        "ticker":  ticker,
-                        "action":  action,
-                        "shares":  shares,
-                        "error":   f"IBKR ikke forbundet. {_hvorfor}",
-                    }))
-                    continue
-
-                # ── SALGSVAGT ────────────────────────────────────────────
-                # ⚠ HER, FOER ORDREN. Den gamle kontrol (`exit_uden_aaben_entry`)
-                # fyrede EFTER fyldningen, og en hændelse i loggen kan ikke tage
-                # pengene tilbage. Paa DUQ441063 kostede det 460 dollar i
-                # fejlbogfoering over tre dage — se noten ved
-                # manuel_forensik.kontroller_salg.
-                #
-                # ⚠ Vagten spoerger BROKEREN, ikke journalen. At journalen ikke
-                # kender positionen er ikke farligt — at brokeren ikke HAR den er.
-                if True:
-                    import manuel_forensik as _mf
-                    _ok, _besked, _detaljer = await _mf.kontroller_ordre(
-                        ibkr, ticker, action, shares)
-                    # Kun det der IKKE er hverdag logges: en afvisning, eller et
-                    # salg vi ikke kunne kontrollere. Et godkendt, kontrolleret
-                    # salg fylder ikke loggen — ellers drukner de to andre.
-                    if not _ok:
-                        await journal.log_event(
-                            ibkr_account = getattr(ibkr, "account", "") or None,
-                            source="manual_watchlist", event_type=_mf.SALGSVAGT_EVENT,
-                            symbol=ticker,
-                            payload={"shares": shares, "besked": _besked, **_detaljer})
+                    try:
+                        _kontrakt = await ibkr.qualify_future(ticker)
+                        _instrument = _nt.nt_instrument(ticker, _kontrakt)
+                    except Exception as e:
                         await websocket.send_text(json.dumps({
                             "type": "ibkr_order_result", "success": False,
                             "ticker": ticker, "action": action, "shares": shares,
-                            "error": f"Ordre afvist: {_besked}",
+                            "error": (f"Kan ikke afgoere kontraktmaaneden for "
+                                      f"{ticker}: {e}. Ingen ordre sendt — "
+                                      f"maaneden gaettes ikke."),
                         }))
                         continue
-                    if not _detaljer.get("kontrolleret"):
-                        await journal.log_event(
-                            ibkr_account = getattr(ibkr, "account", "") or None,
-                            source="manual_watchlist",
-                            event_type=_mf.SALGSVAGT_UKONTROLLERET,
-                            symbol=ticker,
-                            payload={"shares": shares, **_detaljer})
 
-                try:
-                    result = await ibkr.place_paper_order(
-                        ticker=ticker,
-                        action=action,
-                        quantity=shares,
-                        order_type="MKT",
-                        # ⚠ FOER STOD DER INTET HER, og default er "vent 1 sekund
-                        # og se hvad status siger". Tre ordrer blev afskrevet som
-                        # ordre_ikke_fyldt paa det ene kig (29, 67, 76) — alle tre
-                        # fyldte, og ordre-trackeren fik dem bekraeftet af IBKR.
-                        # Journalen fik aldrig en raekke.
-                        #
-                        # ⚠ Og det HER er ikke loesningen alene: femten sekunder
-                        # er stadig en klippekant, og en ordre kan fylde paa det
-                        # sekstende. Den strukturelle del er afstemningen nedenfor,
-                        # som ingen deadline har. Se manuel_forensik.
-                        await_fill_sec=MANUEL_FYLD_VENT_SEC,
-                        # Markerer MANUEL oprindelse, saa handlen er tilskrivbar i
-                        # regnskabet. Uden den ville den vaere ejerloes paa praecis
-                        # samme maade som SHAZ.
-                        order_ref=ordre_forbindelse.order_ref(),
-                    )
-                except Exception as e:
-                    await websocket.send_text(json.dumps({
-                        "type":    "ibkr_order_result",
-                        "success": False,
-                        "ticker":  ticker,
-                        "action":  action,
-                        "shares":  shares,
-                        "error":   f"Ordre-fejl: {e}",
-                    }))
-                    # Journaliser fejlen så vi kan se den senere
-                    await journal.log_event(
-                        # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
-                        ibkr_account = getattr(ibkr, 'account', '') or None,
-                        source     = "manual_watchlist",
-                        event_type = "ibkr_order_error",
-                        symbol     = ticker,
-                        payload    = {"action": action, "shares": shares, "error": str(e)},
-                    )
-                    continue
+                    # ── JOURNAL-VAGTEN ────────────────────────────────────
+                    # ⚠ DEN ADVARER, DEN BLOKERER ALDRIG. ATI kan ikke spoerges
+                    # om positioner, saa journalen er det eneste vi har — og en
+                    # journal der tager fejl maa ikke kunne spaerre et salg.
+                    # Efter aftale 27-09 foretager Iben positionsafstemning
+                    # MANUELT i NT8 naar hun er i tvivl.
+                    import manuel_forensik as _mf
+                    _ok, _besked, _det = await _mf.kontroller_ordre_journal(
+                        journal, ticker, action, shares, nt_konto)
+                    if _besked:
+                        await journal.log_event(
+                            ibkr_account=nt_konto or None,
+                            source="manual_watchlist",
+                            event_type=_mf.ORDRE_UDEN_POSITIONSKONTROL,
+                            symbol=ticker,
+                            payload={"shares": shares, "broker": "NT8",
+                                     "action": action,
+                                     "besked": _besked, **_det})
+
+                    _ref = _nt.order_ref()
+                    try:
+                        # ⚠ I EN TRAAD. send_ordre + afvent_ordre er synkrone og
+                        # sover op mod 30 sekunder tilsammen (OIF-filen skal
+                        # spises, derefter lyttes der efter terminal status).
+                        # Kaldt direkte ville de fryse HELE backenden: alle
+                        # WS-klienter og alle koerende strategier.
+                        def _laeg():
+                            _s = _nt.send_ordre(
+                                konto=nt_konto, instrument=_instrument,
+                                action=action, antal=shares,
+                                ordretype="MARKET", tif="DAY", ordre_id=_ref)
+                            _f = _nt.afvent_ordre(_ref, MANUEL_FYLD_VENT_SEC)
+                            return _s, _f
+                        _svar, _fyld = await asyncio.to_thread(_laeg)
+                    except Exception as e:
+                        await journal.log_event(
+                            ibkr_account=nt_konto or None,
+                            source="manual_watchlist", event_type="nt_order_error",
+                            symbol=ticker,
+                            payload={"action": action, "shares": shares,
+                                     "broker": "NT8", "instrument": _instrument,
+                                     "order_ref": _ref, "error": str(e)})
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": f"NinjaTrader-ordre fejlede: {e}",
+                        }))
+                        continue
+
+                    if _svar.get("ukendt_instrument"):
+                        # NT8 kender ikke instrumentet. Loggen siger det rent ud,
+                        # saa det skal ikke staa som "uafklaret".
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": (f"NT8 kender ikke instrumentet "
+                                      f"'{_instrument}' — er datafeedet for "
+                                      f"kontrakten tilgaengeligt?"),
+                        }))
+                        continue
+
+                    # Samme form som place_paper_order, saa nedstroems er faelles.
+                    nt_result = {
+                        "status":    _fyld["status"] or "Submitted",
+                        "filled":    _fyld["filled"],
+                        "avg_fill":  _fyld["avg_fill"],
+                        "order_id":  _ref,
+                        "order_ref": _ref,
+                        # ⚠ Kun til fejlsoegning. `spist` betyder at NT8 LAESTE
+                        # filen — ikke at ordren blev accepteret.
+                        "nt_spist":  _svar.get("spist"),
+                        "nt_log":    _svar.get("logliner", [])[:6],
+                        "nt_oplaeg": _fyld.get("oplaeg"),
+                    }
+
+                # ── IBKR-GRENEN ───────────────────────────────────────────
+                # ⚠ IKKE ET FALLBACK. Naar brokeren er NT8, koeres denne blok
+                # slet ikke — der er ingen vej fra en spaerret NT8-vagt til en
+                # IBKR-ordre. De to grene moedes foerst ved `result`.
+                if broker == "IBKR":
+                    # ⚠ GENFORBIND FOERST. connect_ibkr() er selv-helende: er den
+                    # eksisterende forbindelse doed, ryddes den op og der forbindes
+                    # mod den friske TWS; lever den, er kaldet en hurtig no-op.
+                    #
+                    # Den manuelle REST-sti (/journal/manual-trade) har altid gjort
+                    # dette. DENNE sti — knappen Iben faktisk bruger — gjorde ikke, og
+                    # gav i stedet op med "start TWS". IBKR lukker forbindelsen hver
+                    # nat, saa en backend der har koert siden i gaar staar med et doedt
+                    # forbindelsesobjekt selvom TWS er logget ind og klar.
+                    #
+                    # Maalt 7/8-2026: tws_online=True, ibkr.connected=False. Beskeden
+                    # sendte altsaa brugeren hen for at rette noget der ikke fejlede,
+                    # mens den ene handling der ville have virket laa ét kald vaek.
+                    # ⚠ ORDRER GAAR GENNEM DEN SKRIVENDE FORBINDELSE naar der er en.
+                    # Kurser kommer fra den delte (laesende) forbindelse; ordrer fra en
+                    # lokal Gateway paa den konto der handles. De to sloges om
+                    # markedsdata-abonnementet — men en Gateway beder aldrig om data af
+                    # sig selv, saa naar KUN den ene laeser, opstaar konflikten ikke.
+                    # Se ordre_forbindelse.py.
+                    ibkr = None
+                    _ordre_fejl = ""
+                    if ordre_forbindelse.konfigureret():
+                        try:
+                            # ⚠ tving=True: her venter et MENNESKE paa svaret.
+                            # Afkoelingen findes for at bremse pollere, ikke for at
+                            # faa Iben til at vente 20 sekunder paa at maatte saelge.
+                            ibkr = await ordre_forbindelse.hent(tving=True)
+                        except ordre_forbindelse.OrdreForbindelseFejl as e:
+                            # En spaerret vagt maa IKKE falde tilbage til den delte
+                            # forbindelse — saa ville ordren lande paa en anden konto
+                            # end den brugeren tror. Vi stopper i stedet.
+                            await websocket.send_text(json.dumps({
+                                "type": "ibkr_order_result", "success": False,
+                                "ticker": ticker, "action": action, "shares": shares,
+                                "error": f"Ordreforbindelsen er spaerret: {e}",
+                            }))
+                            continue
+                    else:
+                        await strategy_manager.connect_ibkr(paper_trading=True)
+                        ibkr = strategy_manager.get_ibkr()
+                    if ibkr is None or not ibkr.connected:
+                        # Skeln de to tilfaelde. "start TWS" er forkert naar TWS koerer,
+                        # og sender brugeren hen for at rette noget der ikke fejler.
+                        _tws = bool(tws_watchdog and tws_watchdog.is_online)
+                        _hvorfor = ("TWS svarer paa porten, men API-forbindelsen kunne "
+                                    "ikke oprettes — tjek Global Configuration → API → "
+                                    "Enable ActiveX and Socket Clients") if _tws else \
+                                   "TWS svarer ikke — er den startet og logget ind?"
+                        await websocket.send_text(json.dumps({
+                            "type":    "ibkr_order_result",
+                            "success": False,
+                            "ticker":  ticker,
+                            "action":  action,
+                            "shares":  shares,
+                            "error":   f"IBKR ikke forbundet. {_hvorfor}",
+                        }))
+                        continue
+
+                    # ── SALGSVAGT ────────────────────────────────────────────
+                    # ⚠ HER, FOER ORDREN. Den gamle kontrol (`exit_uden_aaben_entry`)
+                    # fyrede EFTER fyldningen, og en hændelse i loggen kan ikke tage
+                    # pengene tilbage. Paa DUQ441063 kostede det 460 dollar i
+                    # fejlbogfoering over tre dage — se noten ved
+                    # manuel_forensik.kontroller_salg.
+                    #
+                    # ⚠ Vagten spoerger BROKEREN, ikke journalen. At journalen ikke
+                    # kender positionen er ikke farligt — at brokeren ikke HAR den er.
+                    if True:
+                        import manuel_forensik as _mf
+                        _ok, _besked, _detaljer = await _mf.kontroller_ordre(
+                            ibkr, ticker, action, shares)
+                        # Kun det der IKKE er hverdag logges: en afvisning, eller et
+                        # salg vi ikke kunne kontrollere. Et godkendt, kontrolleret
+                        # salg fylder ikke loggen — ellers drukner de to andre.
+                        if not _ok:
+                            await journal.log_event(
+                                ibkr_account = getattr(ibkr, "account", "") or None,
+                                source="manual_watchlist", event_type=_mf.SALGSVAGT_EVENT,
+                                symbol=ticker,
+                                payload={"shares": shares, "besked": _besked, **_detaljer})
+                            await websocket.send_text(json.dumps({
+                                "type": "ibkr_order_result", "success": False,
+                                "ticker": ticker, "action": action, "shares": shares,
+                                "error": f"Ordre afvist: {_besked}",
+                            }))
+                            continue
+                        if not _detaljer.get("kontrolleret"):
+                            await journal.log_event(
+                                ibkr_account = getattr(ibkr, "account", "") or None,
+                                source="manual_watchlist",
+                                event_type=_mf.SALGSVAGT_UKONTROLLERET,
+                                symbol=ticker,
+                                payload={"shares": shares, **_detaljer})
+
+                    try:
+                        result = await ibkr.place_paper_order(
+                            ticker=ticker,
+                            action=action,
+                            quantity=shares,
+                            order_type="MKT",
+                            # ⚠ FOER STOD DER INTET HER, og default er "vent 1 sekund
+                            # og se hvad status siger". Tre ordrer blev afskrevet som
+                            # ordre_ikke_fyldt paa det ene kig (29, 67, 76) — alle tre
+                            # fyldte, og ordre-trackeren fik dem bekraeftet af IBKR.
+                            # Journalen fik aldrig en raekke.
+                            #
+                            # ⚠ Og det HER er ikke loesningen alene: femten sekunder
+                            # er stadig en klippekant, og en ordre kan fylde paa det
+                            # sekstende. Den strukturelle del er afstemningen nedenfor,
+                            # som ingen deadline har. Se manuel_forensik.
+                            await_fill_sec=MANUEL_FYLD_VENT_SEC,
+                            # Markerer MANUEL oprindelse, saa handlen er tilskrivbar i
+                            # regnskabet. Uden den ville den vaere ejerloes paa praecis
+                            # samme maade som SHAZ.
+                            order_ref=ordre_forbindelse.order_ref(),
+                        )
+                    except Exception as e:
+                        await websocket.send_text(json.dumps({
+                            "type":    "ibkr_order_result",
+                            "success": False,
+                            "ticker":  ticker,
+                            "action":  action,
+                            "shares":  shares,
+                            "error":   f"Ordre-fejl: {e}",
+                        }))
+                        # Journaliser fejlen så vi kan se den senere
+                        await journal.log_event(
+                            # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
+                            ibkr_account = getattr(ibkr, 'account', '') or None,
+                            source     = "manual_watchlist",
+                            event_type = "ibkr_order_error",
+                            symbol     = ticker,
+                            payload    = {"action": action, "shares": shares, "error": str(e)},
+                        )
+                        continue
+                else:
+                    # NT8-grenen har allerede lagt ordren og laest fyldningen
+                    # af ATI. Herfra er de to veje identiske.
+                    result = nt_result
 
                 if result is None:
                     await websocket.send_text(json.dumps({
@@ -1140,9 +1311,19 @@ async def websocket_endpoint(websocket: WebSocket):
                         "ticker":  ticker,
                         "action":  action,
                         "shares":  shares,
-                        "error":   "Ordre returnerede tom — tjek TWS",
+                        "error":   ("Ordre returnerede tom — tjek "
+                                    + ("NT8" if broker == "NT8" else "TWS")),
                     }))
                     continue
+
+                # ⚠ ÉN KILDE TIL "HVILKEN KONTO GIK ORDREN TIL". For NT8 er
+                # `ibkr.account` en HELT anden konto (den delte laeseforbindelse),
+                # og hvert sted nedenfor der selv laeser den, ville bogfoere
+                # NT8-handlen paa IBKR-kontoen. Det er kryds-konto-fejlen fra
+                # 11-09 igen, bare mellem to brokere — og den parrer et NT8-salg
+                # med en IBKR-entry.
+                konto_brugt = (nt_konto if broker == "NT8"
+                               else (getattr(ibkr, "account", "") or ""))
 
                 # Succes — send resultat tilbage til frontend
                 await websocket.send_text(json.dumps({
@@ -1165,11 +1346,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     # en ordre paa den forkerte konto, tavst og tilsyneladende
                     # tilfaeldigt. Det er en driftsfaelde, ikke en kodefejl, og den
                     # kan opstaa paa enhver maskine med en glemt proces.
-                    "konto":        getattr(ibkr, "account", "") or None,
-                    "forbindelse":  ("ordre" if ordre_forbindelse.konfigureret()
-                                     else "delt"),
-                    "port":         getattr(ibkr, "port", None),
+                    "konto":        konto_brugt or None,
+                    "broker":       broker,
+                    "forbindelse":  ("nt8-ati" if broker == "NT8"
+                                     else ("ordre" if ordre_forbindelse.konfigureret()
+                                           else "delt")),
+                    "port":         (None if broker == "NT8"
+                                     else getattr(ibkr, "port", None)),
                     "order_ref":    result.get("order_ref"),
+                    # ⚠ KUN NT8. `nt_spist` betyder at NT8 LAESTE OIF-filen —
+                    # ikke at ordren blev accepteret. Med i svaret fordi det er
+                    # forskellen mellem "vi skrev til ingenting" og "NT8 afviste".
+                    **({"nt_spist":  result.get("nt_spist"),
+                        "nt_oplaeg": result.get("nt_oplaeg"),
+                        "nt_log":    result.get("nt_log")}
+                       if broker == "NT8" else {}),
                 }))
 
                 # Registrer i orders tracker så ordrer-vinduet kan vise den
@@ -1185,13 +1376,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         # ⚠ Hvilken konto ordren FAKTISK gik til. Uden den kan en
                         # senere aflaesning ikke vide om den overhovedet KAN
                         # kende ordren, og et manglende svar ligner "uaendret".
-                        ibkr_account=getattr(ibkr, "account", "") or None,
+                        ibkr_account=konto_brugt or None,
+                        # ⚠ Uden `broker` ville trackeren berige fra ib.trades(),
+                        # aldrig finde NT8-ordren, og lade det optimistiske
+                        # "Submitted · 0 fyldt" staa for evigt — ogsaa efter at
+                        # NT8 havde fyldt den. `maalt` er ATI's eget svar, saa
+                        # der ikke spoerges IBKR om en ordre IBKR ikke kender.
+                        broker=broker,
+                        maalt=(result if broker == "NT8" else None),
                     )
 
                 # Journaliser manuel ordre
                 await journal.log_event(
-                    # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
-                    ibkr_account = getattr(ibkr, 'account', '') or None,
+                    # Kontoen ordren FAKTISK gik til — se konto_brugt.
+                    ibkr_account = konto_brugt or None,
                     source     = "manual_watchlist",
                     event_type = "ibkr_order_placed",
                     symbol     = ticker,
@@ -1202,6 +1400,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         "status":   result.get("status"),
                         "filled":   result.get("filled"),
                         "avg_fill": result.get("avg_fill"),
+                        # ⚠ Hvem der udfoerte. Uden det kan en senere laesning
+                        # ikke skelne en NT8-handel fra en IBKR-handel.
+                        "broker":   broker,
+                        "konto":    konto_brugt,
                     },
                 )
 
@@ -1229,7 +1431,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         # Nu: findes der en aaben manuel raekke, og gaar ordren den
                         # MODSATTE vej, er det en exit. Ellers er det en entry, og
                         # siden foelger ordren.
-                        _aaben = await manuel_forensik.find_aaben(journal, ticker)
+                        # ⚠ KONTOEN SKAL MED. Uden den finder opslaget den
+                        # FOERSTE aabne handel i symbolet uanset broker — og et
+                        # NT8-salg ville lukke en IBKR-entry. To raekker bliver
+                        # forkerte i samme skrivning; det er kryds-konto-fejlen
+                        # fra 11-09, bare mellem to brokere. Se
+                        # test_nt_forensik.py punkt 5 og 7.
+                        _aaben = await manuel_forensik.find_aaben(
+                            journal, ticker, konto=konto_brugt)
                         _side = (_aaben or {}).get("side", "").lower()
                         _lukker = (_aaben is not None and
                                    ((_side == "long" and action == "SELL") or
@@ -1239,43 +1448,57 @@ async def websocket_endpoint(websocket: WebSocket):
                                 journal, ibkr, symbol=ticker,
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
-                                et_tz=ET_TZ)
+                                et_tz=ET_TZ, broker=broker, konto=konto_brugt)
                         else:
+                            # ⚠ `ibkr` er her KURSKILDEN, ikke ordrevejen. Bars
+                            # og indikatorer kommer fra IBKR uanset hvem der
+                            # udfoerte; ATI leverer ingen kurser. Derfor kan de to
+                            # brokere dele hele forensikken — se manuel_forensik.
                             await manuel_forensik.registrer_entry(
                                 journal, ibkr, symbol=ticker,
                                 side="long" if action == "BUY" else "short",
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
-                                et_tz=ET_TZ)
+                                et_tz=ET_TZ, broker=broker, konto=konto_brugt)
                     except Exception as e:
                         # Ordren er gennemfoert; kun forensikken fejlede. Det maa
                         # aldrig vaelte WS-loekken, men det skal kunne ses.
                         logger.error(f"[WS] manuel forensik fejlede for {ticker}: {e}")
                         await journal.log_event(
-                            # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
-                            ibkr_account = getattr(ibkr, 'account', '') or None,
+                            ibkr_account = konto_brugt or None,
                             source="manual", event_type="forensik_fejl",
                             symbol=ticker,
-                            payload={"fase": action, "fejl": str(e)})
+                            payload={"fase": action, "fejl": str(e),
+                                     "broker": broker})
                 else:
                     # ⚠ HED FOER "ordre_ikke_fyldt" — OG DET VAR EN PAASTAND.
                     # Tre gange skrev den en ordre af der bagefter fyldte (29, 67,
                     # 76). Vi kan konstatere at den IKKE VAR FYLDT DA VI SAA
                     # EFTER; vi kan ikke konstatere at den aldrig fylder.
                     # Navnet siger nu hvad vi ved, og statusfeltet siger hvornaar.
+                    # ⚠ OPFOELGNINGEN ER IKKE DEN SAMME FOR DE TO BROKERE, og
+                    # noten maa ikke love mere end der sker. IBKR-ordrer beriges
+                    # af ib.trades() ved hvert kig paa ordre-vinduet, saa en
+                    # sen fyldning bliver fanget af sig selv. NT8-ordrer beriges
+                    # IKKE — ATI's svar blev laest én gang, i vinduet ovenfor.
+                    # Derfor er NT8's eneste opfoelgning et menneske der kigger.
+                    _note = ("ikke fyldt inden for ventetiden — kan stadig fylde. "
+                             "Afstemmes mod ordre-trackeren, som foelger op."
+                             if broker != "NT8" else
+                             "ATI meldte ingen terminal status inden for "
+                             "ventetiden. ⚠ DER ER INGEN AUTOMATISK OPFOELGNING "
+                             "paa NT8-ordrer — tjek NT8's Orders-fane.")
                     await journal.log_event(
-                        # Kontoen fra DEN forbindelse ordren gik igennem — ikke den delte.
-                        ibkr_account = getattr(ibkr, 'account', '') or None,
+                        ibkr_account = konto_brugt or None,
                         source="manual", event_type="ordre_uafklaret",
                         symbol=ticker,
                         payload={"action": action, "shares": shares,
                                  "status": result.get("status"),
                                  "filled": result.get("filled"),
                                  "order_id": order_id,
+                                 "broker": broker, "konto": konto_brugt,
                                  "ventede_sek": MANUEL_FYLD_VENT_SEC,
-                                 "note": "ikke fyldt inden for ventetiden — kan "
-                                         "stadig fylde. Afstemmes mod "
-                                         "ordre-trackeren, som foelger op."})
+                                 "note": _note})
 
                 # ── AFSTEMNING UDEN DEADLINE ────────────────────────────────
                 # ⚠ Koeres uanset udfaldet, ogsaa naar ordren fyldte pent. Den

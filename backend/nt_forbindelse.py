@@ -243,6 +243,74 @@ def ordre_status(ordre_id: str, raa: str | None = None) -> str:
 TERMINALE = {"Cancelled", "Rejected", "Filled"}
 
 
+def fyldning(ordre_id: str, raa: str | None = None) -> tuple[int, float]:
+    """Hvor meget er fyldt, og til hvilken snitpris. (0, 0.0) = intet set.
+
+    ATI pusher det i to felter ved siden af status:
+
+        OrderStatus|TDPROBE1789538169 Rejected
+        Filled|TDPROBE1789538169 0
+        AvgFillPrice|TDPROBE1789538169 0
+
+    ⚠ DE FELTER HAR LIGGET DER HELE TIDEN og blev ikke laest. Uden dem er
+    der ingen fyldpris, og uden fyldpris ingen P&L, ingen entry/exit-parring og
+    intet chart — altsaa ingen forensik vaerd at kalde forensik. Det var den
+    eneste rigtige hindring for at NT8-handler kunne bogfoeres som IBKR-handler.
+
+    ⚠ (0, 0.0) BETYDER IKKE "IKKE FYLDT". Samme oejebliksbillede-regel som
+    `ordre_status`: felterne kan mangle i dette oplaeg og findes i det naeste.
+    """
+    t = raa if raa is not None else _laes_raat()
+    m_a = re.search(rf"Filled\|{re.escape(ordre_id)}\s+(\S+)", t)
+    m_p = re.search(rf"AvgFillPrice\|{re.escape(ordre_id)}\s+(\S+)", t)
+
+    def _tal(m, som):
+        if not m:
+            return som(0)
+        try:
+            return som(float(m.group(1)))
+        except (TypeError, ValueError):
+            return som(0)
+
+    return _tal(m_a, int), _tal(m_p, float)
+
+
+def afvent_ordre(ordre_id: str, sekunder: float = 15.0,
+                 oplaeg_sek: float = 2.0) -> dict:
+    """Lyt til ATI indtil ordren er terminal, eller tiden gaar.
+
+    Returnerer `{"status", "filled", "avg_fill", "terminal", "oplaeg"}` —
+    IBKR-stiens `place_paper_order`-form, saa alt nedenstroems kan vaere faelles
+    for de to brokere i stedet for en kopi pr. broker.
+
+    ⚠ DEN PAASTAAR IKKE NOGET DEN IKKE VED. Loeber tiden ud uden terminal
+    status, er svaret `terminal=False` og `status=""` — ikke "ikke fyldt".
+    Det er praecis den fejl `ordre_uafklaret` blev doebt om for: tre IBKR-ordrer
+    blev afskrevet som ufyldte paa ét kig, og fyldte alle tre.
+    """
+    slut = time.time() + max(sekunder, oplaeg_sek)
+    status, antal, pris, oplaeg = "", 0, 0.0, 0
+    while True:
+        raa = _laes_raat(oplaeg_sek)
+        oplaeg += 1
+        s = ordre_status(ordre_id, raa)
+        a, p = fyldning(ordre_id, raa)
+        # ⚠ ET SENERE OPLAEG MAA IKKE SLETTE ET TIDLIGERE FUND. Snapshottet kan
+        # tabe ordren igen (maalt 26-09), og saa ville et frisk, tomt kig
+        # overskrive en fyldpris vi allerede havde.
+        status = s or status
+        if a:
+            antal = a
+        if p:
+            pris = p
+        if status in TERMINALE:
+            break
+        if time.time() >= slut:
+            break
+    return {"status": status, "filled": antal, "avg_fill": pris,
+            "terminal": status in TERMINALE, "oplaeg": oplaeg}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Vagterne samlet
 # ═══════════════════════════════════════════════════════════════════════════

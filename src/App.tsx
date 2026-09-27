@@ -318,7 +318,8 @@ function useKolonner(noegle: string, standard: string[]): string[] {
 // Derfor: præcis ét panel er aktivt ad gangen, det er markeret med en NEONGUL
 // ramme, og de andre panelers genvejshaandtering returnerer med det samme.
 // Rammen er ikke pynt — den er den eneste maade at se hvor et tastetryk lander.
-type WatchVariant = "futures" | "stocks";
+import { BROKER_FOR_LISTE, BROKER_NAVN, type Broker, type WatchVariant }
+  from "./brokerruter";
 
 const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: string }> = {
   // Futures beholder den kendte moerke flade — det er den Iben kender.
@@ -331,7 +332,8 @@ const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: stri
 function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, cols, variant = "futures", erAktiv = true, onAktiver }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
-  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
+  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
+                   broker: Broker) => void;
   orderResult?: IbkrOrderResult | null;
   cols?: string[];
   variant?: WatchVariant;
@@ -582,7 +584,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
         `Futures handles med det rene symbol (MES, M2K) — ikke kontraktkoden.`);
       return;
     }
-    onRequestOrder(action, stock.ticker, shares, pris);
+    // ⚠ BROKEREN FØLGER LISTEN, ikke tickeren og ikke en indstilling.
+    // Se brokerruter.ts for hvorfor der ikke er en default.
+    onRequestOrder(action, stock.ticker, shares, pris, BROKER_FOR_LISTE[variant]);
   }
 
   async function openCompanySite(ticker: string) {
@@ -1629,7 +1633,8 @@ export function renderWindowContent(id: WindowId, props: {
   aktivWatch: "futures" | "stocks"; setAktivWatch: (v: "futures" | "stocks") => void;
   currentPrice: number;
   onAddWindow: (id: WindowId) => void; onCloseWindow: (id: WindowId) => void;
-  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => void;
+  onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
+                   broker: Broker) => void;
   onOpenDetail: (kind: string, ticker: string) => void;
   orderResult?: IbkrOrderResult | null;
 }) {
@@ -1762,6 +1767,9 @@ function App() {
   // ── Bekræftelses-dialog state for manuelle IBKR-ordrer ──────
   const [orderConfirm, setOrderConfirm] = useState<{
     action: "BUY" | "SELL"; ticker: string; shares: number; price: number;
+    // ⚠ Brokeren fanges PAA KLIKKET, ikke naar der bekraeftes. Skifter det
+    // aktive panel imens, skal ordren stadig gaa dertil hvor den blev bestilt.
+    broker: Broker;
   } | null>(null); 
   const selectedTickerName = useTickerName(selectedTicker);
   
@@ -1869,12 +1877,13 @@ function App() {
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onOpenDetail: openDetail,
     orderResult: lastOrderResult,
-    onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number) => {
+    onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
+                     broker: Broker) => {
       // Konfigurator-indstilling: spring bekræftelses-pop-up over og handl direkte.
       if (localStorage.getItem("skip_order_confirm") === "true") {
-        if (action === "BUY") ibkrBuy(ticker, shares); else ibkrSell(ticker, shares);
+        if (action === "BUY") ibkrBuy(ticker, shares, broker); else ibkrSell(ticker, shares, broker);
       } else {
-        setOrderConfirm({ action, ticker, shares, price });
+        setOrderConfirm({ action, ticker, shares, price, broker });
       }
     },
   };
@@ -1982,11 +1991,21 @@ function App() {
             Bekræft <span style={{ color: orderConfirm.action === "BUY" ? "var(--bull)" : "var(--bear)" }}>
               {orderConfirm.action === "BUY" ? "KØB" : "SÆLG"}
             </span> {orderConfirm.shares} {orderConfirm.ticker} @ ${orderConfirm.price.toFixed(2)}
+            {" "}
+            <span style={{
+              // ⚠ HVOR ORDREN GAAR HEN. Det ene sted det kan ses foer den er sendt.
+              // MES findes hos begge brokere, saa navnet er ikke pynt.
+              fontSize: "0.85em", fontWeight: 700, padding: "2px 7px",
+              borderRadius: 4, marginLeft: 2,
+              background: orderConfirm.broker === "NT8" ? "#3a2d00" : "#002a3a",
+              color:      orderConfirm.broker === "NT8" ? "#ffd84d" : "#7fd4f5",
+              border: `1px solid ${orderConfirm.broker === "NT8" ? "#806200" : "#005f80"}`,
+            }}>{BROKER_NAVN[orderConfirm.broker]}</span>
           </span>
           <button
             onClick={() => {
-              if (orderConfirm.action === "BUY") ibkrBuy(orderConfirm.ticker, orderConfirm.shares);
-              else                                ibkrSell(orderConfirm.ticker, orderConfirm.shares);
+              if (orderConfirm.action === "BUY") ibkrBuy(orderConfirm.ticker, orderConfirm.shares, orderConfirm.broker);
+              else                                ibkrSell(orderConfirm.ticker, orderConfirm.shares, orderConfirm.broker);
               setOrderConfirm(null);
             }}
             style={{

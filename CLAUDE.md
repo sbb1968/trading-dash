@@ -66,6 +66,7 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 
 | `PaperTrading.tsx` | Paper trading panel med ALT+K/ALT+S |
 
+| `brokerruter.ts` | FASTLAAST broker-rute: Watchlist Futures -> NT8, Watchlist Stocks -> IBKR. Ingen default, hverken her eller i backenden |
 | `SwingReport.tsx` | Swing-rapport vindue (POST /swing/analyze, PDF via print, skrift-skyder) |
 
 | `DocsWindow.tsx` | Dokumentation-vindue — lister backend/docs/ PDF'er, aabner dem eksternt |
@@ -87,6 +88,8 @@ En professionel trading platform bygget med \*\*Tauri v2 + React/TypeScript\*\* 
 | `mock\_data.py` | Mock markedsdata generator |
 
 | `alert\_engine.py` | Alert-motor |
+
+| `nt\_forbindelse.py` | NinjaTrader-ordrevej (ATI/OIF): V1-V4-vagter, `klar()`, `send_ordre()`, `afvent_ordre()` |
 
 | `paper\_trading.py` | Mock paper trading logik |
 
@@ -607,3 +610,52 @@ python test\_feed.py        # tester at market data abonnementer virker
 
 ```
 
+
+---
+
+## Manuel handel: to brokere, én kodesti
+
+Watchlist Futures sender **altid** til NinjaTrader; Watchlist Stocks **altid** til
+IBKR. Reglen står i `src/brokerruter.ts` og har **bevidst ingen default** — MES
+kan handles hos begge, så en fejlrutet ordre er ikke en fejlmeddelelse men en
+rigtig position på den forkerte konto ($2.863 initial margin hos IBKR mod $50
+intraday hos NT8).
+
+| | IBKR | NinjaTrader (ATI) |
+|---|---|---|
+| Ordrevej | `ordre_forbindelse` → TWS/Gateway | OIF-fil i `Documents\NinjaTrader 8\incoming\` |
+| Konto bestemmes af | port (4002 paper / 4001 live) **+** `order.account` | **kun** kontonavnet i kommandoen |
+| Positionskontrol før salg | spørger brokeren (`kontroller_ordre`) | ⚠ kan ikke — journal-vagt der **advarer, aldrig blokerer** |
+| Fyldpris | `place_paper_order` | `afvent_ordre()` læser `Filled\|` + `AvgFillPrice\|` |
+| Opfølgning på uafklaret ordre | `ib.trades()` ved hvert kig | ⚠ **ingen** — et menneske skal se i NT8's Orders-fane |
+
+⚠ **Kontraktmåneden hentes fra IBKR**, også for NT8-ordrer. NT8 vil have
+`MES 12-26`; der findes ingen lokal rullekalender, og `nt_instrument()` nægter at
+gætte (MESU6 udløb 18-09-2026 — en konstant fra august ville have virket i seks
+uger og derefter været tavst forkert). NT8-handel kræver derfor IBKR oppe, men
+bars til forensikken kommer derfra alligevel.
+
+Forensikken er **fælles**: `broker` er et argument til `registrer_entry`/
+`registrer_exit`, ikke en kodesti. Samme `trades`-række, samme snapshot, samme
+indikatorer. ⚠ `find_aaben()` **skal** have `konto` med — ellers lukker et
+NT8-salg en IBKR-entry.
+
+### Armering og paper → live
+Ordrevejen findes kun hvis `account.yaml` har en `nt_forbindelse`-blok under
+`instance:` (maskinlokal, ikke i git). Uden den svarer et klik "spærret".
+
+```yaml
+  nt_forbindelse:
+    konto: Sim101          # NT8's egen simulator — lokal, gratis
+```
+
+| Konto | Hvad | Markedsdata |
+|---|---|---|
+| `Sim101` | NT8's indbyggede simulator, ruter ingen steder | nej |
+| `DEMO8580770` | Tradovate-demo, rigtig infrastruktur | ⚠ $4/md |
+| `2080414` | **live**, Payward Europe (CY), CySEC 342/17 | ⚠ $4/md |
+
+⚠ **Live kræver TO ændringer**, ikke én: `konto: 2080414` **og**
+`tillad_live: true`. Kontonummeret alene spærres af V2, fordi det ikke er en
+kendt simulationskonto. IBKR får den andenlås gratis af portnummeret; ATI har
+ingen, så den er bygget i `nt_forbindelse.py`.

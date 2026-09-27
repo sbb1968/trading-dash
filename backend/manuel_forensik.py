@@ -477,6 +477,14 @@ async def alarmer_om_ubogfoerte(journal, tracker_ordrer: list) -> dict:
 SALGSVAGT_EVENT = "ordre_afvist_ville_vende_position"
 SALGSVAGT_UKONTROLLERET = "salg_uden_positionskontrol"
 
+# ⚠ EGET NAVN TIL NT8's ADVARSEL — og det er ikke pedanteri.
+# `salg_uden_positionskontrol` daekker IBKR-stien, hvor vagten spoerger brokeren
+# og kun et SALG kan vende en position. NT8's journal-vagt advarer ogsaa om et
+# KOEB (det kan oege en aaben position), og den er per definition ukontrolleret,
+# fordi ATI ikke kan spoerges om positioner. Under det gamle navn ville et koeb
+# staa som et salg i journalen — og forensik hentes ved at soege paa event_type.
+ORDRE_UDEN_POSITIONSKONTROL = "ordre_uden_positionskontrol"
+
 
 async def kontroller_ordre(ibkr, symbol: str, action: str,
                            shares: int) -> tuple[bool, str, dict]:
