@@ -379,14 +379,29 @@ def _skriv_oif(kommando: str, maerke: str, vent_sek: int = 15) -> dict:
         if not fil.exists():
             spist = True
             break
+
+    # ⚠ AT VI IKKE FIK RYDDET OP, ER ET FUND — IKKE EN DETALJE.
+    # Her stod `except OSError: pass`. Maalt 27-09 kl. 21:10 holdt NT8 filen
+    # aaben ("Device or resource busy"), saa oprydningen fejlede TAVST og en
+    # PLACE-kommando blev liggende i mappen NT8 laeser ordrer fra. Bliver den
+    # laest senere — ved en genstart, eller naar sessionen aabner — dukker der
+    # en ordre op ingen har bedt om, paa et tidspunkt ingen kigger.
+    # Kalderen skal kunne se det og sige det videre.
+    fil_tilbage = ""
     if not spist:
         try:
             fil.unlink()
-        except OSError:
-            pass
+        except OSError as e:
+            fil_tilbage = f"{fil.name}: {e}"
+
     time.sleep(1.0)                  # loggen skrives et øjeblik efter
     linjer = [l for l in _nye_logliner(log, foer) if "OIF" in l or "Order=" in l]
+    # NT8 logger "processing" naar den LAESER filen. At den skrev en
+    # Order=-linje er derimod beviset paa at der blev oprettet noget.
     return {"kommando": kommando, "spist": spist, "logliner": linjer,
+            "set_af_nt8": any("processing" in l for l in linjer),
+            "ordre_i_log": any("Order=" in l for l in linjer),
+            "fil_tilbage": fil_tilbage,
             "ukendt_instrument": any("unknown instrument" in l for l in linjer)}
 
 

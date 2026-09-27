@@ -1016,12 +1016,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "ibkr_order_result", "success": False,
                         "ticker": ticker, "action": action,
                         "shares": message.get("shares"),
-                        "error": (f"Ordren angav ingen gyldig broker "
-                                  f"({broker or 'tom'}) — Trading Dash er "
-                                  f"forældet paa denne maskine. Der er BEVIDST "
-                                  f"ingen standardbroker: MES findes hos baade "
-                                  f"IBKR og NinjaTrader. Laeg en frisk app.exe "
-                                  f"ind (den kommer IKKE med git pull)."),
+                        # ⚠ DE TO TILFAELDE ER IKKE DET SAMME, og en besked der
+                        # blander dem sender nogen hen for at rette noget der
+                        # ikke fejler. TOM = frontenden sendte intet felt, altsaa
+                        # en gammel app.exe. UDFYLDT MED NOGET ANDET = frontenden
+                        # sendte et navn vi ikke kender, og dét er en kodefejl.
+                        "error": (
+                            "Ordren angav ingen broker — Trading Dash er "
+                            "forældet paa denne maskine. Der er BEVIDST ingen "
+                            "standardbroker: MES findes hos baade IBKR og "
+                            "NinjaTrader. Laeg en frisk app.exe ind (den "
+                            "kommer IKKE med git pull)."
+                            if not broker else
+                            f"Ordren angav brokeren '{broker}', som ikke "
+                            f"findes. Kendte: IBKR, NT8. Det er en fejl i "
+                            f"Trading Dash — ingen ordre er sendt."),
                     }))
                     continue
                 try:
@@ -1167,6 +1176,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         }))
                         continue
 
+                    if _svar.get("fil_tilbage"):
+                        # ⚠ EN PLACE-KOMMANDO LIGGER TILBAGE I NT8's INDBAKKE.
+                        # Den kan blive laest senere — ved genstart, eller naar
+                        # sessionen aabner — og saa dukker der en ordre op ingen
+                        # har bedt om. Journaliseres som en haendelse, saa den
+                        # kan findes bagefter, og siges til den der klikkede.
+                        await journal.log_event(
+                            ibkr_account=nt_konto or None,
+                            source="manual_watchlist",
+                            event_type="nt_oif_fil_efterladt",
+                            symbol=ticker,
+                            payload={"fil": _svar.get("fil_tilbage"),
+                                     "kommando": _svar.get("kommando"),
+                                     "order_ref": _ref, "konto": nt_konto})
+                        logger.error(f"[NT8] ⚠ OIF-fil kunne ikke fjernes: "
+                                     f"{_svar.get('fil_tilbage')}")
+
                     if _svar.get("ukendt_instrument"):
                         # NT8 kender ikke instrumentet. Loggen siger det rent ud,
                         # saa det skal ikke staa som "uafklaret".
@@ -1180,8 +1206,17 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
 
                     # Samme form som place_paper_order, saa nedstroems er faelles.
+                    #
+                    # ⚠ HER STOD `_fyld["status"] or "Submitted"` — OG DET VAR EN
+                    # PAASTAND. `afvent_ordre` returnerer omhyggeligt "" naar ATI
+                    # aldrig meldte noget, og saa lavede denne linje det om til
+                    # "Submitted" ét skridt senere. Maalt 27-09 kl. 21:10: NT8
+                    # laeste kommandoen, oprettede INGEN ordre, og svaret til
+                    # brugeren sagde alligevel "Submitted". Det er samme fejlklasse
+                    # som `ordre_ikke_fyldt` — en kontrol hvis tavshed blev til et
+                    # svar. "UKENDT" er et daarligere svar, men et sandt et.
                     nt_result = {
-                        "status":    _fyld["status"] or "Submitted",
+                        "status":    _fyld["status"] or "UKENDT",
                         "filled":    _fyld["filled"],
                         "avg_fill":  _fyld["avg_fill"],
                         "order_id":  _ref,
@@ -1191,6 +1226,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         "nt_spist":  _svar.get("spist"),
                         "nt_log":    _svar.get("logliner", [])[:6],
                         "nt_oplaeg": _fyld.get("oplaeg"),
+                        # ⚠ De tre der skiller "NT8 gjorde ingenting" fra
+                        # "vi naaede ikke at se det".
+                        "nt_set":         _svar.get("set_af_nt8"),
+                        "nt_ordre_i_log": _svar.get("ordre_i_log"),
+                        "nt_fil_tilbage": _svar.get("fil_tilbage"),
                     }
 
                 # ── IBKR-GRENEN ───────────────────────────────────────────
