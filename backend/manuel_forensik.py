@@ -538,6 +538,62 @@ async def kontroller_ordre(ibkr, symbol: str, action: str,
 # ═══════════════════════════════════════════════════════════════════════════════
 # EXIT
 # ═══════════════════════════════════════════════════════════════════════════════
+async def kontroller_ordre_journal(journal, symbol: str, action: str,
+                                   shares: int, konto: str) -> tuple[bool, str, dict]:
+    """Journal-baseret advarsel til brokere vi IKKE kan spoerge om positioner.
+
+    ⚠ DEN BLOKERER ALDRIG. Returnerer altid ok=True. Det er et bevidst valg,
+    truffet 27-09: NinjaTraders ATI sender ikke beholdninger, og Iben foretager
+    positionsafstemningen MANUELT i platformen. At spaerre paa en journal vi
+    ikke kan verificere ville kunne laase hende ude af en position hun faktisk
+    har — og dét er den ubegraensede risiko. Samme afvejning som
+    kontroller_ordre() beskriver, bare med et svagere grundlag.
+
+    ⚠ MEN "VI TJEKKEDE IKKE" MAA IKKE LIGNE "DER ER INTET GALT".
+    Derfor baerer `detaljer` altid `kontrolleret: False` og `kilde: "journal"`.
+    Kalderen SKAL vise beskeden og logge haendelsen. Et salg der gik uden
+    brokerkontrol skal kunne findes bagefter.
+
+    Hvad den faktisk fanger: det almindelige dobbeltklik. Journalen ved hvad
+    DEN har bogfoert, og saelger man mere end det, er der noget galt — enten
+    med journalen eller med hensigten. Begge dele er vaerd at sige.
+    """
+    salg = (action or "").upper() == "SELL"
+    detaljer: dict[str, Any] = {
+        "kontrolleret": False,          # ⚠ ALDRIG True — brokeren er ikke spurgt
+        "kilde": "journal",
+        "konto": konto, "action": action, "antal": shares,
+    }
+    try:
+        aaben = await find_aaben(journal, symbol, konto=konto)
+    except Exception as e:
+        detaljer["journal_fejl"] = str(e)
+        return True, ("⚠ Journalen kunne ikke laeses, og NinjaTrader kan ikke "
+                      "spoerges om positioner. Ordren sendes UKONTROLLERET — "
+                      "tjek selv i NinjaTrader."), detaljer
+
+    kendt = int((aaben or {}).get("shares") or 0)
+    kendt_side = ((aaben or {}).get("side") or "").lower()
+    detaljer["journal_aaben"] = kendt
+    detaljer["journal_side"] = kendt_side or None
+
+    if salg and kendt <= 0:
+        return True, (f"⚠ Journalen kender INGEN aaben {symbol}-position paa "
+                      f"{konto}. Salget sendes alligevel — men det kan aabne en "
+                      f"short. Tjek i NinjaTrader om du har positionen."), detaljer
+    if salg and shares > kendt > 0:
+        return True, (f"⚠ Journalen kender {kendt} {symbol}, du saelger {shares}. "
+                      f"De {shares - kendt} i overskud kan aabne en short. "
+                      f"Positionen er IKKE verificeret mod brokeren — tjek i "
+                      f"NinjaTrader."), detaljer
+    if not salg and kendt > 0:
+        return True, (f"⚠ Journalen har allerede {kendt} {symbol} aaben paa "
+                      f"{konto}. Et koeb mere oeger positionen."), detaljer
+
+    # Intet paafaldende — men stadig ukontrolleret, og det staar i detaljer.
+    return True, "", detaljer
+
+
 async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
                          fill_pris: float, ordre_id: Any, ordre_status: str,
                          et_tz, broker: str = "IBKR",

@@ -157,7 +157,35 @@ async def koer() -> None:
             kraev(fundet_nt["trade_id"] != fundet_ibkr["trade_id"],
                   "⚠ de to brokere kan IKKE parres med hinandens handler")
 
-            # ── 6. Mutation: lad NT8-exit bruge IBKR's konto ─────────────
+            # ── 6. ⚠ JOURNAL-VAGTEN: advarer, men blokerer ALDRIG ───────
+            print("\n  ── journal-vagten (NT8 kan ikke spoerges om positioner) ──")
+            sager = [
+                ("SELL", 1, "Sim101", "", "salg af praecis det journalen kender"),
+                ("SELL", 3, "Sim101", "short", "salg af MERE end journalen kender"),
+                ("SELL", 1, "DEMO8580770", "INGEN", "salg uden kendt position"),
+                ("BUY",  1, "Sim101", "oeger", "koeb oven i en aaben position"),
+            ]
+            for action, antal, konto, forvent, hvad in sager:
+                ok, besked, det = await MF.kontroller_ordre_journal(
+                    j, "MES", action, antal, konto)
+                kraev(ok is True, f"{hvad}: BLOKERER IKKE")
+                kraev(det["kontrolleret"] is False,
+                      f"    …og markeres som UKONTROLLERET")
+                kraev(det["kilde"] == "journal", "    kilden staar i detaljerne")
+                if forvent and forvent != "INGEN":
+                    kraev(forvent in besked.lower() or "⚠" in besked,
+                          f"    advarer: {besked[:58] or '(ingen besked)'}")
+                if forvent == "INGEN":
+                    kraev("INGEN" in besked,
+                          f"    advarer om ukendt position: {besked[:52]}")
+
+            # ⚠ Det vigtigste: den maa ALDRIG returnere kontrolleret=True.
+            alle = [await MF.kontroller_ordre_journal(j, "MES", a, n_, k)
+                    for a, n_, k, _f, _h in sager]
+            kraev(all(d["kontrolleret"] is False for _o, _b, d in alle),
+                  "⚠ ingen af udfaldene paastaar at brokeren blev spurgt")
+
+            # ── 7. Mutation: lad NT8-exit bruge IBKR's konto ─────────────
             print("\n  ── mutation: NT8-exit med IBKR's konto ──")
             forkert = await MF.find_aaben(j, "MES", konto="DUQ441063")
             kraev(forkert["trade_id"] == t_ibkr,
