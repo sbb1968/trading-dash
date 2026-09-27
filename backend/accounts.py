@@ -60,6 +60,8 @@ class AccountIdentity:
     ibkr_konti:             tuple = ()
     # Valgfri SEPARAT forbindelse til ORDRER. Se _laes_ordre_forbindelse.
     ordre_forbindelse:      tuple = ()
+    # Valgfri ordrevej gennem NinjaTrader 8's ATI. Se _laes_nt_forbindelse.
+    nt_forbindelse:         tuple = ()
     # ⚠ OPDIGTEDE PRISER — kun hvis nogen udtrykkeligt beder om dem.
     # mock_data digter kurser for RIGTIGE tickere (AAPL 189.50, TSLA 245.30 …),
     # og intet i graensefladen markerer dem. Prisen naar ikke ordren (den er en
@@ -170,6 +172,45 @@ def _laes_ordre_forbindelse(instance: dict) -> tuple:
         "bruger": str(raa.get("bruger", "")).strip(),
         "tillad_live": bool(raa.get("tillad_live", False)),
     },)
+
+
+def _laes_nt_forbindelse(instance: dict) -> tuple:
+    """Valgfri ordrevej gennem NinjaTrader 8:
+
+        instance:
+          nt_forbindelse:
+            konto: Sim101          # NT8-kontoens navn, PRAECIS som i platformen
+            tillad_live: false     # skal saettes bevidst for alt andet end sim
+
+    ⚠ KONTOEN ER IKKE ET IBKR-KONTONUMMER. NT8 har sine egne navne: "Sim101"
+    er den indbyggede simulator, "DEMO8580770" Tradovates demokonto. De skrives
+    som platformen staver dem.
+
+    ⚠ OG DEN SKAL STAA HER, ikke i kommandoen. OIF-formatet har et konto-felt
+    i hver ordre; lades det tomt, bruger NT8 sin Default account — altsaa det
+    der tilfaeldigvis er valgt i dropdown'en. nt_forbindelse.py skriver derfor
+    DENNE vaerdi ind i hver eneste kommando.
+
+    Mangler blokken, har maskinen ingen NT8-ordrevej, og alt er som foer.
+    """
+    raa = instance.get("nt_forbindelse")
+    if not raa:
+        return ()
+    if not isinstance(raa, dict):
+        _fail("instance.nt_forbindelse skal vaere et opslag med konto")
+    konto = str(raa.get("konto", "")).strip()
+    if not konto:
+        _fail("instance.nt_forbindelse.konto mangler — uden konto ville ordrer "
+              "lande paa NT8's Default account")
+    return ({
+        "konto": konto,
+        "tillad_live": bool(raa.get("tillad_live", False)),
+    },)
+
+
+def nt_forbindelse() -> Optional[dict]:
+    """Profilen for NinjaTrader-ordrevejen, eller None hvis der ikke er nogen."""
+    return dict(identity.nt_forbindelse[0]) if identity.nt_forbindelse else None
 
 
 def ordre_forbindelse() -> Optional[dict]:
@@ -306,6 +347,7 @@ def load_identity() -> AccountIdentity:
             source_id              = f"{str(account['id'])}_{str(instance['role'])}",
             ibkr_konti             = _laes_konti(instance),
             ordre_forbindelse      = _laes_ordre_forbindelse(instance),
+            nt_forbindelse         = _laes_nt_forbindelse(instance),
         )
     except (KeyError, TypeError) as e:
         _fail(f"Manglende eller forkert felt i account.yaml: {e}")

@@ -1,0 +1,355 @@
+"""
+nt_forbindelse.py — den SKRIVENDE forbindelse til NinjaTrader, med vagter
+════════════════════════════════════════════════════════════════════════════════
+Pendant til `ordre_forbindelse.py`, men mod NinjaTrader 8's ATI i stedet for
+IBKR. Samme opgave, samme disciplin, helt andet maskineri.
+
+    LÆS    ATI-socket 36973 — NT8 pusher kontotilstand af sig selv
+    SKRIV  OIF-filer i `Documents\\NinjaTrader 8\\incoming\\`
+    KURSER kommer stadig fra IBKR/algoserveren. ATI leverer ingen.
+
+────────────────────────────────────────────────────────────────────────────────
+⚠ HVORFOR DET HER MODUL OVERHOVEDET FINDES
+
+IBKR's API binder en forbindelse til en konto: man logger på, og ordrer arver
+kontoen. **ATI har ingen forbindelse.** Hver ordre er en selvstændig tekstfil,
+og kontoen er felt nummer to:
+
+    PLACE;DEMO8580770;MES 09-26;BUY;1;LIMIT;4602.50;;DAY;;id;;
+          └── feltet ──┘
+
+Lades feltet tomt, bruger NT8 sin egen **Default account** — den der tilfældigvis
+står i platformens dropdown. Konfigurationsfilen kan altså sige én ting og
+ordren gå et andet sted hen, uden at noget fejler.
+
+Derfor de fire vagter. De er skrevet NU, ikke når de får brug for sig selv:
+Søren har siden 16-09 en **live-konto (2080414)** hos Payward Europe. Den har
+ikke vist sig i ATI-strømmen endnu, men rapportens eget forbehold gælder —
+fravær er ikke bevis.
+
+  V1  KONTOEN SKRIVES EKSPLICIT i hver eneste kommando. Aldrig tom, aldrig
+      overladt til Default account.
+  V2  PAPER/SIM-BEKRÆFTELSE på konfigurationen, FØR der røres noget. Kontoen
+      skal stå på listen over kendte simulationskonti, medmindre `tillad_live`
+      er sat udtrykkeligt.
+  V3  KONTOEN SKAL FINDES I VIRKELIGHEDEN. ATI-strømmen fortæller hvilke konti
+      NT8 faktisk er forbundet til lige nu. Står den konfigurerede ikke dér,
+      sendes der intet — samme regel som `ordre_forbindelse`s V1, der læser
+      `managedAccounts()` efter connect.
+  V4  EN LIVE-KONTO I STRØMMEN RÅBER OP. Dukker der en konto op som hverken er
+      kendt sim eller udtrykkeligt tilladt, er blast radius ændret siden vi
+      målte, og det skal siges — ikke opdages senere.
+
+────────────────────────────────────────────────────────────────────────────────
+⚠ TO TING VI HAR MÅLT, SOM ER LETTE AT TAGE FEJL AF
+
+**Filnavnet skal begynde med `oif`.** `TDPROBE.oif.txt` gav *"Unknown OIF file
+type"* — ordet *type* var nøglen; NT8 klassificerer på navnet, ikke indholdet.
+Med et forkert navn læses filen aldrig, uanset hvor korrekt den er.
+
+**ATI-strømmen er et ØJEBLIKSBILLEDE, ikke en opregning.** Målt 26-09: en ordre
+der beviseligt fandtes stod ikke i det snapshot der blev læst lige før den blev
+annulleret. At noget ikke ses i ét oplæg beviser derfor ingenting — kun en
+`OrderStatus|<id> <tilstand>` med terminal tilstand gør.
+"""
+from __future__ import annotations
+
+import logging
+import pathlib
+import re
+import socket
+import time
+from typing import Optional
+
+import accounts
+
+logger = logging.getLogger(__name__)
+
+# ── Hvor NT8 bor ───────────────────────────────────────────────────────────
+NT8_ROD = pathlib.Path.home() / "Documents" / "NinjaTrader 8"
+INCOMING = NT8_ROD / "incoming"
+LOGMAPPE = NT8_ROD / "log"
+ATI_HOST, ATI_PORT = "127.0.0.1", 36973
+
+# ⚠ KENDTE SIMULATIONSKONTI. Alt andet kræver tillad_live: true.
+# Sim101      NT8's egen simulator — ruter ingen steder
+# DEMO8580770 Tradovates demokonto — rigtig infrastruktur, legetøjspenge
+SIM_KONTI = {"SIM101", "DEMO8580770"}
+
+# Hvor længe vi lytter når strømmen skal aflæses. NT8 pusher af sig selv, så
+# der skal ikke sendes noget — men den sender ikke øjeblikkeligt.
+LYT_SEK = 6.0
+
+
+class NtForbindelseFejl(Exception):
+    """Rejses når en vagt spærrer. Aldrig fanget og logget videre — en spærret
+    ordrevej skal stoppe kaldet, ikke farve det."""
+
+
+class NtTilstandUkendt(Exception):
+    """ATI kunne ikke aflæses.
+
+    ⚠ Det er IKKE det samme som "ingen konti". Et tomt svar fra en socket der
+    ikke svarede, må aldrig kunne læses som at NT8 ikke har nogen konti — så
+    ville V3 bestå ved at fejle. Samme fejlklasse som afstemningen der sagde
+    "nul bogførte" fordi den ikke kunne læse tabellen.
+    """
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Konfiguration
+# ═══════════════════════════════════════════════════════════════════════════
+def konfigureret() -> bool:
+    """Har denne maskine overhovedet en NT8-ordrevej?"""
+    return accounts.nt_forbindelse() is not None
+
+
+def verificer_profil(profil: dict) -> None:
+    """V2 på konfigurationen — FØR der røres noget.
+
+    ⚠ Rækkefølgen er ikke ligegyldig. Opdages en live-konto først efter at en
+    OIF-fil er skrevet, er ordren allerede på vej. Det billige tjek tages først.
+    """
+    konto = (profil.get("konto") or "").strip()
+    if not konto:
+        raise NtForbindelseFejl(
+            "nt_forbindelse.konto mangler — uden konto ville ordren lande paa "
+            "NT8's Default account, altsaa dér hvor platformens dropdown "
+            "tilfaeldigvis staar")
+    if konto.upper() not in SIM_KONTI and not profil.get("tillad_live"):
+        raise NtForbindelseFejl(
+            f"{konto} staar ikke paa listen over kendte simulationskonti "
+            f"{sorted(SIM_KONTI)}, og tillad_live er ikke sat. Ingen ordrer sendes.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ATI-strømmen — læsevejen
+# ═══════════════════════════════════════════════════════════════════════════
+def _laes_raat(sekunder: float = LYT_SEK) -> str:
+    """Alt ATI pusher i vinduet. ⚠ SENDER INGEN BYTES.
+
+    OIF-kommandoer er ren tekst; enhver stump data på denne socket kunne i
+    værste fald fortolkes. Vi åbner, lytter og lukker.
+    """
+    try:
+        s = socket.create_connection((ATI_HOST, ATI_PORT), timeout=5)
+    except OSError as e:
+        raise NtTilstandUkendt(
+            f"kunne ikke naa ATI paa {ATI_HOST}:{ATI_PORT} ({e}) — koerer "
+            f"NinjaTrader, og er Automated Trading Interface slaaet til?") from e
+    s.settimeout(sekunder)
+    buf = b""
+    slut = time.time() + sekunder
+    try:
+        while time.time() < slut:
+            try:
+                d = s.recv(8192)
+                if not d:
+                    break
+                buf += d
+            except socket.timeout:
+                break
+    finally:
+        s.close()
+    return buf.replace(b"\x00", b" ").decode("utf-8", "replace")
+
+
+def tilstand(sekunder: float = LYT_SEK) -> dict:
+    """Hvilke konti er NT8 forbundet til lige nu, og er ATI slået til?"""
+    raa = _laes_raat(sekunder)
+    if not raa.strip():
+        # ⚠ Tom stroem er ikke "ingen konti". Se NtTilstandUkendt.
+        raise NtTilstandUkendt(
+            "ATI svarede tomt — NT8 kan vaere under opstart, eller "
+            "Automated Trading Interface er ikke slaaet til")
+    konti = {m for m in re.findall(r"CashValue\|(\S*)\s", raa)}
+    navngivne = sorted(k for k in konti if k)
+    return {
+        "raa": raa,
+        "konti": navngivne,
+        "uden_navn": "" in konti,
+        "ati_aktiv": "ATI True" in raa,
+    }
+
+
+def ordre_status(ordre_id: str, raa: str | None = None) -> str:
+    """Ordrens tilstand som ATI melder den. "" = ikke set i dette oplæg.
+
+    ⚠ "" BETYDER IKKE "VÆK". Strømmen er et øjebliksbillede; en ordre der
+    beviseligt fandtes stod ikke i snapshottet lige før den blev annulleret
+    (målt 26-09). Kalderen skal behandle "" som UKENDT, aldrig som terminal.
+    """
+    t = raa if raa is not None else _laes_raat()
+    m = re.search(rf"OrderStatus\|{re.escape(ordre_id)}\s+(\S+)", t)
+    return m.group(1) if m else ""
+
+
+TERMINALE = {"Cancelled", "Rejected", "Filled"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Vagterne samlet
+# ═══════════════════════════════════════════════════════════════════════════
+def klar() -> dict:
+    """Kør V1-V4 og returnér den verificerede profil. Kaster hvis noget spærrer.
+
+    Kaldes FØR hver ordre. Det er billigt (én socket-aflæsning) og det er den
+    eneste måde at opdage at NT8 er skiftet konto siden sidst.
+    """
+    profil = accounts.nt_forbindelse()
+    if profil is None:
+        raise NtForbindelseFejl(
+            "ingen nt_forbindelse i account.yaml — denne maskine har ingen "
+            "NinjaTrader-ordrevej")
+
+    verificer_profil(profil)                      # V2, før noget røres
+
+    st = tilstand()                               # kaster NtTilstandUkendt
+    if not st["ati_aktiv"]:
+        raise NtForbindelseFejl(
+            "ATI melder ikke 'ATI True' — Automated Trading Interface er ikke "
+            "aktiv i NT8 (Tools -> Options -> Automated trading interface)")
+
+    konto = profil["konto"]
+    if konto not in st["konti"]:
+        # V3 — konfigurationen skal stemme med virkeligheden.
+        raise NtForbindelseFejl(
+            f"⚠ KONTOEN FINDES IKKE. NT8 er forbundet til {st['konti'] or '(ingen)'}, "
+            f"ikke {konto}. Ingen ordrer sendes. Er den rigtige forbindelse valgt "
+            f"i platformen?")
+
+    # ── V4: er der dukket en konto op vi ikke kender? ─────────────────────
+    ukendte = [k for k in st["konti"]
+               if k.upper() not in SIM_KONTI and k != konto]
+    if ukendte and not profil.get("tillad_live"):
+        raise NtForbindelseFejl(
+            f"⚠ UKENDT KONTO I STROEMMEN: {ukendte}. NT8 er forbundet til noget "
+            f"der hverken er en kendt simulationskonto eller den konfigurerede. "
+            f"Blast radius er aendret siden sidst — ingen ordrer sendes foer det "
+            f"er afklaret.")
+
+    if not INCOMING.is_dir():
+        raise NtForbindelseFejl(f"{INCOMING} findes ikke — koerer NT8?")
+
+    return {**profil, "konti_set": st["konti"], "ati_aktiv": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Skrivevejen — OIF-filer
+# ═══════════════════════════════════════════════════════════════════════════
+def _skriv_oif(kommando: str, maerke: str, vent_sek: int = 15) -> dict:
+    """Skriv én OIF-kommando og returnér hvad NT8 skrev om den.
+
+    ⚠ FILNAVNET SKAL BEGYNDE MED `oif`. Det var fejlen der kostede en hel
+    session 11-08: filen blev set men aldrig læst, fordi den hed noget andet.
+    """
+    log = _nyeste_log()
+    foer = _loglaengde(log)
+    INCOMING.mkdir(parents=True, exist_ok=True)
+    fil = INCOMING / f"oif_td_{maerke}_{int(time.time() * 1000)}.txt"
+    fil.write_text(kommando + "\n", encoding="ascii")
+
+    spist = False
+    for _ in range(vent_sek):
+        time.sleep(1)
+        if not fil.exists():
+            spist = True
+            break
+    if not spist:
+        try:
+            fil.unlink()
+        except OSError:
+            pass
+    time.sleep(1.0)                  # loggen skrives et øjeblik efter
+    linjer = [l for l in _nye_logliner(log, foer) if "OIF" in l or "Order=" in l]
+    return {"kommando": kommando, "spist": spist, "logliner": linjer,
+            "ukendt_instrument": any("unknown instrument" in l for l in linjer)}
+
+
+def send_ordre(*, konto: str, instrument: str, action: str, antal: int,
+               ordretype: str = "MARKET", limit: float | None = None,
+               stop: float | None = None, tif: str = "DAY",
+               ordre_id: str = "") -> dict:
+    """Læg en ordre. V1: kontoen skrives EKSPLICIT.
+
+    ⚠ Kalderen skal have kørt `klar()` først. Denne funktion verificerer ikke
+    noget selv — den ville ellers gøre det to gange og dermed friste nogen til
+    at springe den ene over.
+    """
+    if not konto:
+        raise NtForbindelseFejl("V1: kontoen er tom — ordren ville gaa til "
+                                "NT8's Default account")
+    if antal <= 0:
+        raise NtForbindelseFejl(f"antal skal vaere positivt, fik {antal}")
+    if action.upper() not in ("BUY", "SELL"):
+        raise NtForbindelseFejl(f"ukendt action {action!r}")
+    if tif.upper() == "GTC":
+        # ⚠ Samme regel som ordretesten: en ordre vi ikke faar annulleret,
+        # skal doe af sig selv.
+        raise NtForbindelseFejl("TIF=GTC er ikke tilladt fra denne vej")
+
+    l = "" if limit is None else f"{limit}"
+    s = "" if stop is None else f"{stop}"
+    kmd = (f"PLACE;{konto};{instrument};{action.upper()};{antal};"
+           f"{ordretype.upper()};{l};{s};{tif.upper()};;{ordre_id};;")
+    return _skriv_oif(kmd, "place")
+
+
+def annuller(ordre_id: str) -> dict:
+    """Annullér PRÆCIS én ordre. Verificeret 26-09 på en rigtig efterladt ordre."""
+    if not ordre_id:
+        raise NtForbindelseFejl("annuller() kraever et ordre-id")
+    return _skriv_oif(f"CANCEL;;;;;;;;;;{ordre_id};;", "cancel")
+
+
+def annuller_alt(konto: str) -> dict:
+    """Sidste udvej: ryd HELE kontoen for ordrer.
+
+    ⚠ Kun ordrer — aldrig positioner. `FLATTENEVERYTHING` og `CLOSEPOSITION`
+    bruges IKKE herfra; de hører til et menneske, ikke til en oprydning.
+    """
+    if not konto:
+        raise NtForbindelseFejl("annuller_alt() kraever en konto")
+    return _skriv_oif(f"CANCELALLORDERS;{konto};;;;;;;;;;;", "ryd")
+
+
+# ── NT8's log: kvitteringen ────────────────────────────────────────────────
+def _nyeste_log() -> Optional[pathlib.Path]:
+    try:
+        filer = list(LOGMAPPE.glob("log.*.txt"))
+    except OSError:
+        return None
+    return max(filer, key=lambda p: p.stat().st_mtime) if filer else None
+
+
+def _loglaengde(log: Optional[pathlib.Path]) -> int:
+    if log is None:
+        return 0
+    try:
+        return len(log.read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        return 0
+
+
+def _nye_logliner(log: Optional[pathlib.Path], fra: int) -> list[str]:
+    if log is None:
+        return []
+    try:
+        return [l.strip() for l in
+                log.read_text(encoding="utf-8", errors="replace").splitlines()[fra:]
+                if l.strip()]
+    except OSError:
+        return []
+
+
+def order_ref(hvem: str = "") -> str:
+    """Ordre-id der markerer MANUEL oprindelse gennem NT8.
+
+    ⚠ Id'et BINDER — verificeret 26-09. ATI pusher det som
+    `OrderStatus|<id> <tilstand>`, selv om NT8's log skriver `Name=''`.
+    Det er dét der gør en NT8-handel tilskrivbar i journalen.
+    """
+    # ⚠ Id'et skal vaere ENTYDIGT og kort. NT8 accepterer ikke vilkaarligt lange
+    # id'er, og millisekunder er rigeligt til at skille to klik ad.
+    # "NTM" = NinjaTrader Manuel — saa kilden kan ses paa id'et alene.
+    return f"NTM{int(time.time() * 1000)}"
