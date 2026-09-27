@@ -615,6 +615,40 @@ async def startup():
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
     print(f"[Server] IBKR:      {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
+    # ── HVOR GAAR DE MANUELLE ORDRER HEN? ─────────────────────────────────
+    # ⚠ Banneret sagde "IBKR: DUN748991" og intet om NT8, saa der var ingen
+    # maade at se af loggen om futures-ordrevejen var armeret. Det er samme
+    # blindhed som da to backends laa paa port 8000 med hver sin ordrekonto:
+    # intet fejlede, og udfaldet ville have vaeret en ordre paa den forkerte
+    # konto, tavst.
+    #
+    # ⚠ DET HER ER KONFIGURATIONEN, IKKE EN MAALING. En rigtig kontrol er
+    # nt_forbindelse.klar(), som laeser ATI-socket'en i seks sekunder — for
+    # langsomt til opstart, og NT8 koerer maaske slet ikke endnu. Linjen siger
+    # derfor hvad der STAAR i account.yaml, og siger at det er det den siger.
+    try:
+        import nt_forbindelse as _ntb
+        _ntp = accounts.nt_forbindelse()
+        if _ntp is None:
+            print("[Server] NT8:       ikke armeret — Watchlist Futures svarer "
+                  "'spaerret' (ingen nt_forbindelse i account.yaml)")
+        else:
+            _k = _ntp.get("konto", "")
+            _sim = _k.upper() in _ntb.SIM_KONTI
+            print(f"[Server] NT8:       {_k} "
+                  f"({'simulation' if _sim else '⚠ IKKE en kendt simulationskonto'})"
+                  f" — konfiguration, ikke kontrolleret")
+            if _ntp.get("tillad_live"):
+                # ⚠ Det ene sted et fejlklik ville koste rigtige penge. Det skal
+                # kunne ses i et oejekast, ikke findes ved at laese en yaml-fil.
+                print("[Server] ⚠⚠ NT8 LIVE-HANDEL ER TILLADT (tillad_live: true) "
+                      "— V2 og V4 spaerrer IKKE laengere")
+        print("[Server] Rute:      Watchlist Futures -> NT8 · "
+              "Watchlist Stocks -> IBKR (fastlaast, ingen default)")
+    except Exception as _e:
+        # ⚠ At vi ikke kan afgoere det, maa ikke ligne "ikke armeret".
+        print(f"[Server] NT8:       ⚠ KUNNE IKKE AFGOERES ({_e}) — "
+              f"hverken bekraeftet eller afkraeftet")
     # ── Start TWS watchdog ────────────────────────────────────
     global tws_watchdog, algo_scheduler
 
