@@ -651,9 +651,22 @@ Ordrevejen findes kun hvis `account.yaml` har en `nt_forbindelse`-blok under
 
 | Konto | Hvad | Markedsdata |
 |---|---|---|
-| `Sim101` | NT8's indbyggede simulator, ruter ingen steder | nej |
+| `Sim101` | NT8's indbyggede simulator, ruter ingen steder | ⚠ til ORDRER: nej · til FYLDNING: ja |
 | `DEMO8580770` | Tradovate-demo, rigtig infrastruktur | ⚠ $4/md |
 | `2080414` | **live**, Payward Europe (CY), CySEC 342/17 | ⚠ $4/md |
+
+⚠ **Sim101 kan modtage ordrer uden markedsdata, men ikke fylde dem.** Målt
+27-09-2026 kl. 21:47: ordren blev oprettet (`New state='Submitted'`) og derefter
+afvist med *"Sim101, There is no market data available to drive the simulation
+engine."* Sim101 er altså ikke det gratis trin det ligner — den beviser
+skrivevejen, ikke fyldningen. Og uden fyldning ingen `trades`-række.
+
+⚠ **NT8's ordrebekræftelse skal være slået fra** (Tools → Options → Trading →
+"Confirm order placement"). Med den slået til venter hver OIF-ordre på et
+menneskeklik i NT8: loggen skriver `processing`, men der oprettes intet, ATI
+melder ingenting, og OIF-filen bliver liggende låst. Signaturen er
+**`processing` i loggen uden en `Order=`-linje**. Trading Dash har sin egen
+bekræftelse, så NT8's er en dublet der ligger det forkerte sted.
 
 ⚠ **Live kræver TO ændringer**, ikke én: `konto: 2080414` **og**
 `tillad_live: true`. Kontonummeret alene spærres af V2, fordi det ikke er en
