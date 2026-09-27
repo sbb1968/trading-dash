@@ -177,12 +177,27 @@ async def find_aaben(journal, symbol: str, konto: str = "") -> Optional[dict]:
 # ═══════════════════════════════════════════════════════════════════════════════
 async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
                           fill_pris: float, ordre_id: Any, ordre_status: str,
-                          et_tz) -> Optional[str]:
+                          et_tz, broker: str = "IBKR",
+                          konto: str = "") -> Optional[str]:
     """Skriv trades-raekken OG forensik-snapshottet for en manuel entry.
 
     Returnerer trade_id, eller None hvis raekken ikke kunne skrives.
     Kaldes EFTER at ordre-resultatet er sendt til frontend, saa et langsomt
     bar-kald aldrig forsinker klikket.
+
+    ⚠ `broker` ER EN PARAMETER, IKKE EN NY KODESTI.
+    En handel gennem NinjaTrader skal efterlade PRAECIS samme forensik som en
+    gennem IBKR — samme trades-raekke, samme trade_forensics-snapshot, samme
+    indikatorer. Det eneste der skifter er hvor ORDREN gik hen.
+
+    Og det kan lade sig goere fordi bars og indikatorer kommer fra `ibkr`
+    UANSET hvilken broker der udfoerte. ATI leverer ingen kurser; det skal den
+    heller ikke. En kopi af denne funktion til NT8 ville drive fra hinanden
+    inden for en maaned — det er hele grunden til at det er ét argument.
+
+    `konto` er den konto ordren FAKTISK gik igennem. For IBKR laeses den af
+    forbindelsen; for NT8 kommer den fra nt_forbindelse-profilen. Tom =
+    fald tilbage paa forbindelsens egen.
     """
     entry_time = datetime.now(et_tz)
 
@@ -197,8 +212,15 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
         entry_reason=ENTRY_REASON,
         notes=None,
         payload={
-            "ibkr_order_id": ordre_id,
-            "ibkr_status": ordre_status,
+            # ⚠ BAADE NEUTRALE OG GAMLE NOEGLER. De 17 eksisterende
+            # DUQ441063-handler har kun `ibkr_order_id`, og afstemningen
+            # laeser den. At omdoebe ville goere historikken ulaeselig.
+            "broker": broker,
+            "konto": konto or getattr(ibkr, "account", "") or "",
+            "ordre_id": ordre_id,
+            "ordre_status": ordre_status,
+            **({"ibkr_order_id": ordre_id, "ibkr_status": ordre_status}
+               if broker == "IBKR" else {}),
             "indgang": "watchlist",
         },
     )
@@ -323,7 +345,12 @@ async def _bogfoerte_ordre_ider(journal) -> set:
             p = json.loads(raa) if isinstance(raa, str) else (raa or {})
         except Exception:
             continue
-        for noegle in ("ibkr_order_id", "ibkr_order_id_exit"):
+        # ⚠ BAADE gamle og neutrale noegler. Historikken har kun de gamle;
+        # nye handler skriver begge. Et opslag paa kun den ene ville lade
+        # halvdelen af journalen se ubogfoert ud — samme udfald som
+        # kolonnenavn-fejlen, bare med en anden aarsag.
+        for noegle in ("ibkr_order_id", "ibkr_order_id_exit",
+                       "ordre_id", "ordre_id_exit"):
             v = p.get(noegle)
             if v is not None:
                 ider.add(str(v))
@@ -513,7 +540,8 @@ async def kontroller_ordre(ibkr, symbol: str, action: str,
 # ═══════════════════════════════════════════════════════════════════════════════
 async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
                          fill_pris: float, ordre_id: Any, ordre_status: str,
-                         et_tz) -> Optional[str]:
+                         et_tz, broker: str = "IBKR",
+                         konto: str = "") -> Optional[str]:
     """Luk den aabne manuelle handel og skriv exit-forensikken.
 
     Returnerer trade_id, eller None hvis der ikke var en aaben manuel handel —
@@ -522,8 +550,12 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
     # ⚠ Kontoen tages fra FORBINDELSEN ordren gik igennem — ikke fra
     # konfigurationen. Paa en maskine med ordre-Gateway er den delte forbindelse
     # en anden konto, og et opslag paa "maskinens konto" ville ramme forkert.
+    # ⚠ Kontoen skal komme fra den broker ordren FAKTISK gik igennem.
+    # For NT8 er `ibkr.account` en HELT anden konto — et opslag paa den ville
+    # parre NT8-salget med en IBKR-handel. Det er praecis kryds-konto-fejlen
+    # fra 11-09, bare mellem to brokere i stedet for to IBKR-konti.
     aaben = await find_aaben(journal, symbol,
-                             konto=getattr(ibkr, "account", "") or "")
+                             konto=konto or getattr(ibkr, "account", "") or "")
     if aaben is None:
         # ⚠ DET HER STOD FOER SOM "ikke en fejl". Det var forkert, og det kostede
         # 460 dollar i fejlbogfoering paa DUQ441063 — se noten ved kontroller_salg.
@@ -581,8 +613,11 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
     pnl = (fill_pris - entry_pris) * lukket * retning * mult
 
     payload: dict[str, Any] = {
-        "ibkr_order_id_exit": ordre_id,
-        "ibkr_status_exit": ordre_status,
+        "broker_exit": broker,
+        "ordre_id_exit": ordre_id,
+        "ordre_status_exit": ordre_status,
+        **({"ibkr_order_id_exit": ordre_id, "ibkr_status_exit": ordre_status}
+           if broker == "IBKR" else {}),
         "chart_bars_kilde": "hentet ved exit (manuel handel har ingen bar-buffer)",
         "stop_trajectory": [],       # manuel har ingen stop — se modulets docstring
     }
