@@ -152,6 +152,33 @@ def main() -> int:
         NT._laes_raat = aegte                                   # type: ignore
         accounts.nt_forbindelse = aegte_profil                  # type: ignore
 
+    # ── Instrumentnavnet: maaneden maa ALDRIG hardkodes ──────────────────
+    print("\n  ── instrumentnavn ──")
+
+    class Kontrakt:
+        def __init__(self, udloeb="", lokal=""):
+            self.lastTradeDateOrContractMonth = udloeb
+            self.localSymbol = lokal
+
+    kraev(NT.nt_instrument("MES", Kontrakt("20261218", "MESZ6")) == "MES 12-26",
+          "udloebsdato -> 'MES 12-26'")
+    kraev(NT.nt_instrument("MES", Kontrakt("", "MESZ6")) == "MES 12-26",
+          "localSymbol alene giver samme svar (MESZ6 -> 12-26)")
+    kraev(NT.nt_instrument("M2K", Kontrakt("20270319", "M2KH7")) == "M2K 03-27",
+          "marts naeste aar -> 'M2K 03-27'")
+    # ⚠ Den vigtigste: uden kontrakt GAETTES der ikke.
+    blev, besked = spaerrer(NT.nt_instrument, "MES", None)
+    kraev(blev, "uden kvalificeret kontrakt KASTES der — maaneden gaettes ikke")
+    kraev("GAETTES" in besked or "gaettes" in besked.lower(),
+          f"    og fejlen siger hvorfor: {besked[:58]}")
+    blev, _ = spaerrer(NT.nt_instrument, "MES", Kontrakt("", ""))
+    kraev(blev, "en ulaeselig kontrakt kaster ogsaa")
+
+    # ⚠ MESU6 udloeb 18-09-2026. En konstant skrevet i august ville have
+    # virket i seks uger og derefter vaeret tavst forkert.
+    kraev(NT.nt_instrument("MES", Kontrakt("20260918", "MESU6")) == "MES 09-26",
+          "den udloebne september-kontrakt oversaettes stadig korrekt")
+
     # ── Ordre-id ──────────────────────────────────────────────────────────
     print("\n  ── ordre-id ──")
     a, b = NT.order_ref(), NT.order_ref()

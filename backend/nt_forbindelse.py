@@ -97,6 +97,62 @@ class NtTilstandUkendt(Exception):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Instrumentnavnet — NT8's format, udledt af IBKR's kontrakt
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ MAANEDEN MAA IKKE HARDKODES. Watchlisten siger "MES"; NT8 kraever
+# "MES 12-26" (symbol + MM-YY). Skrev vi maaneden i en konstant, ville
+# ordrevejen knaekke ved hver rulning — og den knaekker STILLE: loggen siger
+# "holds unknown instrument", ordren oprettes ikke, og intet andet sker.
+#
+# MESU6 udloeb 18-09-2026. En konstant skrevet i august ville have virket i
+# seks uger og derefter vaeret tavst forkert.
+#
+# Derfor udledes maaneden af den kontrakt IBKR allerede har kvalificeret.
+# `qualify_future` vaelger den MEST HANDLEDE kontrakt, ikke bare den naermeste
+# ikke-udloebne — saa vi faar samme kontrakt som kurserne kommer fra.
+_MAANEDSKODE = {"F": 1, "G": 2, "H": 3, "J": 4, "K": 5, "M": 6,
+                "N": 7, "Q": 8, "U": 9, "V": 10, "X": 11, "Z": 12}
+
+
+def nt_instrument(symbol: str, kontrakt=None) -> str:
+    """"MES" + IBKR-kontrakten -> "MES 12-26".
+
+    `kontrakt` er et ib_async-Contract. Uden den kastes der — vi GAETTER ikke
+    en maaned.
+    """
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise NtForbindelseFejl("nt_instrument: tomt symbol")
+    if kontrakt is None:
+        raise NtForbindelseFejl(
+            f"nt_instrument({sym}): ingen kvalificeret IBKR-kontrakt. "
+            f"Maaneden GAETTES ikke — uden kontrakt sendes der ingen ordre.")
+
+    # Foerste valg: udloebsdatoen, som er entydig.
+    raa = str(getattr(kontrakt, "lastTradeDateOrContractMonth", "") or "")
+    if len(raa) >= 6 and raa[:6].isdigit():
+        aar, maaned = int(raa[:4]), int(raa[4:6])
+        return f"{sym} {maaned:02d}-{aar % 100:02d}"
+
+    # Fald tilbage paa localSymbol: MESZ6 -> Z = december, 6 = 2026.
+    lokal = str(getattr(kontrakt, "localSymbol", "") or "").upper()
+    m = re.fullmatch(r"([A-Z0-9]{2,4})([FGHJKMNQUVXZ])(\d)", lokal)
+    if m:
+        maaned = _MAANEDSKODE[m.group(2)]
+        # ⚠ ÉT ciffer for aaret. IBKR skriver 6 for 2026; vi antager det
+        # indevaerende aarti. Det holder til 2029 og skal saa genbesoeges —
+        # derfor staar det her frem for at vaere en tavs antagelse.
+        import datetime as _dt
+        aarti = (_dt.date.today().year // 10) * 10
+        aar = aarti + int(m.group(3))
+        return f"{sym} {maaned:02d}-{aar % 100:02d}"
+
+    raise NtForbindelseFejl(
+        f"nt_instrument({sym}): kunne hverken laese udloeb "
+        f"({raa!r}) eller localSymbol ({lokal!r}) fra kontrakten")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Konfiguration
 # ═══════════════════════════════════════════════════════════════════════════
 def konfigureret() -> bool:
