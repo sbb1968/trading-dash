@@ -196,9 +196,23 @@ blot **stå** der.
 ikke en bekræftet kendsgerning. Efterprøv det i NT8 når kontoen er finansieret:
 viser MES DEC26 levende kurser under DEMO8580770, holder det.
 
-⚠ **Stadig ikke afklaret: hvor lille et indskud der udløser CME Bundle.**
-Spørg supporten før overførslen — rækker et symbolsk beløb, kan hele testen
-køres for næsten ingenting.
+**Hvor meget skal der ind?** Supporten 28-09: *"There is no stated minimum
+deposit amount. Your NinjaTrader Brokerage account only needs to be funded,
+meaning the balance must be above $0."*
+
+⚠ **MEN DET ER EN LØBENDE BETINGELSE, IKKE EN ENGANGS.** Samme svar:
+
+> *If the balance is not positive on the **first of the month**, access to the
+> included data may be removed until you add funds.*
+
+Saldoen tjekkes altså den 1. hver måned. Falder kontoen til nul — af gebyrer,
+af et tab, eller fordi pengene er hentet hjem — **forsvinder markedsdataen ved
+næste månedsskifte.** Og symptomet er ikke "du mangler data": det er en
+NT8-ordre der afvises med *"Real-time market data required to trade this
+contract"*, midt i en handelsdag, som om der var en fejl i koden.
+
+Derfor: læg et beløb ind der ikke kan nå nul ved et uheld, frem for det
+mindstebeløb der teknisk rækker. Og tjek saldoen omkring den 1.
 
 **Hvad det køber, som Sim101 aldrig kan give os:**
 
