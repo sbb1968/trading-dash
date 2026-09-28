@@ -630,8 +630,11 @@ async def startup():
         import nt_forbindelse as _ntb
         _ntp = accounts.nt_forbindelse()
         if _ntp is None:
-            print("[Server] NT8:       ikke armeret — Watchlist Futures svarer "
-                  "'spaerret' (ingen nt_forbindelse i account.yaml)")
+            # ⚠ "spaerret" var sandt i tolv timer. Fra 0749e23 ruter en
+            # uarmeret maskine futures til IBKR i stedet, og beskeden ville
+            # have sendt nogen ud at lede efter en fejl der ikke fandtes.
+            print("[Server] NT8:       ikke armeret (ingen nt_forbindelse i "
+                  "account.yaml) — futures handles paa IBKR")
         else:
             _k = _ntp.get("konto", "")
             _sim = _k.upper() in _ntb.SIM_KONTI
@@ -643,8 +646,14 @@ async def startup():
                 # kunne ses i et oejekast, ikke findes ved at laese en yaml-fil.
                 print("[Server] ⚠⚠ NT8 LIVE-HANDEL ER TILLADT (tillad_live: true) "
                       "— V2 og V4 spaerrer IKKE laengere")
-        print("[Server] Rute:      Watchlist Futures -> NT8 · "
-              "Watchlist Stocks -> IBKR (fastlaast, ingen default)")
+        # ⚠ DEN FAKTISKE RUTE, ikke den generelle regel. Linjen skrev foer
+        # "Futures -> NT8" uanset maskinens tilstand og modsagde dermed linjen
+        # lige over paa en uarmeret maskine. En banner-linje der siger noget
+        # andet end systemet goer, koster tid praecis den dag man har travlt.
+        # Den skal stemme med GET /ordre/rute — det er samme faktum.
+        _fut = "NT8" if _ntp is not None else "IBKR"
+        print(f"[Server] Rute:      Watchlist Futures -> {_fut} · "
+              f"Watchlist Stocks -> IBKR")
     except Exception as _e:
         # ⚠ At vi ikke kan afgoere det, maa ikke ligne "ikke armeret".
         print(f"[Server] NT8:       ⚠ KUNNE IKKE AFGOERES ({_e}) — "

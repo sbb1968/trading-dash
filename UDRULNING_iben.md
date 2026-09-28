@@ -1,0 +1,226 @@
+# Udrulning til Ibens workstation — og videre til live
+
+To planer. Den første skal køres i dag. Den anden ligger uger ude, men står her
+nu, fordi rækkefølgen betyder noget og ét af trinene har en fælde der skal
+besluttes **før** den udløses.
+
+---
+
+## ⚠ Svaret på "skal jeg rette account.yaml manuelt?"
+
+**Nej — ikke på Ibens maskine, og det er et bevidst design.**
+
+`account.yaml` er gitignoreret og maskinlokal, så den kommer rigtigt nok ikke med
+`git pull`. Men hendes maskine skal **ingen ændring** have:
+
+| account.yaml | Watchlist Futures går til | Hvorfor |
+|---|---|---|
+| **uden** `nt_forbindelse` | **IBKR** (DUQ441063) | som i dag — intet ændrer sig for Iben |
+| **med** `nt_forbindelse` | NT8 | maskinen har en NinjaTrader-vej |
+
+Armeringen **er** ruten. En maskine uden NinjaTrader kan ikke rute til
+NinjaTrader, så de to kan ikke komme i utakt.
+
+⚠ Det var ikke sådan for to timer siden. Reglen stod hardkodet som
+*"futures → NT8, altid"*, og med den ville Ibens første klik på **KØB MES** have
+svaret *"NinjaTrader-ordrevejen er spærret"*. Hun handler MES på IBKR gennem
+netop den knap. Rettet i `0749e23`.
+
+---
+
+# Plan 1 — udrulning i dag
+
+## Før du rører hendes maskine
+
+**1. Test exe'en på din egen først.** Din maskine er armet mod Sim101 og har NT8
+kørende, så den afdækker mere end hendes gør.
+
+```
+cd C:\Projects\trading_dash\backend
+venv\Scripts\activate
+uvicorn main:app --host 0.0.0.0
+```
+
+Banneret skal sige:
+
+```
+[Server] NT8:       Sim101 (simulation) — konfiguration, ikke kontrolleret
+[Server] Rute:      Watchlist Futures -> NT8 · Watchlist Stocks -> IBKR
+```
+
+Start så exe'en og kontrollér:
+- Toplinjen viser **DK**…  og **US**… i kraftig gul
+- Ordrer-vinduet står på **Aktuel dag (fra midnat)**
+- Fanerne **Ordrer** / **Handler** — den aktive er neongul, den inaktive grå
+- **Handler**-fanen viser gårsdagens fem Sim101-handler med P&L og −$2,50 i alt
+- Et klik på KØB giver en **gul, pulserende** kvittering og spærrer begge knapper
+
+**2. Tag en kopi af hendes nuværende exe.** `git pull` henter den ikke, så den
+version du overskriver, er den eneste du har at falde tilbage på.
+
+```
+copy "C:\Projects\trading_dash\app.exe" "C:\Projects\trading_dash\app.exe.foer-28-09"
+```
+
+## På Ibens workstation
+
+⚠ **Luk ikke hendes TWS.** Du har ikke `fasteriben2`-adgangskoden, og der kan
+kun være én session ad gangen.
+
+**3.** `git pull` i `C:\Projects\trading_dash`
+
+**4.** Kopiér den friske `app.exe` ind (fra
+`src-tauri\target\release\app.exe` på din maskine).
+
+**5.** Genstart backenden. Kontrollér at der ikke kører strategier først — på en
+workstation er auto-start slået fra, men se efter i banneret.
+
+**6. Verificér banneret.** Det skal sige:
+
+```
+[Server] IBKR:      DUQ441063 (paper)
+[Server] NT8:       ikke armeret (ingen nt_forbindelse i account.yaml) — futures handles paa IBKR
+[Server] Rute:      Watchlist Futures -> IBKR · Watchlist Stocks -> IBKR
+```
+
+⚠ Står der `Futures -> NT8` på hendes maskine, så **stop** — så er der kommet en
+`nt_forbindelse`-blok i hendes `account.yaml`, og hendes MES-handel vil fejle.
+
+**7. Det afgørende tjek** — spørg ruten direkte:
+
+```
+curl http://127.0.0.1:8000/ordre/rute
+```
+
+Svaret **skal** være:
+
+```json
+{"stocks":"IBKR","futures":"IBKR","nt_armeret":false,"nt_konto":""}
+```
+
+⚠ Står der `"futures":"NT8"`, så **stop**. Så er der kommet en
+`nt_forbindelse`-blok i hendes `account.yaml`, og hendes MES-handel vil fejle.
+
+**8. En rigtig prøvehandel**, mens du stadig sidder der: køb 1 MES i Watchlist
+Futures, se den gule kvittering, og se at den fylder på **DUQ441063**. Sælg den
+igen. Kig i **Handler**-fanen — der skal stå én linje med begge ben og P&L.
+
+Det koster ~$1 i kurtage og er de penge værd: det er forskellen på at vide at det
+virker og at håbe det.
+
+## Hvis noget går galt
+
+Læg den gamle exe tilbage og genstart backenden på forrige commit:
+
+```
+git log --oneline -5
+git checkout <commit-før-i-dag>
+```
+
+Hendes handel afhænger kun af IBKR-stien, som ikke er rørt i denne omgang.
+
+## Hvad Iben vil opleve som nyt
+
+- **Ordrer-vinduet viser kun i dag.** Det er rettelsen på hendes egen melding —
+  valget hed *"I dag (24 timer)"* men var et rullende døgn og viste i går.
+- **En ny fane, Handler** — én linje pr. transaktion med P&L.
+- **To ure** i toplinjen: `DK` og `US`. US-tiden i gul. Markedet åbner når der
+  står **09.30** i den gule.
+- **Kvittering ved klik.** Knappen siger `SENDER…`, begge knapper spærres, og en
+  gul bjælke navngiver ordren indtil svaret kommer. ⚠ Sig til hende at den gule
+  bjælke betyder *"jeg har hørt dig"* — ikke at handlen er gennemført.
+
+---
+
+# Plan 2 — paper → live på NinjaTrader
+
+Rækkefølgen er ikke vilkårlig. Hvert trin gør ét nyt forhold virkeligt, så en
+fejl kan henføres til det trin der lige blev taget.
+
+## ⚠ Trin 0 — beslut V4, før kontoen finansieres
+
+Som koden er nu, spærrer `klar()` **al** NT8-handel — også Sim101 — i samme
+øjeblik en ukendt konto dukker op i ATI-strømmen. Live-kontoen **2080414** vil
+dukke op dér den dag den finansieres.
+
+Konsekvens hvis det ikke besluttes først: NT8-handel stopper uden varsel, midt i
+en session, med en fejl Iben ikke kan gøre noget ved.
+
+Beskyttelsen er reelt overflødig, fordi V1 skriver kontoen eksplicit i hver
+ordre — en live-konto der blot *findes* i platformen kan ikke modtage en ordre
+stilet til Sim101.
+
+**Forslag:** gør V4 til en højlydt advarsel (journalhændelse + rød linje i
+watchlisten) i stedet for en spærring. Ikke besluttet endnu.
+
+## Trin 1 — penge og data hos NinjaTrader
+
+Ingen kode.
+
+- **Finansiér 2080414.** Dashboard → `TRANSFER FUNDS` → `WIRE`. SEPA/EUR, intet
+  gebyr, intet minimum. ⚠ Hent bankoplysningerne fra dit eget dashboard, ikke fra
+  et forum — wires bærer en klientspecifik reference.
+- **CME Level 1, $4/md.** Uden den afviser Tradovate ordren. ⚠ Sim101 fylder
+  heller ikke uden markedsdata — det så vi 27-09: *"There is no market data
+  available to drive the simulation engine."*
+- Cypriotisk investorgaranti dækker €20.000. Et argument for ikke at parkere mere
+  end nødvendigt.
+
+## Trin 2 — NT8 på Ibens maskine
+
+- Installér NinjaTrader 8
+- `Tools → Options → Automated trading interface` → slå ATI til
+- ⚠ `Tools → Options → Trading` → **fjern** *"Confirm order placement"*. Med den
+  slået til venter hver OIF-ordre på et menneskeklik i NT8; loggen skriver
+  `processing`, men der oprettes intet. Det kostede os en time 27-09.
+
+## Trin 3 — Sim101 på hendes maskine
+
+```yaml
+  nt_forbindelse:
+    konto: Sim101
+```
+
+⚠ Nu flytter hendes Watchlist Futures til NT8. **Hendes IBKR-MES-handel på
+DUQ441063 stopper samme øjeblik.** Det er det egentlige skift, og det skal
+besluttes bevidst — ikke opdages.
+
+Kør hele vejen igennem: køb → kvittering → fyldning → `Handler`-fanen viser
+linjen med P&L. Først når det virker på **hendes** maskine, går vi videre.
+
+## Trin 4 — DEMO8580770
+
+```yaml
+    konto: DEMO8580770
+```
+
+Samme kode, rigtig Tradovate-infrastruktur, legetøjspenge. Her viser det sig om
+markedsdata-abonnementet er på plads. Lad det køre nogle dage.
+
+## Trin 5 — live
+
+```yaml
+  nt_forbindelse:
+    konto: 2080414
+    tillad_live: true
+```
+
+⚠ **To ændringer, ikke én.** Kontonummeret alene spærres af V2, fordi 2080414
+ikke er en kendt simulationskonto. IBKR får den andenlås gratis af portnummeret
+(4002 paper / 4001 live); ATI har ingen, så den er bygget i kode.
+
+Banneret vil derefter råbe ved hver opstart:
+
+```
+[Server] NT8:       2080414 (⚠ IKKE en kendt simulationskonto)
+[Server] ⚠⚠ NT8 LIVE-HANDEL ER TILLADT (tillad_live: true)
+```
+
+Start med **1 kontrakt** og et beløb der ikke betyder noget.
+
+---
+
+## Efterskrift: én ting der ikke er besluttet
+
+**V4**, som beskrevet i trin 0. Den skal afgøres før live-kontoen finansieres,
+ikke efter.
