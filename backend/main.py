@@ -1113,6 +1113,24 @@ async def websocket_endpoint(websocket: WebSocket):
                         continue
                     nt_konto = _profil["konto"]
 
+                    # ⚠ V4's ADVARSEL SKAL SES, ellers er vagten fjernet.
+                    # Den spaerrer ikke laengere (28-09) — V1 skriver kontoen
+                    # eksplicit i hver kommando, saa en fremmed konto i NT8 kan
+                    # ikke modtage vores ordre. Men "ikke farligt" er ikke det
+                    # samme som "ikke vaerd at vide": blast radius er aendret.
+                    # Journalen faar den, og den foelger med svaret til
+                    # brugerfladen.
+                    for _adv in (_profil.get("advarsler") or []):
+                        logger.error(f"[NT8] {_adv}")
+                        await journal.log_event(
+                            ibkr_account=nt_konto or None,
+                            source="manual_watchlist",
+                            event_type="nt_ukendt_konto_i_stroemmen",
+                            symbol=ticker,
+                            payload={"advarsel": _adv,
+                                     "konti_set": _profil.get("konti_set"),
+                                     "konto": nt_konto})
+
                     # ⚠ KONTRAKTMAANEDEN HENTES FRA IBKR — OG DET ER BEVIDST.
                     # NT8 vil have "MES 12-26". Der findes ingen lokal
                     # rullekalender, og `nt_instrument()` naegter at gaette: en
@@ -1262,6 +1280,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         "nt_set":         _svar.get("set_af_nt8"),
                         "nt_ordre_i_log": _svar.get("ordre_i_log"),
                         "nt_fil_tilbage": _svar.get("fil_tilbage"),
+                        "nt_advarsler":   _profil.get("advarsler") or [],
                     }
 
                 # ── IBKR-GRENEN ───────────────────────────────────────────
@@ -1464,7 +1483,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     # forskellen mellem "vi skrev til ingenting" og "NT8 afviste".
                     **({"nt_spist":  result.get("nt_spist"),
                         "nt_oplaeg": result.get("nt_oplaeg"),
-                        "nt_log":    result.get("nt_log")}
+                        "nt_log":    result.get("nt_log"),
+                        "nt_advarsler": result.get("nt_advarsler") or []}
                        if broker == "NT8" else {}),
                 }))
 

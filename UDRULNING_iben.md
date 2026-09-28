@@ -137,21 +137,21 @@ Hendes handel afhænger kun af IBKR-stien, som ikke er rørt i denne omgang.
 Rækkefølgen er ikke vilkårlig. Hvert trin gør ét nyt forhold virkeligt, så en
 fejl kan henføres til det trin der lige blev taget.
 
-## ⚠ Trin 0 — beslut V4, før kontoen finansieres
+## Trin 0 — V4 (afklaret 28-09)
 
-Som koden er nu, spærrer `klar()` **al** NT8-handel — også Sim101 — i samme
-øjeblik en ukendt konto dukker op i ATI-strømmen. Live-kontoen **2080414** vil
-dukke op dér den dag den finansieres.
+Den spærrer ikke længere. Dukker der en ukendt konto op i ATI-strømmen — og det
+gør live-kontoen i samme øjeblik den finansieres — advarer `klar()` i stedet for
+at kaste.
 
-Konsekvens hvis det ikke besluttes først: NT8-handel stopper uden varsel, midt i
-en session, med en fejl Iben ikke kan gøre noget ved.
-
-Beskyttelsen er reelt overflødig, fordi V1 skriver kontoen eksplicit i hver
-ordre — en live-konto der blot *findes* i platformen kan ikke modtage en ordre
+Før ville ét indskud have standset **al** NT8-handel, også Sim101, indtil
+`tillad_live` blev sat. Altså en spærring udløst af præcis den handling der er
+nødvendig for at få markedsdata. Beskyttelsen var overflødig: V1 skriver kontoen
+eksplicit i hver kommando, så en fremmed konto i NT8 kan ikke modtage en ordre
 stilet til Sim101.
 
-**Forslag:** gør V4 til en højlydt advarsel (journalhændelse + rød linje i
-watchlisten) i stedet for en spærring. Ikke besluttet endnu.
+Advarslen journaliseres som `nt_ukendt_konto_i_stroemmen`, logges som fejl og
+følger med ordresvaret til brugerfladen. Ingen støj når strømmen kun har kendte
+konti, og ingen når `tillad_live` er sat — så er valget truffet.
 
 ## Trin 1 — DEMO8580770 på DIN maskine, før noget går til Iben
 

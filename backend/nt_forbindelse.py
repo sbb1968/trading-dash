@@ -446,19 +446,39 @@ def klar() -> dict:
             f"i platformen?")
 
     # ── V4: er der dukket en konto op vi ikke kender? ─────────────────────
+    #
+    # ⚠ DEN ADVARER, DEN SPAERRER IKKE — og det er en aendring fra 28-09.
+    #
+    # Foer kastede den, saa ÉN ukendt konto i stroemmen standsede AL
+    # NT8-handel, ogsaa paa Sim101. Det lyder forsigtigt og er det ikke:
+    # live-kontoen 2080414 dukker op i stroemmen i samme oejeblik den
+    # finansieres — og markedsdata KRAEVER at den finansieres. Vagten ville
+    # altsaa have spaerret Ibens paper-handel, midt i en session, med en fejl
+    # hun ikke kunne goere noget ved, som foelge af en handling der var
+    # noedvendig for at komme videre.
+    #
+    # Og beskyttelsen var overfloedig hele tiden: V1 skriver kontoen EKSPLICIT
+    # i hver eneste kommando. En live-konto der blot FINDES i platformen, kan
+    # ikke modtage en ordre stilet til Sim101. Der var intet at spaerre imod.
+    #
+    # ⚠ MEN DEN SKAL STADIG SES. En vagt der bliver til en stille kommentar,
+    # er en vagt der er fjernet. Advarslen foelger med profilen, og kalderen
+    # journaliserer den og sender den til brugerfladen — se main.py.
+    advarsler: list[str] = []
     ukendte = [k for k in st["konti"]
                if k.upper() not in SIM_KONTI and k != konto]
     if ukendte and not profil.get("tillad_live"):
-        raise NtForbindelseFejl(
-            f"⚠ UKENDT KONTO I STROEMMEN: {ukendte}. NT8 er forbundet til noget "
-            f"der hverken er en kendt simulationskonto eller den konfigurerede. "
-            f"Blast radius er aendret siden sidst — ingen ordrer sendes foer det "
-            f"er afklaret.")
+        advarsler.append(
+            f"⚠ UKENDT KONTO I NT8: {', '.join(ukendte)}. Den er hverken en "
+            f"kendt simulationskonto eller den konfigurerede ({konto}). Dine "
+            f"ordrer gaar fortsat til {konto} — kontoen skrives eksplicit i "
+            f"hver kommando — men NT8 er forbundet til mere end foer.")
 
     if not INCOMING.is_dir():
         raise NtForbindelseFejl(f"{INCOMING} findes ikke — koerer NT8?")
 
-    return {**profil, "konti_set": st["konti"], "ati_aktiv": True}
+    return {**profil, "konti_set": st["konti"], "ati_aktiv": True,
+            "advarsler": advarsler}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

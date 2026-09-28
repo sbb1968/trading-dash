@@ -7,7 +7,7 @@ watchlist-knap og en ordre. En vagt der aldrig er set sige nej, er ikke en vagt.
   V1  kontoen skrives EKSPLICIT i hver kommando — aldrig tom
   V2  kontoen skal være en kendt simulationskonto (medmindre tillad_live)
   V3  kontoen skal FINDES i ATI-strømmen, ikke kun i konfigurationsfilen
-  V4  en ukendt konto i strømmen råber op — blast radius kan have ændret sig
+  V4  en ukendt konto i strømmen RÅBER OP (spærrer ikke — V1 dækker)
 
 ⚠ HVORFOR V1 ER MERE END PEDANTERI. IBKR binder en forbindelse til en konto;
 ordrer arver den. **ATI har ingen forbindelse.** Kontoen er felt to i hver
@@ -141,13 +141,41 @@ def main() -> int:
         kraev(blev, "ATI slaaet fra spaerrer")
         kraev("ATI True" in besked, "    fejlen peger paa ATI-indstillingen")
 
-        print("\n  ── V4 · en ukendt konto i stroemmen raaber op ──")
-        blev, besked = med(STROEM_LIVE, {"konto": "Sim101"})
-        kraev(blev, "⚠ live-kontoen dukker op i stroemmen -> spaerret")
-        kraev("2080414" in besked, f"    og den navngives: {besked[:60]}")
+        print("\n  ── V4 · en ukendt konto RAABER OP, men spaerrer ikke ──")
+        # ⚠ AENDRET 28-09. Foer kastede V4, saa ÉN ukendt konto standsede AL
+        # NT8-handel, ogsaa paa Sim101. Live-kontoen dukker op i stroemmen i
+        # samme oejeblik den finansieres — og markedsdata KRAEVER finansiering.
+        # Vagten ville altsaa have spaerret Ibens paper-handel som foelge af en
+        # handling der var noedvendig for at komme videre.
+        #
+        # Beskyttelsen var overfloedig: V1 skriver kontoen eksplicit i hver
+        # kommando, saa en fremmed konto i NT8 kan ikke modtage vores ordre.
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: STROEM_LIVE   # type: ignore
+        accounts.nt_forbindelse = lambda: {"konto": "Sim101"}     # type: ignore
+        pr = NT.klar()
+        kraev(True, "⚠ live-kontoen i stroemmen SPAERRER IKKE laengere")
+        adv = pr.get("advarsler") or []
+        kraev(len(adv) == 1, f"…men der kommer en advarsel ({len(adv)})")
+        if adv:
+            kraev("2080414" in adv[0], f"    den navngiver kontoen: {adv[0][:52]}")
+            kraev("Sim101" in adv[0],
+                  "    …og siger hvor ordrerne FAKTISK gaar hen")
+        kraev(pr["konto"] == "Sim101", "profilen peger stadig paa Sim101")
 
-        blev, _ = med(STROEM_LIVE, {"konto": "Sim101", "tillad_live": True})
-        kraev(not blev, "tillad_live accepterer den bevidst")
+        # ⚠ Og uden fremmed konto maa der IKKE komme stoej. En advarsel ved
+        # hver ordre holder man op med at se efter i loebet af tre dage.
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: STROEM_SIM    # type: ignore
+        pr = NT.klar()
+        kraev(not (pr.get("advarsler") or []),
+              "ingen advarsel naar stroemmen kun har kendte konti")
+
+        # tillad_live tier ogsaa — saa er valget truffet bevidst.
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: STROEM_LIVE   # type: ignore
+        accounts.nt_forbindelse = lambda: {"konto": "Sim101",     # type: ignore
+                                           "tillad_live": True}
+        pr = NT.klar()
+        kraev(not (pr.get("advarsler") or []),
+              "tillad_live: true -> ingen advarsel, valget er truffet")
     finally:
         NT._laes_raat = aegte                                   # type: ignore
         accounts.nt_forbindelse = aegte_profil                  # type: ignore

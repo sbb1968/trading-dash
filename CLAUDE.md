@@ -688,6 +688,15 @@ alle stod til `1` mens den rigtige stod til `-4` — slår man forkert op, får 
 et forkert svar der ser rigtigt ud. Derfor slås præcis én nøgle op, og
 manglende nøgle er **UKENDT**, aldrig "flad".
 
+⚠ **V4 advarer, den spærrer ikke** (ændret 28-09). Dukker der en ukendt konto
+op i ATI-strømmen — hvilket live-kontoen gør i samme øjeblik den finansieres —
+råber `klar()` op via `advarsler` i profilen, men sender stadig ordren. Før
+kastede den, hvilket ville have standset *al* NT8-handel, også Sim101, som
+følge af en handling (finansiering) der er nødvendig for at få markedsdata.
+Beskyttelsen var overflødig: V1 skriver kontoen eksplicit i hver kommando, så
+en fremmed konto i NT8 kan ikke modtage vores ordre. Advarslen journaliseres
+som `nt_ukendt_konto_i_stroemmen` og følger med ordresvaret.
+
 ⚠ **Live kræver TO ændringer**, ikke én: `konto: 2080414` **og**
 `tillad_live: true`. Kontonummeret alene spærres af V2, fordi det ikke er en
 kendt simulationskonto. IBKR får den andenlås gratis af portnummeret; ATI har
