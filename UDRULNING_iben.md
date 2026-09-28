@@ -67,6 +67,21 @@ copy "C:\Projects\trading_dash\app.exe" "C:\Projects\trading_dash\app.exe.foer-2
 ⚠ **Luk ikke hendes TWS.** Du har ikke `fasteriben2`-adgangskoden, og der kan
 kun være én session ad gangen.
 
+**⚠ 2b. Tag et skærmbillede af begge hendes watchlists FØR du rører noget.**
+
+Målt på Sørens maskine 28-09: efter opstart med den nye exe stod Watchlist
+Futures med standardlisten (`NVDA, TSLA, AAPL`) i stedet for MES. Nøglen
+`watchlist` i localStorage var væk.
+
+Årsagen er ikke fundet. Lagringen er ét fælles sted (app-data-mappen under
+`dk.brejlborup.tradingdash`), så det er ikke et spørgsmål om hvorfra exe'en
+startes — og ingen af dagens ændringer rører watchlist-nøglerne. Men det skete,
+og det kan ske igen.
+
+Et skærmbillede koster ti sekunder og gør det til en bagatel i stedet for noget
+der skal rekonstrueres midt på en handelsdag.
+
+
 **3.** `git pull` i `C:\Projects\trading_dash`
 
 **4.** Kopiér den friske `app.exe` ind (fra
