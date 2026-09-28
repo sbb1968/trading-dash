@@ -321,6 +321,24 @@ function useKolonner(noegle: string, standard: string[]): string[] {
 import { BROKER_FOR_LISTE, BROKER_NAVN, type Broker, type WatchVariant }
   from "./brokerruter";
 
+// Hvad backendens `forbindelse`-felt hedder paa dansk.
+//
+// ⚠ ET KORT FREM FOR EN KAEDE AF ===, og det er lært paa den dyre maade.
+// Her stod `ordre` / `delt` / ellers "⚠ UKENDT forbindelse — svarer en gammel
+// backend?". Da NT8-vejen kom til, sendte backenden "nt8-ati", som faldt i
+// else-grenen: en gennemfoert ordre blev meldt som en mistaenkelig backend.
+//
+// Maalt 28-09 kl. 06:57 kostede det en handel. Salget LYKKEDES, advarslen fik
+// det til at ligne noget andet, der blev klikket igen — og anden gang aabnede
+// en short i stedet for at lukke en long. Beskeden paastod altsaa en AARSAG
+// ("gammel backend") for en OBSERVATION ("vaerdien er ukendt"), og aarsagen
+// var forkert. Nu navngives det vi ved, og en ny ordrevej er én linje her.
+const ORDREVEJ_NAVN: Record<string, string> = {
+  "ordre":   "lokal ordre-Gateway",
+  "delt":    "delt forbindelse",
+  "nt8-ati": "NinjaTrader (ATI)",
+};
+
 const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: string }> = {
   // Futures beholder den kendte moerke flade — det er den Iben kender.
   futures: { bg: "var(--bg-surface)", tekst: "var(--text-primary)", etiket: "FUTURES" },
@@ -764,11 +782,9 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   feltet. En backend uden ordre_forbindelse-stoette sender det
                   slet ikke, og det er praecis den gamle proces der laa og
                   lyttede paa port 8000 ved siden af den nye. Dér skal der raabes. */}
-              {sidsteOrdre.forbindelse === "ordre"
-                ? <span className="ordre-vej"> · lokal ordre-Gateway{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
-                : sidsteOrdre.forbindelse === "delt"
-                  ? <span className="ordre-vej"> · delt forbindelse{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
-                  : <span className="ordre-vej ordre-vej-delt"> · ⚠ UKENDT forbindelse — svarer en gammel backend?</span>}
+              {ORDREVEJ_NAVN[sidsteOrdre.forbindelse || ""]
+                ? <span className="ordre-vej"> · {ORDREVEJ_NAVN[sidsteOrdre.forbindelse!]}{sidsteOrdre.port ? ` :${sidsteOrdre.port}` : ""}</span>
+                : <span className="ordre-vej ordre-vej-delt"> · ⚠ UKENDT ordrevej "{sidsteOrdre.forbindelse || "(intet felt)"}"</span>}
             </>
           ) : (
             <>⚠ {sidsteOrdre.action === "BUY" ? "Køb" : "Salg"} af {sidsteOrdre.ticker} fejlede: {sidsteOrdre.error}</>
