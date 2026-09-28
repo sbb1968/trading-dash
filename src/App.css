@@ -130,8 +130,12 @@ button {
 
 /* US-tiden er den man skal handle efter, men DK er den man lever i.
    Den faar derfor sin egen toning frem for at ligne en gentagelse. */
-.ur-us { color: var(--accent); margin-left: 9px; }
-.ur-us .ur-praefiks { color: var(--accent); opacity: 0.75; }
+.ur-us {
+  color:       var(--ur-us);
+  font-weight: 700;
+  margin-left: 9px;
+}
+.ur-us .ur-praefiks { color: var(--ur-us); opacity: 0.8; }
 
 /* Market status farver */
 .market-open   { color: var(--bull); }

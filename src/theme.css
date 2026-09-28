@@ -29,6 +29,11 @@
   --aktiv-markering: #d4ff00;     /* neongul — moerke temaer */
   --inaktiv-tekst:   #6b7280;     /* rigtig graa, tydeligt daempet */
   --aktiv-glod:      rgba(212, 255, 0, 0.18);
+  /* ⚠ EGEN VARIABEL, ikke --aktiv-markering. Samme farve i moerke temaer,
+     men de betyder ikke det samme: den ene siger "denne liste lytter",
+     den anden "det her er US-tid". Faelles variabel ville binde to
+     beslutninger sammen der skal kunne aendres hver for sig. */
+  --ur-us:           #d4ff00;
   --bg-base:        #0a0c0f;
   --bg-surface:     #0f1217;
   --bg-elevated:    #151a21;
@@ -214,6 +219,8 @@
   --aktiv-markering: #5f7000;
   --inaktiv-tekst:   #64748b;
   --aktiv-glod:      rgba(95, 112, 0, 0.10);
+  /* Kraftig gul paa hvid er ulaeselig; moerk rav baerer samme vaegt. */
+  --ur-us:           #8a6d00;
   --bg-base:        #f0f4f8;
   --bg-surface:     #ffffff;
   --bg-elevated:    #e8eef5;
