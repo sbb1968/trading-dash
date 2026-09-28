@@ -161,11 +161,32 @@ mod rigtig infrastruktur, ved vi at det også kan virke hos hende.
 **Hvad det kræver:**
 - En mæglerforbindelse i din NT8. ⚠ Der er **ingen** i dag — `Config.xml` har kun
   `Simulated Data Feed`, `Playback` og `Kinetick End Of Day (Free)`.
-- **CME Level 1, $4/md.** Bevist nødvendigt: ordren 16-09 blev afvist med
+- **Markedsdata.** Bevist nødvendigt: ordren 16-09 blev afvist med
   *"Real-time market data required to trade this contract."*
 
-⚠ Det er de samme $4 du skal bruge til live alligevel. Ikke penge brugt på en
-test — et abonnement købt tidligere.
+⚠ **Og markedsdata købes ikke — kontoen finansieres.** Aflæst i portalen 28-09
+(`td.ninjatrader.com/settings/plans`):
+
+```
+Account plan:  Live Trading | Free        Commissions: $0.39/micro
+Features (included when you fund your account)
+   CME Bundle (Level 1)     ← nedtonet, altså ikke aktiv
+   EUREX Bundle (Level 1)   ← nedtonet
+   TradingView · Order Flow+ · Market Replay
+```
+
+Der er **ingen** aktiv dataabonnement på kontoen, og der er heller ingen separat
+$4-post at købe på denne plan. CME Level 1 følger med i det øjeblik kontoen
+finansieres. Den tidligere antagelse om "$4/md" stammede fra EU-prislisten og
+gælder ikke denne plan.
+
+⚠ **Det flytter finansieringen frem foran DEMO-testen** — og dermed også
+V4-beslutningen i trin 0, for live-kontoen dukker op i ATI-strømmen samme dag
+pengene går ind.
+
+⚠ **Ikke afklaret:** om finansiering af live-kontoen også giver data på
+DEMO8580770, og hvor lille et indskud der skal til. Begge dele kan besvares af
+supportchatten i portalen, før der overføres noget.
 
 **Hvad det køber, som Sim101 aldrig kan give os:**
 
@@ -262,8 +283,8 @@ det køre nogle dage — det er her vi første gang ser systemet møde et marked
 er derfor ingen delt-login-begrænsning at tage hensyn til, sådan som
 `fasteriben2` har kostet os tid hos IBKR.
 
-⚠ **Men markedsdata er pr. konto.** Hendes egen konto kræver sit eget
-abonnement. Regn med $4/md hver, ikke $4 i alt.
+⚠ **Men markedsdata følger kontoen.** Hendes konto skal finansieres for at få
+CME Level 1 — det kan ikke deles fra Sørens. To konti, to indskud.
 
 ## Trin 5 — live
 
