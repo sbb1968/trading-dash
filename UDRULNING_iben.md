@@ -184,9 +184,21 @@ gælder ikke denne plan.
 V4-beslutningen i trin 0, for live-kontoen dukker op i ATI-strømmen samme dag
 pengene går ind.
 
-⚠ **Ikke afklaret:** om finansiering af live-kontoen også giver data på
-DEMO8580770, og hvor lille et indskud der skal til. Begge dele kan besvares af
-supportchatten i portalen, før der overføres noget.
+**Afklaret med supporten 28-09:** finansiering af 2080414 giver også data på
+DEMO8580770 — *"the complimentary Level I CME Group and EUREX market data
+benefits apply to both the live and Demo environments under the same username…
+A separate Demo payment or add-on is not required."*
+
+Hele DEMO-testen kan altså køres uden at handle på live-kontoen. Pengene skal
+blot **stå** der.
+
+⚠ Svaret var fra supportchatten og sagde *"should also apply"* — en slutning,
+ikke en bekræftet kendsgerning. Efterprøv det i NT8 når kontoen er finansieret:
+viser MES DEC26 levende kurser under DEMO8580770, holder det.
+
+⚠ **Stadig ikke afklaret: hvor lille et indskud der udløser CME Bundle.**
+Spørg supporten før overførslen — rækker et symbolsk beløb, kan hele testen
+køres for næsten ingenting.
 
 **Hvad det køber, som Sim101 aldrig kan give os:**
 
