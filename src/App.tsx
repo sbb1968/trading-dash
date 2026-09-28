@@ -347,12 +347,14 @@ const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: stri
   stocks:  { bg: "#0f1b24",           tekst: "#cfe8f5",            etiket: "STOCKS" },
 };
 
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, cols, variant = "futures", erAktiv = true, onAktiver }: {
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, ordreUndervejs, cols, variant = "futures", erAktiv = true, onAktiver }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
                    broker: Broker) => void;
   orderResult?: IbkrOrderResult | null;
+  ordreUndervejs?: { action: "BUY" | "SELL"; ticker: string; shares: number;
+                     broker: Broker; sendt: number } | null;
   cols?: string[];
   variant?: WatchVariant;
   erAktiv?: boolean;
@@ -758,12 +760,33 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
               Konfigurator) ·{" "}
             </span>}<b>ALT+H</b> test halt-alarm
       </div>
+      {/* ⚠ KVITTERINGEN KOMMER FOER SVARET, og det er hele pointen.
+          En NT8-ordre er sekunder undervejs. Indtil 28-09 skete der intet
+          synligt imens, og den der klikker konkluderer rimeligt nok at klikket
+          ikke gik igennem. Maalt samme dag paa Sim101: ét koeb, FEM salg,
+          nettoposition -4 MES — fire utilsigtede kontrakter, fordi intet sagde
+          "jeg har hoert dig".
+
+          Den navngiver ordren (retning, antal, ticker, broker), saa den ikke
+          bare er en spinner: man skal kunne se AT det rigtige blev bestilt,
+          ikke kun at der sker noget. */}
+      {ordreUndervejs && (
+        <div className="ordre-kvittering ordre-venter">
+          ⏳ {ordreUndervejs.action === "BUY" ? "KØBER" : "SÆLGER"}{" "}
+          <b>{ordreUndervejs.shares} {ordreUndervejs.ticker}</b>
+          {" "}via <b>{BROKER_NAVN[ordreUndervejs.broker]}</b> · sendt, venter på svar…
+          <span style={{ opacity: 0.75 }}>
+            {" "}— knapperne er spærret indtil svaret kommer
+          </span>
+        </div>
+      )}
+
       {/* ⚠ ORDREKVITTERING MED KONTO. To backends laa engang og lyttede paa samme
           port, én med gammel kode — en ordre kunne da lande paa den forkerte konto
           uden at noget fejlede. Det er en driftsfaelde, ikke en kodefejl, og den
           kan opstaa paa enhver maskine med en glemt proces. Derfor staar kontoen
           her, ved siden af handlen, frem for kun i journalen. */}
-      {sidsteOrdre && (
+      {sidsteOrdre && !ordreUndervejs && (
         <div className={sidsteOrdre.success ? "ordre-kvittering" : "ordre-kvittering ordre-fejl"}>
           {sidsteOrdre.success ? (
             <>
@@ -919,12 +942,38 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                           manuel handel
                         </span>
                       : <>
+                        {/* ⚠ MENS EN ORDRE ER UNDERVEJS, ER BEGGE KNAPPER DØDE.
+                            En NT8-ordre er sekunder undervejs, og indtil 28-09
+                            skete der intet synligt imens. Den der klikker,
+                            konkluderer rimeligt nok at klikket ikke gik
+                            igennem — og klikker igen. Målt samme dag: ét køb,
+                            FEM salg, nettoposition -4 MES, ingen af de fire
+                            ekstra ønsket.
+
+                            Knappen der blev trykket, siger hvad den laver.
+                            Den anden er blot slået fra: at BEGGE er døde er
+                            vigtigere end at se pæn ud, for et KØB oven i et
+                            SALG-i-flugten er lige så galt som to salg. */}
                         <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
-                          title={`Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                          style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4, cursor: "pointer" }}>KØB</button>
+                          disabled={!!ordreUndervejs}
+                          title={ordreUndervejs
+                            ? "Vent — en ordre er undervejs"
+                            : `Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                          style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4,
+                                   cursor: ordreUndervejs ? "not-allowed" : "pointer",
+                                   opacity: ordreUndervejs ? 0.35 : 1 }}>
+                          {ordreUndervejs?.action === "BUY" && ordreUndervejs.ticker === stock.ticker ? "SENDER…" : "KØB"}
+                        </button>
                         <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
-                          title={`Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
-                          style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", cursor: "pointer" }}>SÆLG</button>
+                          disabled={!!ordreUndervejs}
+                          title={ordreUndervejs
+                            ? "Vent — en ordre er undervejs"
+                            : `Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
+                          style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px",
+                                   cursor: ordreUndervejs ? "not-allowed" : "pointer",
+                                   opacity: ordreUndervejs ? 0.35 : 1 }}>
+                          {ordreUndervejs?.action === "SELL" && ordreUndervejs.ticker === stock.ticker ? "SENDER…" : "SÆLG"}
+                        </button>
                       </>}
                   </td>}
                   {vist("koebspris")  && <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>}
@@ -1653,16 +1702,18 @@ export function renderWindowContent(id: WindowId, props: {
                    broker: Broker) => void;
   onOpenDetail: (kind: string, ticker: string) => void;
   orderResult?: IbkrOrderResult | null;
+  ordreUndervejs?: { action: "BUY" | "SELL"; ticker: string; shares: number;
+                     broker: Broker; sendt: number } | null;
 }) {
   switch(id) {
     case "watchlist":   return <WatchlistPanel variant="futures"
                           erAktiv={props.aktivWatch === "futures"}
                           onAktiver={() => props.setAktivWatch("futures")}
-                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} />;
     case "watchliststocks": return <WatchlistPanel variant="stocks"
                           erAktiv={props.aktivWatch === "stocks"}
                           onAktiver={() => props.setAktivWatch("stocks")}
-                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlistStocks} onAddTicker={props.onAddTickerStocks} onRemoveTicker={props.onRemoveTickerStocks} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} />;
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlistStocks} onAddTicker={props.onAddTickerStocks} onRemoveTicker={props.onRemoveTickerStocks} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
     case "chart3min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="3 min" />;
@@ -1768,6 +1819,7 @@ function App() {
   const {
     stocksArray, status,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult, subscribeTickers,
+    ordreUndervejs,
   } = useMarketData();
 
   // Trin 3: abonnér på watchlist-tickers' live-kurs når listen ændres / ved (gen)forbindelse.
@@ -1893,6 +1945,7 @@ function App() {
     onCloseWindow: (id: WindowId) => updateWindowState(id, { closed: true }),
     onOpenDetail: openDetail,
     orderResult: lastOrderResult,
+    ordreUndervejs,
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
                      broker: Broker) => {
       // Konfigurator-indstilling: spring bekræftelses-pop-up over og handl direkte.

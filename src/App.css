@@ -1116,6 +1116,29 @@ body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator:
   line-height: 1.5;
 }
 
+/* ⚠ VENTETILSTANDEN SKAL SE ANDERLEDES UD END ET RESULTAT.
+   Gul/rav betyder "i gang", ikke "gik godt" og ikke "gik galt". Var den
+   groen som en kvittering, ville den blive laest som "solgt" — og det var
+   netop den fejllaesning der 28-09 gav fire utilsigtede MES-kontrakter.
+   Pulsen er der for at sige at der stadig sker noget; uden den ligner et
+   fastfrosset vindue. */
+.ordre-kvittering.ordre-venter {
+  background: rgba(212, 160, 23, 0.14);
+  border-color: #d4a017;
+  color: #f0c24b;
+  animation: ordre-venter-puls 1.4s ease-in-out infinite;
+}
+
+@keyframes ordre-venter-puls {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.62; }
+}
+
+/* Respekter at nogen slaar bevaegelse fra i systemet. */
+@media (prefers-reduced-motion: reduce) {
+  .ordre-kvittering.ordre-venter { animation: none; }
+}
+
 .ordre-kvittering.ordre-fejl {
   background: rgba(248, 113, 113, 0.12);
   border-color: var(--bear);

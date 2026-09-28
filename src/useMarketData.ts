@@ -65,6 +65,26 @@ export function useMarketData() {
   const [status,    setStatus]    = useState<ConnectionStatus>("connecting");
   const [lastOrderResult, setLastOrderResult] = useState<IbkrOrderResult | null>(null);
 
+  // ⚠ ER DER EN ORDRE UNDERVEJS? Det dyrest lærte felt i denne fil.
+  //
+  // En NT8-ordre er 5-11 sekunder undervejs (ATI-oplæg + OIF-filen + fyldningen),
+  // og indtil 28-09 skete der INTET synligt imens. Den der klikker, konkluderer
+  // rimeligt nok at klikket ikke gik igennem, og klikker igen.
+  //
+  // Målt 28-09 på Sim101: ét køb, FEM salg, nettoposition -4 MES. Ingen af de
+  // fire ekstra var ønsket. På Sim101 kostede det ingenting; på en live-konto
+  // er fire utilsigtede MES-kontrakter til markedspris en anden historie.
+  //
+  // ⚠ OG HASTIGHED ER IKKE LØSNINGEN. Uanset hvor hurtig vejen bliver, er der
+  // et vindue hvor svaret ikke er kommet endnu — og et vindue man kan klikke i,
+  // bliver klikket i. Derfor spærres knappen, og der vises at der arbejdes.
+  // ⚠ Den baerer HVAD der er bestilt, ikke kun AT noget er undervejs. En
+  // kvittering der ikke kan naevne ordren, beroliger ikke nogen.
+  const [ordreUndervejs, setOrdreUndervejs] =
+    useState<{ action: "BUY" | "SELL"; ticker: string; shares: number;
+               broker: Broker; sendt: number } | null>(null);
+  const ordreTimerRef = useRef<number | null>(null);
+
   const wsRef         = useRef<ReconnectingWebSocket | null>(null);
 
   useEffect(() => {
@@ -107,6 +127,12 @@ export function useMarketData() {
         } else if (message.type === "ibkr_order_result") {
           // Manuel watchlist-ordre — gem resultat så UI kan vise toast
           setLastOrderResult(message as IbkrOrderResult);
+          // Svaret er kommet — luk op igen.
+          setOrdreUndervejs(null);
+          if (ordreTimerRef.current) {
+            clearTimeout(ordreTimerRef.current);
+            ordreTimerRef.current = null;
+          }
         }
 
       } catch (e) {
@@ -140,6 +166,22 @@ export function useMarketData() {
   const sendOrdre = useCallback(
     (action: "BUY" | "SELL", ticker: string, shares: number, broker: Broker) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setOrdreUndervejs({ action, ticker, shares, broker, sendt: Date.now() });
+        // ⚠ EN SPÆRRING DER KAN HÆNGE, ER VÆRRE END INGEN. Kommer svaret
+        // aldrig (tabt WebSocket, backend genstartet midt i), må knappen ikke
+        // være død for altid. 60 s er rigeligt over den målte værste vej og
+        // kort nok til at man ikke giver op.
+        if (ordreTimerRef.current) clearTimeout(ordreTimerRef.current);
+        ordreTimerRef.current = window.setTimeout(() => {
+          setOrdreUndervejs(null);
+          ordreTimerRef.current = null;
+          setLastOrderResult({
+            type: "ibkr_order_result", success: false, ticker, action, shares,
+            error: "Intet svar fra backenden inden for 60 sekunder. ⚠ ORDREN "
+                 + "KAN VÆRE GÅET IGENNEM ALLIGEVEL — tjek i " + broker
+                 + " før du prøver igen.",
+          } as IbkrOrderResult);
+        }, 60000);
         wsRef.current.send(JSON.stringify({
           type: action === "BUY" ? "ordre_buy" : "ordre_sell",
           ticker, shares, broker,
@@ -166,5 +208,6 @@ export function useMarketData() {
   return {
     stocksArray, news, status, sendMessage,
     ibkrBuy, ibkrSell, lastOrderResult, clearLastOrderResult, subscribeTickers,
+    ordreUndervejs,
   };
 }

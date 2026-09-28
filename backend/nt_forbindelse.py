@@ -210,9 +210,29 @@ def _laes_raat(sekunder: float = LYT_SEK) -> str:
     return buf.replace(b"\x00", b" ").decode("utf-8", "replace")
 
 
+# Hvor kort vi noejes med naar svaret allerede er der. Maalt 28-09: 0,5 s gav
+# samme to konti og samme "ATI True" som 6 s.
+LYT_HURTIG = 0.6
+
+
 def tilstand(sekunder: float = LYT_SEK) -> dict:
-    """Hvilke konti er NT8 forbundet til lige nu, og er ATI slået til?"""
-    raa = _laes_raat(sekunder)
+    """Hvilke konti er NT8 forbundet til lige nu, og er ATI slået til?
+
+    ⚠ ESKALERER VED TVIVL — DEN FORKORTER IKKE VED HÅB.
+    `klar()` kalder denne før hver eneste ordre, og med et fast seks sekunders
+    oplæg kostede hver ordre seks sekunder hvor brugerfladen intet sagde. Målt
+    28-09 gav 0,6 s nøjagtig samme svar; de seks var ren venten.
+
+    Men en kort aflæsning må ALDRIG kunne blive til "ingen konti" — det ville
+    være en kontrol hvis fejl ser ud som et fund, og V3 ville spærre en gyldig
+    ordre med en forkert begrundelse. Derfor: læs kort, og er svaret tomt eller
+    uden navngivne konti, så læs det fulde vindue før der konkluderes noget.
+    Den hurtige vej er kun en genvej NÅR svaret allerede er der.
+    """
+    raa = _laes_raat(min(LYT_HURTIG, sekunder))
+    if not raa.strip() or not re.search(r"CashValue\|\S+\s", raa):
+        # Tvivl — brug det fulde vindue, som før.
+        raa = _laes_raat(sekunder)
     if not raa.strip():
         # ⚠ Tom stroem er ikke "ingen konti". Se NtTilstandUkendt.
         raise NtTilstandUkendt(
@@ -276,7 +296,7 @@ def fyldning(ordre_id: str, raa: str | None = None) -> tuple[int, float]:
 
 
 def afvent_ordre(ordre_id: str, sekunder: float = 15.0,
-                 oplaeg_sek: float = 2.0) -> dict:
+                 oplaeg_sek: float = 0.8) -> dict:
     """Lyt til ATI indtil ordren er terminal, eller tiden gaar.
 
     Returnerer `{"status", "filled", "avg_fill", "terminal", "oplaeg"}` —
@@ -373,9 +393,11 @@ def _skriv_oif(kommando: str, maerke: str, vent_sek: int = 15) -> dict:
     fil = INCOMING / f"oif_td_{maerke}_{int(time.time() * 1000)}.txt"
     fil.write_text(kommando + "\n", encoding="ascii")
 
+    # ⚠ Fin-kornet polling. Var 1 s, og NT8 spiser filen paa ~100 ms — saa
+    # hvert eneste klik betalte op mod et helt sekund for ingenting.
     spist = False
-    for _ in range(vent_sek):
-        time.sleep(1)
+    for _ in range(int(vent_sek / 0.1)):
+        time.sleep(0.1)
         if not fil.exists():
             spist = True
             break
@@ -394,7 +416,7 @@ def _skriv_oif(kommando: str, maerke: str, vent_sek: int = 15) -> dict:
         except OSError as e:
             fil_tilbage = f"{fil.name}: {e}"
 
-    time.sleep(1.0)                  # loggen skrives et øjeblik efter
+    time.sleep(0.35)                 # loggen skrives et øjeblik efter
     linjer = [l for l in _nye_logliner(log, foer) if "OIF" in l or "Order=" in l]
     # NT8 logger "processing" naar den LAESER filen. At den skrev en
     # Order=-linje er derimod beviset paa at der blev oprettet noget.
