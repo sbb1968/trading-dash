@@ -155,6 +155,7 @@ class OrdersTracker:
         self,
         ibkr_conn,
         period_hours: int = 24,
+        since: Optional[datetime] = None,
         sources=None,
     ) -> list[dict]:
         """
@@ -164,7 +165,16 @@ class OrdersTracker:
         Hvis IBKR ikke er forbundet, returneres vores stored entries uden
         live-status (status="UNKNOWN").
         """
-        cutoff = datetime.now() - timedelta(hours=period_hours)
+        # ⚠ ET RULLENDE VINDUE ER IKKE EN DAG.
+        # Her stod kun `now() - period_hours`, og valget hed "I dag (24 timer)".
+        # Klokken 09:30 betoed det "tilbage til 09:30 i gaar" — altsaa hele
+        # gaarsdagens session. Maalt 28-09: 8 ordrer vist, 2 af dem fra i gaar.
+        # Iben meldte det som en fejl i vinduet; det var etiketten der loej.
+        #
+        # `since` lader kalderen sige PRAECIS hvor graensen gaar, saa
+        # "aktuel dag" kan betyde midnat og ikke noget der ligner.
+        cutoff = since if since is not None else (
+            datetime.now() - timedelta(hours=period_hours))
         recent = [
             e for e in self._entries
             if _parse_ts(e.get("placed_at")) >= cutoff

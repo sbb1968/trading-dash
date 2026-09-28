@@ -1761,11 +1761,16 @@ async def handels_forbindelse():
 
 
 @app.get("/orders/list")
-async def get_orders_list(period_hours: int = 24):
+async def get_orders_list(period_hours: int = 24, fra_midnat: bool = False):
     """Returnér Trading Dash's MANUELLE ordrer i de seneste N timer med holdbar status."""
     ibkr = await handels_forbindelse()
     orders = await get_tracker().get_all_orders(
-        ibkr, period_hours=period_hours, sources=MANUAL_ORDER_SOURCES)
+        ibkr, period_hours=period_hours, sources=MANUAL_ORDER_SOURCES,
+        # ⚠ Kalenderdag, ikke "de seneste 24 timer". Se noten i
+        # orders_tracker.get_all_orders — de to er ikke det samme, og
+        # forskellen er hele gaarsdagens handel.
+        since=(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+               if fra_midnat else None))
     return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
 
 
