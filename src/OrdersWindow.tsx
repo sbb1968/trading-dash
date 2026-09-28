@@ -325,15 +325,27 @@ export function OrdersWindow() {
             {([["ordrer", "Ordrer"], ["handler", "Handler"]] as [Fane, string][])
               .map(([v, navn], i) => (
               <span key={v} onClick={() => setFane(v)}
+                title={fane === v ? `${navn} vises` : `Skift til ${navn}`}
                 style={{
-                  padding: "3px 12px", fontSize: 11, fontWeight: 700,
+                  padding: "3px 12px", fontSize: 11,
                   cursor: "pointer", userSelect: "none",
-                  border: "1px solid var(--border-default)",
+                  borderStyle: "solid", borderWidth: 1,
                   borderRightWidth: i === 0 ? 0 : 1,
                   borderRadius: i === 0 ? "3px 0 0 3px" : "0 3px 3px 0",
-                  background: fane === v ? "var(--accent, #4a9eff)22" : "transparent",
-                  borderColor: fane === v ? "var(--accent, #4a9eff)" : "var(--border-default)",
-                  color: fane === v ? "var(--accent, #4a9eff)" : "var(--text-muted)",
+                  // ⚠ SAMME SIGNAL SOM DEN AKTIVE WATCHLIST. Neongul betyder
+                  // "det er denne der er i brug" — ét sprog, ikke to.
+                  //
+                  // ⚠ OG DEN INAKTIVE BRUGER IKKE --text-muted. I stealth er
+                  // den sat til #e2e8f0, naesten hvid, saa den inaktive fane
+                  // blev MERE fremtraedende end den aktive og signalet vendte
+                  // om. "Muted" er ikke daempet i alle temaer.
+                  fontWeight: fane === v ? 700 : 500,
+                  background:  fane === v ? "var(--aktiv-glod)" : "transparent",
+                  borderColor: fane === v ? "var(--aktiv-markering)"
+                                          : "var(--inaktiv-tekst)",
+                  color:       fane === v ? "var(--aktiv-markering)"
+                                          : "var(--inaktiv-tekst)",
+                  opacity:     fane === v ? 1 : 0.75,
                 }}>{navn}</span>
             ))}
           </div>

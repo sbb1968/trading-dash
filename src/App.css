@@ -1164,9 +1164,9 @@ body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator:
    liste, lægger en ordre paa en forkert ticker. Rammen er derfor den eneste
    synlige garanti for hvor tastetrykket havner. */
 .watchlist-container.watchlist-aktiv {
-  outline:        2px solid #d4ff00;          /* neongul */
+  outline:        2px solid var(--aktiv-markering);
   outline-offset: -2px;
-  box-shadow:     inset 0 0 12px rgba(212, 255, 0, 0.18);
+  box-shadow:     inset 0 0 12px var(--aktiv-glod);
 }
 
 /* Variantbåndet: hvilken liste, og om den lytter. Står øverst, fordi det er
@@ -1182,8 +1182,8 @@ body[data-theme="arctic"] input[type="date"]::-webkit-calendar-picker-indicator:
   border-bottom:  1px solid var(--border);
 }
 .watchlist-variantnavn   { font-weight: 800; opacity: 0.75; }
-.watchlist-aktivmaerke   { color: #d4ff00; font-weight: 700; white-space: nowrap; }
-.watchlist-inaktivmaerke { color: var(--text-muted); font-style: italic; white-space: nowrap; }
+.watchlist-aktivmaerke   { color: var(--aktiv-markering); font-weight: 700; white-space: nowrap; }
+.watchlist-inaktivmaerke { color: var(--inaktiv-tekst); font-style: italic; white-space: nowrap; }
 
 /* Aktie-listen skal kunne skelnes i øjenkrogen, ikke kun læses. */
 .watchlist-container.watchlist-stocks .watchlist-input {

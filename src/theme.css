@@ -8,9 +8,27 @@
      rosegold | dracula | sunset | monochrome
    ============================================================ */
 
+/* ── AKTIV / INAKTIV ──────────────────────────────────────────
+   Hvilket panel lytter, hvilken fane er valgt. Samme signal alle steder:
+   den neongule ramme om den aktive watchlist, og den valgte fane i
+   Ordrer-vinduet.
+
+   ⚠ HVORFOR IKKE --text-muted TIL DEN INAKTIVE. I stealth er --text-muted
+   sat til #e2e8f0 — naesten hvid, samme vaerdi som --border-default. Den
+   inaktive fane blev derfor MERE fremtraedende end den aktive, og signalet
+   vendte om. "Muted" betyder ikke daempet i alle temaer, saa en daempning
+   skal have sin egen variabel.
+
+   ⚠ OG DEN GULE KAN IKKE VAERE ET FAST TAL. Arctic er et rigtigt lyst tema
+   (--bg-base: #f0f4f8, hvide flader); #d4ff00 paa hvid er naesten usynlig.
+   Derfor overskrives begge nedenfor for arctic. */
+
 /* ── 1. STEALTH DARK ──────────────────────────────────────── */
 :root,
 [data-theme="stealth"] {
+  --aktiv-markering: #d4ff00;     /* neongul — moerke temaer */
+  --inaktiv-tekst:   #6b7280;     /* rigtig graa, tydeligt daempet */
+  --aktiv-glod:      rgba(212, 255, 0, 0.18);
   --bg-base:        #0a0c0f;
   --bg-surface:     #0f1217;
   --bg-elevated:    #151a21;
@@ -191,6 +209,11 @@
 
 /* ── 6. ARCTIC ────────────────────────────────────────────── */
 [data-theme="arctic"] {
+  /* ⚠ Lyst tema: neongul paa hvid er ulaeselig. Moerk oliven baerer samme
+     betydning med kontrast der holder (ca. 5,5:1 mod hvid). */
+  --aktiv-markering: #5f7000;
+  --inaktiv-tekst:   #64748b;
+  --aktiv-glod:      rgba(95, 112, 0, 0.10);
   --bg-base:        #f0f4f8;
   --bg-surface:     #ffffff;
   --bg-elevated:    #e8eef5;
