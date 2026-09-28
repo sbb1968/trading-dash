@@ -103,17 +103,41 @@ export function sameArrangement(a: WindowConfig[], b: WindowConfig[]): boolean {
 }
 
 // ── Clock ─────────────────────────────────────────────────────
+// ⚠ TO URE, OG DET ER IKKE OVERFLOEDIGT.
+// Markedet aabner 09:30 ET. Hvad det er i dansk tid, AENDRER SIG — og ikke én
+// gang om aaret, men to, fordi EU og USA ikke skifter samme dag:
+//
+//     indtil 25-10-2026    ET+6  ->  markedet aabner 15:30 dansk
+//     25-10 til 01-11      ET+5  ->  markedet aabner 14:30 dansk   ⚠ EN UGE
+//     fra 01-11-2026       ET+6  ->  markedet aabner 15:30 dansk
+//
+// Den uge i slutningen af oktober er den farlige: EU er gaaet paa vintertid,
+// USA er ikke, og et klokkeslaet man har laert udenad er pludselig forkert.
+// Derfor vises begge tider ved siden af hinanden, hver med sit praefiks, saa
+// der ikke skal regnes i hovedet paa en handelsdag.
+//
+// `timeZone: America/New_York` haandterer skiftet selv — der er ingen
+// konstant her der kan blive forkert.
 function Clock() {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+  const hms = { hour: "2-digit", minute: "2-digit",
+                second: "2-digit", hour12: false } as const;
+  const dk = time.toLocaleTimeString("da-DK", hms);
+  const us = time.toLocaleTimeString("da-DK", { ...hms,
+                                                timeZone: "America/New_York" });
   return (
     <div className="status-item">
       <span className="status-label">🕐</span>
-      <span className="status-value">
-        {time.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+      <span className="status-value" title="Dansk tid">
+        <span className="ur-praefiks">DK</span>{dk}
+      </span>
+      <span className="status-value ur-us"
+            title="New York (ET) — markedet aabner 09:30">
+        <span className="ur-praefiks">US</span>{us}
       </span>
     </div>
   );

@@ -110,6 +110,29 @@ button {
 .status-label { color: var(--text-muted); font-size: 11px; }
 .status-value { color: var(--text-secondary); font-size: 11px; }
 
+/* ── De to ure i toplinjen ────────────────────────────────────
+   ⚠ PRAEFIKSET SIDDER KLISTRET TIL TALLET MED VILJE ("DK09:30"). Et mellemrum
+   ville lade oejet laese "DK" og "09:30" som to ting, og saa er man praecis
+   lige saa uvis som foer. De hoerer sammen: det ER en dansk tid.
+
+   Tallene faar tabular-nums saa de ikke hopper i bredden hvert sekund —
+   med to ure ved siden af hinanden er sidelaens uro paafaldende. */
+.status-value { font-variant-numeric: tabular-nums; }
+
+.ur-praefiks {
+  font-size:      8.5px;
+  font-weight:    700;
+  letter-spacing: 0.4px;
+  color:          var(--text-muted);
+  vertical-align: 1px;
+  margin-right:   1px;
+}
+
+/* US-tiden er den man skal handle efter, men DK er den man lever i.
+   Den faar derfor sin egen toning frem for at ligne en gentagelse. */
+.ur-us { color: var(--accent); margin-left: 9px; }
+.ur-us .ur-praefiks { color: var(--accent); opacity: 0.75; }
+
 /* Market status farver */
 .market-open   { color: var(--bull); }
 .market-pre    { color: var(--neutral); }
