@@ -119,6 +119,21 @@ async def rigtig_ordre() -> bool:
         # ⚠ I STROEMMEN. Loggen skriver Name='' og kender ikke vores id.
         status = await asyncio.to_thread(NT.ordre_status, ref)
         print(f"      status    : {status or '(ikke set i dette oplaeg)'}")
+
+        # ⚠ "FILLED" ER TERMINALT FOR ORDREN OG FORKERT FOR KONTOEN.
+        # Foerste gang ordren faktisk fyldte (28-09 kl. 08:48) skrev scriptet
+        # "ALT GRoeNT" og efterlod en aaben MES-long paa Sim101. Annullering
+        # rydder ORDRER; den rydder ikke POSITIONER. En kontrol der bestaar
+        # mens tilstanden er forkert, er praecis den fejl hele resten af
+        # projektet er bygget imod — saa den skal siges, ikke antages.
+        if status == "Filled":
+            print("      ⚠ ORDREN FYLDTE — der staar nu en AABEN POSITION paa "
+                  "Sim101.")
+            print("      ⚠ Annullering rydder ordrer, ikke positioner. Luk den "
+                  "via watchlisten (SAELG) saa exit-forensikken ogsaa koeres,")
+            print("      ⚠ eller 'Flat' i NT8 hvis den bare skal vaek.")
+            return False
+
         if status in NT.TERMINALE:
             print("      -> OK, bekraeftet terminal")
             return True

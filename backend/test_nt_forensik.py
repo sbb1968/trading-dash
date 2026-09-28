@@ -52,6 +52,17 @@ class FalskJournal:
         self.events: list[dict] = []
         self.aabne: dict[str, dict] = {}
 
+    # ⚠ DENNE DOUBLE VAR FOER VENLIGERE END DEN RIGTIGE JOURNAL, og derfor
+    # bestod testen mens koden var forkert. Den laeste kontoen ud af PAYLOADEN.
+    # Det goer journal.log_trade_open ikke: den tager `ibkr_account` som
+    # ARGUMENT og falder ellers tilbage paa accounts.identity — maskinens egen
+    # konto. Resultatet blev maalt 28-09: en NT8-handel paa Sim101 bogfoert med
+    # ibkr_account=DUN748991, hvor `find_aaben` aldrig ville finde den igen.
+    #
+    # En double der er mildere end virkeligheden, er ikke en test — den er en
+    # bekraeftelse. Denne efterligner nu den rigtige praecist.
+    IDENTITET = "DUN748991"          # hvad journalen falder tilbage paa
+
     async def log_trade_open(self, **kw):
         tid = f"t{len(self.aabne) + 1}"
         self.aabne[tid] = {**kw, "trade_id": tid}
@@ -61,7 +72,7 @@ class FalskJournal:
             " entry_price, entry_reason, capital_used, payload_json)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (tid, "iben", "workstation",
-             (kw.get("payload") or {}).get("konto") or "DUQ441063",
+             kw.get("ibkr_account") or self.IDENTITET,
              kw["source"], kw["symbol"], kw["side"], kw["shares"],
              kw["entry_time"].isoformat(), kw["entry_time"].isoformat(),
              kw["entry_price"], kw.get("entry_reason") or "", kw["entry_price"],

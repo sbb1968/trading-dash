@@ -201,6 +201,19 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
     """
     entry_time = datetime.now(et_tz)
 
+    # ⚠ KONTOEN SKAL I KOLONNEN, IKKE KUN I PAYLOADEN.
+    # Her stod intet `ibkr_account`, og saa satte journalen den fra
+    # accounts.identity — maskinens egen konto. For IBKR paa en maskine hvor de
+    # to er ens, saa det rigtigt ud. Maalt 28-09 kl. 08:48 gjorde det ikke:
+    # en fyldt NT8-handel paa Sim101 blev bogfoert med ibkr_account=DUN748991.
+    #
+    # Og det er ikke kosmetisk. `find_aaben` slaar op paa PRAECIS den kolonne,
+    # saa salget bagefter ville ikke kunne finde sin egen entry — og den aabne
+    # raekke ville ligge under en konto den aldrig har vaeret paa.
+    # Samme fejl ramte IBKR gennem en ordre-Gateway paa en anden konto end
+    # identitetens; den har bare ikke vist sig endnu.
+    _konto_raekke = konto or getattr(ibkr, "account", "") or ""
+
     trade_id = await journal.log_trade_open(
         source=KILDE,
         symbol=symbol,
@@ -211,12 +224,13 @@ async def registrer_entry(journal, ibkr, *, symbol: str, side: str, shares: int,
         variant=None,
         entry_reason=ENTRY_REASON,
         notes=None,
+        ibkr_account=_konto_raekke or None,
         payload={
             # ⚠ BAADE NEUTRALE OG GAMLE NOEGLER. De 17 eksisterende
             # DUQ441063-handler har kun `ibkr_order_id`, og afstemningen
             # laeser den. At omdoebe ville goere historikken ulaeselig.
             "broker": broker,
-            "konto": konto or getattr(ibkr, "account", "") or "",
+            "konto": _konto_raekke,
             "ordre_id": ordre_id,
             "ordre_status": ordre_status,
             **({"ibkr_order_id": ordre_id, "ibkr_status": ordre_status}
