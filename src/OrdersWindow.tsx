@@ -321,17 +321,16 @@ export function OrdersWindow() {
               hvad. "Handler" er opgoerelsen — entry og exit paret, med P&L.
               De besvarer forskellige spoergsmaal, saa ingen af dem erstatter
               den anden. */}
-          <div style={{ display: "flex", gap: 0, marginRight: 4 }}>
+          <div style={{ display: "flex", gap: 5, marginRight: 8 }}>
             {([["ordrer", "Ordrer"], ["handler", "Handler"]] as [Fane, string][])
-              .map(([v, navn], i) => (
+              .map(([v, navn]) => (
               <span key={v} onClick={() => setFane(v)}
                 title={fane === v ? `${navn} vises` : `Skift til ${navn}`}
                 style={{
                   padding: "3px 12px", fontSize: 11,
                   cursor: "pointer", userSelect: "none",
                   borderStyle: "solid", borderWidth: 1,
-                  borderRightWidth: i === 0 ? 0 : 1,
-                  borderRadius: i === 0 ? "3px 0 0 3px" : "0 3px 3px 0",
+                  borderRadius: 3,
                   // ⚠ SAMME SIGNAL SOM DEN AKTIVE WATCHLIST. Neongul betyder
                   // "det er denne der er i brug" — ét sprog, ikke to.
                   //
