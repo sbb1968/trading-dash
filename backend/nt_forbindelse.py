@@ -263,6 +263,89 @@ def ordre_status(ordre_id: str, raa: str | None = None) -> str:
 TERMINALE = {"Cancelled", "Rejected", "Filled"}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Positioner — ATI pusher dem, og det gjorde vi laenge ikke brug af
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠ ANTAGELSEN VAR FORKERT. Hele NT8-stien blev bygget paa at "ATI kan ikke
+# spoerges om positioner", og derfor kunne salgsvagten kun laese journalen.
+# Maalt 28-09 pusher stroemmen bl.a.:
+#
+#     MarketPosition|MES DEC26|Sim101 -4
+#     AvgEntryPrice|MES DEC26|Sim101 7773.125
+#     RealizedPnL|Sim101 -2.5
+#
+# ⚠ OG HER LIGGER FAELDEN. Vi sender "MES 12-26" i OIF-kommandoen, men
+# stroemmens noegle er "MES DEC26" — ikke det samme. Samtidig ligger der
+# FORAELDEDE ekkoer under andre stavemaader (@MES, MESZ26, "MES Z6"), som
+# stod til 1 mens den rigtige stod til -4. Slaar man den forkerte op, faar man
+# et forkert svar der ser fuldstaendig rigtigt ud.
+#
+# Derfor: ÉN noegle, udledt deterministisk af OIF-navnet, og intet gaetteri paa
+# alternativer. Findes den ikke, er svaret UKENDT — ikke "flad".
+
+_MAANED = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+           "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+
+def ati_noegle(instrument: str) -> str:
+    """OIF-navnet -> ATI-stroemmens navn. "MES 12-26" -> "MES DEC26"."""
+    m = re.fullmatch(r"(\S+)\s+(\d{2})-(\d{2})", instrument.strip())
+    if not m:
+        raise NtForbindelseFejl(
+            f"kan ikke oversaette {instrument!r} til ATI-navn — forventede "
+            f"formen 'MES 12-26'")
+    sym, mm, yy = m.group(1), int(m.group(2)), m.group(3)
+    if not 1 <= mm <= 12:
+        raise NtForbindelseFejl(f"ugyldig maaned i {instrument!r}")
+    return f"{sym} {_MAANED[mm - 1]}{yy}"
+
+
+def position(instrument: str, konto: str, raa: str | None = None) -> dict:
+    """Nettoposition hos NT8. `netto=None` betyder UKENDT — aldrig "flad".
+
+    ⚠ FRAVAER AF NOEGLEN ER IKKE NUL. NT8 pusher foerst en MarketPosition-linje
+    for et instrument den har set; et instrument der aldrig er handlet paa
+    kontoen, staar der slet ikke. Det ligner "flad" og er det maaske ogsaa —
+    men vi ved det ikke, og en vagt der behandler tavshed som et svar, er
+    praecis den fejlklasse resten af denne fil er bygget imod.
+
+    Er noeglen DER, er tallet til gengaeld autoritativt: efter en flatten stod
+    den paa 0, ikke vaek (maalt 28-09).
+    """
+    noegle = ati_noegle(instrument)
+    t = raa if raa is not None else _laes_raat(LYT_HURTIG)
+    if not t.strip():
+        # Samme regel som `tilstand`: tavshed eskalerer, den konkluderer ikke.
+        t = _laes_raat(LYT_SEK)
+    if not t.strip():
+        raise NtTilstandUkendt(
+            "ATI svarede tomt — positionen kan hverken bekraeftes eller "
+            "afkraeftes")
+
+    k = re.escape(noegle)
+    a = re.escape(konto)
+    m_p = re.search(rf"MarketPosition\|{k}\|{a}\s+(-?\d+)", t)
+    m_s = re.search(rf"AvgEntryPrice\|{k}\|{a}\s+([\d.]+)", t)
+    m_r = re.search(rf"RealizedPnL\|{a}\s+(-?[\d.]+)", t)
+
+    def _f(m, som):
+        if not m:
+            return None
+        try:
+            return som(m.group(1))
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "noegle":    noegle,
+        "konto":     konto,
+        "netto":     _f(m_p, int),          # None = UKENDT
+        "snit":      _f(m_s, float),
+        "realiseret": _f(m_r, float),
+        "set":       m_p is not None,
+    }
+
+
 def fyldning(ordre_id: str, raa: str | None = None) -> tuple[int, float]:
     """Hvor meget er fyldt, og til hvilken snitpris. (0, 0.0) = intet set.
 

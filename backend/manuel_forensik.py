@@ -544,17 +544,97 @@ async def kontroller_ordre(ibkr, symbol: str, action: str,
     # ene vej og aabner den anden, kan ikke repraesenteres. Praecis dét var
     # over-salget 31-07: en lang position solgt for meget, som endte som en
     # ejerloes short.
+    ok, besked = _vender_positionen(netto, action, shares, symbol)
+    return ok, besked, detaljer
+
+
+def _vender_positionen(netto: float, action: str, shares: int,
+                       symbol: str) -> tuple[bool, str]:
+    """Ville ordren lukke den ene vej OG aabne den anden i SAMME ordre?
+
+    ⚠ ÉN REGEL, TO BROKERE. Den laa foer inde i `kontroller_ordre` og gjaldt
+    derfor kun IBKR. Da NT8 fik sin egen positionsvagt, var en kopi det
+    naerliggende — og to kopier af en regel om hvornaar en ordre er farlig,
+    driver fra hinanden praecis som to kopier af forensikken ville have gjort.
+
+    Reglen er IKKE "aabn aldrig en short". Den foerste udgave (19-08) afviste
+    ethvert salg der ville aabne en short, fordi vinduet ikke kunne BOGFOERE en
+    short — en bogfoeringsmangel oploeftet til et forbud, og 25-08 stod Iben og
+    kunne ikke handle. Shorten kan bogfoeres nu.
+
+    Tilbage staar det der faktisk betoed noget: vinduet kan holde ÉN position ad
+    gangen, saa en ordre der vender fortegnet, kan ikke repraesenteres. Praecis
+    dét var over-salget 31-07, som endte som en ejerloes short.
+    """
+    salg = (action or "").upper() == "SELL"
     if salg and netto > 0 and shares > netto:
         return False, (f"Brokeren har {netto:g} {symbol}. Et salg paa {shares} ville "
                        f"lukke den OG aabne en short paa {shares - netto:g} i samme "
                        f"ordre — det kan vinduet ikke bogfoere. Luk foerst, "
-                       f"aabn saa."), detaljer
+                       f"aabn saa.")
     if not salg and netto < 0 and shares > -netto:
         return False, (f"Brokeren er short {-netto:g} {symbol}. Et koeb paa {shares} "
                        f"ville daekke den OG aabne en long paa {shares + netto:g} i "
                        f"samme ordre — det kan vinduet ikke bogfoere. Luk foerst, "
-                       f"aabn saa."), detaljer
-    return True, "", detaljer
+                       f"aabn saa.")
+    return True, ""
+
+
+async def kontroller_ordre_nt8(journal, *, symbol: str, instrument: str,
+                               konto: str, action: str,
+                               shares: int) -> tuple[bool, str, dict]:
+    """Samme spoergsmaal som `kontroller_ordre`, men stillet til NT8.
+
+    ⚠ DEN SPOERGER BROKEREN, IKKE JOURNALEN — og det var laenge ikke muligt.
+    Hele NT8-stien blev bygget paa antagelsen at ATI ikke kunne rapportere
+    positioner, saa `kontroller_ordre_journal` maatte gaette ud fra vores egne
+    raekker og kunne derfor kun advare. Maalt 28-09 pusher ATI baade
+    MarketPosition, AvgEntryPrice og RealizedPnL. Antagelsen var forkert.
+
+    ⚠ MEN DEN BLOKERER KUN NAAR DEN VED NOGET. Kan positionen ikke laeses —
+    ATI tavs, noeglen ikke i stroemmen endnu, oversaettelsen slaar fejl — falder
+    den tilbage til journal-vagten, som advarer uden at spaerre. En vagt der
+    spaerrer paa et opslag den ikke fik, er en kontrol hvis fejl ser ud som et
+    fund, og den ville staa i vejen for et salg Iben FAKTISK skal have lov til.
+
+    ⚠ OG DEN FORHINDRER IKKE DOBBELTKLIK. Efter at en long er lukket, er
+    nettoet 0, og et nyt salg aabner blot en short — hvilket reglen tillader,
+    fordi det er en helt normal handling. Det var kvitteringen og den spaerrede
+    knap der loeste dét (28-09); denne vagt lukker et andet hul: ordren der
+    vender fortegnet i ét hug.
+    """
+    import asyncio as _a
+    import nt_forbindelse as _nt
+
+    grund = ""
+    try:
+        p = await _a.to_thread(_nt.position, instrument, konto)
+        netto = p.get("netto")
+    except Exception as e:
+        netto, p = None, {}
+        grund = f"positionsopslag fejlede: {e}"
+
+    if netto is None:
+        # ⚠ UKENDT — ikke flad. Journal-vagten overtager: den advarer, aldrig mere.
+        if not grund:
+            grund = (f"{(p or {}).get('noegle') or instrument} staar ikke i "
+                     f"ATI-stroemmen endnu")
+        ok, besked, det = await kontroller_ordre_journal(
+            journal, symbol, action, shares, konto)
+        det["grund"] = grund
+        det["kilde"] = "journal (NT8-position ukendt)"
+        return ok, besked, det
+
+    ok, besked = _vender_positionen(netto, action, shares, symbol)
+    return ok, besked, {
+        "kontrolleret": True,
+        "kilde": "nt8-ati",
+        "netto_hos_broker": netto,
+        "snit_hos_broker": p.get("snit"),
+        "noegle": p.get("noegle"),
+        "action": action,
+        "antal": shares,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

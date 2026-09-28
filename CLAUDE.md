@@ -625,7 +625,7 @@ intraday hos NT8).
 |---|---|---|
 | Ordrevej | `ordre_forbindelse` → TWS/Gateway | OIF-fil i `Documents\NinjaTrader 8\incoming\` |
 | Konto bestemmes af | port (4002 paper / 4001 live) **+** `order.account` | **kun** kontonavnet i kommandoen |
-| Positionskontrol før salg | spørger brokeren (`kontroller_ordre`) | ⚠ kan ikke — journal-vagt der **advarer, aldrig blokerer** |
+| Positionskontrol før salg | spørger brokeren (`kontroller_ordre`) | spørger brokeren (`kontroller_ordre_nt8`, ATI's `MarketPosition`); journal-vagt kun når positionen er UKENDT |
 | Fyldpris | `place_paper_order` | `afvent_ordre()` læser `Filled\|` + `AvgFillPrice\|` |
 | Opfølgning på uafklaret ordre | `ib.trades()` ved hvert kig | ⚠ **ingen** — et menneske skal se i NT8's Orders-fane |
 
@@ -667,6 +667,15 @@ menneskeklik i NT8: loggen skriver `processing`, men der oprettes intet, ATI
 melder ingenting, og OIF-filen bliver liggende låst. Signaturen er
 **`processing` i loggen uden en `Order=`-linje**. Trading Dash har sin egen
 bekræftelse, så NT8's er en dublet der ligger det forkerte sted.
+
+⚠ **ATI RAPPORTERER POSITIONER** — men nøglen er ikke den vi sender.
+Strømmen pusher `MarketPosition|`, `Position|`, `AvgEntryPrice|` og
+`RealizedPnL|` pr. instrument og konto. Vi sender `MES 12-26` i OIF; strømmens
+nøgle er `MES DEC26` (`nt_forbindelse.ati_noegle()` oversætter). Ved siden af
+den ligger **forældede ekkoer** under `@MES`, `MESZ26` og `MES Z6`, som 28-09
+alle stod til `1` mens den rigtige stod til `-4` — slår man forkert op, får man
+et forkert svar der ser rigtigt ud. Derfor slås præcis én nøgle op, og
+manglende nøgle er **UKENDT**, aldrig "flad".
 
 ⚠ **Live kræver TO ændringer**, ikke én: `konto: 2080414` **og**
 `tillad_live: true`. Kontonummeret alene spærres af V2, fordi det ikke er en

@@ -1127,16 +1127,38 @@ async def websocket_endpoint(websocket: WebSocket):
                         }))
                         continue
 
-                    # ── JOURNAL-VAGTEN ────────────────────────────────────
-                    # ⚠ DEN ADVARER, DEN BLOKERER ALDRIG. ATI kan ikke spoerges
-                    # om positioner, saa journalen er det eneste vi har — og en
-                    # journal der tager fejl maa ikke kunne spaerre et salg.
-                    # Efter aftale 27-09 foretager Iben positionsafstemning
-                    # MANUELT i NT8 naar hun er i tvivl.
+                    # ── POSITIONSVAGTEN ──────────────────────────────────
+                    # ⚠ DEN SPOERGER NU BROKEREN. Indtil 28-09 stod der her en
+                    # journal-vagt der kun kunne advare, fordi vi troede ATI ikke
+                    # kunne rapportere positioner. Det kunne den hele tiden:
+                    # MarketPosition, AvgEntryPrice og RealizedPnL pushes pr.
+                    # instrument og konto. NT8 har dermed samme beskyttelse som
+                    # IBKR mod ordren der vender fortegnet i ét hug.
+                    #
+                    # ⚠ Kan positionen ikke laeses, falder den selv tilbage til
+                    # journal-vagten og advarer i stedet for at spaerre — se
+                    # kontroller_ordre_nt8. Iben skal kunne lukke en position
+                    # ogsaa naar ATI er tavs.
                     import manuel_forensik as _mf
-                    _ok, _besked, _det = await _mf.kontroller_ordre_journal(
-                        journal, ticker, action, shares, nt_konto)
-                    if _besked:
+                    _ok, _besked, _det = await _mf.kontroller_ordre_nt8(
+                        journal, symbol=ticker, instrument=_instrument,
+                        konto=nt_konto, action=action, shares=shares)
+                    if not _ok:
+                        await journal.log_event(
+                            ibkr_account=nt_konto or None,
+                            source="manual_watchlist",
+                            event_type=_mf.SALGSVAGT_EVENT,
+                            symbol=ticker,
+                            payload={"shares": shares, "broker": "NT8",
+                                     "action": action,
+                                     "besked": _besked, **_det})
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": f"Ordre afvist: {_besked}",
+                        }))
+                        continue
+                    if not _det.get("kontrolleret"):
                         await journal.log_event(
                             ibkr_account=nt_konto or None,
                             source="manual_watchlist",
