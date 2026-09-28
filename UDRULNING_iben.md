@@ -153,7 +153,50 @@ stilet til Sim101.
 **Forslag:** gør V4 til en højlydt advarsel (journalhændelse + rød linje i
 watchlisten) i stedet for en spærring. Ikke besluttet endnu.
 
-## Trin 1 — NT8 på Ibens maskine (gratis)
+## Trin 1 — DEMO8580770 på DIN maskine, før noget går til Iben
+
+Foreslået af Søren 28-09, og det er den rigtige rækkefølge: virker det hos dig
+mod rigtig infrastruktur, ved vi at det også kan virke hos hende.
+
+**Hvad det kræver:**
+- En mæglerforbindelse i din NT8. ⚠ Der er **ingen** i dag — `Config.xml` har kun
+  `Simulated Data Feed`, `Playback` og `Kinetick End Of Day (Free)`.
+- **CME Level 1, $4/md.** Bevist nødvendigt: ordren 16-09 blev afvist med
+  *"Real-time market data required to trade this contract."*
+
+⚠ Det er de samme $4 du skal bruge til live alligevel. Ikke penge brugt på en
+test — et abonnement købt tidligere.
+
+**Hvad det køber, som Sim101 aldrig kan give os:**
+
+| | |
+|---|---|
+| Rigtige priser | fyldningerne indtil nu var opdigtede |
+| Mæglerkæden | NT8 → Tradovate → børs, hele vejen |
+| Slippage | en markedsordre mod en rigtig ordrebog |
+| Afvisninger fra et rigtigt marked | margin, session, kontrakt |
+| **⚠ Instrumentnøglen** | se nedenfor — den er vores mest skrøbelige antagelse |
+
+⚠ **Instrumentnøglen er den vigtigste grund.** Positionsvagten slår op på præcis
+`MES DEC26`, og vi har kun set den navngivning under den simulerede feed. Målt
+28-09 kl. 10:17, mens kontoen var **flad**:
+
+```
+@MES         1  @ 7772.5   ⚠ forældet
+MES 12-26    0             ✅
+MES DEC26    0             ✅  ← den vi læser
+MES Z6       1  @ 7772.5   ⚠ forældet
+MESZ26       1  @ 7772.5   ⚠ forældet
+```
+
+Tre af fem aliasser påstår en åben position, med en plausibel pris. Skifter
+navngivningen på en mæglerforbindelse, læser vagten et forkert tal der ser
+rigtigt ud. **Det skal efterprøves her, ikke hos Iben.**
+
+Kør `python nt_klik_test.py` med `konto: DEMO8580770` i `account.yaml`, og
+kontrollér bagefter at `MES DEC26` stadig er den nøgle der holder sandheden.
+
+## Trin 2 — NT8 på Ibens maskine (gratis)
 
 ⚠ **Her skal der ingen penge og intet dataabonnement bruges.** Det stod forkert
 i første udgave af denne plan.
@@ -180,7 +223,7 @@ positionen på −4 var alle regnet på **opdigtede priser**. Mekanikken er bevi
 rigtige markedsforhold, slippage eller at mæglerkæden virker. Det kommer først
 i trin 3.
 
-## Trin 2 — Sim101 på hendes maskine
+## Trin 3 — Sim101 på hendes maskine
 
 ```yaml
   nt_forbindelse:
@@ -194,9 +237,9 @@ besluttes bevidst — ikke opdages.
 Kør hele vejen igennem: køb → kvittering → fyldning → `Handler`-fanen viser
 linjen med P&L. Først når det virker på **hendes** maskine, går vi videre.
 
-## Trin 3 — penge, data og DEMO8580770
+## Trin 4 — DEMO på Ibens egen konto
 
-**Først nu bliver det dyrt**, og her forlader vi de opdigtede priser.
+Samme øvelse som trin 1, men på hendes konto og hendes maskine.
 
 - **CME Level 1, $4/md.** Nu er den nødvendig: uden den afviser Tradovate ordren
   med *"Real-time market data required to trade this contract"* — det er den
@@ -215,13 +258,14 @@ linjen med P&L. Først når det virker på **hendes** maskine, går vi videre.
 Samme kode, rigtig Tradovate-infrastruktur, rigtige priser, legetøjspenge. Lad
 det køre nogle dage — det er her vi første gang ser systemet møde et marked.
 
-⚠ **Uafklaret: kan to maskiner være logget på samme NinjaTrader-konto?** Fra
-dette trin kræver både din og Ibens maskine en mæglerforbindelse. Hos IBKR kan
-`fasteriben2` kun have én session ad gangen, og det har kostet os tid før. Om
-NinjaTrader har samme begrænsning, ved jeg ikke — det skal afklares før trin 3,
-ikke opdages midt i det.
+**Iben har sin egen NinjaTrader-konto** — samme model som IBKR, hver sin. Der
+er derfor ingen delt-login-begrænsning at tage hensyn til, sådan som
+`fasteriben2` har kostet os tid hos IBKR.
 
-## Trin 4 — live
+⚠ **Men markedsdata er pr. konto.** Hendes egen konto kræver sit eget
+abonnement. Regn med $4/md hver, ikke $4 i alt.
+
+## Trin 5 — live
 
 ```yaml
   nt_forbindelse:
