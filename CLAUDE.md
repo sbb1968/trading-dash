@@ -615,11 +615,22 @@ python test\_feed.py        # tester at market data abonnementer virker
 
 ## Manuel handel: to brokere, én kodesti
 
-Watchlist Futures sender **altid** til NinjaTrader; Watchlist Stocks **altid** til
-IBKR. Reglen står i `src/brokerruter.ts` og har **bevidst ingen default** — MES
-kan handles hos begge, så en fejlrutet ordre er ikke en fejlmeddelelse men en
-rigtig position på den forkerte konto ($2.863 initial margin hos IBKR mod $50
-intraday hos NT8).
+Watchlist Stocks sender **altid** til IBKR. Watchlist Futures følger **maskinens
+opsætning**: har `account.yaml` en `nt_forbindelse`-blok, går futures til NT8;
+har den ikke, går de til IBKR. Backenden svarer på `GET /ordre/rute`, og
+`src/brokerruter.ts` spørger den.
+
+⚠ **Armeringen ER ruten.** De to kan ikke komme i utakt, fordi det er samme
+faktum. Det blev lavet om 28-09: reglen stod hardkodet som "futures → NT8,
+altid", hvilket er rigtigt som slutmål og forkert som overgang — Ibens maskine
+har ingen `nt_forbindelse`, så hendes første klik ville have svaret
+*"NinjaTrader-ordrevejen er spærret"*, og hun handler MES på IBKR gennem netop
+den knap.
+
+⚠ **Der er stadig ingen default.** Kan ruten ikke hentes, spærres knapperne med
+besked. MES kan handles hos begge, så en fejlrutet ordre er ikke en
+fejlmeddelelse men en rigtig position på den forkerte konto ($2.863 initial
+margin hos IBKR mod $50 intraday hos NT8).
 
 | | IBKR | NinjaTrader (ATI) |
 |---|---|---|

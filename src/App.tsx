@@ -342,7 +342,7 @@ function useKolonner(noegle: string, standard: string[]): string[] {
 // Derfor: præcis ét panel er aktivt ad gangen, det er markeret med en NEONGUL
 // ramme, og de andre panelers genvejshaandtering returnerer med det samme.
 // Rammen er ikke pynt — den er den eneste maade at se hvor et tastetryk lander.
-import { BROKER_FOR_LISTE, BROKER_NAVN, type Broker, type WatchVariant }
+import { brokerFor, BROKER_NAVN, type Broker, type OrdreRute, type WatchVariant }
   from "./brokerruter";
 
 // Hvad backendens `forbindelse`-felt hedder paa dansk.
@@ -371,7 +371,7 @@ const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: stri
   stocks:  { bg: "#0f1b24",           tekst: "#cfe8f5",            etiket: "STOCKS" },
 };
 
-function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, ordreUndervejs, cols, variant = "futures", erAktiv = true, onAktiver }: {
+function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onAddTicker, onRemoveTicker, onRequestOrder, orderResult, ordreUndervejs, rute, cols, variant = "futures", erAktiv = true, onAktiver }: {
   stocks: any[]; selectedTicker: string; onSelectTicker: (ticker: string) => void;
   watchlist: string[]; onAddTicker: (ticker: string) => void; onRemoveTicker: (ticker: string) => void;
   onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
@@ -379,6 +379,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   orderResult?: IbkrOrderResult | null;
   ordreUndervejs?: { action: "BUY" | "SELL"; ticker: string; shares: number;
                      broker: Broker; sendt: number } | null;
+  rute?: OrdreRute | null;
   cols?: string[];
   variant?: WatchVariant;
   erAktiv?: boolean;
@@ -427,6 +428,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // ubrugelig midt i en handel. Hun opdagede det foerst da et SALG fejlede.
   // En dash der har mistet brokeren skal sige det hoejt, ikke vise en streg.
   const [brokerFejl, setBrokerFejl] = useState<string>("");
+
   useEffect(() => {
     let levende = true;
     async function hent() {
@@ -628,9 +630,18 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
         `Futures handles med det rene symbol (MES, M2K) — ikke kontraktkoden.`);
       return;
     }
-    // ⚠ BROKEREN FØLGER LISTEN, ikke tickeren og ikke en indstilling.
-    // Se brokerruter.ts for hvorfor der ikke er en default.
-    onRequestOrder(action, stock.ticker, shares, pris, BROKER_FOR_LISTE[variant]);
+    // ⚠ BROKEREN FØLGER LISTEN OG MASKINEN, ikke tickeren og ikke et valg.
+    // Se brokerruter.ts: futures følger maskinens opsætning, aktier er altid
+    // IBKR. Kender vi ikke ruten, sendes der INTET — der gættes ikke.
+    const broker = brokerFor(variant, rute ?? null);
+    if (!broker) {
+      alert(`Kan ikke afgøre hvilken broker ${stock.ticker} skal handles hos.\n\n` +
+        `Backenden svarer ikke paa /ordre/rute. Ordren er IKKE sendt — der ` +
+        `gættes ikke paa broker, fordi MES kan handles hos både IBKR og ` +
+        `NinjaTrader.`);
+      return;
+    }
+    onRequestOrder(action, stock.ticker, shares, pris, broker);
   }
 
   async function openCompanySite(ticker: string) {
@@ -979,23 +990,27 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                             vigtigere end at se pæn ud, for et KØB oven i et
                             SALG-i-flugten er lige så galt som to salg. */}
                         <button onClick={e => { e.stopPropagation(); handleOrder("BUY", stock); }}
-                          disabled={!!ordreUndervejs}
-                          title={ordreUndervejs
+                          disabled={!!ordreUndervejs || !brokerFor(variant, rute ?? null)}
+                          title={!brokerFor(variant, rute ?? null)
+                            ? "Ruten til brokeren kendes ikke endnu — backenden svarer ikke"
+                            : ordreUndervejs
                             ? "Vent — en ordre er undervejs"
                             : `Køb ${getShares(stock.ticker)} ${stock.ticker} @ market`}
                           style={{ background: "var(--bull-muted)", border: "1px solid var(--bull)", color: "var(--bull)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px", marginRight: 4,
-                                   cursor: ordreUndervejs ? "not-allowed" : "pointer",
-                                   opacity: ordreUndervejs ? 0.35 : 1 }}>
+                                   cursor: (ordreUndervejs || !brokerFor(variant, rute ?? null)) ? "not-allowed" : "pointer",
+                                   opacity: (ordreUndervejs || !brokerFor(variant, rute ?? null)) ? 0.35 : 1 }}>
                           {ordreUndervejs?.action === "BUY" && ordreUndervejs.ticker === stock.ticker ? "SENDER…" : "KØB"}
                         </button>
                         <button onClick={e => { e.stopPropagation(); handleOrder("SELL", stock); }}
-                          disabled={!!ordreUndervejs}
-                          title={ordreUndervejs
+                          disabled={!!ordreUndervejs || !brokerFor(variant, rute ?? null)}
+                          title={!brokerFor(variant, rute ?? null)
+                            ? "Ruten til brokeren kendes ikke endnu — backenden svarer ikke"
+                            : ordreUndervejs
                             ? "Vent — en ordre er undervejs"
                             : `Sælg ${getShares(stock.ticker)} ${stock.ticker} @ market`}
                           style={{ background: "var(--bear-muted)", border: "1px solid var(--bear)", color: "var(--bear)", borderRadius: 3, fontSize: 11, fontWeight: 700, padding: "3px 10px",
-                                   cursor: ordreUndervejs ? "not-allowed" : "pointer",
-                                   opacity: ordreUndervejs ? 0.35 : 1 }}>
+                                   cursor: (ordreUndervejs || !brokerFor(variant, rute ?? null)) ? "not-allowed" : "pointer",
+                                   opacity: (ordreUndervejs || !brokerFor(variant, rute ?? null)) ? 0.35 : 1 }}>
                           {ordreUndervejs?.action === "SELL" && ordreUndervejs.ticker === stock.ticker ? "SENDER…" : "SÆLG"}
                         </button>
                       </>}
@@ -1728,16 +1743,17 @@ export function renderWindowContent(id: WindowId, props: {
   orderResult?: IbkrOrderResult | null;
   ordreUndervejs?: { action: "BUY" | "SELL"; ticker: string; shares: number;
                      broker: Broker; sendt: number } | null;
+  rute?: OrdreRute | null;
 }) {
   switch(id) {
     case "watchlist":   return <WatchlistPanel variant="futures"
                           erAktiv={props.aktivWatch === "futures"}
                           onAktiver={() => props.setAktivWatch("futures")}
-                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} />;
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlist} onAddTicker={props.onAddTicker} onRemoveTicker={props.onRemoveTicker} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} rute={props.rute} />;
     case "watchliststocks": return <WatchlistPanel variant="stocks"
                           erAktiv={props.aktivWatch === "stocks"}
                           onAktiver={() => props.setAktivWatch("stocks")}
-                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlistStocks} onAddTicker={props.onAddTickerStocks} onRemoveTicker={props.onRemoveTickerStocks} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} />;
+                          stocks={props.stocks} selectedTicker={props.selectedTicker} onSelectTicker={props.onSelectTicker} watchlist={props.watchlistStocks} onAddTicker={props.onAddTickerStocks} onRemoveTicker={props.onRemoveTickerStocks} onRequestOrder={props.onRequestOrder} orderResult={props.orderResult} ordreUndervejs={props.ordreUndervejs} rute={props.rute} />;
     case "chart1min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="1 min" />;
     case "chart2min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="2 min" />;
     case "chart3min":   return <TradingViewWidget ticker={props.selectedTicker} timeframe="3 min" />;
@@ -1857,6 +1873,34 @@ function App() {
   const layoutDirty = !baseLayout || !sameArrangement(workspace, baseLayout.windows);
 
   // ── Bekræftelses-dialog state for manuelle IBKR-ordrer ──────
+  // ⚠ HVOR GAAR MANUELLE ORDRER HEN PAA DENNE MASKINE?
+  // Hentes separat fra /ordre/rute, IKKE fra dash-snapshot. Ruten er en
+  // maskinkonfiguration, ikke en IBKR-kendsgerning — laa den i snapshottet,
+  // ville en maskine med TWS nede faa "ok: false" uden rute, og knapperne
+  // ville vaere spaerret af en grund der intet har med ruten at goere.
+  //
+  // `null` indtil vi VED det. Se brokerFor(): uden rute spaerres knapperne, og
+  // der gaettes ikke paa broker.
+  const [rute, setRute] = useState<OrdreRute | null>(null);
+  useEffect(() => {
+    let levende = true;
+    async function hentRute() {
+      try {
+        const r = await fetch("http://127.0.0.1:8000/ordre/rute");
+        if (!r.ok) throw new Error(String(r.status));
+        const d = await r.json();
+        if (levende && (d.futures === "NT8" || d.futures === "IBKR")) setRute(d);
+      } catch {
+        // ⚠ Behold den sidst kendte rute frem for at nulstille. Et enkelt
+        // mislykket kald under en genstart maa ikke spaerre handelsknapperne;
+        // ruten aendrer sig kun naar account.yaml goer.
+      }
+    }
+    hentRute();
+    const t = window.setInterval(hentRute, 30_000);
+    return () => { levende = false; window.clearInterval(t); };
+  }, []);
+
   const [orderConfirm, setOrderConfirm] = useState<{
     action: "BUY" | "SELL"; ticker: string; shares: number; price: number;
     // ⚠ Brokeren fanges PAA KLIKKET, ikke naar der bekraeftes. Skifter det
@@ -1970,6 +2014,7 @@ function App() {
     onOpenDetail: openDetail,
     orderResult: lastOrderResult,
     ordreUndervejs,
+    rute,
     onRequestOrder: (action: "BUY" | "SELL", ticker: string, shares: number, price: number,
                      broker: Broker) => {
       // Konfigurator-indstilling: spring bekræftelses-pop-up over og handl direkte.

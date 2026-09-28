@@ -5948,6 +5948,44 @@ async def account_skift(req: SkiftKontoRequest):
             "tidligere": gammel}
 
 
+@app.get("/ordre/rute")
+async def ordre_rute():
+    """Hvor sendes manuelle ordrer hen paa DENNE maskine?
+
+    ⚠ HVORFOR DET IKKE LAENGERE STAAR I FRONTENDEN.
+    Reglen blev fastlaast 27-09 som "Watchlist Futures -> NT8, altid" og lagt i
+    src/brokerruter.ts. Den er rigtig som slutmaal og forkert som overgang:
+    Iben handler i dag MES paa IBKR (DUQ441063) gennem netop den knap, og hendes
+    maskine har hverken NinjaTrader eller en nt_forbindelse-blok. Med reglen
+    hardkodet ville hendes foerste klik svare "NinjaTrader-ordrevejen er
+    spaerret" — og hun kunne ikke handle.
+
+    ⚠ ARMERINGEN ER RUTEN. En maskine med en nt_forbindelse-blok i account.yaml
+    HAR en NinjaTrader-vej og bruger den til futures. En maskine uden har det
+    ikke, og futures gaar til IBKR som hidtil. Det kan ikke komme i utakt,
+    fordi det er det samme faktum.
+
+    Soerens oprindelige hensigt er intakt: Iben tager ikke stilling pr. ordre.
+    Maskinen er sat op én gang, og opstartsbanneret siger hvad der gaelder.
+
+    Endpointet er BEVIDST uafhaengigt af IBKR. Havde det ligget i
+    /account/dash-snapshot, ville en maskine med TWS nede faa "ok: False" uden
+    rute — og saa ville knapperne vaere spaerret af en grund der intet har med
+    ruten at goere.
+    """
+    profil = accounts.nt_forbindelse()
+    armeret = profil is not None
+    return {
+        # Watchlist Stocks gaar ALTID til IBKR. NT8 handler futures, ikke aktier.
+        "stocks":     "IBKR",
+        "futures":    "NT8" if armeret else "IBKR",
+        "nt_armeret": armeret,
+        "nt_konto":   (profil or {}).get("konto", ""),
+        "nt_live":    bool((profil or {}).get("tillad_live")),
+        "instans":    identity.instance_display_name,
+    }
+
+
 @app.get("/account/dash-snapshot")
 async def account_dash_snapshot():
     """

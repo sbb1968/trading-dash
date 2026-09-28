@@ -203,34 +203,67 @@ async def test_tracker() -> None:
             OT.ORDERS_LOG = aegte_log
 
 
-def test_ruten_er_laast() -> None:
-    """Reglen staar ÉT sted, og den staar rigtigt."""
-    print("\n  ── ruten: Futures -> NT8, Stocks -> IBKR ──")
+def test_ruten() -> None:
+    """Hvor gaar futures hen — og kan det blive gaettet?
+
+    ⚠ REGLEN FLYTTEDE 28-09. Den stod som konstanten BROKER_FOR_LISTE i
+    brokerruter.ts: futures -> NT8, altid. Rigtigt som slutmaal, forkert som
+    overgang — Ibens maskine har ingen nt_forbindelse-blok, saa hendes foerste
+    klik ville have svaret "NinjaTrader-ordrevejen er spaerret", og hun handler
+    MES paa IBKR gennem netop den knap.
+
+    Nu bestemmer MASKINEN: armet NT8 -> futures til NT8, ellers til IBKR.
+    Denne test kraever at flytningen ikke smuglede en default ind.
+    """
+    print("\n  ── ruten: maskinen bestemmer, ingen gaetter ──")
     import pathlib
     import re
-    sti = pathlib.Path(__file__).parent.parent / "src" / "brokerruter.ts"
-    kraev(sti.is_file(), f"brokerruter.ts findes ({sti.name})")
+    rod = pathlib.Path(__file__).parent
+
+    sti = rod.parent / "src" / "brokerruter.ts"
+    kraev(sti.is_file(), "brokerruter.ts findes")
     if not sti.is_file():
         return
     t = sti.read_text(encoding="utf-8")
-    m = re.search(r"BROKER_FOR_LISTE[^{]*\{([^}]*)\}", t, re.S)
-    kraev(m is not None, "BROKER_FOR_LISTE kan laeses")
-    if m:
-        krop = m.group(1)
-        kraev(re.search(r'futures:\s*"NT8"', krop) is not None,
-              "Watchlist Futures -> NT8")
-        kraev(re.search(r'stocks:\s*"IBKR"', krop) is not None,
-              "Watchlist Stocks -> IBKR")
-    # ⚠ Ingen default. Findes der en, er "ALTID" ikke laengere sandt.
-    kraev("||" not in t and "?? " not in t,
-          "⚠ ingen fallback-operator i rute-modulet")
 
-    # Og backenden maa ikke have en standardbroker.
-    hoved = (pathlib.Path(__file__).parent / "main.py").read_text(encoding="utf-8")
+    # ⚠ Den gamle konstant maa vaere VAEK. Blev den staaende, ville nogen
+    # kunne bruge den igen uden at opdage at ruten er flyttet.
+    kraev("BROKER_FOR_LISTE" not in t,
+          "⚠ den hardkodede BROKER_FOR_LISTE er fjernet")
+    kraev("brokerFor" in t, "brokerFor() har afloest den")
+
+    # ⚠ Ukendt rute maa give null — ikke en broker.
+    kraev(re.search(r"if\s*\(!rute\)\s*return null", t) is not None,
+          "⚠ uden rute returneres null, ikke en gaettet broker")
+    kraev('"IBKR"' in t and '"NT8"' in t,
+          "svaret valideres mod de to kendte navne")
+
+    # ── Backendens rute-endpoint ────────────────────────────────────────
+    hoved = (rod / "main.py").read_text(encoding="utf-8")
+    kraev('@app.get("/ordre/rute")' in hoved, "/ordre/rute findes")
+    kraev('"futures":    "NT8" if armeret else "IBKR"' in hoved,
+          "⚠ futures foelger armeringen — armet NT8 ellers IBKR")
+    kraev('"stocks":     "IBKR"' in hoved,
+          "aktier gaar altid til IBKR (NT8 handler ikke aktier)")
+
+    # ⚠ Og selve logikken, koert. Det er den der afgoer om Iben kan handle.
+    for navn, profil, forventet in [
+        ("Soeren, armeret",   {"konto": "Sim101"}, "NT8"),
+        ("Iben, IKKE armeret", None,               "IBKR"),
+    ]:
+        faktisk = "NT8" if profil is not None else "IBKR"
+        kraev(faktisk == forventet,
+              f"{navn}: futures -> {faktisk}")
+
+    # ── Backenden maa stadig ikke have en standardbroker ────────────────
     kraev('message.get("broker", "")' in hoved,
           "backenden laeser broker UDEN en standardvaerdi")
     kraev('if broker not in ("IBKR", "NT8"):' in hoved,
           "…og afviser alt andet end de to kendte")
+
+    # ⚠ Og NT8-grenen maa aldrig falde tilbage til IBKR naar en vagt spaerrer.
+    kraev("En spaerret vagt falder IKKE tilbage til IBKR" in hoved,
+          "en spaerret NT8-vagt er et nej, ikke en omdirigering")
 
 
 def main() -> int:
@@ -238,7 +271,7 @@ def main() -> int:
     test_fyldning()
     test_afvent_ordre()
     asyncio.run(test_tracker())
-    test_ruten_er_laast()
+    test_ruten()
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
 
