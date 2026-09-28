@@ -153,28 +153,34 @@ stilet til Sim101.
 **Forslag:** gør V4 til en højlydt advarsel (journalhændelse + rød linje i
 watchlisten) i stedet for en spærring. Ikke besluttet endnu.
 
-## Trin 1 — penge og data hos NinjaTrader
+## Trin 1 — NT8 på Ibens maskine (gratis)
 
-Ingen kode.
+⚠ **Her skal der ingen penge og intet dataabonnement bruges.** Det stod forkert
+i første udgave af denne plan.
 
-- **Finansiér 2080414.** Dashboard → `TRANSFER FUNDS` → `WIRE`. SEPA/EUR, intet
-  gebyr, intet minimum. ⚠ Hent bankoplysningerne fra dit eget dashboard, ikke fra
-  et forum — wires bærer en klientspecifik reference.
-- **CME Level 1, $4/md.** Uden den afviser Tradovate ordren. ⚠ Sim101 fylder
-  heller ikke uden markedsdata — det så vi 27-09: *"There is no market data
-  available to drive the simulation engine."*
-- Cypriotisk investorgaranti dækker €20.000. Et argument for ikke at parkere mere
-  end nødvendigt.
+Det vi beviste 27.–28. september på Sørens maskine, kørte mod NT8's **Simulated
+Data Feed** — en lokal, syntetisk kurskilde der følger med platformen. Der var
+ingen Tradovate-forbindelse overhovedet opsat; de konfigurerede forbindelser var
+`Simulated Data Feed`, `Playback Connection` og `Kinetick End Of Day (Free)`.
 
-## Trin 2 — NT8 på Ibens maskine
+Det forklarer begge observationer: Sim101 fyldte i handelstiden og afviste uden
+for den (*"There is no market data available to drive the simulation engine"*),
+fordi den simulerede feed respekterer instrumentets sessionstider.
 
 - Installér NinjaTrader 8
+- Forbind med **Simulated Data Feed** (`Connections`-menuen)
 - `Tools → Options → Automated trading interface` → slå ATI til
 - ⚠ `Tools → Options → Trading` → **fjern** *"Confirm order placement"*. Med den
   slået til venter hver OIF-ordre på et menneskeklik i NT8; loggen skriver
   `processing`, men der oprettes intet. Det kostede os en time 27-09.
 
-## Trin 3 — Sim101 på hendes maskine
+⚠ **Og hvad det så IKKE beviser.** Fyldningen på 7772,50, gevinsten på $3,75 og
+positionen på −4 var alle regnet på **opdigtede priser**. Mekanikken er bevist
+— OIF-skrivning, ATI-aflæsning, parring, forensik, multiplikator — men intet om
+rigtige markedsforhold, slippage eller at mæglerkæden virker. Det kommer først
+i trin 3.
+
+## Trin 2 — Sim101 på hendes maskine
 
 ```yaml
   nt_forbindelse:
@@ -188,16 +194,34 @@ besluttes bevidst — ikke opdages.
 Kør hele vejen igennem: køb → kvittering → fyldning → `Handler`-fanen viser
 linjen med P&L. Først når det virker på **hendes** maskine, går vi videre.
 
-## Trin 4 — DEMO8580770
+## Trin 3 — penge, data og DEMO8580770
+
+**Først nu bliver det dyrt**, og her forlader vi de opdigtede priser.
+
+- **CME Level 1, $4/md.** Nu er den nødvendig: uden den afviser Tradovate ordren
+  med *"Real-time market data required to trade this contract"* — det er den
+  præcise fejl vi fik 16-09.
+- **Finansiér 2080414.** Dashboard → `TRANSFER FUNDS` → `WIRE`. SEPA/EUR, intet
+  gebyr, intet minimum. ⚠ Hent bankoplysningerne fra dit eget dashboard, ikke fra
+  et forum — wires bærer en klientspecifik reference. (Kan gøres samtidig; demo
+  og live deler dataabonnement.)
+- Cypriotisk investorgaranti dækker €20.000. Et argument for ikke at parkere mere
+  end nødvendigt.
 
 ```yaml
     konto: DEMO8580770
 ```
 
-Samme kode, rigtig Tradovate-infrastruktur, legetøjspenge. Her viser det sig om
-markedsdata-abonnementet er på plads. Lad det køre nogle dage.
+Samme kode, rigtig Tradovate-infrastruktur, rigtige priser, legetøjspenge. Lad
+det køre nogle dage — det er her vi første gang ser systemet møde et marked.
 
-## Trin 5 — live
+⚠ **Uafklaret: kan to maskiner være logget på samme NinjaTrader-konto?** Fra
+dette trin kræver både din og Ibens maskine en mæglerforbindelse. Hos IBKR kan
+`fasteriben2` kun have én session ad gangen, og det har kostet os tid før. Om
+NinjaTrader har samme begrænsning, ved jeg ikke — det skal afklares før trin 3,
+ikke opdages midt i det.
+
+## Trin 4 — live
 
 ```yaml
   nt_forbindelse:
