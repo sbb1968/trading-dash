@@ -197,6 +197,27 @@ button {
   border: 1px solid var(--neutral, #d99a00);
 }
 
+/* ── Sommertidsskifte: US-åbningen flytter sig i dansk tid ──────────────
+   ⚠ Rolig farve med vilje. Varslet står i op til fire dage, og noget der
+   blinker i fire dage holder man op med at se efter på den anden dag — så
+   ville det ikke være der den morgen hvor det betyder noget.
+   Dagen selv får derimod accentfarve og kant: dér er klokkeslættet faktisk
+   anderledes end i går. */
+.tidsskifte-varsel {
+  display: inline-flex; align-items: center;
+  color: var(--text-secondary); font-size: 11.5px; font-weight: 600;
+  padding: 3px 10px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid var(--border-default);
+}
+.tidsskifte-idag {
+  display: inline-flex; align-items: center;
+  color: var(--ur-us); font-size: 12px; font-weight: 800;
+  letter-spacing: 0.3px;
+  padding: 3px 11px; border-radius: 4px; white-space: nowrap;
+  border: 1px solid var(--ur-us);
+  background: var(--aktiv-glod);
+}
+
 /* Markedsoverblik — vandret skillelinje mellem de 3 informations-grupper */
 .mo-divider { height: 1px; background: var(--border-default); margin: 12px 0 10px; border: none; }
 

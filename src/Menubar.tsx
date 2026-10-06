@@ -561,6 +561,79 @@ function KontoMaerke() {
   );
 }
 
+/** Hvornår åbner US-markedet (09:30 ET) i dansk tid, `dage` fra i dag? */
+function aabningDansk(dage: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dage);
+  // ⚠ 09:30 ET den dag — ikke "dansk tid minus seks". Forskellen er 6 timer
+  // det meste af året og 5 i sommertidsugerne, og det er præcis dét varslet
+  // handler om. Vi finder det øjeblik hvor New York siger 09:30, og spørger
+  // hvad klokken så er i København.
+  for (let m = 0; m < 24 * 60; m += 5) {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(),
+                                Math.floor(m / 60), m % 60));
+    const et = t.toLocaleTimeString("da-DK", {
+      hour: "2-digit", minute: "2-digit", hour12: false,
+      timeZone: "America/New_York",
+    });
+    if (et === "09.30") {
+      return t.toLocaleTimeString("da-DK", {
+        hour: "2-digit", minute: "2-digit", hour12: false,
+        timeZone: "Europe/Copenhagen",
+      });
+    }
+  }
+  return "";
+}
+
+export interface Tidsskifte {
+  dage: number;        // 0 = i dag, 1 = i morgen, 2, 3
+  fra: string;         // "15.30"
+  til: string;         // "14.30"
+  tidligere: boolean;  // åbner markedet tidligere i dansk tid?
+}
+
+/**
+ * Flytter US-åbningen sig inden for de næste tre dage — eller skete det i dag?
+ *
+ * ⚠ IKKE EN KALENDER OVER SKIFTEDATOER. EU og USA skifter sommertid på
+ * forskellige datoer (EU sidste søndag i oktober/marts, USA første søndag i
+ * november og anden søndag i marts), så der er TO skift pr. halvår og ikke ét.
+ * En liste over datoer ville være rigtig indtil den ikke var det.
+ *
+ * I stedet spørges der direkte: hvad er klokken i Danmark når New York siger
+ * 09:30? Ændrer svaret sig, er der et skift — uanset hvem af de to der flyttede
+ * sig, og uanset om reglerne laves om.
+ *
+ * ⚠ Selve skiftet falder på en søndag, hvor markedet er lukket. Derfor
+ * sammenlignes med dagen FØR (så dagen efter skiftet siger "i dag") og med
+ * 1-3 dage FREM (så fredag før en søndag siger "om 3 dage"). Iben ser det
+ * altså på en handelsdag i begge ender.
+ */
+export function naesteTidsskifte(): Tidsskifte | null {
+  const idag = aabningDansk(0);
+  if (!idag) return null;
+
+  // ⚠ SE TRE DAGE TILBAGE, IKKE ÉN. Selve skiftet falder altid på en søndag,
+  // hvor Iben ikke er på arbejde. Så man kigger kun på dagen før, forsvinder
+  // varslet mandag morgen — netop den dag hvor markedet for første gang åbner
+  // en time anderledes, og hvor hun har brug for at vide det.
+  // Målt: med kun -1 stod mandag 26-10-2026 og mandag 15-03-2027 helt tomme.
+  for (let d = 1; d <= 3; d++) {
+    const foer = aabningDansk(-d);
+    if (foer && foer !== idag) {
+      return {dage: 0, fra: foer, til: idag, tidligere: idag < foer};
+    }
+  }
+  for (let d = 1; d <= 3; d++) {
+    const senere = aabningDansk(d);
+    if (senere && senere !== idag) {
+      return {dage: d, fra: idag, til: senere, tidligere: senere < idag};
+    }
+  }
+  return null;
+}
+
 export function Menubar({
   activeView, onViewChange,
   layouts, activeLayoutId, layoutDirty, onLoadLayout, onSaveLayout, onDeleteLayout,
@@ -669,6 +742,8 @@ export function Menubar({
     "2": () => openScreen2(),
   };
 
+  const tidsskifte = naesteTidsskifte();
+
   // ── US-marked lukket-markering (Iben kender ikke US-helligdage) ──────────
   // Tydelig hvis lukket I DAG; diskret dagen foer. Test-genveje: ALT+Y (i dag) og
   // ALT+U (i morgen) toggler en forced visning uafhaengigt af faktisk dato.
@@ -772,19 +847,42 @@ export function Menubar({
         ⊞ <LabelWithShortcut text="Auto-arrange" shortcut="A" />
       </button>
 
-      {/* ── US-marked lukket-markering (mellem de to grupper) ── */}
+      {/* ── Varsler, skubbet mod hoejre som én gruppe ──────────────────
+          ⚠ Helligdagsbeskeden havde foer marginLeft: auto paa sig selv. Med to
+          varsler ville de to skubbe hinanden fra hinanden og lande i hver sin
+          ende af linjen. Nu skubber BEHOLDEREN, og de staar side om side. */}
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center",
+                    gap: 8, minWidth: 0 }}>
+      {tidsskifte && (
+        <div className={tidsskifte.dage === 0
+                        ? "tidsskifte-idag" : "tidsskifte-varsel"}
+             title={`Når New York åbner kl. 09.30, er klokken ${tidsskifte.til} `
+                  + `i Danmark — mod ${tidsskifte.fra} før skiftet. `
+                  + `EU og USA skifter sommertid på forskellige datoer, så `
+                  + `forskellen er 5 timer i stedet for 6 i en uges tid.`}>
+          {tidsskifte.dage === 0
+            ? `🕐 US ÅBNER NU ${tidsskifte.til} DANSK`
+            : `🕐 US åbner ${tidsskifte.til} ${
+                tidsskifte.dage === 1 ? "fra i morgen"
+                : `om ${tidsskifte.dage} dage`}`}
+          <span style={{ opacity: 0.75 }}>
+            {" "}({tidsskifte.tidligere ? "1 time tidligere" : "1 time senere"})
+          </span>
+        </div>
+      )}
       {showClosedToday && (
-        <div className="market-closed-today" style={{ marginLeft: "auto" }}
+        <div className="market-closed-today"
              title="Det amerikanske aktiemarked er LUKKET i dag — ingen handel.">
           🚫 US-MARKED LUKKET I DAG{todayReason && todayReason !== "weekend" ? ` — ${todayReason}` : ""}
         </div>
       )}
       {showClosedTomorrow && (
-        <div className="market-closed-tomorrow" style={{ marginLeft: "auto" }}
+        <div className="market-closed-tomorrow"
              title="Det amerikanske aktiemarked er lukket i morgen.">
           US-marked lukket i morgen{tomorrowReason && tomorrowReason !== "weekend" ? ` (${tomorrowReason})` : ""}
         </div>
       )}
+      </div>
 
       {/* ── HOEJRE: platform & hjaelp (doere, ikke vinduer) ── */}
       <div className="menubar-right">
