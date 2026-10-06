@@ -485,6 +485,7 @@ Pædagogisk demo til at vise algotrading til ikke-tekniske brugere.
 | Historiske bars returnerer tomt uden for handelstid med `TRADES` | Brug `MIDPOINT` i stedet uden for handelstid |
 
 | Market data abonnement equity-krav | Abonner på live-kontoen — deles automatisk med paper trading |
+| ⚠ Test fejler mod kode der ER rettet | Python godkender en `.pyc` paa (mtime-sekund, kildestoerrelse). Gendanner man en fil i samme sekund som en tidligere import, og aendringen var en ombytning af linjer (samme stoerrelse), koerer den GAMLE bytecode videre. Kostede en time 06-10. `rm -rf __pycache__` eller koer `python -B` |
 
 
 
