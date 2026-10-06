@@ -99,6 +99,14 @@ class OrdersTracker:
         ibkr_account: Optional[str] = None,
         broker: str = "IBKR",
         maalt: Optional[dict] = None,
+        # ── Exit-ordrer (spec 5.3). Alle valgfrie; eksisterende kald uaendrede.
+        ordre_type: Optional[str] = None,       # LONG|SHORT|EXIT|PLOSS|TPROF|TRAIL
+        parent_order_id: Optional[str] = None,  # kun exit-ordrer
+        oco_id: Optional[str] = None,
+        trigger_pris: Optional[float] = None,   # PLOSS/TPROF: Ibens pris
+        trail_hoejeste: Optional[float] = None,
+        trail_afstand: Optional[float] = None,
+        exit_aarsag: Optional[str] = None,      # PLOSS|TPROF|TRAIL|TVANGSLUK
     ) -> None:
         """Registrer en nyplaceret ordre.
 
@@ -146,10 +154,68 @@ class OrdersTracker:
             "avg_fill":    float(_m.get("avg_fill") or 0),
             # ⚠ Hvem der udfoerte. Styrer om berigelsen fra ib.trades() gaelder.
             "broker":      broker.upper(),
+            # ⚠ TYPEN GEMMES, DEN BEREGNES IKKE VED VISNING. En raekke skal
+            # kunne laeses om et aar uden at genskabe hvad positionen var da
+            # ordren blev lagt — og nettoet FOER ordren findes ikke bagefter.
+            "ordre_type":      ordre_type,
+            "parent_order_id": parent_order_id,
+            "oco_id":          oco_id,
+            "trigger_pris":    trigger_pris,
+            "trail_hoejeste":  trail_hoejeste,
+            "trail_afstand":   trail_afstand,
+            "exit_aarsag":     exit_aarsag,
         }
         self._entries.append(entry)
         _save_log(self._entries)
         logger.info(f"[OrdersTracker] Registreret ordre {order_id}: {action} {shares} {ticker}")
+
+    def opdater(self, order_id, **felter) -> bool:
+        """Ret felter paa en registreret ordre. True hvis noget blev aendret.
+
+        ⚠ SKRIVER KUN VED AENDRING. Overvaagningsloekken kalder den ca. hvert
+        sekund for hver aktiv exit-ordre; en ubetinget skrivning ville banke
+        orders_log.json flere tusinde gange i timen for ingenting.
+
+        ⚠ OG DEN OPFINDER IKKE RAEKKER. Findes id'et ikke, returneres False —
+        en stille oprettelse ville skjule at vi mistede sporet af en ordre.
+        """
+        mark = str(order_id)
+        for e in self._entries:
+            if str(e.get("order_id")) != mark:
+                continue
+            aendret = False
+            for k, v in felter.items():
+                if e.get(k) != v:
+                    e[k] = v
+                    aendret = True
+            if aendret:
+                _save_log(self._entries)
+            return aendret
+        logger.warning(f"[OrdersTracker] opdater: ukendt ordre {order_id}")
+        return False
+
+    def find(self, order_id) -> Optional[dict]:
+        """Raekken for eet ordre-id, eller None."""
+        mark = str(order_id)
+        for e in self._entries:
+            if str(e.get("order_id")) == mark:
+                return dict(e)
+        return None
+
+    def exit_ordrer_for(self, parent_order_id, kun_aktive: bool = True) -> list:
+        """Exit-ordrerne der hoerer til én position.
+
+        `kun_aktive` = dem der hverken er fyldt, annulleret eller afvist.
+        """
+        mark = str(parent_order_id)
+        ud = []
+        for e in self._entries:
+            if str(e.get("parent_order_id") or "") != mark:
+                continue
+            if kun_aktive and e.get("status") in STATUS_DONE | STATUS_CANCEL | {"Rejected"}:
+                continue
+            ud.append(dict(e))
+        return ud
 
     async def get_all_orders(
         self,

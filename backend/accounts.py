@@ -205,6 +205,10 @@ def _laes_nt_forbindelse(instance: dict) -> tuple:
     return ({
         "konto": konto,
         "tillad_live": bool(raa.get("tillad_live", False)),
+        # ⚠ notifier.NTFY_TOPIC er hardkodet til Ibens telefon. En test paa
+        # Soerens maskine maa ikke ringe hos hende, saa push er FRA som
+        # standard og slaas kun til i hendes egen account.yaml.
+        "exit_push": bool(raa.get("exit_push", False)),
     },)
 
 

@@ -1,6 +1,11 @@
 import asyncio
 import json
 from datetime import datetime
+from typing import Optional
+# ⚠ Importeres paa modulniveau fordi exit-endpointene fanger dens
+# undtagelser. Et lokalt import inde i hver handler ville virke, men
+# except-klausulen skal kunne naevne typen uden at gaette paa den.
+import nt_forbindelse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 import futures_katalog as _fkat
 from fastapi.middleware.cors import CORSMiddleware
@@ -661,6 +666,40 @@ async def startup():
     # ── Start TWS watchdog ────────────────────────────────────
     global tws_watchdog, algo_scheduler
 
+    # ── EXIT-ORDRER ───────────────────────────────────────────────────────
+    # ⚠ KUN naar maskinen HAR en NT8-ordrevej. Uden nt_forbindelse i
+    # account.yaml findes der ingen exit-ordrer at overvaage, og en loekke der
+    # kaldte ATI hvert sekund paa en maskine uden NinjaTrader ville kun
+    # producere fejl i loggen.
+    global exit_overvaagning
+    if accounts.nt_forbindelse():
+        async def _opdater_exit_instrument():
+            # Kontraktmaaneden gaettes ikke — den hentes, og den skiftes kun
+            # fire gange om aaret. Derfor én gang i minuttet, ikke pr. ordre.
+            while True:
+                try:
+                    ib = strategy_manager.get_ibkr()
+                    if ib is not None and getattr(ib, "connected", False):
+                        k = await ib.qualify_future("MES")
+                        if k:
+                            _EXIT_INSTRUMENT["navn"] = nt_forbindelse.nt_instrument("MES", k)
+                except Exception as e:
+                    logger.warning(f"[ExitOrdrer] kontraktopslag fejlede: {e}")
+                await asyncio.sleep(60)
+
+        import exit_ordrer as _exmod
+        asyncio.create_task(_opdater_exit_instrument())
+        exit_overvaagning = _exmod.Overvaagning(
+            get_tracker(), journal,
+            hent_kurs=lambda: _exit_kurs("MES"),
+            instrument_for=_exit_instrument,
+            bogfoer_exit=_exit_bogfoer)
+        asyncio.create_task(exit_overvaagning.koer())
+        print("[Server] Exit-ordrer: overvaagning startet "
+              f"(trail-afstand {_exmod.hent_config()['trail_afstand']:g} points)")
+    else:
+        print("[Server] Exit-ordrer: ikke aktiv (ingen nt_forbindelse)")
+
     tws_watchdog = TWSWatchdog()
     await tws_watchdog.start()
     print("[Server] TWS watchdog startet — tjekker port 7497 hvert 30. sek")
@@ -1170,6 +1209,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     _ok, _besked, _det = await _mf.kontroller_ordre_nt8(
                         journal, symbol=ticker, instrument=_instrument,
                         konto=nt_konto, action=action, shares=shares)
+
+                    # ⚠ TYPEN AFGOERES HER, HVOR NETTOET FOER ORDREN STADIG
+                    # FINDES. Bagefter er det vaek: positionen er allerede
+                    # aendret af vores egen ordre. Vagten har lige laest det,
+                    # saa ATI spoerges ikke en gang til.
+                    import exit_ordrer as _ex
+                    _netto_foer = _det.get("netto_hos_broker")
+                    _ordre_type = _ex.klassificer(
+                        int(_netto_foer) if _netto_foer is not None else None,
+                        action)
                     if not _ok:
                         await journal.log_event(
                             ibkr_account=nt_konto or None,
@@ -1509,6 +1558,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         # der ikke spoerges IBKR om en ordre IBKR ikke kender.
                         broker=broker,
                         maalt=(result if broker == "NT8" else None),
+                        # ⚠ GEMMES, BEREGNES IKKE VED VISNING. Se klassificer().
+                        ordre_type=(_ordre_type if broker == "NT8" else None),
                     )
 
                 # Journaliser manuel ordre
@@ -1624,6 +1675,23 @@ async def websocket_endpoint(websocket: WebSocket):
                                  "broker": broker, "konto": konto_brugt,
                                  "ventede_sek": MANUEL_FYLD_VENT_SEC,
                                  "note": _note})
+
+                # ⚠ EN MANUEL EXIT SKAL TAGE EXIT-ORDRERNE MED SIG — STRAKS.
+                # Overvaagningsloekken opdager det ogsaa (netto 0 -> ryd alt),
+                # men foerst ved naeste gennemloeb. I det sekund staar der en
+                # levende stop loss paa en position der ikke findes, og den
+                # aabner en NY position i modsat retning hvis den udloeses.
+                if broker == "NT8" and filled_qty > 0:
+                    try:
+                        import exit_ordrer as _ex2
+                        _n = await _ex2.ryd(
+                            get_tracker(), journal, instrument=_instrument,
+                            hvorfor="manuel ordre fra watchlist")
+                        if _n:
+                            logger.info(f"[WS] ryddede {_n} exit-ordrer efter "
+                                        f"manuel {action}")
+                    except Exception as e:
+                        logger.error(f"[WS] kunne ikke rydde exit-ordrer: {e}")
 
                 # ── AFSTEMNING UDEN DEADLINE ────────────────────────────────
                 # ⚠ Koeres uanset udfaldet, ogsaa naar ordren fyldte pent. Den
@@ -1753,7 +1821,10 @@ class CancelOrderRequest(BaseModel):
 # Ordrer-vinduet viser KUN ordrer oprettet i Trading Dash (manuelle). Algo-ordrer
 # registreres stadig i trackeren (orders_log.json) til dagens_log/journal, men hoerer
 # ikke til her — de ses i dagens_log/Studio.
-MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual"}
+# ⚠ "manual_exit" SKAL VAERE HER. /orders/list filtrerer paa kilden, saa en
+# exit-ordre der ikke staar i saettet, er usynlig i vinduet — og en stop loss
+# man ikke kan se, er ikke en stop loss man kan stole paa.
+MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual", "manual_exit"}
 
 # Hvor laenge en manuel ordre faar lov at fylde foer vi holder op med at kigge.
 # En MES-markedsordre fylder paa under et sekund; femten er rigelig margin uden
@@ -1789,6 +1860,50 @@ async def handels_forbindelse():
     return strategy_manager.get_ibkr()
 
 
+def _berig_med_exit(ordrer: list) -> list:
+    """Giv parent-raekkerne knaptilstande og exit-raekkerne deres plads.
+
+    ⚠ KNAPTILSTANDEN KOMMER HERFRA — ALDRIG FRA KLIKKET. Frontenden maa ikke
+    farve en knap gul fordi den lige blev trykket; den skal farve den gul naar
+    BACKENDEN har set ATI bekraefte ordren. Ellers ser en afvist stop loss
+    aktiv ud, og det er den slags man opdager naar man faar brug for den.
+
+    `exit_mulig` er kun sand for den SENESTE aabnende raekke. Exit-ordrer
+    daekker hele positionen (spec §13 punkt 2), saa knapper paa en aeldre
+    raekke ville lade som om der var to positioner at beskytte.
+    """
+    import exit_ordrer as _ex
+    aabnende = [o for o in ordrer
+                if (o.get("ordre_type") or "") in ("LONG", "SHORT")]
+    # Trackeren leverer nyeste foerst.
+    seneste = aabnende[0]["order_id"] if aabnende else None
+
+    pr_parent: dict = {}
+    for o in ordrer:
+        t = (o.get("ordre_type") or "").upper()
+        if t not in _ex.TYPER:
+            continue
+        pid = str(o.get("parent_order_id") or "")
+        st = o.get("status") or ""
+        if st in ("Filled", "Cancelled", "Rejected"):
+            continue
+        # ⚠ "aktiv" kraever at ATI bekraeftede. Alt andet er "afventer" — og
+        # en knap der staar paa "afventer" er deaktiveret, saa der ikke kan
+        # laegges to af samme slags mens den foerste er undervejs.
+        pr_parent.setdefault(pid, {})[t] = (
+            "aktiv" if o.get("bekraeftet") and st in ("Working", "Accepted")
+            else "afventer")
+
+    for o in ordrer:
+        if (o.get("ordre_type") or "") not in ("LONG", "SHORT"):
+            continue
+        oid = str(o.get("order_id"))
+        knapper = pr_parent.get(oid, {})
+        o["exit_knapper"] = {t: knapper.get(t, "ingen") for t in _ex.TYPER}
+        o["exit_mulig"] = bool(oid == str(seneste) and _EXIT_INSTRUMENT.get("navn"))
+    return ordrer
+
+
 @app.get("/orders/list")
 async def get_orders_list(period_hours: int = 24, fra_midnat: bool = False):
     """Returnér Trading Dash's MANUELLE ordrer i de seneste N timer med holdbar status."""
@@ -1800,12 +1915,45 @@ async def get_orders_list(period_hours: int = 24, fra_midnat: bool = False):
         # forskellen er hele gaarsdagens handel.
         since=(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
                if fra_midnat else None))
+    orders = _berig_med_exit(orders)
     return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
 
 
 @app.post("/orders/cancel")
 async def cancel_order(req: CancelOrderRequest):
-    """Annullér en åben ordre via IBKR."""
+    """Annullér en åben ordre. Ruter paa brokeren.
+
+    ⚠ DEN KUNNE FOER KUN IBKR. `OrdersTracker.cancel()` slaar op i
+    `ib.trades()`, og en NT8-ordre staar ikke der — saa krydset i
+    Ordrer-vinduet gjorde intet paa en NT8-ordre, uden at noget fejlede.
+    Det var en kendt mangel (spec §2 punkt 4) og er rettet her.
+    """
+    raekke = get_tracker().find(req.order_id)
+    if raekke and (raekke.get("broker") or "").upper() == "NT8":
+        # Exit-ordrer gaar den vej der ogsaa haandterer OCO-kaskaden.
+        if (raekke.get("ordre_type") or "") in ("PLOSS", "TPROF", "TRAIL"):
+            import exit_ordrer as _ex
+            try:
+                r = await _ex.annuller_exit(
+                    get_tracker(), journal, order_id=str(req.order_id),
+                    instrument=_exit_instrument() or "")
+                return {"success": True, **r}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        try:
+            await asyncio.to_thread(nt_forbindelse.annuller, str(req.order_id))
+            r = await asyncio.to_thread(nt_forbindelse.afvent_ordre,
+                                        str(req.order_id), 12.0)
+            get_tracker().opdater(req.order_id, status=r["status"] or "UNKNOWN",
+                                  bekraeftet=r["terminal"])
+            # ⚠ "" er UKENDT, ikke "annulleret". Se afvent_ordre.
+            return {"success": r["terminal"], "status": r["status"] or "UNKNOWN",
+                    "error": None if r["terminal"] else
+                             "NinjaTrader bekræftede ikke annulleringen — "
+                             "tjek NT8's Orders-fane."}
+        except Exception as e:
+            return {"success": False, "error": f"NinjaTrader: {e}"}
+
     # ⚠ Og annulleringen skal sendes til den forbindelse ordren blev lagt paa.
     # Den delte kender den ikke, saa annulleringen ville tavst intet gøre.
     ibkr = await handels_forbindelse()
@@ -5975,6 +6123,126 @@ async def account_skift(req: SkiftKontoRequest):
     await broadcast_algo(besked)
     return {"ok": True, "konto": ny, "label": accounts.konto_label(ny),
             "tidligere": gammel}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Exit-ordrer (PLOSS / TPROF / TRAIL) — se exit_ordrer.py og SPEC'en
+# ═══════════════════════════════════════════════════════════════════════════
+async def _exit_kurs(symbol: str = "MES"):
+    """Kurskilden exit_ordrer faar injiceret. IBKR/algoserveren, ikke NT8.
+
+    ⚠ Trailing regnes paa DENNE kurs, men stoppen udloeses paa NT8's. Forskellen
+    er typisk 0-1 tick paa MES og accepteres (spec §2 punkt 6).
+    """
+    try:
+        d = await quote(symbol)
+        return d.get("price")
+    except Exception:
+        return None
+
+
+def _exit_instrument():
+    """NT8-navnet paa frontkontrakten, eller None. Cachet pr. opslag."""
+    return _EXIT_INSTRUMENT.get("navn")
+
+
+_EXIT_INSTRUMENT: dict = {"navn": None}
+
+
+async def _exit_bogfoer(order_id, action, antal, pris, status, aarsag):
+    """En fyldt exit-ordre skal bogfoeres som enhver anden exit.
+
+    ⚠ SAMME VEJ SOM EN EXIT FRA WATCHLIST — ingen kopi pr. sti. `broker` er et
+    argument til manuel_forensik, ikke en kodesti, og det er praecis derfor en
+    PLOSS der fylder, kan ende i samme `trades`-raekke som et manuelt salg.
+    """
+    import manuel_forensik as _mf
+    profil = accounts.nt_forbindelse() or {}
+    konto = profil.get("konto", "")
+    ibkr = strategy_manager.get_ibkr()
+    tid = await _mf.registrer_exit(
+        journal, ibkr, symbol="MES", shares=int(antal), fill_pris=float(pris),
+        ordre_id=order_id, ordre_status=status, et_tz=ET_TZ,
+        broker="NT8", konto=konto)
+    get_tracker().record_placed(
+        order_id=f"{order_id}_x", source="manual_exit", ticker="MES",
+        action=(action or "").upper(), shares=int(antal), order_type="MKT",
+        ibkr_account=konto or None, broker="NT8",
+        maalt={"status": "Filled", "filled": int(antal), "avg_fill": float(pris)},
+        ordre_type="EXIT", exit_aarsag=aarsag)
+    await journal.log_event(
+        ibkr_account=konto or None, source="manual_exit",
+        event_type="exit_fyldt", symbol="MES",
+        payload={"order_id": order_id, "aarsag": aarsag, "antal": antal,
+                 "pris": pris, "trade_id": tid})
+    logger.info(f"[ExitOrdrer] {aarsag} fyldt {antal} @ {pris} (trade {tid})")
+
+
+class ExitOrdreIn(BaseModel):
+    parent_order_id: str
+    type: str
+    pris: Optional[float] = None
+
+
+class ExitAnnullerIn(BaseModel):
+    order_id: str
+
+
+class ExitConfigIn(BaseModel):
+    trail_afstand: float
+
+
+@app.post("/exit-ordre")
+async def exit_ordre_opret(body: ExitOrdreIn):
+    import exit_ordrer as _ex
+    instr = _exit_instrument()
+    if not instr:
+        return {"success": False,
+                "error": "Kontraktmåneden kendes ikke — er IBKR forbundet?"}
+    try:
+        r = await _ex.opret_exit(
+            get_tracker(), journal, parent_order_id=body.parent_order_id,
+            type_=body.type, pris=body.pris, instrument=instr,
+            hent_kurs=lambda: _exit_kurs("MES"))
+        return {"success": True, **r}
+    except _ex.ExitFejl as e:
+        return {"success": False, "error": str(e)}
+    except (nt_forbindelse.NtForbindelseFejl,
+            nt_forbindelse.NtTilstandUkendt) as e:
+        return {"success": False, "error": f"NinjaTrader-ordrevejen: {e}"}
+    except Exception as e:
+        logger.error(f"[ExitOrdrer] opret fejlede: {e}")
+        return {"success": False, "error": f"Uventet fejl: {e}"}
+
+
+@app.post("/exit-ordre/annuller")
+async def exit_ordre_annuller(body: ExitAnnullerIn):
+    import exit_ordrer as _ex
+    instr = _exit_instrument() or ""
+    try:
+        r = await _ex.annuller_exit(get_tracker(), journal,
+                                    order_id=body.order_id, instrument=instr)
+        return {"success": True, **r}
+    except _ex.ExitFejl as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error(f"[ExitOrdrer] annuller fejlede: {e}")
+        return {"success": False, "error": f"Uventet fejl: {e}"}
+
+
+@app.get("/exit-config")
+async def exit_config_hent():
+    import exit_ordrer as _ex
+    return _ex.hent_config()
+
+
+@app.post("/exit-config")
+async def exit_config_saet(body: ExitConfigIn):
+    import exit_ordrer as _ex
+    try:
+        return {"success": True, **_ex.saet_config(body.trail_afstand)}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/ordre/rute")
