@@ -256,6 +256,38 @@ def test_exit_mulig() -> None:
           "ny position -> knapper paa den NYE raekke, ikke den gamle")
     kraev(EX.exit_mulig_for([]) is None, "ingen raekker -> ingen knapper")
 
+    # ⚠ BEGGE MAADER EN POSITION KAN LUKKE SKAL FJERNE KNAPPERNE, og de ser
+    # forskellige ud i trackeren. Fund b) i trin 8 havde netop to kilder:
+    #   · manuel SAELG fra watchlisten  -> én EXIT-raekke (ovenfor)
+    #   · en exit-ordre der FYLDER      -> TO raekker: selve SLOSS/TPROF/TRAIL
+    #     og den EXIT-raekke _exit_bogfoer skriver ved siden af
+    # Den anden form blev proevet paa nettoet, men ikke paa selve beslutningen.
+    fyldt_stop = [r("08:00", "LONG", "BUY", 1),
+                  r("09:00", "SLOSS", "SELL", 1),
+                  r("09:00:01", "EXIT", "SELL", 1)]
+    kraev(EX.exit_mulig_for(fyldt_stop) is None,
+          "⚠ fyldt SLOSS -> INGEN knapper (fyldningen taelles én gang)")
+    for t in ("TPROF", "TRAIL"):
+        f = [r("08:00", "LONG", "BUY", 1), r("09:00", t, "SELL", 1),
+             r("09:00:01", "EXIT", "SELL", 1)]
+        kraev(EX.exit_mulig_for(f) is None, f"…og det samme for {t}")
+
+    # ⚠ DAGENS FAKTISKE FORLOEB 06-10, hvor en TRAIL paa en SHORT er et KOEB.
+    # Taltes TRAIL-raekken med, ville nettoet blive +1 i stedet for 0 — altsaa
+    # knapper paa en flad konto, og med forkert fortegn.
+    dagen = [r("08:36:59", "LONG",  "BUY",  1, oid="NTM..618394"),
+             r("13:01:39", "EXIT",  "SELL", 1, oid="NTM..498355"),
+             r("13:05:22", "SHORT", "SELL", 1, oid="NTM..721417"),
+             r("13:06:34", "TRAIL", "BUY",  1, oid="NTX..793605"),
+             r("13:32:56", "EXIT",  "BUY",  1, oid="NTX..793605_x")]
+    kraev(EX.netto_fra_raekker(dagen) == 0,
+          f"⚠ dagens forloeb -> netto 0 ({EX.netto_fra_raekker(dagen)})")
+    kraev(EX.exit_mulig_for(dagen) is None,
+          "⚠ …og ingen raekke faar knapper")
+    # Og midt i forloebet, hvor shorten var aaben, skulle den HAVE knapper.
+    kraev(EX.exit_mulig_for(dagen[:3]) == "NTM..721417",
+          "midt i forloebet: knapperne sidder paa shorten")
+
     kraev(EX.seneste_aabnende([]) is None, "tom liste -> ingen seneste")
     kraev(EX.netto_fra_raekker([]) == 0, "tom liste -> netto 0")
 
