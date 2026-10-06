@@ -115,13 +115,34 @@ def send(instr: str, action: str, antal: int, **kw) -> tuple[str, dict]:
     return ref, svar
 
 
-def marked(instr: str, action: str, antal: int) -> tuple[str, float]:
-    """Markedsordre, og fyldprisen tilbage. Den er vores kurskilde."""
+def marked(instr: str, action: str, antal: int,
+           forvent_netto: int | None = None) -> tuple[str, float]:
+    """Markedsordre, og fyldprisen tilbage. Den er vores kurskilde.
+
+    `forvent_netto` er den position vi forventer BAGEFTER. Passer den ikke,
+    stopper proben. Se noten ved `startpositionen` — det er sådan vi faar
+    maalt noget vi ikke kunne laese paa forhaand.
+    """
     ref, _ = send(instr, action, antal, ordretype="MARKET")
     if toer:
         return ref, 0.0
     r = NT.afvent_ordre(ref, 20.0)
     log(f"     {action} {antal}: {r['status']} {r['filled']} @ {r['avg_fill']}")
+
+    if forvent_netto is not None:
+        time.sleep(2)
+        n = pos(instr)
+        if n is None:
+            raise SystemExit(
+                "\n  ⛔ Positionen kan stadig ikke læses efter en fyldt ordre.\n"
+                "     Det burde ikke kunne ske — tjek NT8's Positions-fane.")
+        if n != forvent_netto:
+            raise SystemExit(
+                f"\n  ⛔ Efter {action} {antal} er positionen {n}, forventet "
+                f"{forvent_netto}.\n"
+                f"     Der var altsaa noget paa kontoen i forvejen. Proben "
+                f"stopper;\n     ryd op i NT8 og koer igen.")
+        log(f"     position bekraeftet: {n}")
     return ref, r["avg_fill"]
 
 
@@ -137,6 +158,8 @@ def ryd_op(instr: str, hvorfor: str) -> bool:
     time.sleep(2)
     n = pos(instr)
     if n is None:
+        # ⚠ Her er fravaer FARLIGT, ikke harmloest: har vi handlet, FINDES
+        # noeglen, saa `None` betyder at vi mistede ATI — ikke at vi er flade.
         log("     ⚠ positionen er UKENDT — tjek NT8's Positions-fane manuelt")
         return False
     if n != 0:
@@ -154,7 +177,7 @@ def ryd_op(instr: str, hvorfor: str) -> bool:
 def P1(instr: str) -> dict:
     """Accepterer NT8 OCO via OIF? Ses begge som Working?"""
     log("\n╔═ P1 · long 1 MES + STOPMARKET og LIMIT med samme OCO-id ═══════════")
-    _, fyld = marked(instr, "BUY", 1)
+    _, fyld = marked(instr, "BUY", 1, forvent_netto=1)
     if not toer and not fyld:
         return {"svar": "UKLART", "bevis": ["markedsordren fyldte ikke — ingen kurs at regne ud fra"]}
 
@@ -276,7 +299,7 @@ def P4(instr: str, st: dict, st3: dict) -> dict:
 def P5(instr: str) -> dict:
     """Annullerer NT8 selv søsteren når den ene fylder?"""
     log("\n╔═ P5 · flyt LIMIT ind i markedet saa den fylder ════════════════════")
-    _, fyld = marked(instr, "BUY", 1)
+    _, fyld = marked(instr, "BUY", 1, forvent_netto=1)
     if not toer and not fyld:
         return {"svar": "UKLART", "bevis": ["kunne ikke åbne position"]}
     oco = "TDOCO" + str(int(time.time()))[-7:]
@@ -318,7 +341,7 @@ def P5(instr: str) -> dict:
 def P6(instr: str) -> dict:
     """Virker kvantitetsændring via CHANGE?"""
     log("\n╔═ P6 · CHANGE antal fra 1 til 2 ═══════════════════════════════════")
-    _, fyld = marked(instr, "BUY", 2)
+    _, fyld = marked(instr, "BUY", 2, forvent_netto=2)
     if not toer and not fyld:
         return {"svar": "UKLART", "bevis": ["kunne ikke åbne position"]}
     s_id, _ = send(instr, "SELL", 1, ordretype="STOPMARKET",
@@ -343,7 +366,7 @@ def P7(instr: str, brugt_oco: str | None) -> dict:
     log("\n╔═ P7 · genbrug et opbrugt OCO-id ══════════════════════════════════")
     if not brugt_oco:
         return {"svar": "SPRUNGET OVER", "bevis": ["intet brugt OCO-id"]}
-    _, fyld = marked(instr, "BUY", 1)
+    _, fyld = marked(instr, "BUY", 1, forvent_netto=1)
     if not toer and not fyld:
         return {"svar": "UKLART", "bevis": ["kunne ikke åbne position"]}
     s_id, _ = send(instr, "SELL", 1, ordretype="STOPMARKET",
@@ -417,13 +440,32 @@ def main() -> int:
     instr = a.instrument or instrument()
     log(f"  instrument: {instr}")
 
+    # ── Er kontoen flad? ─────────────────────────────────────────────────
+    # ⚠ ATI PUSHER INGEN MarketPosition-LINJE FOR ET INSTRUMENT DEN ALDRIG HAR
+    # SET PAA KONTOEN. Paa en frisk forbindelse er noeglen altsaa fravaerende,
+    # og `position()` svarer korrekt `None` = UKENDT. Et forhaandstjek der
+    # kraever `netto == 0` kan derfor ALDRIG bestaa foerste gang — og at kalde
+    # fravaeret "flad" ville vaere den fejl hele denne kodebase er bygget imod.
+    #
+    # Loesningen er at MAALE i stedet for at antage: den foerste markedsordre
+    # faar noeglen til at dukke op, og bagefter SKAL positionen vaere praecis
+    # det vi sendte. Var der noget i forvejen, passer tallet ikke, og proben
+    # stopper foer den laegger mere oveni. Se `marked(forvent_netto=...)`.
     n = pos(instr)
     if n is None:
-        log("\n  ⛔ Positionen kan ikke læses. UKENDT er ikke flad — stopper.")
-        return 1
-    if n != 0:
+        log("\n  ⚠ Positionen er UKENDT — NT8 har ingen MarketPosition-noegle")
+        log(f"    for {NT.ati_noegle(instr)} paa {KONTO} endnu.")
+        log("    Det er forventeligt paa en konto der ikke har handlet.")
+        log("    ⚠ Proben antager IKKE at den er flad: den foerste ordre")
+        log("    verificeres mod den position den skulle give.")
+        o = NT.ordrer_for(instr) if hasattr(NT, "ordrer_for") else None
+        if o:
+            log(f"    aabne ordrer ifoelge ATI: {o}")
+    elif n != 0:
         log(f"\n  ⛔ Der er allerede en position paa {n}. Luk den først.")
         return 1
+    else:
+        log("  position: 0 (flad)")
 
     brugt_oco = None
     try:

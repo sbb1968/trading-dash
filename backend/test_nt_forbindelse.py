@@ -310,6 +310,29 @@ def main() -> int:
     kraev(a.startswith("NTM"), f"id'et roeber kilden: {a}")
     kraev(len(a) <= 24, f"id'et er kort nok til NT8 ({len(a)} tegn)")
 
+    # ⚠ DEN GAV SAMME ID SEKS GANGE I TRAEK (maalt 06-10). Ren millisekund-tid
+    # raekker til at skille to KLIK ad — et menneske klikker ikke to gange i
+    # samme millisekund. Exit-ordrer goer: PLOSS, TPROF og TRAIL laegges af kode
+    # i traek, et OCO-par endnu taettere.
+    #
+    # To ordrer med samme id er ikke kosmetik: ordre_status() kan ikke skelne
+    # dem, og annuller() rammer den ene eller den anden uden at vi ved hvilken.
+    kraev(a != b, "⚠ to kald i traek giver FORSKELLIGE id'er")
+    mange = [NT.order_ref() for _ in range(200)]
+    kraev(len(set(mange)) == 200,
+          f"200 kald i traek giver 200 unikke ({len(set(mange))})")
+    kraev(max(len(x) for x in mange) <= 24,
+          f"…og de er stadig korte nok ({max(len(x) for x in mange)} tegn)")
+
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(8) as _ex:
+        traadet = list(_ex.map(lambda _: NT.order_ref(), range(400)))
+    kraev(len(set(traadet)) == 400,
+          f"⚠ ogsaa fra 8 traade samtidig ({len(set(traadet))}/400)")
+
+    kraev(NT.order_ref(praefiks="NTX").startswith("NTX"),
+          "exit-ordrer kan faa deres eget praefiks")
+
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
 

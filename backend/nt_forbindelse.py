@@ -58,6 +58,7 @@ import logging
 import pathlib
 import re
 import socket
+import threading
 import time
 from typing import Optional
 
@@ -696,14 +697,42 @@ def _nye_logliner(log: Optional[pathlib.Path], fra: int) -> list[str]:
         return []
 
 
-def order_ref(hvem: str = "") -> str:
-    """Ordre-id der markerer MANUEL oprindelse gennem NT8.
+_ref_laas = threading.Lock()
+_ref_sidst = {"ms": 0, "n": 0}
+
+
+def order_ref(hvem: str = "", praefiks: str = "NTM") -> str:
+    """Ordre-id der markerer oprindelsen af en NT8-ordre.
 
     ⚠ Id'et BINDER — verificeret 26-09. ATI pusher det som
     `OrderStatus|<id> <tilstand>`, selv om NT8's log skriver `Name=''`.
     Det er dét der gør en NT8-handel tilskrivbar i journalen.
+
+    `praefiks`: "NTM" = manuel (watchlist-klik), "NTX" = exit-ordre lagt af
+    backenden. Kilden kan dermed ses paa id'et alene.
+
+    ⚠ DEN GAV FOER SAMME ID SEKS GANGE I TRAEK (maalt 06-10). Den var ren
+    millisekund-tid, og kommentaren sagde at det var "rigeligt til at skille to
+    klik ad". Det var sandt — om KLIK. Et menneske klikker ikke to gange i samme
+    millisekund.
+
+    Exit-ordrer goer det. PLOSS, TPROF og TRAIL laegges af kode i traek, og et
+    OCO-par endnu taettere. To ordrer med samme id er ikke en kosmetisk fejl:
+    `ordre_status(id)` kan ikke skelne dem, og `annuller(id)` rammer den ene
+    eller den anden — vi ved ikke hvilken. En stop loss der ikke kan annulleres
+    maalrettet, er praecis den ejerloese ordre vi brugte ti dage paa at finde
+    16-09.
+
+    Taelleren goer id'et entydigt inden for samme millisekund og nulstilles
+    naar uret gaar videre, saa laengden holder sig nede.
     """
-    # ⚠ Id'et skal vaere ENTYDIGT og kort. NT8 accepterer ikke vilkaarligt lange
-    # id'er, og millisekunder er rigeligt til at skille to klik ad.
-    # "NTM" = NinjaTrader Manuel — saa kilden kan ses paa id'et alene.
-    return f"NTM{int(time.time() * 1000)}"
+    with _ref_laas:
+        ms = int(time.time() * 1000)
+        if ms == _ref_sidst["ms"]:
+            _ref_sidst["n"] += 1
+        else:
+            _ref_sidst["ms"], _ref_sidst["n"] = ms, 0
+        n = _ref_sidst["n"]
+    # Suffikset udelades i det almindelige tilfaelde, saa id'erne ser ud som de
+    # altid har gjort — og de 17 eksisterende i journalen stadig ligner dem.
+    return f"{praefiks}{ms}" if n == 0 else f"{praefiks}{ms}_{n}"
