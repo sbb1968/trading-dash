@@ -587,10 +587,42 @@ function aabningDansk(dage: number): string {
 }
 
 export interface Tidsskifte {
-  dage: number;        // 0 = i dag, 1 = i morgen, 2, 3
+  dage: number;        // 0 = skiftet er sket, 1-3 = dage til det sker
   fra: string;         // "15.30"
   til: string;         // "14.30"
   tidligere: boolean;  // åbner markedet tidligere i dansk tid?
+  dato: string;        // "mandag 26-10" — den dag hun først mærker det
+}
+
+/** "mandag 26-10" for en dato `dage` fra i dag. */
+function datoTekst(dage: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + dage);
+  const uge = ["søndag", "mandag", "tirsdag", "onsdag", "torsdag",
+               "fredag", "lørdag"][d.getDay()];
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${uge} ${dd}-${mm}`;
+}
+
+/**
+ * Den første HANDELSDAG med den nye åbningstid.
+ *
+ * ⚠ SELVE SKIFTET FALDER ALTID PÅ EN SØNDAG — både i EU og i USA. At skrive
+ * "fra søndag 25-10" ville være teknisk rigtigt og praktisk ubrugeligt:
+ * markedet er lukket, og Iben handler ikke. Datoen hun skal bruge, er den
+ * første dag hun faktisk møder det nye klokkeslæt.
+ */
+function foersteHandelsdag(dage: number): number {
+  const d = new Date();
+  d.setDate(d.getDate() + dage);
+  let n = dage;
+  while (true) {
+    const u = new Date();
+    u.setDate(u.getDate() + n);
+    if (u.getDay() !== 0 && u.getDay() !== 6) return n;   // ikke søn/lør
+    n += 1;
+  }
 }
 
 /**
@@ -622,13 +654,15 @@ export function naesteTidsskifte(): Tidsskifte | null {
   for (let d = 1; d <= 3; d++) {
     const foer = aabningDansk(-d);
     if (foer && foer !== idag) {
-      return {dage: 0, fra: foer, til: idag, tidligere: idag < foer};
+      return {dage: 0, fra: foer, til: idag, tidligere: idag < foer,
+              dato: datoTekst(0)};
     }
   }
   for (let d = 1; d <= 3; d++) {
     const senere = aabningDansk(d);
     if (senere && senere !== idag) {
-      return {dage: d, fra: idag, til: senere, tidligere: senere < idag};
+      return {dage: d, fra: idag, til: senere, tidligere: senere < idag,
+              dato: datoTekst(foersteHandelsdag(d))};
     }
   }
   return null;
@@ -856,15 +890,14 @@ export function Menubar({
       {tidsskifte && (
         <div className={tidsskifte.dage === 0
                         ? "tidsskifte-idag" : "tidsskifte-varsel"}
-             title={`Når New York åbner kl. 09.30, er klokken ${tidsskifte.til} `
-                  + `i Danmark — mod ${tidsskifte.fra} før skiftet. `
+             title={`Fra ${tidsskifte.dato} åbner New York kl. 09.30 når `
+                  + `klokken er ${tidsskifte.til} i Danmark — mod `
+                  + `${tidsskifte.fra} før skiftet. `
                   + `EU og USA skifter sommertid på forskellige datoer, så `
                   + `forskellen er 5 timer i stedet for 6 i en uges tid.`}>
           {tidsskifte.dage === 0
             ? `🕐 US ÅBNER NU ${tidsskifte.til} DANSK`
-            : `🕐 US åbner ${tidsskifte.til} ${
-                tidsskifte.dage === 1 ? "fra i morgen"
-                : `om ${tidsskifte.dage} dage`}`}
+            : `🕐 US åbner ${tidsskifte.til} fra ${tidsskifte.dato}`}
           <span style={{ opacity: 0.75 }}>
             {" "}({tidsskifte.tidligere ? "1 time tidligere" : "1 time senere"})
           </span>
