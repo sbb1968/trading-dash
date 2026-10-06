@@ -447,7 +447,13 @@ async def annuller_exit(tracker, journal, *, order_id: str,
     nyt_oco = _nyt_oco_id()
     genlagt = []
     for e in søskende:
-        tracker.opdater(e["order_id"], status="Cancelled", bekraeftet=True)
+        # ⚠ "Annulleret" er sandt og misvisende. Raekken blev ikke slettet
+        # fordi nogen ville af med den — den blev fejet med af OCO-kaskaden og
+        # lagt igen et oejeblik senere. Staar der bare "Annulleret", ser det ud
+        # som om beskyttelsen forsvandt, og det er praecis den tvivl man ikke
+        # skal sidde med midt i en handel.
+        tracker.opdater(e["order_id"], status="Cancelled", bekraeftet=True,
+                        genlagt_som=None)
         t = normaliser_type(e.get("ordre_type"))
         modsat = "SELL" if netto > 0 else "BUY"
         ny_ref = NT.order_ref(praefiks="NTX")
@@ -470,6 +476,9 @@ async def annuller_exit(tracker, journal, *, order_id: str,
             trail_afstand=e.get("trail_afstand"))
         tracker.opdater(ny_ref, status=rr["status"] or "afventer",
                         bekraeftet=rr["aktiv"])
+        # Peg den gamle raekke paa sin afloeser, saa vinduet kan sige
+        # "Genlagt" i stedet for "Annulleret".
+        tracker.opdater(e["order_id"], genlagt_som=ny_ref)
         genlagt.append({"type": t, "fra": e["order_id"], "til": ny_ref,
                         "aktiv": rr["aktiv"]})
 

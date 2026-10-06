@@ -46,6 +46,10 @@ interface OrderEntry {
    *  ikke med". ⚠ En trailing stop der er holdt op med at foelge markedet,
    *  ser ud praecis som en der foelger med. */
   advarsel?:        string | null;
+  /** ⚠ Raekken blev ikke slettet — den blev FEJET MED af OCO-kaskaden og lagt
+   *  igen som denne ordre. "Annulleret" alene ville se ud som om beskyttelsen
+   *  forsvandt. */
+  genlagt_som?:     string | null;
 }
 
 const EXIT_TYPER = ["SLOSS", "TPROF", "TRAIL"] as const;
@@ -844,9 +848,17 @@ export function OrdersWindow() {
                         </div>
                       )}
                     </td>
-                    <td style={{ color: statusColor(o.status_group), fontWeight: 600 }}
-                        title={o.note || undefined}>
-                      {statusEmoji(o.status_group)} {statusText(o.status)}
+                    <td style={{ color: o.genlagt_som ? "var(--text-muted)"
+                                        : statusColor(o.status_group),
+                                 fontWeight: 600 }}
+                        title={o.genlagt_som
+                          ? `Lagt igen som ${o.genlagt_som}. NinjaTrader `
+                            + `annullerer hele OCO-gruppen når én ordre slettes, `
+                            + `så søskende skal lægges på ny med et nyt OCO-id.`
+                          : (o.note || undefined)}>
+                      {o.genlagt_som
+                        ? <>↻ Genlagt</>
+                        : <>{statusEmoji(o.status_group)} {statusText(o.status)}</>}
                       {o.note && <span style={{ marginLeft: 4, cursor: "help",
                                                 color: "var(--text-muted)" }}>ⓘ</span>}
                     </td>
