@@ -541,13 +541,54 @@ def paamindelsestidspunkt(nu: Optional[datetime.datetime] = None) -> datetime.da
 # ═══════════════════════════════════════════════════════════════════════════
 # Tvangslukning
 # ═══════════════════════════════════════════════════════════════════════════
+def _har_handlet_i_dag(tracker, symbol: str = "MES") -> bool:
+    """Har trackeren en MES-ordre på kontoen i dag?
+
+    ⚠ DET AFGØR OM EN ULÆSELIG POSITION SKAL VÆKKE NOGEN. Har Iben ikke handlet,
+    er "positionen kan ikke læses" en kedelig kendsgerning om en tom konto — og
+    en telefon der ringer hver aften hun ikke har handlet, bliver slået fra
+    inden den aften hvor den betyder noget.
+    """
+    i_dag = datetime.datetime.now().date()
+    for e in tracker._entries:
+        if (e.get("ticker") or "").upper() != symbol.upper():
+            continue
+        if (e.get("broker") or "").upper() != "NT8":
+            continue
+        if (e.get("ordre_type") or "") not in ("LONG", "SHORT", "EXIT"):
+            continue
+        try:
+            if datetime.datetime.fromisoformat(
+                    str(e.get("placed_at"))).date() == i_dag:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def tvangsluk(tracker, journal, *, instrument: str,
-                    bogfoer_exit=None) -> dict:
+                    bogfoer_exit=None, blind_forsoeg: int = 20,
+                    blind_pause: float = 15.0) -> dict:
     """Annullér alt og luk positionen. Kører uanset om der er exit-ordrer.
 
     ⚠ "UANSET HVAD" ER IKKE DET SAMME SOM "ANTAG DET VÆRSTE". Kan positionen
     ikke læses, lukkes der INTET — en markedsordre på en position vi ikke kender,
     kan lige så godt åbne en som lukke en.
+
+    ⚠ MEN DEN MÅ HELLER IKKE VÆRE TAVS. Kravet er "uanset hvad", og en
+    tvangslukning der stiltiende gav op, ville efterlade en position natten over
+    med fuld børsmargin i stedet for intraday — og ingen ville vide det.
+
+    Derfor: er positionen ulæselig, prøves der igen hvert `blind_pause` sekund i
+    fem minutter. Lykkes det stadig ikke, afhænger alarmen af om der overhovedet
+    er handlet i dag:
+
+      · handlet i dag  -> push prioritet 5 + journal `tvangsluk_fejlet`
+      · ikke handlet   -> kun en linje i loggen
+
+    Den anden halvdel er lige så vigtig som den første: ringer telefonen hver
+    aften Iben ikke har handlet, slår hun den fra inden den aften hvor den
+    betyder noget.
     """
     t0 = datetime.datetime.now(DK)
     profil = await asyncio.to_thread(NT.klar)
@@ -563,12 +604,21 @@ async def tvangsluk(tracker, journal, *, instrument: str,
 
     flad = False
     fyld = None
-    for forsoeg in (1, 2):
+    blinde = 0
+    for forsoeg in range(1, 3 + blind_forsoeg):
         p = await asyncio.to_thread(NT.position, instrument, konto)
         netto = p.get("netto")
         if netto is None:
-            logger.error("[ExitOrdrer] tvangsluk: positionen er UKENDT")
+            # ⚠ Prøv igen — men luk ingenting imens.
+            blinde += 1
+            if blinde <= blind_forsoeg:
+                logger.warning(f"[ExitOrdrer] tvangsluk: positionen er UKENDT "
+                               f"({blinde}/{blind_forsoeg}) — venter")
+                await asyncio.sleep(blind_pause)
+                continue
+            logger.error("[ExitOrdrer] tvangsluk: positionen forblev UKENDT")
             break
+        blinde = 0
         if netto == 0:
             flad = True
             break
@@ -592,7 +642,19 @@ async def tvangsluk(tracker, journal, *, instrument: str,
         await asyncio.sleep(3)
 
     ud = {"flad": flad, "ryddet": antal_ryddet, "fyld": fyld,
+          "blind": blinde > blind_forsoeg,
+          "handlet_i_dag": _har_handlet_i_dag(tracker),
           "dansk": f"{t0:%H:%M}", "et": f"{t0.astimezone(ET):%H:%M}"}
+    if not flad and ud["blind"] and not ud["handlet_i_dag"]:
+        # ⚠ Ingen handel i dag + ulæselig position = ingenting at lukke.
+        # En linje i loggen, ikke en telefon der ringer.
+        logger.info("[ExitOrdrer] tvangsluk: positionen kunne ikke læses, men "
+                    "der er ikke handlet MES i dag — ingen alarm")
+        await journal.log_event(
+            ibkr_account=konto or None, source="manual_exit",
+            event_type="tvangsluk_uden_handel", symbol=instrument.split()[0],
+            payload=ud)
+        return ud
     if flad:
         await journal.log_event(
             ibkr_account=konto or None, source="manual_exit",
@@ -607,9 +669,12 @@ async def tvangsluk(tracker, journal, *, instrument: str,
             ibkr_account=konto or None, source="manual_exit",
             event_type="tvangsluk_fejlet", symbol=instrument.split()[0],
             payload=ud)
-        await _push("⚠ Tvangslukning MISLYKKEDES. Der kan stå en åben "
-                    "MES-position. Tjek NinjaTrader nu.",
-                    prioritet=5, titel="Trading Dash — tvangsluk")
+        await _push(
+            "⚠ Positionen kunne ikke læses — tjek NinjaTrader og luk manuelt."
+            if ud["blind"] else
+            "⚠ Tvangslukning MISLYKKEDES. Der kan stå en åben MES-position. "
+            "Tjek NinjaTrader nu.",
+            prioritet=5, titel="Trading Dash — tvangsluk")
         logger.error(f"[ExitOrdrer] ⚠ TVANGSLUK FEJLEDE: {ud}")
     return ud
 
@@ -720,10 +785,22 @@ class Overvaagning:
                 payload={"sekunder": round(time.time() - self._sidste_kurs_tid),
                          "note": "stoppen staar hvor den stod"})
             logger.error("[ExitOrdrer] ⚠ ingen kurs — trailing staar stille")
+            # ⚠ OG DEN SKAL KUNNE SES I VINDUET, ikke kun i journalen. En
+            # trailing stop der er holdt op med at foelge med, ser ud praecis
+            # som en der foelger med — indtil man opdager at tallet ikke har
+            # rykket sig i et kvarter.
+            for e in aktive:
+                if (e.get("ordre_type") or "").upper() == "TRAIL":
+                    self.tracker.opdater(
+                        e["order_id"],
+                        advarsel="Ingen kurs — stoppen følger ikke med")
 
         if kurs:
             for e in aktive:
                 if (e.get("ordre_type") or "").upper() == "TRAIL":
+                    # Kursen er tilbage -> ryd advarslen igen.
+                    if e.get("advarsel"):
+                        self.tracker.opdater(e["order_id"], advarsel=None)
                     try:
                         await self._traek_trail(e, kurs, instrument)
                     except Exception as ex:
@@ -745,7 +822,16 @@ class Overvaagning:
                              "note": "positionen kan ikke laeses; der er IKKE "
                                      "annulleret eller lukket noget"})
                 logger.error("[ExitOrdrer] ⚠ positionen er blind")
+                for e in aktive:
+                    self.tracker.opdater(
+                        e["order_id"],
+                        advarsel="Positionen kan ikke læses — exit-ordrerne "
+                                 "overvåges ikke lige nu")
             return
+        if self._blind_siden:
+            for e in aktive:
+                if (e.get("advarsel") or "").startswith("Positionen"):
+                    self.tracker.opdater(e["order_id"], advarsel=None)
         self._blind_siden = 0.0
 
         if netto == 0 and aktive:
@@ -835,5 +921,25 @@ class Overvaagning:
                         prioritet=4, dedup="exit_paamindelse")
         if self._tvangsluk_dato != nu.date() and nu >= lukketidspunkt(nu):
             self._tvangsluk_dato = nu.date()
+            # ⚠ KUN I ET VINDUE EFTER LUKKETID. Starter backenden kl. 23:30 —
+            # efter en genstart, eller fordi nogen taendte PC'en sent — ville
+            # den ellers fyre en tvangslukning med det samme. CME holder pause
+            # 17:00-18:00 ET (23:00-00:00 dansk), saa markedsordren ville ligge
+            # og vente, og "tvangsluk_udfoert" ville staa i journalen om en
+            # lukning der ikke skete.
+            forsinkelse = (nu - lukketidspunkt(nu)).total_seconds() / 60
+            if forsinkelse > 60:
+                logger.warning(
+                    f"[ExitOrdrer] lukketid var for {forsinkelse:.0f} min "
+                    f"siden — tvangslukning springes over. Er der en aaben "
+                    f"position, skal den lukkes manuelt.")
+                await self.journal.log_event(
+                    source="manual_exit", event_type="tvangsluk_sprunget_over",
+                    symbol=instrument.split()[0],
+                    payload={"minutter_efter_lukketid": round(forsinkelse),
+                             "hvorfor": "backenden startede efter lukketid; en "
+                                        "markedsordre i CME's pause ville ikke "
+                                        "fylde"})
+                return
             await tvangsluk(self.tracker, self.journal, instrument=instrument,
                             bogfoer_exit=self.bogfoer_exit)

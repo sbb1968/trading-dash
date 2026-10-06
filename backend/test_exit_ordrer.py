@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import pathlib
 import sys
-import types
 import zoneinfo
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -432,6 +432,160 @@ async def test_opret() -> None:
         gendan(orig)
 
 
+async def test_genstart() -> None:
+    """⚠ OVERLEVER EN BACKEND-GENSTART ALT DET DER SKAL?
+
+    En backend-genstart midt i en session har kostet dette projekt dyrt før:
+    27-09 doede K2 ved en genstart efter auto-start-vinduet, og 15:45-lukningen
+    fyrede aldrig. En exit-ordre der "forsvandt" ved en genstart ville vaere
+    vaerre: stoppen ligger stadig hos NT8, men backenden ved det ikke laengere
+    — saa den bliver hverken flyttet eller ryddet naar positionen lukkes.
+
+    Her proeves det med RIGTIG disk: en tracker skrives, en ny tracker laeses,
+    og loekken genoptager paa den.
+    """
+    print("\n  ── genstart ──")
+    import json
+    import tempfile
+    import orders_tracker as OT
+
+    with tempfile.TemporaryDirectory() as d:
+        aegte = OT.ORDERS_LOG
+        try:
+            OT.ORDERS_LOG = pathlib.Path(d) / "orders_log.json"
+
+            # ── FØR genstarten: en TRAIL der har fulgt kursen et stykke op ──
+            t1 = OT.OrdersTracker()
+            t1._entries = []
+            t1.record_placed(
+                order_id="NTM_P", source="manual_watchlist", ticker="MES",
+                action="BUY", shares=1, broker="NT8", ordre_type="LONG",
+                maalt={"status": "Filled", "filled": 1, "avg_fill": 6800.0})
+            t1.record_placed(
+                order_id="NTX_T", source="manual_exit", ticker="MES",
+                action="SELL", shares=1, order_type="STOPMARKET", broker="NT8",
+                ordre_type="TRAIL", parent_order_id="NTM_P", oco_id="TDOCO1",
+                trigger_pris=6816.0, trail_hoejeste=6820.0, trail_afstand=4.0)
+            t1.opdater("NTX_T", status="Working", bekraeftet=True,
+                       trail_stop_forventet=6816.0)
+
+            kraev(OT.ORDERS_LOG.exists(), "trackeren skrev til disk")
+            raa = json.loads(OT.ORDERS_LOG.read_text(encoding="utf-8"))
+            gemt = next(e for e in raa if e["order_id"] == "NTX_T")
+            kraev(gemt.get("trail_hoejeste") == 6820.0,
+                  "⚠ trail_hoejeste ligger PAA DISKEN, ikke kun i hukommelsen")
+            kraev(gemt.get("trigger_pris") == 6816.0, "…og den aktuelle stop")
+            kraev(gemt.get("trail_afstand") == 4.0, "…og afstanden ordren blev "
+                                                    "oprettet med")
+            kraev(gemt.get("oco_id") == "TDOCO1", "…og OCO-bindingen")
+
+            # ── GENSTARTEN: ny tracker, samme fil ───────────────────────────
+            t2 = OT.OrdersTracker()
+            e = t2.find("NTX_T")
+            kraev(e is not None, "exit-ordren findes efter genstart")
+            kraev(e.get("trail_hoejeste") == 6820.0,
+                  "⚠ trail_hoejeste genopbygget fra disken")
+            kraev(e.get("trigger_pris") == 6816.0, "…og stoppen")
+            kraev(len(t2.exit_ordrer_for("NTM_P")) == 1,
+                  "…og den hoerer stadig til sin position")
+
+            # ── Loekken maa IKKE lægge nye ordrer ved opstart ───────────────
+            jo = FalskJournal()
+            kald, orig = mock_nt(position={"netto": 1, "noegle": "MES DEC26"})
+            try:
+                o = EX.Overvaagning(t2, jo, hent_kurs=lambda: _kurs(6818.0),
+                                    instrument_for=lambda: "MES 12-26")
+                await o._tik("MES 12-26", "DEMO8580770")
+                kraev(not any(k[0] == "send_ordre" for k in kald),
+                      "⚠ der laegges INGEN nye ordrer ved opstart")
+                # Kursen (6818) er UNDER hoejeste (6820), saa stoppen skal
+                # heller ikke flyttes.
+                kraev(not any(k[0] == "aendr" for k in kald),
+                      "⚠ og en uaendret kurs flytter ikke stoppen")
+            finally:
+                gendan(orig)
+
+            # ── Men den SKAL indhente hvis markedet loeb mens vi var nede ──
+            # ⚠ Det er ikke det samme som "aendrer ved opstart". En stop der
+            # bliver staaende hvor den stod for en time siden, beskytter mod
+            # et marked der ikke findes laengere.
+            jo = FalskJournal()
+            kald, orig = mock_nt(position={"netto": 1, "noegle": "MES DEC26"})
+            try:
+                o = EX.Overvaagning(t2, jo, hent_kurs=lambda: _kurs(6840.0),
+                                    instrument_for=lambda: "MES 12-26")
+                await o._tik("MES 12-26", "DEMO8580770")
+                kraev(any(k[0] == "aendr" for k in kald),
+                      "⚠ men den INDHENTER hvis kursen loeb mens vi var nede")
+                e2 = t2.find("NTX_T")
+                kraev(e2.get("trail_hoejeste") == 6840.0,
+                      f"…og det nye hoejeste gemmes ({e2.get('trail_hoejeste')})")
+                kraev(e2.get("trigger_pris") == 6836.0,
+                      f"…med stoppen 4 points under ({e2.get('trigger_pris')})")
+            finally:
+                gendan(orig)
+
+            # ── OCO-loebenummeret overlever ogsaa ──────────────────────────
+            foer = EX._laes_konfig()["oco_loebenr"]
+            EX._nyt_oco_id()
+            kraev(EX._laes_konfig()["oco_loebenr"] == foer + 1,
+                  "⚠ OCO-loebenummeret staar i exit_config.json, ikke i RAM")
+        finally:
+            OT.ORDERS_LOG = aegte
+
+
+async def test_tvangsluk_blind() -> None:
+    """⚠ Ukendt position: proev igen, og alarmér kun hvis der ER handlet."""
+    print("\n  ── tvangsluk med ulaeselig position ──")
+
+    # 1. Ingen handel i dag -> ingen alarm, kun en linje.
+    tr, jo = FalskTracker([]), FalskJournal()
+    kald, orig = mock_nt(position={"netto": None})
+    try:
+        ud = await EX.tvangsluk(tr, jo, instrument="MES 12-26",
+                                blind_forsoeg=2, blind_pause=0.01)
+        kraev(not any(k[0] == "send_ordre" for k in kald),
+              "⚠ ulaeselig position -> der sendes INGEN markedsordre")
+        kraev("tvangsluk_uden_handel" in jo.typer(),
+              f"ikke handlet i dag -> ingen alarm ({jo.typer()})")
+        kraev("tvangsluk_fejlet" not in jo.typer(),
+              "⚠ …og telefonen ringer IKKE. En alarm hver aften hun ikke har "
+              "handlet, bliver slaaet fra inden den betyder noget.")
+    finally:
+        gendan(orig)
+
+    # 2. Handlet i dag -> alarm.
+    import datetime as _dt
+    i_dag = _dt.datetime.now().isoformat()
+    tr = FalskTracker([{"order_id": "NTM_X", "ticker": "MES", "broker": "NT8",
+                        "ordre_type": "LONG", "placed_at": i_dag}])
+    jo = FalskJournal()
+    kald, orig = mock_nt(position={"netto": None})
+    try:
+        ud = await EX.tvangsluk(tr, jo, instrument="MES 12-26",
+                                blind_forsoeg=2, blind_pause=0.01)
+        kraev("tvangsluk_fejlet" in jo.typer(),
+              f"⚠ handlet i dag + ulaeselig -> ALARM ({jo.typer()})")
+        kraev(ud["blind"] and ud["handlet_i_dag"], "og begge flag er sat")
+    finally:
+        gendan(orig)
+
+    # 3. Og den proever faktisk igen foer den giver op.
+    tr = FalskTracker([]); jo = FalskJournal()
+    kald, orig = mock_nt(position={"netto": None})
+    try:
+        await EX.tvangsluk(tr, jo, instrument="MES 12-26",
+                           blind_forsoeg=4, blind_pause=0.01)
+        n = sum(1 for k in kald if k[0] == "position")
+        kraev(n >= 4, f"der blev spurgt {n} gange foer den gav op")
+    finally:
+        gendan(orig)
+
+
+async def _kurs(v):
+    return v
+
+
 async def _ingen():
     return None
 
@@ -445,6 +599,8 @@ def main() -> int:
     test_lukketid()
     asyncio.run(test_overvaagning())
     asyncio.run(test_opret())
+    asyncio.run(test_genstart())
+    asyncio.run(test_tvangsluk_blind())
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
 

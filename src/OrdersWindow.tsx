@@ -27,7 +27,35 @@ interface OrderEntry {
    *  en anden konto end den forbindelsen styrer. Uden den ville "Status
    *  ukendt" se ud som en fejl i stedet for som en graense for hvad vi kan vide. */
   note?: string | null;
+
+  // ── Exit-ordrer (backend: orders_tracker + /orders/list) ──────────────
+  /** LONG | SHORT | EXIT | PLOSS | TPROF | TRAIL | UKENDT. Gamle raekker har
+   *  den ikke, og viser saa `order_type` som hidtil. */
+  ordre_type?:      string | null;
+  parent_order_id?: string | null;
+  oco_id?:          string | null;
+  /** PLOSS/TPROF: Ibens pris. TRAIL: den aktuelle stop. */
+  trigger_pris?:    number | null;
+  trail_hoejeste?:  number | null;
+  trail_afstand?:   number | null;
+  exit_aarsag?:     string | null;
+  /** ⚠ KUN PAA PARENT-RAEKKER, og KUN fra backenden. Se noten ved knapperne. */
+  exit_knapper?:    Record<string, "ingen" | "afventer" | "aktiv">;
+  exit_mulig?:      boolean;
+  /** Kort besked fra overvaagningsloekken, fx "Ingen kurs — stoppen følger
+   *  ikke med". ⚠ En trailing stop der er holdt op med at foelge markedet,
+   *  ser ud praecis som en der foelger med. */
+  advarsel?:        string | null;
 }
+
+const EXIT_TYPER = ["PLOSS", "TPROF", "TRAIL"] as const;
+type ExitType = (typeof EXIT_TYPER)[number];
+
+const EXIT_NAVN: Record<ExitType, string> = {
+  PLOSS: "Stop loss",
+  TPROF: "Target profit",
+  TRAIL: "Trailing stop",
+};
 
 /** Én handel = entry + exit på samme linje. Fra `trades`-tabellen, ikke fra
  *  ordre-trackeren — det er journalens parrede rækker, med P&L regnet med
@@ -48,7 +76,92 @@ interface HandelRow {
   payload?:       { broker?: string; konto?: string } | null;
 }
 
-// ── Hjælpere ──────────────────────────────────────────────────
+/** Lille modal til PLOSS/TPROF. TRAIL har ingen — afstanden kommer fra
+ *  Konfiguratoren, og et felt man skal udfylde hver gang, bliver udfyldt
+ *  forkert en travl dag. */
+function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
+  type: ExitType;
+  ticker: string;
+  kurs: number | null;
+  fejl: string;
+  travl: boolean;
+  onOpret: (pris: number) => void;
+  onLuk: () => void;
+}) {
+  const [pris, setPris] = useState<string>("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onLuk(); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onLuk]);
+
+  const tal = Number(pris);
+  const gyldig = pris !== "" && isFinite(tal) && tal > 0;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000,
+    }} onMouseDown={e => { if (e.target === e.currentTarget) onLuk(); }}>
+      <div style={{
+        background: "var(--bg-elevated)", border: "1px solid var(--border-strong)",
+        borderRadius: 8, padding: 20, minWidth: 320,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4,
+                      color: "var(--text-primary)" }}>
+          {EXIT_NAVN[type]} på {ticker}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 12 }}>
+          {kurs != null
+            ? <>Aktuel kurs: <b>{kurs.toLocaleString("da-DK",
+                {minimumFractionDigits: 2, maximumFractionDigits: 2})}</b></>
+            : "⚠ Ingen aktuel kurs"}
+        </div>
+        <input
+          ref={ref} type="number" step={0.25} value={pris}
+          placeholder={type === "PLOSS" ? "Stop loss-pris" : "Target profit-pris"}
+          onChange={e => setPris(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && gyldig && !travl) onOpret(tal); }}
+          style={{
+            width: "100%", padding: "7px 10px", fontSize: 13,
+            background: "var(--bg-input)", color: "var(--text-primary)",
+            border: "1px solid var(--border-default)", borderRadius: 4,
+            fontVariantNumeric: "tabular-nums",
+          }} />
+        {/* ⚠ Backendens tekst, ikke vores egen gaet. Den ved hvilken side af
+            kursen prisen skal ligge, og den har hentet en FRISK kurs lige foer
+            afsendelse — modalen her viser den kurs der var da den blev aabnet. */}
+        {fejl && (
+          <div style={{ color: "var(--bear)", fontSize: 11.5, marginTop: 10,
+                        lineHeight: 1.45 }}>{fejl}</div>
+        )}
+        <div style={{ display: "flex", gap: 8, marginTop: 16,
+                      justifyContent: "flex-end" }}>
+          <button onClick={onLuk} disabled={travl}
+            style={{ padding: "6px 14px", fontSize: 12, borderRadius: 4,
+                     background: "transparent", color: "var(--text-secondary)",
+                     border: "1px solid var(--border-default)",
+                     cursor: travl ? "wait" : "pointer" }}>Annuller</button>
+          <button onClick={() => gyldig && onOpret(tal)}
+            disabled={!gyldig || travl}
+            style={{ padding: "6px 16px", fontSize: 12, fontWeight: 700,
+                     borderRadius: 4, background: "var(--accent)", color: "#fff",
+                     border: "1px solid var(--accent)",
+                     opacity: (!gyldig || travl) ? 0.45 : 1,
+                     cursor: (!gyldig || travl) ? "not-allowed" : "pointer" }}>
+            {travl ? "Opretter…" : "Opret"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Hjælpere ──────────────────────────────────────────────
 function fmtTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -156,6 +269,56 @@ export function OrdersWindow() {
   const [handler, setHandler] = useState<HandelRow[]>([]);
   useEffect(() => { localStorage.setItem("orders_fane", fane); }, [fane]);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [prisModal, setPrisModal] = useState<
+    {type: ExitType; parent: string; ticker: string} | null>(null);
+  const [modalFejl, setModalFejl] = useState("");
+  const [travl, setTravl] = useState(false);
+  const [kurs, setKurs] = useState<number | null>(null);
+
+  async function hentKurs(ticker: string) {
+    try {
+      const r = await fetch(`http://127.0.0.1:8000/quote/${ticker}`);
+      const d = await r.json();
+      setKurs(typeof d.price === "number" ? d.price : null);
+    } catch { setKurs(null); }
+  }
+
+  /** Opret en exit-ordre. ⚠ Knaptilstanden saettes IKKE her — se noten ved
+   *  knapperne. Vi henter listen igen og lader backenden svare. */
+  async function opretExit(parent: string, type: ExitType, pris: number | null) {
+    setTravl(true); setModalFejl("");
+    try {
+      const r = await fetch("http://127.0.0.1:8000/exit-ordre", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({parent_order_id: parent, type, pris}),
+      });
+      const d = await r.json();
+      if (!d.success) { setModalFejl(d.error || "Ukendt fejl."); return; }
+      setPrisModal(null);
+      await fetchOrders();     // ⚠ straks igen, saa knappen ikke staar forkert
+    } catch (e: any) {
+      setModalFejl(`Kunne ikke nå backenden: ${e?.message || e}`);
+    } finally { setTravl(false); }
+  }
+
+  async function annullerExit(o: OrderEntry) {
+    const navn = EXIT_NAVN[(o.ordre_type || "") as ExitType] || "exit-ordren";
+    const pris = o.trigger_pris != null
+      ? ` på ${o.trigger_pris.toLocaleString("da-DK",
+          {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "";
+    if (!window.confirm(`Annullér ${navn.toLowerCase()}${pris}?`)) return;
+    try {
+      const r = await fetch("http://127.0.0.1:8000/exit-ordre/annuller", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({order_id: String(o.order_id)}),
+      });
+      const d = await r.json();
+      if (!d.success) setError(d.error || "Kunne ikke annullere.");
+      // ⚠ Genlaegningen af soeskende sker i backenden (OCO kaskaderer). Vi
+      // venter paa listen frem for at gaette hvad der nu er aktivt.
+      await fetchOrders();
+    } catch (e: any) { setError(`Kunne ikke nå backenden: ${e?.message || e}`); }
+  }
   const timerRef = useRef<number | null>(null);
 
   // Hvilke status-grupper skal vises? Iben kan toggle med badges øverst.
@@ -282,6 +445,30 @@ export function OrdersWindow() {
     if (o.status_group === "unknown"   && !showUnknown)   return false;
     return true;
   });
+
+  /** Exit-raekker lige under deres parent, let indrykket.
+   *
+   * ⚠ TRACKEREN LEVERER NYESTE FOERST, saa en exit-ordre staar normalt OVER
+   * den position den beskytter. Laest ovenfra ville det se ud som om stoppen
+   * hoerte til noget andet — eller til ingenting. */
+  function grupper(raekker: OrderEntry[]): {o: OrderEntry; barn: boolean}[] {
+    const exits = new Map<string, OrderEntry[]>();
+    for (const o of raekker) {
+      const t = (o.ordre_type || "").toUpperCase();
+      if (!(EXIT_TYPER as readonly string[]).includes(t)) continue;
+      const pid = String(o.parent_order_id || "");
+      if (!pid) continue;
+      (exits.get(pid) || exits.set(pid, []).get(pid)!).push(o);
+    }
+    const ud: {o: OrderEntry; barn: boolean}[] = [];
+    for (const o of raekker) {
+      const t = (o.ordre_type || "").toUpperCase();
+      if ((EXIT_TYPER as readonly string[]).includes(t) && o.parent_order_id) continue;
+      ud.push({o, barn: false});
+      for (const b of exits.get(String(o.order_id)) || []) ud.push({o: b, barn: true});
+    }
+    return ud;
+  }
 
   // Genbrugelig badge-style
   function badgeStyle(active: boolean, color: string): React.CSSProperties {
@@ -414,6 +601,14 @@ export function OrdersWindow() {
           {lastUpdate && `Opdateret ${lastUpdate}`}
         </span>
       </div>
+
+      {prisModal && (
+        <ExitPrisModal
+          type={prisModal.type} ticker={prisModal.ticker} kurs={kurs}
+          fejl={modalFejl} travl={travl}
+          onOpret={pris => opretExit(prisModal.parent, prisModal.type, pris)}
+          onLuk={() => { setPrisModal(null); setModalFejl(""); }} />
+      )}
 
       {/* ── Fejl ── */}
       {error && (
@@ -574,17 +769,25 @@ export function OrdersWindow() {
                 <th style={{ textAlign: "center" }}>Type</th>
                 <th style={{ textAlign: "left" }}>Status</th>
                 <th style={{ textAlign: "right" }}>Fyldt</th>
-                <th style={{ textAlign: "right" }}>Snit pris</th>
+                {/* ⚠ "Snit pris" passede kun paa fyldte ordrer. En PLOSS har
+                    ingen snitpris — den har en TRIGGERPRIS, og det er den
+                    Iben skal kunne se. Samme kolonne, aerligt navn. */}
+                <th style={{ textAlign: "right" }}>Entry price</th>
                 <th style={{ textAlign: "center" }}></th>
               </tr>
             </thead>
             <tbody>
-              {visibleOrders.map(o => {
+              {grupper(visibleOrders).map(({o, barn}) => {
                 const isOpen = o.status_group === "open";
                 const sideColor = o.action === "BUY" ? "var(--bull)" : "var(--bear)";
+                const type = (o.ordre_type || "").toUpperCase();
+                const erExit = (EXIT_TYPER as readonly string[]).includes(type);
+                const knapper = o.exit_knapper;
                 return (
-                  <tr key={o.order_id}>
-                    <td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+                  <tr key={o.order_id}
+                      style={barn ? {background: "var(--bg-surface)"} : undefined}>
+                    <td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap",
+                                 paddingLeft: barn ? 18 : undefined }}>
                       <div>{fmtTime(o.placed_at)}</div>
                       <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
                         {fmtDate(o.placed_at)}
@@ -600,9 +803,29 @@ export function OrdersWindow() {
                       {o.action}
                     </td>
                     <td style={{ textAlign: "right" }}>{o.shares.toLocaleString("da-DK")}</td>
-                    <td style={{ textAlign: "center", color: "var(--text-muted)", fontSize: 11 }}>
-                      {o.order_type}
-                      {o.limit_price ? ` @ $${o.limit_price.toFixed(2)}` : ""}
+                    {/* ⚠ ordre_type FOERST. Gamle raekker har den ikke og viser
+                        order_type (MKT/LMT) som hidtil — historikken skal stadig
+                        kunne laeses. */}
+                    <td style={{ textAlign: "center", fontSize: 11,
+                                 fontWeight: o.ordre_type ? 700 : 400,
+                                 color: erExit ? "var(--ur-us)"
+                                      : type === "EXIT" ? "var(--text-secondary)"
+                                      : type === "LONG" ? "var(--bull)"
+                                      : type === "SHORT" ? "var(--bear)"
+                                      : "var(--text-muted)" }}
+                        title={o.exit_aarsag ? `Lukket af ${o.exit_aarsag}` : undefined}>
+                      {o.ordre_type || o.order_type}
+                      {!o.ordre_type && o.limit_price
+                        ? ` @ $${o.limit_price.toFixed(2)}` : ""}
+                      {o.exit_aarsag ? ` · ${o.exit_aarsag}` : ""}
+                      {o.advarsel && (
+                        <div style={{ color: "var(--bear)", fontSize: 9.5,
+                                      fontWeight: 600, marginTop: 1,
+                                      whiteSpace: "normal", maxWidth: 150,
+                                      lineHeight: 1.25 }}>
+                          ⚠ {o.advarsel}
+                        </div>
+                      )}
                     </td>
                     <td style={{ color: statusColor(o.status_group), fontWeight: 600 }}
                         title={o.note || undefined}>
@@ -615,11 +838,82 @@ export function OrdersWindow() {
                         ? `${o.filled}${o.remaining > 0 ? ` / ${o.filled + o.remaining}` : ""}`
                         : "—"}
                     </td>
-                    <td style={{ textAlign: "right" }}>
-                      {o.avg_fill > 0 ? `$${o.avg_fill.toFixed(2)}` : "—"}
+                    {/* Entry price: fyldpris for LONG/SHORT/EXIT, triggerpris
+                        for PLOSS/TPROF, aktuel stop for TRAIL. */}
+                    <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}
+                        title={type === "TRAIL" && o.trail_hoejeste != null
+                          ? `${o.action === "SELL" ? "Højeste" : "Laveste"} `
+                            + `${o.trail_hoejeste.toLocaleString("da-DK",
+                                {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                            + ` · afstand ${(o.trail_afstand ?? 0).toLocaleString("da-DK",
+                                {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                          : undefined}>
+                      {erExit
+                        ? (o.trigger_pris != null
+                            ? `$${o.trigger_pris.toFixed(2)}` : "—")
+                        : (o.avg_fill > 0 ? `$${o.avg_fill.toFixed(2)}` : "—")}
+                      {type === "TRAIL" && <span style={{ opacity: 0.6 }}> ↗</span>}
                     </td>
-                    <td style={{ textAlign: "center" }}>
-                      {isOpen && (
+                    <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      {/* ── Exit-raekke: et kryds, som i watchlisten ──────── */}
+                      {erExit && isOpen && (
+                        <span onClick={() => annullerExit(o)}
+                          title={`Annullér ${EXIT_NAVN[type as ExitType]}`}
+                          style={{ cursor: "pointer", color: "var(--text-muted)",
+                                   fontSize: 14, padding: "0 6px",
+                                   userSelect: "none" }}>×</span>
+                      )}
+
+                      {/* ── Parent-raekke: de tre knapper ─────────────────
+                          ⚠ TILSTANDEN KOMMER KUN FRA BACKENDEN (exit_knapper),
+                          aldrig fra klikket. Farvede vi gul ved klik, ville en
+                          AFVIST stop loss se aktiv ud — og det opdager man
+                          foerst den dag man faar brug for den.
+                          Derfor: klik -> POST -> hent listen -> farven skifter
+                          naar ATI har bekraeftet. */}
+                      {!erExit && o.exit_mulig && knapper && (
+                        <span style={{ display: "inline-flex", gap: 4 }}>
+                          {EXIT_TYPER.map(t => {
+                            const st = knapper[t] || "ingen";
+                            const aktiv = st === "aktiv";
+                            const venter = st === "afventer";
+                            return (
+                              <button key={t}
+                                disabled={aktiv || venter || travl}
+                                onClick={() => {
+                                  if (t === "TRAIL") {
+                                    // ⚠ Ingen modal. Afstanden staar i
+                                    // Konfiguratoren; et felt man skal udfylde
+                                    // hver gang, bliver udfyldt forkert en
+                                    // travl dag.
+                                    opretExit(String(o.order_id), t, null);
+                                  } else {
+                                    setModalFejl(""); setKurs(null);
+                                    hentKurs(o.ticker);
+                                    setPrisModal({type: t, parent: String(o.order_id),
+                                                  ticker: o.ticker});
+                                  }
+                                }}
+                                title={aktiv ? `${EXIT_NAVN[t]} er aktiv`
+                                     : venter ? `${EXIT_NAVN[t]} afventer bekræftelse`
+                                     : `Opret ${EXIT_NAVN[t].toLowerCase()}`}
+                                style={{
+                                  fontSize: 10, fontWeight: 700, padding: "2px 7px",
+                                  borderRadius: 3, borderStyle: "solid", borderWidth: 1,
+                                  background: aktiv ? "var(--aktiv-glod)" : "transparent",
+                                  borderColor: aktiv ? "var(--ur-us)" : "var(--accent)",
+                                  color: aktiv ? "var(--ur-us)" : "var(--accent)",
+                                  opacity: venter ? 0.5 : 1,
+                                  cursor: (aktiv || venter) ? "default" : "pointer",
+                                }}>
+                                {venter ? "…" : t}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      )}
+
+                      {!erExit && isOpen && (
                         <button
                           onClick={() => handleCancel(o)}
                           disabled={cancellingId === o.order_id}

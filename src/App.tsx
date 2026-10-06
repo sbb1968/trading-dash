@@ -1080,6 +1080,33 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
   const [confirmDelete, setConfirmDelete] = useState<boolean>(() => localStorage.getItem("confirm_delete_open") !== "false");
   useEffect(() => { localStorage.setItem("confirm_delete_open", confirmDelete ? "true" : "false"); }, [confirmDelete]);
 
+  // ── Exit-ordrer: trailing-afstand (backend /exit-config) ──────────────
+  // ⚠ GEMMES PÅ BACKENDEN, ikke i localStorage. Det er backendens
+  // overvågningsløkke der skal bruge værdien når den flytter stoppen — en
+  // indstilling i browserens lager ville være usynlig for den der handler på
+  // den, og en trailing stop der følger en afstand ingen kan se, er værre end
+  // ingen trailing stop.
+  const [trailAfstand, setTrailAfstand] = useState<string>("");
+  const [trailDirty, setTrailDirty] = useState(false);
+  const [trailErr, setTrailErr] = useState("");
+  const [trailAktiv, setTrailAktiv] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const r = await fetch("http://127.0.0.1:8000/exit-config");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        if (alive) { setTrailAfstand(String(d.trail_afstand)); setTrailAktiv(true); }
+      } catch {
+        // ⚠ Ikke en fejl at vise. Har maskinen ingen NT8-ordrevej, findes
+        // exit-ordrer ikke, og så skal feltet bare ikke stå der.
+        if (alive) setTrailAktiv(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   // ── Risikostyring: konfigurerbare grænser pr. strategi (backend /risk-config) ──
   const RISK_API = "http://127.0.0.1:8000";
   const [risk, setRisk] = useState<any | null>(null);
@@ -1153,6 +1180,23 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
   }
 
   async function handleSave() {
+    // ⚠ Exit-config FØR risiko-config: fejler den, skal panelet blive åbent
+    // med beskeden, ikke lukke og lade som om værdien blev gemt.
+    if (trailDirty && trailAktiv) {
+      try {
+        const r = await fetch("http://127.0.0.1:8000/exit-config", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ trail_afstand: Number(trailAfstand) }),
+        });
+        const d = await r.json();
+        if (!d.success) { setTrailErr(d.error || "Kunne ikke gemme."); return; }
+        setTrailDirty(false);
+      } catch (e: any) {
+        setTrailErr(`Kunne ikke gemme trailing-afstand: ${e?.message || e}`);
+        return;
+      }
+    }
+
     // Gem risiko-config på backenden (font/kolonner er allerede gemt løbende).
     if (riskDirty && risk?.strategies) {
       const body: any = {};
@@ -1265,6 +1309,52 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
             med dem</b>. Ellers kunne et tastetryk lægge en markedsordre på en mængde du
             hverken kan se eller ændre.
           </div>
+        )}
+
+        {/* ── Exit-ordrer: trailing-afstand ── */}
+        {trailAktiv && (
+          <>
+            <div className="konfigurator-divider" />
+            <div className="konfigurator-panel">
+              <div className="konfigurator-panel-title">
+                Exit-ordrer (MES via NinjaTrader)
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10,
+                            flexWrap: "wrap" }}>
+                <label style={{ fontSize: 12 }}>Trailing stop-afstand (points)</label>
+                <input
+                  type="number" step={0.25} min={0.25} max={50}
+                  value={trailAfstand}
+                  onChange={e => { setTrailAfstand(e.target.value);
+                                   setTrailDirty(true); setTrailErr(""); }}
+                  style={{ width: 90, padding: "4px 8px", fontSize: 12,
+                           background: "var(--bg-input)",
+                           color: "var(--text-primary)",
+                           border: "1px solid var(--border-default)",
+                           borderRadius: 4 }} />
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  {Number(trailAfstand) > 0
+                    ? `= $${(Number(trailAfstand) * 5).toFixed(2)} pr. MES-kontrakt`
+                    : ""}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)",
+                            marginTop: 8, lineHeight: 1.5 }}>
+                4,00 points = $20 pr. MES-kontrakt.{" "}
+                {/* ⚠ Dét her skal stå. En aktiv TRAIL beholder den afstand den
+                    blev oprettet med — ellers ville en justering her flytte en
+                    stop der allerede beskytter en åben position, uden at nogen
+                    bad om det. */}
+                <b>Gælder nye TRAIL-ordrer.</b> En trailing stop der allerede
+                er lagt, beholder den afstand den blev oprettet med.
+              </div>
+              {trailErr && (
+                <div style={{ color: "var(--bear)", fontSize: 12, marginTop: 8 }}>
+                  {trailErr}
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* ── Risikostyring: grænser pr. strategi ── */}
