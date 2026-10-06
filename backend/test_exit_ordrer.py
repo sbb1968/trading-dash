@@ -701,6 +701,109 @@ async def test_tvangsluk_blind() -> None:
         gendan(orig)
 
 
+async def test_fyldt_uden_pris() -> None:
+    """⚠ FILLED UDEN FYLDPRIS ER IKKE FAERDIGT — det er et nyt forsoeg.
+
+    Dette var den ANDEN aarsag til at shorten 06-10 aldrig blev lukket, og den
+    ville have staaet tilbage efter at rekkefoelgen var rettet.
+
+    ATI pusher status og fyldpris i hver sit felt, og de kommer ikke
+    noedvendigvis i samme oplaeg. `fyldning()` siger selv at (0, 0.0) betyder
+    "intet set", ikke "nul fyldt" — men loekken skrev raekken terminal med
+    nuller, og saa var den ude af `aktive` for altid.
+
+    Maalt: ordre 602502520254 fyldte 1 @ 7850,25 (NT8's egen log 13:07:31),
+    mens raekken stod som status=Filled filled=0 avg_fill=0.0.
+    """
+    print()
+    print("  -- Filled uden fyldpris --")
+    bogfoert = []
+
+    async def bogfoer(oid, action, antal, pris, status, aarsag):
+        bogfoert.append({"pris": pris, "antal": antal, "aarsag": aarsag})
+
+    e = {"order_id": "NTX_U", "source": "manual_exit", "ordre_type": "TRAIL",
+         "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
+         "shares": 1, "action": "BUY", "trigger_pris": 7850.25,
+         "ticker": "MES", "trail_afstand": 1.0, "trail_hoejeste": 7849.0}
+    tr, jo = FalskTracker([dict(e)]), FalskJournal()
+
+    # Gennemloeb 1: ATI siger Filled, men fyldfelterne mangler i oplaegget.
+    kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                         ordre_status="Filled", fyldning=(0, 0.0))
+    try:
+        o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                            instrument_for=lambda: "MES 12-26",
+                            bogfoer_exit=bogfoer)
+        await o._tik("MES 12-26", "DEMO8580770")
+        r = tr.find("NTX_U")
+        kraev(not bogfoert, "uden fyldpris bogfoeres der INTET")
+        kraev(r.get("avg_fill") in (None, 0) and not r.get("filled"),
+              f"⚠ og der skrives ingen nuller i raekken "
+              f"(filled={r.get('filled')} avg={r.get('avg_fill')})")
+        kraev(r.get("fyld_forsoeg") == 1,
+              f"raekken taeller forsoeget ({r.get('fyld_forsoeg')})")
+        kraev(bool(r.get("advarsel")),
+              f"⚠ ...og det kan SES i vinduet ({r.get('advarsel')!r})")
+        kraev(not any(k[0] == "annuller" for k in kald),
+              "⚠ en fyldt ordre annulleres IKKE som en efterladt rest")
+    finally:
+        gendan(orig)
+
+    # Gennemloeb 2: naeste oplaeg baerer tallene — nu skal den bogfoeres.
+    kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                         ordre_status="Filled", fyldning=(1, 7850.25))
+    try:
+        o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                            instrument_for=lambda: "MES 12-26",
+                            bogfoer_exit=bogfoer)
+        await o._tik("MES 12-26", "DEMO8580770")
+        r = tr.find("NTX_U")
+        kraev(len(bogfoert) == 1,
+              f"⚠ naeste oplaeg bogfoerer fyldningen ({len(bogfoert)})")
+        if bogfoert:
+            kraev(bogfoert[0]["pris"] == 7850.25,
+                  f"    ...til den rigtige pris ({bogfoert[0]['pris']})")
+        kraev(r.get("filled") == 1, f"raekken baerer antallet ({r.get('filled')})")
+        kraev(r.get("fyld_bogfoert") is True, "...og er markeret bogfoert")
+        kraev(not r.get("advarsel"), "...og advarslen er vaek igen")
+    finally:
+        gendan(orig)
+
+    # Gennemloeb 3: den maa IKKE bogfoeres to gange.
+    kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                         ordre_status="Filled", fyldning=(1, 7850.25))
+    try:
+        o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                            instrument_for=lambda: "MES 12-26",
+                            bogfoer_exit=bogfoer)
+        await o._tik("MES 12-26", "DEMO8580770")
+        kraev(len(bogfoert) == 1,
+              f"⚠ og den bogfoeres ikke igen naeste gennemloeb "
+              f"({len(bogfoert)})")
+    finally:
+        gendan(orig)
+
+    # Og tavsheden skal siges hoejt — ellers staar handlen aaben i stilhed.
+    print()
+    tr2, jo2 = FalskTracker([dict(e, order_id="NTX_V")]), FalskJournal()
+    kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                         ordre_status="Filled", fyldning=(0, 0.0))
+    try:
+        o = EX.Overvaagning(tr2, jo2, hent_kurs=lambda: _ingen(),
+                            instrument_for=lambda: "MES 12-26",
+                            bogfoer_exit=bogfoer)
+        for _ in range(EX.FYLD_FORSOEG_ALARM):
+            await o._tik("MES 12-26", "DEMO8580770")
+        typer = jo2.typer()
+        kraev("exit_fyldt_uden_pris" in typer,
+              f"⚠ efter {EX.FYLD_FORSOEG_ALARM} forsoeg siges det HOEJT ({typer})")
+        kraev(typer.count("exit_fyldt_uden_pris") == 1,
+              "...én gang, ikke hvert gennemloeb")
+    finally:
+        gendan(orig)
+
+
 async def test_fyldt_exit_bogfoeres() -> None:
     """⚠ FYLDER EN EXIT, SKAL DEN BOGFOERES — ikke annulleres.
 
@@ -799,6 +902,7 @@ def main() -> int:
     test_lukketid()
     asyncio.run(test_overvaagning())
     asyncio.run(test_opret())
+    asyncio.run(test_fyldt_uden_pris())
     asyncio.run(test_fyldt_exit_bogfoeres())
     asyncio.run(test_genstart())
     asyncio.run(test_tvangsluk_blind())

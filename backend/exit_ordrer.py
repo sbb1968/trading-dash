@@ -68,6 +68,10 @@ TRAIL_THROTTLE_SEK = 2.0
 KURS_STILHED_SEK = 10.0
 # ...og hvor længe positionen må være ulæselig før det samme.
 POSITION_BLIND_SEK = 30.0
+# Hvor mange gennemløb en fyldt ordre må mangle sin fyldpris, før det siges
+# højt. ⚠ Den SKAL siges højt: uden fyldpris er der ingen P&L, ingen
+# entry/exit-parring og intet chart — handlen står åben i journalen.
+FYLD_FORSOEG_ALARM = 5
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -868,6 +872,27 @@ class Overvaagning:
                   and er_exit_type(e.get("ordre_type") or "")
                   and e.get("status") not in ("Filled", "Cancelled", "Rejected")]
 
+        # ⚠ FYLDT, MEN UDEN TAL. ATI pusher status og fyldpris i hver sit felt,
+        # og de kommer ikke noedvendigvis i samme oplaeg. `fyldning()` siger det
+        # selv i sin egen docstring: (0, 0.0) betyder "intet set", ikke "nul
+        # fyldt". Loekken behandlede det alligevel som "intet at bogfoere" og
+        # skrev SAMTIDIG raekken terminal med nuller — hvorefter den faldt ud af
+        # `aktive` for altid og fyldningen var vaek.
+        #
+        # Maalt 06-10: ordre 602502520254 fyldte 1 @ 7850,25 (NT8's egen log),
+        # raekken stod som status=Filled filled=0 avg_fill=0.0, og shorten blev
+        # aldrig lukket i journalen. Rekkefoelge-fejlen ovenfor var den ene
+        # aarsag; DEN HER var den anden, og den ville have staaet tilbage.
+        #
+        # Saadanne raekker bliver spurgt igen hvert gennemloeb. De trailes IKKE
+        # — ordren er fyldt, der er intet at flytte.
+        uafklarede = [e for e in self.tracker._entries
+                      if e.get("source") == "manual_exit"
+                      and er_exit_type(e.get("ordre_type") or "")
+                      and e.get("status") == "Filled"
+                      and not e.get("fyld_bogfoert")
+                      and not e.get("avg_fill")]
+
         kurs = await self.hent_kurs()
         if kurs:
             self._sidste_kurs_tid = time.time()
@@ -919,22 +944,51 @@ class Overvaagning:
         # lukket et andet sted" — og den stillede det forkerte spoergsmaal
         # foerst. En fyldt exit FORKLARER hvorfor positionen er nul, saa
         # den skal laeses foerst.
-        for e in aktive:
+        for e in list(aktive) + list(uafklarede):
             oid = str(e["order_id"])
             st = await asyncio.to_thread(NT.ordre_status, oid)
-            if not st:
+            # En raekke vi allerede VED er fyldt, skal spoerges om fyldprisen
+            # selv om status-feltet er faldet ud af oplaegget igen.
+            fyldt_foer = e.get("status") == "Filled"
+            if not st and not fyldt_foer:
                 continue          # ⚠ "" er UKENDT — lad raekken staa
-            if st == "Filled":
+            if st == "Filled" or fyldt_foer:
                 antal, pris = await asyncio.to_thread(NT.fyldning, oid)
-                self.tracker.opdater(oid, status=st, bekraeftet=True,
-                                     filled=antal, avg_fill=pris, remaining=0)
-                if self.bogfoer_exit and antal and pris:
-                    try:
-                        await self.bogfoer_exit(
-                            oid, e.get("action"), antal, pris, st,
-                            normaliser_type(e.get("ordre_type")))
-                    except Exception as ex:
-                        logger.error(f"[ExitOrdrer] bogfoering fejlede: {ex}")
+                if antal and pris:
+                    self.tracker.opdater(oid, status="Filled", bekraeftet=True,
+                                         filled=antal, avg_fill=pris,
+                                         remaining=0, fyld_bogfoert=True,
+                                         fyld_forsoeg=None, advarsel=None)
+                    if self.bogfoer_exit:
+                        try:
+                            await self.bogfoer_exit(
+                                oid, e.get("action"), antal, pris, "Filled",
+                                normaliser_type(e.get("ordre_type")))
+                        except Exception as ex:
+                            logger.error(
+                                f"[ExitOrdrer] bogfoering fejlede: {ex}")
+                    continue
+                # ⚠ INGEN NULLER I RAEKKEN. At skrive filled=0 avg_fill=0.0
+                # her ville gemme "vi ved det ikke" bag et tal der ser ud som
+                # et svar — og samtidig lukke raekken for et nyt forsoeg.
+                forsoeg = int(e.get("fyld_forsoeg") or 0) + 1
+                self.tracker.opdater(
+                    oid, status="Filled", bekraeftet=True,
+                    fyld_forsoeg=forsoeg,
+                    advarsel="Fyldt — fyldprisen er ikke læst endnu")
+                if forsoeg == FYLD_FORSOEG_ALARM:
+                    await self.journal.log_event(
+                        source="manual_exit", event_type="exit_fyldt_uden_pris",
+                        symbol=instrument.split()[0],
+                        payload={"order_id": oid, "forsoeg": forsoeg,
+                                 "type": normaliser_type(e.get("ordre_type")),
+                                 "note": "ATI melder Filled, men Filled|/"
+                                         "AvgFillPrice| mangler. Handlen staar "
+                                         "AABEN i journalen — se NT8's "
+                                         "Orders-fane"})
+                    logger.error(f"[ExitOrdrer] ⚠ {oid} er fyldt, men "
+                                 f"fyldprisen er stadig ikke laest efter "
+                                 f"{forsoeg} forsoeg — handlen staar aaben")
             elif st in ("Cancelled", "Rejected"):
                 self.tracker.opdater(oid, status=st, bekraeftet=True)
 
