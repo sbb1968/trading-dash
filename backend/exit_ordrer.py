@@ -111,7 +111,7 @@ def saet_config(trail_afstand: float) -> dict:
         raise ValueError("Trailing-afstanden må højst være 50 points.")
     if abs(v / TICK - round(v / TICK)) > 1e-9:
         raise ValueError(f"Trailing-afstanden skal være et helt antal ticks "
-                         f"({TICK:g}). {v:g} går ikke op.")
+                         f"({_dk(TICK)}). {_dk(v)} går ikke op.")
     k = _laes_konfig()
     k["trail_afstand"] = round(v, 2)
     _skriv_konfig(k)
@@ -134,8 +134,17 @@ def hele_ticks(pris: float) -> bool:
 
 
 def _dk(v: float) -> str:
-    """Dansk talformat til fejltekster: 6812,25."""
-    return f"{v:,.2f}".replace(",", " ").replace(".", ",")
+    """Dansk talformat: 7.841,25 — punktum som tusind, komma som decimal.
+
+    ⚠ SAMME FORM SOM VINDUET. Den gav foer "7 841,25" med mellemrum, mens
+    frontendens toLocaleString("da-DK") giver "7.841,25". To skrivemaader for
+    samme tal i samme arbejdsgang saar tvivl om hvad man faktisk har indtastet
+    — og her er tallet en stop loss-pris.
+
+    translate() bytter de to tegn i ÉT greb; en pladsholder undervejs er netop
+    dét der gik galt da denne linje blev skrevet.
+    """
+    return f"{v:,.2f}".translate(str.maketrans(",.", ".,"))
 
 
 def klassificer(netto_foer: Optional[int], action: str) -> str:
@@ -171,7 +180,7 @@ def valider_pris(type_: str, pris: Optional[float], retning: str,
     if pris is None:
         raise ValueError("Der mangler en pris.")
     if not hele_ticks(pris):
-        raise ValueError(f"Prisen skal være et helt antal ticks ({TICK:g}). "
+        raise ValueError(f"Prisen skal være et helt antal ticks ({_dk(TICK)}). "
                          f"{_dk(pris)} går ikke op.")
     if kurs is None:
         # ⚠ Ingen kurs -> vi kan ikke afgøre siden. At sende alligevel ville

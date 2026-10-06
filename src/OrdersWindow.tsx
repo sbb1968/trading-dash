@@ -110,8 +110,14 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
     return () => window.removeEventListener("keydown", k);
   }, [onLuk]);
 
-  const tal = Number(pris);
-  const gyldig = pris !== "" && isFinite(tal) && tal > 0;
+  // ⚠ KOMMA SKAL VIRKE. Iben taster 7831,25 — det er sådan man skriver tal i
+  // Danmark. `Number("7831,25")` er NaN, og med et <input type="number"> er
+  // man prisgivet om browseren tilfældigvis normaliserer det. Gør den ikke
+  // det, bliver knappen bare grå uden at sige hvorfor, og ordren bliver aldrig
+  // lagt. Vi oversætter selv i stedet for at håbe.
+  const rent = pris.replace(/\s/g, "").replace(",", ".");
+  const vaerdi = Number(rent);
+  const gyldig = rent !== "" && isFinite(vaerdi) && vaerdi > 0;
 
   return (
     <div style={{
@@ -130,15 +136,14 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
         </div>
         <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginBottom: 12 }}>
           {kurs != null
-            ? <>Aktuel kurs: <b>{kurs.toLocaleString("da-DK",
-                {minimumFractionDigits: 2, maximumFractionDigits: 2})}</b></>
+            ? <>Aktuel kurs: <b>{tal(kurs)}</b></>
             : "⚠ Ingen aktuel kurs"}
         </div>
         <input
-          ref={ref} type="number" step={0.25} value={pris}
+          ref={ref} type="text" inputMode="decimal" value={pris}
           placeholder={type === "SLOSS" ? "Stop loss-pris" : "Target profit-pris"}
           onChange={e => setPris(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && gyldig && !travl) onOpret(tal); }}
+          onKeyDown={e => { if (e.key === "Enter" && gyldig && !travl) onOpret(vaerdi); }}
           style={{
             width: "100%", padding: "7px 10px", fontSize: 13,
             background: "var(--bg-input)", color: "var(--text-primary)",
@@ -159,7 +164,7 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
                      background: "transparent", color: "var(--text-secondary)",
                      border: "1px solid var(--border-default)",
                      cursor: travl ? "wait" : "pointer" }}>Annuller</button>
-          <button onClick={() => gyldig && onOpret(tal)}
+          <button onClick={() => gyldig && onOpret(vaerdi)}
             disabled={!gyldig || travl}
             style={{ padding: "6px 16px", fontSize: 12, fontWeight: 700,
                      borderRadius: 4, background: "var(--accent)", color: "#fff",
@@ -198,9 +203,22 @@ function varighed(fra: string, til: string | null): string {
   } catch { return "—"; }
 }
 
+/** Dansk talformat: 7.841,25 — komma som decimalseparator.
+ *
+ * ⚠ VINDUET BLANDEDE DE TO. Entry price stod som "$7841.25" (punktum) mens
+ * tooltip'en lige ved siden af sagde "Højeste 7845,75" (komma). Det er ikke
+ * kun grimt: Iben INDTASTER med komma, og et vindue der svarer med punktum,
+ * sår tvivl om den pris man lige har lagt en stop loss på.
+ */
+function tal(v: number | null | undefined, decimaler = 2): string {
+  if (v == null || !isFinite(v)) return "—";
+  return v.toLocaleString("da-DK", {
+    minimumFractionDigits: decimaler, maximumFractionDigits: decimaler});
+}
+
 function usd(v: number | null | undefined): string {
   if (v == null || !isFinite(v)) return "—";
-  return (v < 0 ? "-$" : "$") + Math.abs(v).toFixed(2);
+  return (v < 0 ? "-$" : "$") + tal(Math.abs(v));
 }
 
 function fmtDate(iso: string): string {
@@ -318,8 +336,7 @@ export function OrdersWindow() {
     const t = exitType(o.ordre_type);
     const navn = t ? EXIT_NAVN[t] : "exit-ordren";
     const pris = o.trigger_pris != null
-      ? ` på ${o.trigger_pris.toLocaleString("da-DK",
-          {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "";
+      ? ` på ${tal(o.trigger_pris)}` : "";
     if (!window.confirm(`Annullér ${navn.toLowerCase()}${pris}?`)) return;
     try {
       const r = await fetch("http://127.0.0.1:8000/exit-ordre/annuller", {
@@ -845,7 +862,7 @@ export function OrdersWindow() {
                         title={o.exit_aarsag ? `Lukket af ${o.exit_aarsag}` : undefined}>
                       {o.ordre_type || o.order_type}
                       {!o.ordre_type && o.limit_price
-                        ? ` @ $${o.limit_price.toFixed(2)}` : ""}
+                        ? ` @ ${usd(o.limit_price)}` : ""}
                       {o.exit_aarsag ? ` · ${o.exit_aarsag}` : ""}
                       {o.advarsel && (
                         <div style={{ color: "var(--bear)", fontSize: 9.5,
@@ -880,15 +897,12 @@ export function OrdersWindow() {
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}
                         title={type === "TRAIL" && o.trail_hoejeste != null
                           ? `${o.action === "SELL" ? "Højeste" : "Laveste"} `
-                            + `${o.trail_hoejeste.toLocaleString("da-DK",
-                                {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
-                            + ` · afstand ${(o.trail_afstand ?? 0).toLocaleString("da-DK",
-                                {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                            + `${tal(o.trail_hoejeste)}`
+                            + ` · afstand ${tal(o.trail_afstand ?? 0)}`
                           : undefined}>
                       {erExit
-                        ? (o.trigger_pris != null
-                            ? `$${o.trigger_pris.toFixed(2)}` : "—")
-                        : (o.avg_fill > 0 ? `$${o.avg_fill.toFixed(2)}` : "—")}
+                        ? (o.trigger_pris != null ? usd(o.trigger_pris) : "—")
+                        : (o.avg_fill > 0 ? usd(o.avg_fill) : "—")}
                       {type === "TRAIL" && <span style={{ opacity: 0.6 }}> ↗</span>}
                     </td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
