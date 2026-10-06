@@ -255,6 +255,71 @@ def _stop_fra_log(logliner: list) -> Optional[float]:
     return v if v else None
 
 
+def netto_fra_raekker(raekker) -> int:
+    """Nettopositionen udledt af trackerens egne raekker.
+
+    ⚠ TRACKEREN SKAL KUNNE SVARE ALENE. `exit_mulig` saa foer kun paa om en
+    raekke var den NYESTE aabnende — aldrig paa om positionen stadig fandtes.
+    Efter et salg fra watchlisten stod LONG-raekken derfor med tre blaa knapper
+    paa en position der var lukket (maalt 06-10, trin 6 i §9). At trykke paa dem
+    ville have lagt en stop loss paa ingenting — og den foerste ordre der fylder
+    paa en flad konto, AABNER en position.
+
+    ATI's netto er en ekstra bekraeftelse, ikke en betingelse: er ATI tavs,
+    skal knapperne stadig forsvinde.
+
+    ⚠ KUN FYLDTE RAEKKER TAELLER, og kun LONG/SHORT/EXIT. En SLOSS-raekke der
+    fylder, faar sin egen EXIT-raekke skrevet af _exit_bogfoer; taltes begge,
+    ville samme fyldning blive regnet to gange.
+
+    `action` afgoer fortegnet — ikke typen. En LONG er et koeb, en SHORT et
+    salg, og en EXIT er dét der lukker. BUY er plus, SELL er minus, uanset hvad
+    raekken hedder.
+    """
+    netto = 0
+    for e in sorted(raekker, key=lambda x: str(x.get("placed_at") or "")):
+        if (e.get("ordre_type") or "").upper() not in ("LONG", "SHORT", "EXIT"):
+            continue
+        if e.get("status") != "Filled":
+            continue
+        try:
+            q = int(float(e.get("filled") or 0))
+        except (TypeError, ValueError):
+            continue
+        if not q:
+            continue
+        netto += q if (e.get("action") or "").upper() == "BUY" else -q
+    return netto
+
+
+def exit_mulig_for(raekker) -> Optional[str]:
+    """Hvilken raekke skal have exit-knapper? None = ingen.
+
+    ⚠ SELVE BESLUTNINGEN, saa den kan proeves uden at starte en webserver.
+    Den laa foer inde i main.py's _berig_med_exit, og derfor var det netop den
+    der ikke blev testet — mens de to funktioner under den var daekket.
+    Fejlen i trin 6 sad praecis i sammenstillingen: begge dele var rigtige hver
+    for sig, og "er du nyeste?" blev stillet uden "findes positionen?".
+
+    Knapperne hoerer kun paa den SENESTE aabnende raekke, og kun saa laenge der
+    er en position. Exit-ordrer daekker hele positionen (spec §13 punkt 2), saa
+    knapper paa en aeldre raekke ville lade som om der var to at beskytte.
+    """
+    if not netto_fra_raekker(raekker):
+        return None
+    return seneste_aabnende(raekker)
+
+
+def seneste_aabnende(raekker) -> Optional[str]:
+    """order_id paa den nyeste LONG/SHORT-raekke, eller None."""
+    aabnende = [e for e in raekker
+                if (e.get("ordre_type") or "").upper() in ("LONG", "SHORT")]
+    if not aabnende:
+        return None
+    nyeste = max(aabnende, key=lambda x: str(x.get("placed_at") or ""))
+    return str(nyeste.get("order_id"))
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Push — men ikke til Ibens telefon fra Sørens maskine
 # ═══════════════════════════════════════════════════════════════════════════

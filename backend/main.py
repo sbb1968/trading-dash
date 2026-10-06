@@ -1873,10 +1873,12 @@ def _berig_med_exit(ordrer: list) -> list:
     raekke ville lade som om der var to positioner at beskytte.
     """
     import exit_ordrer as _ex
-    aabnende = [o for o in ordrer
-                if (o.get("ordre_type") or "") in ("LONG", "SHORT")]
-    # Trackeren leverer nyeste foerst.
-    seneste = aabnende[0]["order_id"] if aabnende else None
+    # ⚠ POSITIONEN AFGOER DET, IKKE RAEKKEFOELGEN. Her stod foer blot "den
+    # nyeste aabnende raekke", og efter et salg fra watchlisten beholdt
+    # LONG-raekken derfor sine knapper paa en LUKKET position.
+    # Udledes nu af trackeren alene, saa knapperne forsvinder STRAKS —
+    # ogsaa naar ATI er tavs. ATI's netto er en ekstra bekraeftelse.
+    seneste = _ex.exit_mulig_for(ordrer)
 
     pr_parent: dict = {}
     for o in ordrer:
@@ -1900,7 +1902,8 @@ def _berig_med_exit(ordrer: list) -> list:
         oid = str(o.get("order_id"))
         knapper = pr_parent.get(oid, {})
         o["exit_knapper"] = {t: knapper.get(t, "ingen") for t in _ex.TYPER}
-        o["exit_mulig"] = bool(oid == str(seneste) and _EXIT_INSTRUMENT.get("navn"))
+        o["exit_mulig"] = bool(seneste and oid == seneste
+                               and _EXIT_INSTRUMENT.get("navn"))
     return ordrer
 
 

@@ -165,6 +165,101 @@ def test_legacy_navn() -> None:
           "⚠ en PLOSS-raekke fra i gaar findes stadig som exit-ordre")
 
 
+def test_exit_mulig() -> None:
+    """Forsvinder knapperne naar positionen lukkes?
+
+    ⚠ FUNDET I TRIN 6 AF DEN MANUELLE TEST (06-10): efter et salg fra
+    watchlisten stod LONG-raekken stadig med tre blaa knapper, selv om
+    positionen var flad og alle exit-ordrer var annulleret i NT8.
+
+    `exit_mulig` saa kun paa om raekken var den NYESTE aabnende — aldrig paa om
+    positionen fandtes. Et tryk ville have lagt en stop loss paa ingenting, og
+    den foerste ordre der fylder paa en flad konto, AABNER en position.
+
+    ⚠ Og det skal kunne afgoeres af TRACKEREN ALENE. Er ATI tavs, skal
+    knapperne stadig forsvinde — ATI's netto er en ekstra bekraeftelse, ikke en
+    betingelse.
+    """
+    print("\n  -- exit_mulig --")
+
+    def r(tid, type_, action, filled, status="Filled", oid=None):
+        return {"order_id": oid or f"o{tid}", "placed_at": f"2026-10-06T{tid}",
+                "ordre_type": type_, "action": action, "filled": filled,
+                "status": status, "ticker": "MES"}
+
+    # 1. Kun en aaben long.
+    raekker = [r("08:00", "LONG", "BUY", 1)]
+    kraev(EX.netto_fra_raekker(raekker) == 1, "long 1 -> netto 1")
+    kraev(EX.seneste_aabnende(raekker) == "o08:00", "…og den er den seneste")
+
+    # 2. ⚠ KERNEN: long + exit der lukker -> netto 0.
+    raekker.append(r("09:00", "EXIT", "SELL", 1))
+    kraev(EX.netto_fra_raekker(raekker) == 0,
+          "⚠ long + exit -> netto 0, altsaa INGEN knapper")
+
+    # 3. Ny long bagefter -> knapper igen, paa den NYE raekke.
+    raekker.append(r("10:00", "LONG", "BUY", 1))
+    kraev(EX.netto_fra_raekker(raekker) == 1, "ny long -> netto 1 igen")
+    kraev(EX.seneste_aabnende(raekker) == "o10:00",
+          "…og knapperne sidder paa den NYE raekke")
+
+    # 4. Short-siden spejlet.
+    s2 = [r("08:00", "SHORT", "SELL", 2)]
+    kraev(EX.netto_fra_raekker(s2) == -2, "short 2 -> netto -2")
+    s2.append(r("09:00", "EXIT", "BUY", 2))
+    kraev(EX.netto_fra_raekker(s2) == 0, "short + daekning -> 0")
+
+    # 5. Delvis lukning efterlader en position.
+    s3 = [r("08:00", "LONG", "BUY", 3), r("09:00", "EXIT", "SELL", 1)]
+    kraev(EX.netto_fra_raekker(s3) == 2, "3 koebt, 1 solgt -> netto 2")
+
+    # ── Det der ikke maa taelle med ──────────────────────────────────────
+    # ⚠ En SLOSS-raekke der fylder, faar sin EGEN EXIT-raekke skrevet af
+    # _exit_bogfoer. Taltes begge, ville samme fyldning blive regnet to gange,
+    # og nettoet ville vippe til den forkerte side.
+    s4 = [r("08:00", "LONG", "BUY", 1),
+          r("09:00", "SLOSS", "SELL", 1),            # selve stop-ordren
+          r("09:00:01", "EXIT", "SELL", 1)]          # bogfoeringen af fyldningen
+    kraev(EX.netto_fra_raekker(s4) == 0,
+          "⚠ en fyldt SLOSS taelles ÉN gang, ikke to")
+
+    # En ordre der ikke fyldte, flytter ingenting.
+    s5 = [r("08:00", "LONG", "BUY", 0, status="Cancelled"),
+          r("09:00", "LONG", "BUY", 1)]
+    kraev(EX.netto_fra_raekker(s5) == 1, "en annulleret ordre taeller ikke med")
+
+    s6 = [r("08:00", "LONG", "BUY", 0, status="Working")]
+    kraev(EX.netto_fra_raekker(s6) == 0,
+          "⚠ en ordre der endnu ikke har fyldt, aabner ingen position")
+
+    # ⚠ Raekkefoelgen maa ikke afhaenge af hvordan listen kom ind. Trackeren
+    # leverer nyeste foerst; en naiv gennemgang ville regne exit'en foer entry.
+    omvendt = list(reversed(s3))
+    kraev(EX.netto_fra_raekker(omvendt) == 2,
+          "nettoet er det samme uanset listens raekkefoelge")
+
+    # -- SELVE BESLUTNINGEN ------------------------------------------
+    # ⚠ Fejlen i trin 6 sad i SAMMENSTILLINGEN: begge funktioner ovenfor
+    # var rigtige hver for sig, men "er du nyeste?" blev stillet uden
+    # "findes positionen?". Derfor proeves exit_mulig_for direkte — det er
+    # den der afgoer om knapperne staar der.
+    aaben = [r("08:00", "LONG", "BUY", 1)]
+    kraev(EX.exit_mulig_for(aaben) == "o08:00",
+          "aaben long -> knapper paa den raekke")
+
+    lukket = aaben + [r("09:00", "EXIT", "SELL", 1)]
+    kraev(EX.exit_mulig_for(lukket) is None,
+          "⚠ TRIN 6: lukket position -> INGEN raekke faar knapper")
+
+    igen = lukket + [r("10:00", "LONG", "BUY", 1)]
+    kraev(EX.exit_mulig_for(igen) == "o10:00",
+          "ny position -> knapper paa den NYE raekke, ikke den gamle")
+    kraev(EX.exit_mulig_for([]) is None, "ingen raekker -> ingen knapper")
+
+    kraev(EX.seneste_aabnende([]) is None, "tom liste -> ingen seneste")
+    kraev(EX.netto_fra_raekker([]) == 0, "tom liste -> netto 0")
+
+
 def test_validering() -> None:
     print("\n  ── prisvalidering (så NT8 ikke behøver afvise) ──")
 
@@ -618,6 +713,7 @@ def main() -> int:
     print("  ── exit-ordrer ──")
     test_klassifikation()
     test_legacy_navn()
+    test_exit_mulig()
     test_validering()
     test_config()
     test_log_aflaesning()
