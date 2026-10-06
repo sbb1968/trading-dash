@@ -363,6 +363,30 @@ const ORDREVEJ_NAVN: Record<string, string> = {
   "nt8-ati": "NinjaTrader (ATI)",
 };
 
+/** Dansk talformat: 7.846,00 — punktum som tusind, komma som decimal.
+ *
+ * ⚠ VINDUERNE BLANDEDE DE TO. Watchlisten skrev "$7846.00" med punktum, mens
+ * Ordrer-vinduet og dets tooltips skrev "7.845,75" med komma — samme kurs, to
+ * skrivemåder, på to vinduer der står ved siden af hinanden. Og Iben indtaster
+ * med komma, så det er den form hun læser efter.
+ */
+export function dkTal(v: number | null | undefined, decimaler = 2): string {
+  if (v == null || !isFinite(v)) return "—";
+  return v.toLocaleString("da-DK", {
+    minimumFractionDigits: decimaler, maximumFractionDigits: decimaler});
+}
+
+export function dkUsd(v: number | null | undefined, decimaler = 2): string {
+  if (v == null || !isFinite(v)) return "—";
+  return (v < 0 ? "-$" : "$") + dkTal(Math.abs(v), decimaler);
+}
+
+/** Procent med komma: "+1,23 %". */
+export function dkPct(v: number | null | undefined): string {
+  if (v == null || !isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : ""}${dkTal(v)} %`;
+}
+
 const WATCH_STIL: Record<WatchVariant, { bg: string; tekst: string; etiket: string }> = {
   // Futures beholder den kendte moerke flade — det er den Iben kender.
   futures: { bg: "var(--bg-surface)", tekst: "var(--text-primary)", etiket: "FUTURES" },
@@ -706,7 +730,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   }).map(s => s.ticker);
 
   const R = { textAlign: "right", whiteSpace: "nowrap" } as const;
-  const usd = (v: number) => `$${v.toFixed(2)}`;
+  const usd = (v: number) => dkUsd(v);
 
   // Genveje: ALT+tal vælg række · K køb · S sælg (den valgte række, med dens Stk).
   shortcutRef.current = (e: KeyboardEvent) => {
@@ -935,16 +959,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   {vist("pris") && <td style={R}>{m.addPrice != null ? usd(m.addPrice) : (live != null ? usd(live) : "—")}</td>}
                   {vist("upl")    && <td style={R} className={plCls(uplAmt)}
                       title={uplAmt != null
-                        ? `(${usd(aktuel!)} − ${b!.avgPrice.toFixed(3)}) × ${b!.qty} × ${b!.mult} = ${brutto!.toFixed(2)}
+                        ? `(${usd(aktuel!)} − ${dkTal(b!.avgPrice, 3)}) × ${b!.qty} × ${b!.mult} = ${dkTal(brutto!)}
 `
                           + (b!.exitKurtage != null
-                              ? `− exit-kurtage ${b!.exitKurtage.toFixed(2)} = ${uplAmt.toFixed(2)} USD
+                              ? `− exit-kurtage ${dkTal(b!.exitKurtage)} = ${dkTal(uplAmt)} USD
 
 `
                                 + `Det er hvad du faar hvis du lukker NU. Koebsprisen er `
                                 + `brokerens kostbasis og indeholder allerede entry-kurtagen — `
                                 + `derfor decimalerne.`
-                              : `= ${uplAmt.toFixed(2)} USD
+                              : `= ${dkTal(uplAmt)} USD
 
 `
                                 + `⚠ EXIT-KURTAGEN ER IKKE TRUKKET FRA — den er ikke maalt for `
@@ -953,7 +977,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                         : posUkendt
                           ? "Positionen kunne ikke hentes fra brokeren — tallet er UKENDT, ikke nul"
                           : "Ingen aaben position i denne ticker"}>
-                    {uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}$${uplAmt.toFixed(2)}` : "—"}</td>}
+                    {uplAmt != null ? `${uplAmt >= 0 ? "+" : ""}${dkUsd(uplAmt)}` : "—"}</td>}
                   {vist("stk") && <td onClick={e => e.stopPropagation()} style={{ textAlign: "center" }}>
                     <input type="text" inputMode="numeric" value={getShares(stock.ticker)}
                       ref={el => { stkRefs.current[i] = el; }}
@@ -1018,7 +1042,7 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
                   {vist("koebspris")  && <td style={R}>{b ? usd(b.avgPrice) : "—"}</td>}
                   {vist("aktuel")     && <td style={R}>{aktuel != null ? usd(aktuel) : "—"}</td>}
                   {vist("beholdning") && <td style={R}>{b ? b.qty : "—"}</td>}
-                  {vist("uplpct") && <td style={R} className={plCls(uplPct)}>{uplPct != null ? `${uplPct >= 0 ? "+" : ""}${uplPct.toFixed(2)}%` : "—"}</td>}
+                  {vist("uplpct") && <td style={R} className={plCls(uplPct)}>{uplPct != null ? dkPct(uplPct) : "—"}</td>}
                   <td><button className="watchlist-remove" onClick={e => { e.stopPropagation(); removeRow(stock.ticker); }}>✕</button></td>
                 </tr>
               );
@@ -1334,7 +1358,7 @@ export function Konfigurator({ onClose }: { onClose: () => void }) {
                            borderRadius: 4 }} />
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
                   {Number(trailAfstand) > 0
-                    ? `= $${(Number(trailAfstand) * 5).toFixed(2)} pr. MES-kontrakt`
+                    ? `= ${dkUsd(Number(trailAfstand) * 5)} pr. MES-kontrakt`
                     : ""}
                 </span>
               </div>
@@ -1519,7 +1543,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
         Level 2 — {displayTicker}
         {bestBid > 0 && bestAsk > 0 && (
           <span style={{ float: "right", fontSize: 12, color: "var(--text-primary)", fontWeight: 600 }}>
-            Spread: ${spread.toFixed(2)}
+            Spread: ${dkTal(spread)}
           </span>
         )}
       </div>
@@ -1584,7 +1608,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
                 bids.map((b, i) => (
                   <tr key={`bid-${i}`} style={{ background: i === 0 ? "rgba(74, 222, 128, 0.08)" : undefined }}>
                     <td style={{ color: "var(--text-secondary)" }}>{b.marketMaker}</td>
-                    <td style={{ color: "var(--bull)" }}>${b.price.toFixed(2)}</td>
+                    <td style={{ color: "var(--bull)" }}>{dkUsd(b.price)}</td>
                     <td>{b.size.toLocaleString("da-DK")}</td>
                   </tr>
                 ))
@@ -1610,7 +1634,7 @@ function Level2Panel({ ticker }: { ticker: string }) {
                 asks.map((a, i) => (
                   <tr key={`ask-${i}`} style={{ background: i === 0 ? "rgba(248, 113, 113, 0.08)" : undefined }}>
                     <td style={{ color: "var(--text-secondary)" }}>{a.marketMaker}</td>
-                    <td style={{ color: "var(--bear)" }}>${a.price.toFixed(2)}</td>
+                    <td style={{ color: "var(--bear)" }}>{dkUsd(a.price)}</td>
                     <td>{a.size.toLocaleString("da-DK")}</td>
                   </tr>
                 ))
@@ -1808,7 +1832,7 @@ function TimeSalesPanel({ ticker }: { ticker: string }) {
                   t.direction === "down" ? "row-down" : ""
                 }>
                   <td>{t.time}</td>
-                  <td style={{ textAlign: "right" }}>${t.price.toFixed(2)}</td>
+                  <td style={{ textAlign: "right" }}>{dkUsd(t.price)}</td>
                   <td style={{ textAlign: "right" }}>{t.size.toLocaleString("da-DK")}</td>
                 </tr>
               ))
@@ -2218,7 +2242,7 @@ function App() {
           <span style={{ color: "var(--text-primary)" }}>
             Bekræft <span style={{ color: orderConfirm.action === "BUY" ? "var(--bull)" : "var(--bear)" }}>
               {orderConfirm.action === "BUY" ? "KØB" : "SÆLG"}
-            </span> {orderConfirm.shares} {orderConfirm.ticker} @ ${orderConfirm.price.toFixed(2)}
+            </span> {orderConfirm.shares} {orderConfirm.ticker} @ {dkUsd(orderConfirm.price)}
             {" "}
             <span style={{
               // ⚠ HVOR ORDREN GAAR HEN. Det ene sted det kan ses foer den er sendt.
@@ -2285,7 +2309,7 @@ function OrderResultToast({ result, onClose }: { result: any; onClose: () => voi
   const success = result.success;
   const color = success ? "var(--bull)" : "var(--bear)";
   const text = success
-    ? `✓ ${result.action} ${result.shares} ${result.ticker} — ${result.status}${result.filled ? ` (fyldt: ${result.filled} @ $${result.avg_fill?.toFixed(2)})` : ""}`
+    ? `✓ ${result.action} ${result.shares} ${result.ticker} — ${result.status}${result.filled ? ` (fyldt: ${result.filled} @ ${dkUsd(result.avg_fill)})` : ""}`
     : `✗ ${result.action} ${result.ticker} fejlede: ${result.error}`;
 
   return (
