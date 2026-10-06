@@ -74,7 +74,9 @@ ATI_HOST, ATI_PORT = "127.0.0.1", 36973
 # ⚠ KENDTE SIMULATIONSKONTI. Alt andet kræver tillad_live: true.
 # Sim101      NT8's egen simulator — ruter ingen steder
 # DEMO8580770 Tradovates demokonto — rigtig infrastruktur, legetøjspenge
-SIM_KONTI = {"SIM101", "DEMO8580770"}
+# ⚠ V2 spaerrer alt der ikke staar her. DEMO8635291 er Ibens egen
+# Tradovate-demokonto; uden den ville hendes foerste klik blive afvist.
+SIM_KONTI = {"SIM101", "DEMO8580770", "DEMO8635291"}
 
 # Hvor længe vi lytter når strømmen skal aflæses. NT8 pusher af sig selv, så
 # der skal ikke sendes noget — men den sender ikke øjeblikkeligt.
@@ -261,6 +263,13 @@ def ordre_status(ordre_id: str, raa: str | None = None) -> str:
 
 
 TERMINALE = {"Cancelled", "Rejected", "Filled"}
+
+# ⚠ EN LEVENDE ORDRE ER IKKE EN FAERDIG ORDRE. En exit-ordre skal ligge og
+# vente; naar den naar TERMINALE, er den enten udfoert eller doed.
+LEVENDE = {"Working", "Accepted"}
+
+# Hvad OIF kan. Trailing er IKKE med — den findes kun i NT8's ATM-strategier.
+ORDRETYPER = {"MARKET", "LIMIT", "STOPMARKET", "STOPLIMIT"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -533,7 +542,7 @@ def _skriv_oif(kommando: str, maerke: str, vent_sek: int = 15) -> dict:
 def send_ordre(*, konto: str, instrument: str, action: str, antal: int,
                ordretype: str = "MARKET", limit: float | None = None,
                stop: float | None = None, tif: str = "DAY",
-               ordre_id: str = "") -> dict:
+               ordre_id: str = "", oco: str = "") -> dict:
     """Læg en ordre. V1: kontoen skrives EKSPLICIT.
 
     ⚠ Kalderen skal have kørt `klar()` først. Denne funktion verificerer ikke
@@ -552,11 +561,92 @@ def send_ordre(*, konto: str, instrument: str, action: str, antal: int,
         # skal doe af sig selv.
         raise NtForbindelseFejl("TIF=GTC er ikke tilladt fra denne vej")
 
+    if ordretype.upper() not in ORDRETYPER:
+        # ⚠ OIF kender kun fire. "TRAILINGSTOP" findes i NT8's brugerflade og
+        # i ATM-strategier, men IKKE over filgraensefladen — en ordre med den
+        # type ville blive laest og lydloest intet goere.
+        raise NtForbindelseFejl(
+            f"ukendt ordretype {ordretype!r}. OIF kender kun "
+            f"{', '.join(sorted(ORDRETYPER))} — trailing findes ikke som type "
+            f"og skal laves ved at FLYTTE en STOPMARKET (se aendr).")
+
     l = "" if limit is None else f"{limit}"
     s = "" if stop is None else f"{stop}"
+    # ⚠ FELT 10 ER OCO, og det har staaet tomt siden vejen blev bygget.
+    # Formatet har altid haft pladsen; vi har bare aldrig haft to ordrer der
+    # skulle annullere hinanden. Se probe_nt_exit_ordrer.py — at NT8 ACCEPTERER
+    # feltet er ikke bevist endnu.
     kmd = (f"PLACE;{konto};{instrument};{action.upper()};{antal};"
-           f"{ordretype.upper()};{l};{s};{tif.upper()};;{ordre_id};;")
+           f"{ordretype.upper()};{l};{s};{tif.upper()};{oco};{ordre_id};;")
     return _skriv_oif(kmd, "place")
+
+
+def aendr(ordre_id: str, *, antal: int | None = None,
+          limit: float | None = None, stop: float | None = None) -> dict:
+    """Flyt en levende ordres pris eller antal.
+
+    ⚠ ALDRIG AFPROEVET MOD NT8. Kun PLACE og CANCEL er verificeret (16-09 og
+    26-09). CHANGE er skrevet efter OIF-formatets feltraekkefoelge og ser
+    rigtig ud — men "ser rigtig ud" er praecis dét denne kodebase har brugt to
+    dage paa at laere ikke at stole paa. Den foerste rigtige brug er
+    probe_nt_exit_ordrer.py, scenarie P2.
+
+    Hele trailing-stoppet hviler paa at den virker: OIF har ingen
+    trailing-ordretype, saa en TRAIL er en STOPMARKET som backenden flytter.
+    Virker CHANGE ikke, skal TRAIL i stedet annulleres og genlaegges ved hvert
+    ryk — med et hul uden beskyttelse hver gang.
+
+    Felterne er de samme tretten som PLACE; kun 5 (antal), 7 (limit),
+    8 (stop) og 11 (ordre-id) udfyldes.
+    """
+    if not ordre_id:
+        raise NtForbindelseFejl("aendr() kraever et ordre-id")
+    if antal is None and limit is None and stop is None:
+        # ⚠ En CHANGE uden aendringer er ikke harmloes: den ville blive sendt,
+        # og et tomt svar fra NT8 kunne laeses som "det gik godt".
+        raise NtForbindelseFejl(
+            "aendr() uden antal, limit eller stop aendrer intet — "
+            "ingen kommando sendt")
+    if antal is not None and antal <= 0:
+        raise NtForbindelseFejl(f"antal skal vaere positivt, fik {antal}")
+
+    a = "" if antal is None else f"{antal}"
+    l = "" if limit is None else f"{limit}"
+    s = "" if stop is None else f"{stop}"
+    return _skriv_oif(f"CHANGE;;;;{a};;{l};{s};;;{ordre_id};;", "change")
+
+
+def afvent_aktiv(ordre_id: str, sekunder: float = 10.0,
+                 oplaeg_sek: float = 0.8) -> dict:
+    """Lyt indtil ordren er LEVENDE (Working/Accepted) — eller terminal.
+
+    ⚠ `afvent_ordre` venter paa at en ordre bliver FAERDIG. En exit-ordre skal
+    ikke blive faerdig; den skal ligge og vente paa markedet. Brugt den ene i
+    stedet for den anden ville hver eneste stop loss se ud som en fejl.
+
+    Samme oejebliksbillede-regel som alt andet her: status `""` er UKENDT og
+    bliver aldrig til et svar. Loeber tiden ud, er svaret `aktiv=False` OG
+    `terminal=False` — altsaa "vi ved det ikke", ikke "den findes ikke".
+    """
+    slut = time.time() + max(sekunder, oplaeg_sek)
+    status, antal, pris, oplaeg = "", 0, 0.0, 0
+    while True:
+        raa = _laes_raat(oplaeg_sek)
+        oplaeg += 1
+        s_ = ordre_status(ordre_id, raa)
+        a_, p_ = fyldning(ordre_id, raa)
+        status = s_ or status
+        if a_:
+            antal = a_
+        if p_:
+            pris = p_
+        if status in LEVENDE or status in TERMINALE:
+            break
+        if time.time() >= slut:
+            break
+    return {"status": status, "aktiv": status in LEVENDE,
+            "terminal": status in TERMINALE, "filled": antal,
+            "avg_fill": pris, "oplaeg": oplaeg}
 
 
 def annuller(ordre_id: str) -> dict:

@@ -56,6 +56,7 @@ def main() -> int:
     for konto, forventet, hvorfor in [
         ("Sim101",      False, "Sim101 er en kendt simulationskonto"),
         ("DEMO8580770", False, "DEMO8580770 er Tradovates demokonto"),
+        ("DEMO8635291", False, "DEMO8635291 er Ibens egen demokonto"),
         ("sim101",      False, "store/smaa bogstaver maa ikke spaerre en gyldig konto"),
         ("2080414",     True,  "⚠ LIVE-kontoen spaerres"),
         ("",            True,  "tom konto spaerres"),
@@ -206,6 +207,102 @@ def main() -> int:
     # virket i seks uger og derefter vaeret tavst forkert.
     kraev(NT.nt_instrument("MES", Kontrakt("20260918", "MESU6")) == "MES 09-26",
           "den udloebne september-kontrakt oversaettes stadig korrekt")
+
+    # ── OIF-kommandoernes felter ──────────────────────────────────────────
+    # ⚠ TRETTEN FELTER, OG PLADSEN BETYDER ALT. Et felt for lidt forskyder
+    # resten: en stoppris ville lande i TIF-feltet, og NT8 ville enten afvise
+    # eller — vaerre — laese noget andet end vi mente. Derfor taelles de her.
+    print("\n  ── OIF-felternes placering ──")
+    sendt: list[str] = []
+    aegte_skriv = NT._skriv_oif
+    try:
+        NT._skriv_oif = lambda kmd, maerke, **kw: (                  # type: ignore
+            sendt.append(kmd) or {"kommando": kmd, "logliner": []})
+
+        NT.send_ordre(konto="DEMO8580770", instrument="MES 12-26",
+                      action="SELL", antal=1, ordretype="STOPMARKET",
+                      stop=6800.0, ordre_id="NTX1", oco="TDOCO9")
+        f = sendt[-1].split(";")
+        kraev(len(f) == 13, f"PLACE har 13 felter ({len(f)})")
+        kraev(f[8] == "DAY", f"felt 9 = TIF ({f[8]!r})")
+        # ⚠ Feltet har altid vaeret der og altid staaet tomt. Det er dét P1 proever.
+        kraev(f[9] == "TDOCO9", f"⚠ felt 10 = OCO ({f[9]!r})")
+        kraev(f[10] == "NTX1", f"felt 11 = ordre-id ({f[10]!r})")
+        kraev(f[7] == "6800.0", f"felt 8 = stop ({f[7]!r})")
+        kraev(f[6] == "", f"felt 7 (limit) er tomt paa en STOPMARKET")
+
+        # Uden oco skal feltet vaere tomt — bagudkompatibelt med alt hidtil.
+        sendt.clear()
+        NT.send_ordre(konto="DEMO8580770", instrument="MES 12-26",
+                      action="BUY", antal=1, ordre_id="NTM1")
+        kraev(sendt[-1].split(";")[9] == "",
+              "uden oco staar felt 10 tomt — som alle hidtidige ordrer")
+
+        # ── CHANGE ────────────────────────────────────────────────────────
+        print("\n  ── CHANGE ──")
+        for kw, felt, vaerdi, hvad in [
+            ({"stop": 6805.0},  7, "6805.0", "stop i felt 8"),
+            ({"limit": 6820.0}, 6, "6820.0", "limit i felt 7"),
+            ({"antal": 2},      4, "2",      "antal i felt 5"),
+        ]:
+            sendt.clear()
+            NT.aendr("NTX1", **kw)
+            f = sendt[-1].split(";")
+            kraev(len(f) == 13, f"CHANGE har 13 felter ({len(f)})")
+            kraev(f[felt] == vaerdi, f"{hvad} ({f[felt]!r})")
+            kraev(f[10] == "NTX1", "    ordre-id i felt 11")
+
+        # ⚠ En CHANGE uden aendringer maa ikke sendes: NT8 ville svare noget
+        # der kunne laeses som "det gik godt".
+        blev, besked = spaerrer(NT.aendr, "NTX1")
+        kraev(blev, "⚠ aendr() uden antal/limit/stop sender INTET")
+        kraev("aendrer intet" in besked, f"    og siger hvorfor: {besked[:52]}")
+        blev, _ = spaerrer(NT.aendr, "")
+        kraev(blev, "aendr() uden id spaerrer")
+        blev, _ = spaerrer(NT.aendr, "NTX1", antal=0)
+        kraev(blev, "antal 0 spaerrer")
+
+        # ⚠ TRAILING FINDES IKKE SOM ORDRETYPE I OIF. En ordre med den type
+        # ville blive laest og lydloest intet goere — derfor afvises den her.
+        print("\n  ── ordretyper ──")
+        blev, besked = spaerrer(NT.send_ordre, konto="DEMO8580770",
+                                instrument="MES 12-26", action="SELL", antal=1,
+                                ordretype="TRAILINGSTOP")
+        kraev(blev, "⚠ TRAILINGSTOP afvises — OIF kender den ikke")
+        kraev("trailing" in besked.lower(),
+              f"    og peger paa loesningen: {besked[-60:]}")
+        for t in ("MARKET", "LIMIT", "STOPMARKET", "STOPLIMIT"):
+            sendt.clear()
+            NT.send_ordre(konto="DEMO8580770", instrument="MES 12-26",
+                          action="BUY", antal=1, ordretype=t)
+            kraev(sendt[-1].split(";")[5] == t, f"{t} accepteres")
+    finally:
+        NT._skriv_oif = aegte_skriv                                  # type: ignore
+
+    # ── afvent_aktiv: en levende ordre er ikke en faerdig ordre ───────────
+    print("\n  ── afvent_aktiv ──")
+    aegte_laes = NT._laes_raat
+    try:
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: (                # type: ignore
+            "OrderStatus|A Working ")
+        r = NT.afvent_aktiv("A", sekunder=0.05, oplaeg_sek=0.01)
+        kraev(r["aktiv"] and not r["terminal"],
+              f"Working -> aktiv, ikke terminal ({r['status']})")
+
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: (                # type: ignore
+            "OrderStatus|B Rejected ")
+        r = NT.afvent_aktiv("B", sekunder=0.05, oplaeg_sek=0.01)
+        kraev(r["terminal"] and not r["aktiv"],
+              f"Rejected -> terminal, ikke aktiv ({r['status']})")
+
+        # ⚠ Det vigtigste: tavshed bliver ikke til et svar.
+        NT._laes_raat = lambda sekunder=NT.LYT_SEK: "ATI True "      # type: ignore
+        r = NT.afvent_aktiv("C", sekunder=0.05, oplaeg_sek=0.01)
+        kraev(not r["aktiv"] and not r["terminal"],
+              "⚠ ingen status -> HVERKEN aktiv ELLER terminal")
+        kraev(r["status"] == "", f"…og status er tom ({r['status']!r})")
+    finally:
+        NT._laes_raat = aegte_laes                                   # type: ignore
 
     # ── Ordre-id ──────────────────────────────────────────────────────────
     print("\n  ── ordre-id ──")
