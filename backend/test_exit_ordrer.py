@@ -701,6 +701,85 @@ async def test_tvangsluk_blind() -> None:
         gendan(orig)
 
 
+async def test_fyldt_exit_bogfoeres() -> None:
+    """⚠ FYLDER EN EXIT, SKAL DEN BOGFOERES — ikke annulleres.
+
+    Fundet i trin 8 (06-10 kl. 13:07): NT8 fyldte en TRAIL paa en short, og
+    Trading Dash bogfoerte det aldrig. Handlen stod aaben i journalen med
+    exit_price=None, SHORT-raekken beholdt sine knapper, og Fyldt-kolonnen sagde
+    "—" paa en ordre der var fyldt.
+
+    Aarsagen var raekkefoelgen i _tik: positionen blev laest FOER ordrestatus.
+    Naar TRAIL'en fyldte, gik positionen til nul, og loekken laeste det som
+    "positionen er lukket, ryd resterne" — annullerede den netop fyldte ordre og
+    returnerede, foer den naaede at se at den var fyldt.
+
+    ⚠ Loekken kunne ikke skelne "exit'en fyldte" fra "positionen blev lukket et
+    andet sted". En fyldt exit FORKLARER hvorfor positionen er nul, saa den skal
+    laeses foerst. Tre symptomer, én aarsag.
+    """
+    print("\n  -- fyldt exit bogfoeres --")
+    bogfoert = []
+
+    async def bogfoer(oid, action, antal, pris, status, aarsag):
+        bogfoert.append({"order_id": oid, "antal": antal, "pris": pris,
+                         "aarsag": aarsag})
+
+    for navn, type_, aktion in [("TRAIL paa short", "TRAIL", "BUY"),
+                                ("SLOSS paa long", "SLOSS", "SELL"),
+                                ("TPROF paa long", "TPROF", "SELL")]:
+        bogfoert.clear()
+        e = {"order_id": "NTX_F", "source": "manual_exit", "ordre_type": type_,
+             "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
+             "shares": 1, "action": aktion, "trigger_pris": 7850.25,
+             "ticker": "MES", "trail_afstand": 1.0, "trail_hoejeste": 7849.0}
+        tr, jo = FalskTracker([dict(e)]), FalskJournal()
+        # ⚠ Praecis situationen: ATI melder Filled OG positionen er nul.
+        kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                             ordre_status="Filled", fyldning=(1, 7850.25))
+        try:
+            o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                                instrument_for=lambda: "MES 12-26",
+                                bogfoer_exit=bogfoer)
+            await o._tik("MES 12-26", "DEMO8580770")
+            kraev(len(bogfoert) == 1,
+                  f"⚠ {navn}: fyldningen BOGFOERES ({len(bogfoert)})")
+            if bogfoert:
+                kraev(bogfoert[0]["aarsag"] == type_,
+                      f"    …med exit_aarsag={bogfoert[0]['aarsag']}")
+                kraev(bogfoert[0]["pris"] == 7850.25,
+                      f"    …og fyldprisen ({bogfoert[0]['pris']})")
+            # Og raekken skal baere fyldningen, saa "Fyldt" ikke viser "—".
+            r2 = tr.find("NTX_F")
+            kraev(r2.get("status") == "Filled", "    raekken staar som Filled")
+            kraev(r2.get("filled") == 1,
+                  f"    ⚠ og Fyldt er 1, ikke tom ({r2.get('filled')})")
+        finally:
+            gendan(orig)
+
+    # ⚠ Og det modsatte skal stadig virke: lukkes positionen et ANDET sted,
+    # skal de tilbagevaerende exit-ordrer ryddes.
+    print()
+    e = {"order_id": "NTX_R", "source": "manual_exit", "ordre_type": "SLOSS",
+         "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
+         "shares": 1, "action": "SELL", "trigger_pris": 7800.0, "ticker": "MES"}
+    tr, jo = FalskTracker([dict(e)]), FalskJournal()
+    bogfoert.clear()
+    # Position nul, men ordren er IKKE fyldt — den blev lukket manuelt.
+    kald, orig = mock_nt(position={"netto": 0, "noegle": "MES DEC26"},
+                         ordre_status="")
+    try:
+        o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                            instrument_for=lambda: "MES 12-26",
+                            bogfoer_exit=bogfoer)
+        await o._tik("MES 12-26", "DEMO8580770")
+        kraev(not bogfoert, "lukket et andet sted -> der bogfoeres INGEN exit")
+        kraev(any(k[0] == "annuller" for k in kald),
+              "⚠ …men den efterladte stop ryddes stadig")
+    finally:
+        gendan(orig)
+
+
 async def _kurs(v):
     return v
 
@@ -720,6 +799,7 @@ def main() -> int:
     test_lukketid()
     asyncio.run(test_overvaagning())
     asyncio.run(test_opret())
+    asyncio.run(test_fyldt_exit_bogfoeres())
     asyncio.run(test_genstart())
     asyncio.run(test_tvangsluk_blind())
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")

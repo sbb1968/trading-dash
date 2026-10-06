@@ -1620,11 +1620,16 @@ async def websocket_endpoint(websocket: WebSocket):
                                    ((_side == "long" and action == "SELL") or
                                     (_side == "short" and action == "BUY")))
                         if _lukker:
-                            await manuel_forensik.registrer_exit(
+                            _tid = await manuel_forensik.registrer_exit(
                                 journal, ibkr, symbol=ticker,
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
                                 et_tz=ET_TZ, broker=broker, konto=konto_brugt)
+                            # ⚠ Samme tal som forensikken regnede.
+                            _p = await _hent_pnl(_tid)
+                            if _p is not None and order_id:
+                                get_tracker().opdater(order_id, pnl=_p,
+                                                      trade_id=_tid)
                         else:
                             # ⚠ `ibkr` er her KURSKILDEN, ikke ordrevejen. Bars
                             # og indikatorer kommer fra IBKR uanset hvem der
@@ -6153,6 +6158,41 @@ def _exit_instrument():
 _EXIT_INSTRUMENT: dict = {"navn": None}
 
 
+async def _hent_pnl(trade_id):
+    """Den P/L forensikken regnede for en lukket handel, eller None.
+
+    ⚠ ÉN KILDE. At regne P/L igen her ville give et andet tal den dag
+    multiplikator eller kurtage aendrer sig ét af stederne — og to tal for
+    samme handel er vaerre end ingen.
+    """
+    if not trade_id:
+        return None
+    # ⚠ journal.db er None indtil journalen er initialiseret, og
+    # None.execute ville blive fanget nedenfor og se ud som "handlen havde
+    # ingen P/L". Det er to forskellige ting, og de skal staa forskelligt i
+    # loggen — ellers leder man efter fejlen i forensikken.
+    db = journal.db
+    if db is None:
+        logger.error(f"[ExitOrdrer] ⚠ journalen er ikke klar — P/L for "
+                     f"{trade_id} kunne ikke hentes")
+        return None
+    try:
+        async with db.execute(
+                "SELECT pnl FROM trades WHERE trade_id = ?",
+                (trade_id,)) as cur:
+            r = await cur.fetchone()
+    except Exception as e:
+        logger.warning(f"[ExitOrdrer] kunne ikke hente pnl for "
+                       f"{trade_id}: {e}")
+        return None
+    if r is None:
+        # Handlen findes ikke i `trades`. Sker hvis positionen blev aabnet et
+        # andet sted end watchlist-vinduet — ikke en fejl, men vaerd at se.
+        logger.info(f"[ExitOrdrer] ingen trades-raekke for {trade_id}")
+        return None
+    return None if r[0] is None else float(r[0])
+
+
 async def _exit_bogfoer(order_id, action, antal, pris, status, aarsag):
     """En fyldt exit-ordre skal bogfoeres som enhver anden exit.
 
@@ -6174,6 +6214,12 @@ async def _exit_bogfoer(order_id, action, antal, pris, status, aarsag):
         ibkr_account=konto or None, broker="NT8",
         maalt={"status": "Filled", "filled": int(antal), "avg_fill": float(pris)},
         ordre_type="EXIT", exit_aarsag=aarsag)
+    # ⚠ P/L HOERER PAA RAEKKEN, ikke kun i journalen. Ordrer-vinduet er det
+    # foerste Iben kigger i naar en handel er lukket, og "hvad gav den" er
+    # det foerste hun vil vide.
+    _pnl = await _hent_pnl(tid)
+    if _pnl is not None:
+        get_tracker().opdater(f"{order_id}_x", pnl=_pnl, trade_id=tid)
     await journal.log_event(
         ibkr_account=konto or None, source="manual_exit",
         event_type="exit_fyldt", symbol="MES",

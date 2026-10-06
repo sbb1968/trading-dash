@@ -50,6 +50,11 @@ interface OrderEntry {
    *  igen som denne ordre. "Annulleret" alene ville se ud som om beskyttelsen
    *  forsvandt. */
   genlagt_som?:     string | null;
+  /** Realiseret P/L for den handel denne ordre LUKKEDE. Kun paa EXIT-
+   *  raekker. ⚠ Tallet kommer fra `trades` — det er DET SAMME som
+   *  forensikken regnede, ikke et nyt regnestykke der kan drive fra det. */
+  pnl?:             number | null;
+  trade_id?:        string | null;
 }
 
 const EXIT_TYPER = ["SLOSS", "TPROF", "TRAIL"] as const;
@@ -809,6 +814,10 @@ export function OrdersWindow() {
                     ingen snitpris — den har en TRIGGERPRIS, og det er den
                     Iben skal kunne se. Samme kolonne, aerligt navn. */}
                 <th style={{ textAlign: "right" }}>Entry price</th>
+                {/* ⚠ Kun udfyldt paa raekker der LUKKEDE en handel. En
+                    aabning har ingen P/L endnu, og et nul dér ville se ud
+                    som en handel der gik i nul. */}
+                <th style={{ textAlign: "right" }}>P&amp;L</th>
                 {/* Plads nok til SLOSS + TPROF + TRAIL med mellemrum. */}
                 <th style={{ textAlign: "center", width: 190, minWidth: 190 }}></th>
               </tr>
@@ -904,6 +913,17 @@ export function OrdersWindow() {
                         ? (o.trigger_pris != null ? usd(o.trigger_pris) : "—")
                         : (o.avg_fill > 0 ? usd(o.avg_fill) : "—")}
                       {type === "TRAIL" && <span style={{ opacity: 0.6 }}> ↗</span>}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700,
+                                 fontVariantNumeric: "tabular-nums",
+                                 color: o.pnl == null ? "var(--text-muted)"
+                                      : o.pnl >= 0 ? "var(--bull)" : "var(--bear)" }}
+                        title={o.pnl != null && o.trade_id
+                          ? `Realiseret på handel ${o.trade_id.slice(0, 8)}`
+                          : undefined}>
+                      {o.pnl == null
+                        ? "—"
+                        : `${o.pnl >= 0 ? "+" : ""}${usd(o.pnl)}`}
                     </td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                       {/* ── Exit-raekke: et kryds, som i watchlisten ──────── */}

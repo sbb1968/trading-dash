@@ -903,7 +903,55 @@ class Overvaagning:
                     except Exception as ex:
                         logger.error(f"[ExitOrdrer] trail fejlede: {ex}")
 
+        # ── ordrestatus FOERST ─────────────────────────────────────────
+        # ⚠ REKKEFOELGEN ER IKKE LIGEGYLDIG, og den var forkert.
+        # Positionen blev laest foer ordrestatus, og naar en TRAIL fyldte,
+        # gik positionen til nul. Loekken laeste det som "positionen er
+        # lukket, ryd resterne", annullerede den netop fyldte ordre og
+        # returnerede — FOER den naaede at se at den var fyldt.
+        #
+        # Maalt 06-10 kl. 13:07: NT8 fyldte en TRAIL paa en short, og
+        # Trading Dash bogfoerte det aldrig. Handlen stod aaben i journalen
+        # med exit_price=None, SHORT-raekken beholdt sine knapper, og
+        # Fyldt-kolonnen sagde "—" paa en ordre der var fyldt.
+        #
+        # ⚠ Loekken kunne ikke skelne "exit'en fyldte" fra "positionen blev
+        # lukket et andet sted" — og den stillede det forkerte spoergsmaal
+        # foerst. En fyldt exit FORKLARER hvorfor positionen er nul, saa
+        # den skal laeses foerst.
+        for e in aktive:
+            oid = str(e["order_id"])
+            st = await asyncio.to_thread(NT.ordre_status, oid)
+            if not st:
+                continue          # ⚠ "" er UKENDT — lad raekken staa
+            if st == "Filled":
+                antal, pris = await asyncio.to_thread(NT.fyldning, oid)
+                self.tracker.opdater(oid, status=st, bekraeftet=True,
+                                     filled=antal, avg_fill=pris, remaining=0)
+                if self.bogfoer_exit and antal and pris:
+                    try:
+                        await self.bogfoer_exit(
+                            oid, e.get("action"), antal, pris, st,
+                            normaliser_type(e.get("ordre_type")))
+                    except Exception as ex:
+                        logger.error(f"[ExitOrdrer] bogfoering fejlede: {ex}")
+            elif st in ("Cancelled", "Rejected"):
+                self.tracker.opdater(oid, status=st, bekraeftet=True)
+
+        # ⚠ GENBEREGN. Listen blev lavet FOER status-loekken, og en ordre
+        # der lige er bogfoert som fyldt, staar stadig i den. Uden det ville
+        # ryd() blive kaldt paa noget der allerede er vaek — harmloest i sig
+        # selv, men det ville ogsaa skjule at der INTET var at rydde.
+        aktive = [e for e in self.tracker._entries
+                  if e.get("source") == "manual_exit"
+                  and er_exit_type(e.get("ordre_type") or "")
+                  and e.get("status") not in ("Filled", "Cancelled",
+                                             "Rejected")]
+
         # ── position ──────────────────────────────────────────────────────
+        # ⚠ Nu hvor fyldninger er bogfoert ovenfor, betyder netto 0 og
+        # tilbagevaerende aktive exits at positionen blev lukket et ANDET
+        # sted — manuelt i NT8, eller af tvangslukningen. Saa skal de ryddes.
         p = await asyncio.to_thread(NT.position, instrument, konto)
         netto = p.get("netto")
         if netto is None:
@@ -948,26 +996,6 @@ class Overvaagning:
                                          remaining=abs(netto))
                     logger.info(f"[ExitOrdrer] {e['order_id']} antal -> "
                                 f"{abs(netto)}")
-
-        # ── ordrestatus ───────────────────────────────────────────────────
-        for e in aktive:
-            oid = str(e["order_id"])
-            st = await asyncio.to_thread(NT.ordre_status, oid)
-            if not st:
-                continue          # ⚠ "" er UKENDT — lad raekken staa
-            if st == "Filled":
-                antal, pris = await asyncio.to_thread(NT.fyldning, oid)
-                self.tracker.opdater(oid, status=st, bekraeftet=True,
-                                     filled=antal, avg_fill=pris, remaining=0)
-                if self.bogfoer_exit and antal and pris:
-                    try:
-                        await self.bogfoer_exit(
-                            oid, e.get("action"), antal, pris, st,
-                            normaliser_type(e.get("ordre_type")))
-                    except Exception as ex:
-                        logger.error(f"[ExitOrdrer] bogfoering fejlede: {ex}")
-            elif st in ("Cancelled", "Rejected"):
-                self.tracker.opdater(oid, status=st, bekraeftet=True)
 
     # ── løkken ────────────────────────────────────────────────────────────
     async def koer(self) -> None:
