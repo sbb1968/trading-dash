@@ -770,7 +770,14 @@ export function OrdersWindow() {
       {/* ── Tabel ── */}
       {fane === "ordrer" && visibleOrders.length > 0 && (
         <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-          <table className="scanner-table" style={{ width: "100%" }}>
+          {/* ⚠ minWidth FREM FOR REN 100 %. Handlingskolonnen har nowrap, og
+              med width:100 % alene skrumper tabellen med vinduet indtil den
+              SKAERER knapperne af — TRAIL forsvandt ud over kanten. En knap man
+              ikke kan se, findes ikke, og det er ikke en kosmetisk mangel naar
+              knappen laegger en stop loss.
+              Nu faar tabellen en mindstebredde, og beholderen ruller i stedet. */}
+          <table className="scanner-table"
+                 style={{ width: "100%", minWidth: 1020 }}>
             <thead style={{ position: "sticky", top: 0, background: "var(--bg-elevated)", zIndex: 1 }}>
               <tr>
                 <th style={{ textAlign: "left" }}>Tid</th>
@@ -785,7 +792,8 @@ export function OrdersWindow() {
                     ingen snitpris — den har en TRIGGERPRIS, og det er den
                     Iben skal kunne se. Samme kolonne, aerligt navn. */}
                 <th style={{ textAlign: "right" }}>Entry price</th>
-                <th style={{ textAlign: "center" }}></th>
+                {/* Plads nok til SLOSS + TPROF + TRAIL med mellemrum. */}
+                <th style={{ textAlign: "center", width: 190, minWidth: 190 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -901,7 +909,8 @@ export function OrdersWindow() {
                           Derfor: klik -> POST -> hent listen -> farven skifter
                           naar ATI har bekraeftet. */}
                       {!erExit && o.exit_mulig && knapper && (
-                        <span style={{ display: "inline-flex", gap: 4 }}>
+                        <span style={{ display: "inline-flex", gap: 4,
+                                       whiteSpace: "nowrap" }}>
                           {EXIT_TYPER.map(t => {
                             const st = knapper[t] || "ingen";
                             const aktiv = st === "aktiv";
