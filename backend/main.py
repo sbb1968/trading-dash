@@ -1880,7 +1880,7 @@ def _berig_med_exit(ordrer: list) -> list:
 
     pr_parent: dict = {}
     for o in ordrer:
-        t = (o.get("ordre_type") or "").upper()
+        t = _ex.normaliser_type(o.get("ordre_type"))
         if t not in _ex.TYPER:
             continue
         pid = str(o.get("parent_order_id") or "")
@@ -1928,10 +1928,11 @@ async def cancel_order(req: CancelOrderRequest):
     Ordrer-vinduet gjorde intet paa en NT8-ordre, uden at noget fejlede.
     Det var en kendt mangel (spec §2 punkt 4) og er rettet her.
     """
+    import exit_ordrer as _ex_mod
     raekke = get_tracker().find(req.order_id)
     if raekke and (raekke.get("broker") or "").upper() == "NT8":
         # Exit-ordrer gaar den vej der ogsaa haandterer OCO-kaskaden.
-        if (raekke.get("ordre_type") or "") in ("PLOSS", "TPROF", "TRAIL"):
+        if _ex_mod.er_exit_type(raekke.get("ordre_type") or ""):
             import exit_ordrer as _ex
             try:
                 r = await _ex.annuller_exit(

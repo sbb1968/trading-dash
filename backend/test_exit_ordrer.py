@@ -141,6 +141,30 @@ def test_klassifikation() -> None:
           "⚠ ukendt netto bliver ALDRIG til LONG")
 
 
+def test_legacy_navn() -> None:
+    """⚠ En raekke lagt FOER omdoebningen skal stadig kunne vises og slettes."""
+    print("\n  -- PLOSS -> SLOSS --")
+    kraev(EX.TYPER == ("SLOSS", "TPROF", "TRAIL"),
+          f"typerne hedder nu SLOSS ({EX.TYPER})")
+    kraev(EX.normaliser_type("PLOSS") == "SLOSS",
+          "⚠ den gamle stavemaade oversaettes")
+    kraev(EX.er_exit_type("PLOSS"), "⚠ …og genkendes stadig som en exit-ordre")
+    kraev(EX.er_exit_type("sloss"), "store/smaa bogstaver er lige gyldige")
+    kraev(not EX.er_exit_type("LONG"), "LONG er ikke en exit-type")
+    kraev(not EX.er_exit_type(""), "tom type er ikke en exit-type")
+
+    # ⚠ Det der ville vaere gaaet galt: en levende stop loss lagt i gaar
+    # forsvinder fra vinduet, mens den stadig ligger hos NinjaTrader.
+    gammel = {"order_id": "NTX_G", "source": "manual_exit",
+              "ordre_type": "PLOSS", "parent_order_id": "NTM1",
+              "status": "Working", "shares": 1, "action": "SELL",
+              "trigger_pris": 6800.0, "ticker": "MES"}
+    tr = FalskTracker([gammel])
+    fundet = [e for e in tr._entries if EX.er_exit_type(e.get("ordre_type"))]
+    kraev(len(fundet) == 1,
+          "⚠ en PLOSS-raekke fra i gaar findes stadig som exit-ordre")
+
+
 def test_validering() -> None:
     print("\n  ── prisvalidering (så NT8 ikke behøver afvise) ──")
 
@@ -155,12 +179,12 @@ def test_validering() -> None:
           "hele ticks genkendes")
     kraev(not EX.hele_ticks(6812.30), "6812,30 er ikke et helt tick")
 
-    g, b = ok("PLOSS", 6812.30, "LONG", 6820.0)
+    g, b = ok("SLOSS", 6812.30, "LONG", 6820.0)
     kraev(not g and "tick" in b, f"skæv pris afvises: {b[:46]}")
 
-    g, b = ok("PLOSS", 6830.0, "LONG", 6820.0)
+    g, b = ok("SLOSS", 6830.0, "LONG", 6820.0)
     kraev(not g and "under" in b, f"long: stop over kurs afvises: {b[:46]}")
-    g, _ = ok("PLOSS", 6810.0, "LONG", 6820.0)
+    g, _ = ok("SLOSS", 6810.0, "LONG", 6820.0)
     kraev(g, "long: stop under kurs godkendes")
 
     g, b = ok("TPROF", 6810.0, "LONG", 6820.0)
@@ -168,16 +192,16 @@ def test_validering() -> None:
 
     # ⚠ SPEJLET FOR SHORT. 25-08 stod Iben og kunne ikke handle, fordi reglen
     # var skrevet som om kun long fandtes.
-    g, b = ok("PLOSS", 6810.0, "SHORT", 6820.0)
+    g, b = ok("SLOSS", 6810.0, "SHORT", 6820.0)
     kraev(not g and "over" in b, f"short: stop under kurs afvises: {b[:46]}")
-    g, _ = ok("PLOSS", 6830.0, "SHORT", 6820.0)
+    g, _ = ok("SLOSS", 6830.0, "SHORT", 6820.0)
     kraev(g, "short: stop over kurs godkendes")
     g, _ = ok("TPROF", 6810.0, "SHORT", 6820.0)
     kraev(g, "short: target under kurs godkendes")
 
     # ⚠ Ingen kurs -> afvis. At sende alligevel ville lade NT8 om det, og NT8
     # svarer med en modal dialogboks paa Ibens skaerm (maalt 06-10, P7).
-    g, b = ok("PLOSS", 6810.0, "LONG", None)
+    g, b = ok("SLOSS", 6810.0, "LONG", None)
     kraev(not g and "kurs" in b, f"ingen kurs -> afvis: {b[:46]}")
 
     g, b = ok("TRAIL", 6810.0, "LONG", 6820.0)
@@ -272,7 +296,7 @@ def test_lukketid() -> None:
 
 async def test_overvaagning() -> None:
     print("\n  ── overvågningen: de to regler der koster penge ──")
-    EXIT = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "PLOSS",
+    EXIT = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "SLOSS",
             "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
             "shares": 1, "action": "SELL", "trigger_pris": 6800.0,
             "ticker": "MES"}
@@ -374,25 +398,25 @@ async def test_opret() -> None:
         return 6820.0
 
     # ⚠ Dobbelt-oprettelse af samme type afvises.
-    aktiv = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "PLOSS",
+    aktiv = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "SLOSS",
              "parent_order_id": "NTM1", "status": "Working", "oco_id": "TDOCO1"}
     tr, jo = FalskTracker([PARENT, aktiv]), FalskJournal()
     _, orig = mock_nt()
     try:
         try:
-            await EX.opret_exit(tr, jo, parent_order_id="NTM1", type_="PLOSS",
+            await EX.opret_exit(tr, jo, parent_order_id="NTM1", type_="SLOSS",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
-            kraev(False, "dobbelt PLOSS burde afvises")
+            kraev(False, "dobbelt SLOSS burde afvises")
         except EX.ExitFejl as e:
-            kraev("allerede" in str(e), f"dobbelt PLOSS afvises: {str(e)[:44]}")
+            kraev("allerede" in str(e), f"dobbelt SLOSS afvises: {str(e)[:44]}")
 
         # ⚠ Position None -> ingen ordre.
         gendan(orig)
         _, orig = mock_nt(position={"netto": None})
         tr2 = FalskTracker([PARENT])
         try:
-            await EX.opret_exit(tr2, jo, parent_order_id="NTM1", type_="PLOSS",
+            await EX.opret_exit(tr2, jo, parent_order_id="NTM1", type_="SLOSS",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "ukendt position burde afvises")
@@ -405,7 +429,7 @@ async def test_opret() -> None:
         _, orig = mock_nt(position={"netto": -1})
         try:
             await EX.opret_exit(FalskTracker([PARENT]), jo,
-                                parent_order_id="NTM1", type_="PLOSS",
+                                parent_order_id="NTM1", type_="SLOSS",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "modsat position burde afvises")
@@ -420,7 +444,7 @@ async def test_opret() -> None:
         jo2 = FalskJournal()
         try:
             await EX.opret_exit(FalskTracker([PARENT]), jo2,
-                                parent_order_id="NTM1", type_="PLOSS",
+                                parent_order_id="NTM1", type_="SLOSS",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "Rejected burde kaste")
@@ -593,6 +617,7 @@ async def _ingen():
 def main() -> int:
     print("  ── exit-ordrer ──")
     test_klassifikation()
+    test_legacy_navn()
     test_validering()
     test_config()
     test_log_aflaesning()

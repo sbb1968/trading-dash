@@ -40,7 +40,21 @@ logger = logging.getLogger(__name__)
 
 KONFIG_FIL = pathlib.Path(__file__).parent / "exit_config.json"
 TICK = 0.25
-TYPER = ("PLOSS", "TPROF", "TRAIL")
+# SLOSS = Stop Loss. ⚠ "PLOSS" er den gamle stavemaade; raekker lagt foer
+# 06-10 baerer den, og de skal stadig kunne vises og annulleres. Derfor en
+# alias frem for en omdoebning der ville goere historikken ulaeselig.
+TYPER = ("SLOSS", "TPROF", "TRAIL")
+LEGACY_TYPER = {"PLOSS": "SLOSS"}
+
+
+def normaliser_type(t: str) -> str:
+    """Den gaeldende stavemaade for en exit-type."""
+    t = (t or "").upper()
+    return LEGACY_TYPER.get(t, t)
+
+
+def er_exit_type(t: str) -> bool:
+    return normaliser_type(t) in TYPER
 
 DK = zoneinfo.ZoneInfo("Europe/Copenhagen")
 ET = zoneinfo.ZoneInfo("America/New_York")
@@ -166,14 +180,14 @@ def valider_pris(type_: str, pris: Optional[float], retning: str,
         raise ValueError("Ingen aktuel kurs — prisen kan ikke kontrolleres, "
                          "og der sendes ingen ordre.")
     if retning == "LONG":
-        if type_ == "PLOSS" and pris >= kurs:
+        if type_ == "SLOSS" and pris >= kurs:
             raise ValueError(f"Stop loss skal ligge under aktuel kurs "
                              f"({_dk(kurs)}) for en long.")
         if type_ == "TPROF" and pris <= kurs:
             raise ValueError(f"Target profit skal ligge over aktuel kurs "
                              f"({_dk(kurs)}) for en long.")
     else:
-        if type_ == "PLOSS" and pris <= kurs:
+        if type_ == "SLOSS" and pris <= kurs:
             raise ValueError(f"Stop loss skal ligge over aktuel kurs "
                              f"({_dk(kurs)}) for en short.")
         if type_ == "TPROF" and pris >= kurs:
@@ -268,8 +282,8 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
     `hent_kurs` er en awaitable () -> float|None. Den injiceres, så modulet
     ikke skal kende main.py.
     """
-    type_ = (type_ or "").upper()
-    if type_ not in TYPER:
+    type_ = normaliser_type(type_)
+    if normaliser_type(type_) not in TYPER:
         raise ExitFejl(f"Ukendt exit-type {type_!r}.")
 
     parent = tracker.find(parent_order_id)
@@ -300,7 +314,7 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
 
     # 3. Typen må ikke allerede være aktiv.
     aktive = tracker.exit_ordrer_for(parent_order_id)
-    if any((e.get("ordre_type") or "").upper() == type_ for e in aktive):
+    if any(normaliser_type(e.get("ordre_type")) == type_ for e in aktive):
         raise ExitFejl(f"Der er allerede en aktiv {type_} på positionen.")
 
     # 4. FRISK kurs lige før afsendelse — ikke den UI'et viste.
@@ -327,7 +341,7 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
         stop = kurs - trail_afstand if retning == "LONG" else kurs + trail_afstand
         stop = round(round(stop / TICK) * TICK, 2)
         ordretype, limit = "STOPMARKET", None
-    elif type_ == "PLOSS":
+    elif type_ == "SLOSS":
         ordretype, limit, stop = "STOPMARKET", None, pris
     else:
         ordretype, limit, stop = "LIMIT", pris, None
@@ -434,7 +448,7 @@ async def annuller_exit(tracker, journal, *, order_id: str,
     genlagt = []
     for e in søskende:
         tracker.opdater(e["order_id"], status="Cancelled", bekraeftet=True)
-        t = (e.get("ordre_type") or "").upper()
+        t = normaliser_type(e.get("ordre_type"))
         modsat = "SELL" if netto > 0 else "BUY"
         ny_ref = NT.order_ref(praefiks="NTX")
         er_limit = t == "TPROF"
@@ -486,7 +500,7 @@ async def ryd(tracker, journal, *, parent_order_id: Optional[str] = None,
     else:
         aktive = [e for e in tracker._entries
                   if e.get("source") == "manual_exit"
-                  and (e.get("ordre_type") or "") in TYPER
+                  and er_exit_type(e.get("ordre_type") or "")
                   and e.get("status") not in ("Filled", "Cancelled", "Rejected")]
     if not aktive:
         return 0
@@ -768,7 +782,7 @@ class Overvaagning:
     async def _tik(self, instrument: str, konto: str) -> None:
         aktive = [e for e in self.tracker._entries
                   if e.get("source") == "manual_exit"
-                  and (e.get("ordre_type") or "") in TYPER
+                  and er_exit_type(e.get("ordre_type") or "")
                   and e.get("status") not in ("Filled", "Cancelled", "Rejected")]
 
         kurs = await self.hent_kurs()
@@ -790,14 +804,14 @@ class Overvaagning:
             # som en der foelger med — indtil man opdager at tallet ikke har
             # rykket sig i et kvarter.
             for e in aktive:
-                if (e.get("ordre_type") or "").upper() == "TRAIL":
+                if normaliser_type(e.get("ordre_type")) == "TRAIL":
                     self.tracker.opdater(
                         e["order_id"],
                         advarsel="Ingen kurs — stoppen følger ikke med")
 
         if kurs:
             for e in aktive:
-                if (e.get("ordre_type") or "").upper() == "TRAIL":
+                if normaliser_type(e.get("ordre_type")) == "TRAIL":
                     # Kursen er tilbage -> ryd advarslen igen.
                     if e.get("advarsel"):
                         self.tracker.opdater(e["order_id"], advarsel=None)
@@ -866,7 +880,7 @@ class Overvaagning:
                     try:
                         await self.bogfoer_exit(
                             oid, e.get("action"), antal, pris, st,
-                            (e.get("ordre_type") or "").upper())
+                            normaliser_type(e.get("ordre_type")))
                     except Exception as ex:
                         logger.error(f"[ExitOrdrer] bogfoering fejlede: {ex}")
             elif st in ("Cancelled", "Rejected"):

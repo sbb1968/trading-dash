@@ -34,10 +34,18 @@ ORDERS_LOG = Path(__file__).parent / "orders_log.json"
 _OPSTART = datetime.now()
 
 # IBKR-statusser opdelt i overordnede grupper for UI
+# ⚠ BEGGE BROKERES NAVNE. Listen var IBKR's alene, og NT8 siger noget andet:
+# "Working" og "Accepted". En NT8-ordre faldt derfor igennem til UKENDT — med
+# graa prik, "1 ukendt" i taelleren, og (vaerst) INTET kryds til at annullere
+# den, fordi krydset kraever at raekken er aaben.
+# Maalt 06-10 paa en levende stop loss: den kunne ikke slettes fra vinduet.
 STATUS_OPEN = {"PendingSubmit", "PendingCancel", "PreSubmitted", "Submitted",
-               "ApiPending", "Inactive"}
+               "ApiPending", "Inactive",
+               "Working", "Accepted", "Change submitted", "afventer"}
 STATUS_DONE = {"Filled"}
-STATUS_CANCEL = {"Cancelled", "ApiCancelled"}
+# ⚠ "Rejected" hoerer med her. Den er TERMINAL — ordren kommer aldrig til at
+# fylde — og stod foer som UKENDT, hvilket er det ene den ikke er.
+STATUS_CANCEL = {"Cancelled", "ApiCancelled", "Rejected"}
 
 
 def _load_log() -> list[dict]:

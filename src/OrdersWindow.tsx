@@ -48,14 +48,23 @@ interface OrderEntry {
   advarsel?:        string | null;
 }
 
-const EXIT_TYPER = ["PLOSS", "TPROF", "TRAIL"] as const;
+const EXIT_TYPER = ["SLOSS", "TPROF", "TRAIL"] as const;
 type ExitType = (typeof EXIT_TYPER)[number];
 
 const EXIT_NAVN: Record<ExitType, string> = {
-  PLOSS: "Stop loss",
+  SLOSS: "Stop loss",
   TPROF: "Target profit",
   TRAIL: "Trailing stop",
 };
+
+/** ⚠ "PLOSS" var den første stavemåde. Rækker lagt før 06-10 bærer den, og de
+ *  skal stadig kunne vises og annulleres — ellers ville en levende stop loss
+ *  blive usynlig i vinduet, mens den stadig lå hos NinjaTrader. */
+function exitType(t: string | null | undefined): ExitType | null {
+  const v = (t || "").toUpperCase();
+  const n = v === "PLOSS" ? "SLOSS" : v;
+  return (EXIT_TYPER as readonly string[]).includes(n) ? (n as ExitType) : null;
+}
 
 /** Én handel = entry + exit på samme linje. Fra `trades`-tabellen, ikke fra
  *  ordre-trackeren — det er journalens parrede rækker, med P&L regnet med
@@ -123,7 +132,7 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
         </div>
         <input
           ref={ref} type="number" step={0.25} value={pris}
-          placeholder={type === "PLOSS" ? "Stop loss-pris" : "Target profit-pris"}
+          placeholder={type === "SLOSS" ? "Stop loss-pris" : "Target profit-pris"}
           onChange={e => setPris(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && gyldig && !travl) onOpret(tal); }}
           style={{
@@ -302,7 +311,8 @@ export function OrdersWindow() {
   }
 
   async function annullerExit(o: OrderEntry) {
-    const navn = EXIT_NAVN[(o.ordre_type || "") as ExitType] || "exit-ordren";
+    const t = exitType(o.ordre_type);
+    const navn = t ? EXIT_NAVN[t] : "exit-ordren";
     const pris = o.trigger_pris != null
       ? ` på ${o.trigger_pris.toLocaleString("da-DK",
           {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "";
@@ -454,16 +464,14 @@ export function OrdersWindow() {
   function grupper(raekker: OrderEntry[]): {o: OrderEntry; barn: boolean}[] {
     const exits = new Map<string, OrderEntry[]>();
     for (const o of raekker) {
-      const t = (o.ordre_type || "").toUpperCase();
-      if (!(EXIT_TYPER as readonly string[]).includes(t)) continue;
+      if (!exitType(o.ordre_type)) continue;
       const pid = String(o.parent_order_id || "");
       if (!pid) continue;
       (exits.get(pid) || exits.set(pid, []).get(pid)!).push(o);
     }
     const ud: {o: OrderEntry; barn: boolean}[] = [];
     for (const o of raekker) {
-      const t = (o.ordre_type || "").toUpperCase();
-      if ((EXIT_TYPER as readonly string[]).includes(t) && o.parent_order_id) continue;
+      if (exitType(o.ordre_type) && o.parent_order_id) continue;
       ud.push({o, barn: false});
       for (const b of exits.get(String(o.order_id)) || []) ud.push({o: b, barn: true});
     }
@@ -781,13 +789,20 @@ export function OrdersWindow() {
                 const isOpen = o.status_group === "open";
                 const sideColor = o.action === "BUY" ? "var(--bull)" : "var(--bear)";
                 const type = (o.ordre_type || "").toUpperCase();
-                const erExit = (EXIT_TYPER as readonly string[]).includes(type);
+                const exitT = exitType(o.ordre_type);
+                const erExit = exitT !== null;
                 const knapper = o.exit_knapper;
                 return (
                   <tr key={o.order_id}
                       style={barn ? {background: "var(--bg-surface)"} : undefined}>
-                    <td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap",
-                                 paddingLeft: barn ? 18 : undefined }}>
+                    {/* ⚠ INDRYKNINGEN MAA IKKE LIGGE HER. Den skubbede baade
+                        klokkeslaet og dato til hoejre paa exit-raekker, saa
+                        kolonnen stod forskudt fra raekke til raekke — og en
+                        tidskolonne man ikke kan laese lodret, er svaer at bruge
+                        til dét den er til: at se hvornaar man gjorde hvad.
+                        Slaegtskabet vises med baggrunden og med indrykning af
+                        TICKER-cellen i stedet. */}
+                    <td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                       <div>{fmtTime(o.placed_at)}</div>
                       <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
                         {fmtDate(o.placed_at)}
@@ -796,7 +811,9 @@ export function OrdersWindow() {
                     <td style={{ color: "var(--text-muted)", fontSize: 11 }}>
                       {sourceLabel(o.source)}
                     </td>
-                    <td>
+                    <td style={{ paddingLeft: barn ? 16 : undefined }}>
+                      {barn && <span style={{ color: "var(--text-muted)",
+                                              marginRight: 4 }}>└</span>}
                       <strong>{o.ticker}</strong>
                     </td>
                     <td style={{ textAlign: "center", color: sideColor, fontWeight: 700 }}>
@@ -858,7 +875,7 @@ export function OrdersWindow() {
                       {/* ── Exit-raekke: et kryds, som i watchlisten ──────── */}
                       {erExit && isOpen && (
                         <span onClick={() => annullerExit(o)}
-                          title={`Annullér ${EXIT_NAVN[type as ExitType]}`}
+                          title={`Annullér ${EXIT_NAVN[exitT!]}`}
                           style={{ cursor: "pointer", color: "var(--text-muted)",
                                    fontSize: 14, padding: "0 6px",
                                    userSelect: "none" }}>×</span>
