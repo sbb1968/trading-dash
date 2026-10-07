@@ -716,7 +716,7 @@ def order_ref(hvem: str = "", praefiks: str = "NTM") -> str:
     klik ad". Det var sandt — om KLIK. Et menneske klikker ikke to gange i samme
     millisekund.
 
-    Exit-ordrer goer det. PLOSS, TPROF og TRAIL laegges af kode i traek, og et
+    Exit-ordrer goer det. STOP, TARGET og TRAIL laegges af kode i traek, og et
     OCO-par endnu taettere. To ordrer med samme id er ikke en kosmetisk fejl:
     `ordre_status(id)` kan ikke skelne dem, og `annuller(id)` rammer den ene
     eller den anden — vi ved ikke hvilken. En stop loss der ikke kan annulleres

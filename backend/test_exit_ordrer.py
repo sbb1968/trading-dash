@@ -143,15 +143,28 @@ def test_klassifikation() -> None:
 
 def test_legacy_navn() -> None:
     """⚠ En raekke lagt FOER omdoebningen skal stadig kunne vises og slettes."""
-    print("\n  -- PLOSS -> SLOSS --")
-    kraev(EX.TYPER == ("SLOSS", "TPROF", "TRAIL"),
-          f"typerne hedder nu SLOSS ({EX.TYPER})")
-    kraev(EX.normaliser_type("PLOSS") == "SLOSS",
+    print("\n  -- PLOSS -> STOP --")
+    kraev(EX.TYPER == ("STOP", "TARGET", "TRAIL"),
+          f"typerne hedder nu STOP ({EX.TYPER})")
+    kraev(EX.normaliser_type("PLOSS") == "STOP",
           "⚠ den gamle stavemaade oversaettes")
     kraev(EX.er_exit_type("PLOSS"), "⚠ …og genkendes stadig som en exit-ordre")
-    kraev(EX.er_exit_type("sloss"), "store/smaa bogstaver er lige gyldige")
+    kraev(EX.er_exit_type("stop"), "store/smaa bogstaver er lige gyldige")
     kraev(not EX.er_exit_type("LONG"), "LONG er ikke en exit-type")
     kraev(not EX.er_exit_type(""), "tom type er ikke en exit-type")
+
+    # ⚠ SLOSS og TPROF er BEVIDST ikke aliaser (besluttet 07-10). De raekker
+    # er alle annullerede og historiske; de vises stadig med deres egen tekst i
+    # vinduet, men taelles ikke som exit-typer. Testen staar her, saa en senere
+    # laeser kan se at det var et VALG og ikke en forglemmelse.
+    for gl in ("SLOSS", "TPROF"):
+        kraev(not EX.er_exit_type(gl),
+              f"⚠ {gl} er bevidst IKKE en exit-type laengere")
+
+    # ⚠ NT8's ordretype hedder ogsaa noget med STOP. De to navnerum maa ikke
+    # blandes: STOPMARKET er OIF'ens felt, STOP er Ibens navn paa typen.
+    kraev(not EX.er_exit_type("STOPMARKET"),
+          "⚠ STOPMARKET er NT8's ordretype, ikke vores exit-type")
 
     # ⚠ Det der ville vaere gaaet galt: en levende stop loss lagt i gaar
     # forsvinder fra vinduet, mens den stadig ligger hos NinjaTrader.
@@ -214,14 +227,14 @@ def test_exit_mulig() -> None:
     kraev(EX.netto_fra_raekker(s3) == 2, "3 koebt, 1 solgt -> netto 2")
 
     # ── Det der ikke maa taelle med ──────────────────────────────────────
-    # ⚠ En SLOSS-raekke der fylder, faar sin EGEN EXIT-raekke skrevet af
+    # ⚠ En STOP-raekke der fylder, faar sin EGEN EXIT-raekke skrevet af
     # _exit_bogfoer. Taltes begge, ville samme fyldning blive regnet to gange,
     # og nettoet ville vippe til den forkerte side.
     s4 = [r("08:00", "LONG", "BUY", 1),
-          r("09:00", "SLOSS", "SELL", 1),            # selve stop-ordren
+          r("09:00", "STOP", "SELL", 1),            # selve stop-ordren
           r("09:00:01", "EXIT", "SELL", 1)]          # bogfoeringen af fyldningen
     kraev(EX.netto_fra_raekker(s4) == 0,
-          "⚠ en fyldt SLOSS taelles ÉN gang, ikke to")
+          "⚠ en fyldt STOP taelles ÉN gang, ikke to")
 
     # En ordre der ikke fyldte, flytter ingenting.
     s5 = [r("08:00", "LONG", "BUY", 0, status="Cancelled"),
@@ -259,15 +272,15 @@ def test_exit_mulig() -> None:
     # ⚠ BEGGE MAADER EN POSITION KAN LUKKE SKAL FJERNE KNAPPERNE, og de ser
     # forskellige ud i trackeren. Fund b) i trin 8 havde netop to kilder:
     #   · manuel SAELG fra watchlisten  -> én EXIT-raekke (ovenfor)
-    #   · en exit-ordre der FYLDER      -> TO raekker: selve SLOSS/TPROF/TRAIL
+    #   · en exit-ordre der FYLDER      -> TO raekker: selve STOP/TARGET/TRAIL
     #     og den EXIT-raekke _exit_bogfoer skriver ved siden af
     # Den anden form blev proevet paa nettoet, men ikke paa selve beslutningen.
     fyldt_stop = [r("08:00", "LONG", "BUY", 1),
-                  r("09:00", "SLOSS", "SELL", 1),
+                  r("09:00", "STOP", "SELL", 1),
                   r("09:00:01", "EXIT", "SELL", 1)]
     kraev(EX.exit_mulig_for(fyldt_stop) is None,
-          "⚠ fyldt SLOSS -> INGEN knapper (fyldningen taelles én gang)")
-    for t in ("TPROF", "TRAIL"):
+          "⚠ fyldt STOP -> INGEN knapper (fyldningen taelles én gang)")
+    for t in ("TARGET", "TRAIL"):
         f = [r("08:00", "LONG", "BUY", 1), r("09:00", t, "SELL", 1),
              r("09:00:01", "EXIT", "SELL", 1)]
         kraev(EX.exit_mulig_for(f) is None, f"…og det samme for {t}")
@@ -396,29 +409,29 @@ def test_validering() -> None:
           "hele ticks genkendes")
     kraev(not EX.hele_ticks(6812.30), "6812,30 er ikke et helt tick")
 
-    g, b = ok("SLOSS", 6812.30, "LONG", 6820.0)
+    g, b = ok("STOP", 6812.30, "LONG", 6820.0)
     kraev(not g and "tick" in b, f"skæv pris afvises: {b[:46]}")
 
-    g, b = ok("SLOSS", 6830.0, "LONG", 6820.0)
+    g, b = ok("STOP", 6830.0, "LONG", 6820.0)
     kraev(not g and "under" in b, f"long: stop over kurs afvises: {b[:46]}")
-    g, _ = ok("SLOSS", 6810.0, "LONG", 6820.0)
+    g, _ = ok("STOP", 6810.0, "LONG", 6820.0)
     kraev(g, "long: stop under kurs godkendes")
 
-    g, b = ok("TPROF", 6810.0, "LONG", 6820.0)
+    g, b = ok("TARGET", 6810.0, "LONG", 6820.0)
     kraev(not g and "over" in b, f"long: target under kurs afvises: {b[:46]}")
 
     # ⚠ SPEJLET FOR SHORT. 25-08 stod Iben og kunne ikke handle, fordi reglen
     # var skrevet som om kun long fandtes.
-    g, b = ok("SLOSS", 6810.0, "SHORT", 6820.0)
+    g, b = ok("STOP", 6810.0, "SHORT", 6820.0)
     kraev(not g and "over" in b, f"short: stop under kurs afvises: {b[:46]}")
-    g, _ = ok("SLOSS", 6830.0, "SHORT", 6820.0)
+    g, _ = ok("STOP", 6830.0, "SHORT", 6820.0)
     kraev(g, "short: stop over kurs godkendes")
-    g, _ = ok("TPROF", 6810.0, "SHORT", 6820.0)
+    g, _ = ok("TARGET", 6810.0, "SHORT", 6820.0)
     kraev(g, "short: target under kurs godkendes")
 
     # ⚠ Ingen kurs -> afvis. At sende alligevel ville lade NT8 om det, og NT8
     # svarer med en modal dialogboks paa Ibens skaerm (maalt 06-10, P7).
-    g, b = ok("SLOSS", 6810.0, "LONG", None)
+    g, b = ok("STOP", 6810.0, "LONG", None)
     kraev(not g and "kurs" in b, f"ingen kurs -> afvis: {b[:46]}")
 
     g, b = ok("TRAIL", 6810.0, "LONG", 6820.0)
@@ -432,37 +445,37 @@ def test_validering() -> None:
     # $39.150. NT8 ville tage imod den uden at blinke, og den ville ligge der
     # resten af dagen og se ud som en beskyttelse.
     print()
-    g, b = ok("SLOSS", 20.0, "LONG", 7850.0)
+    g, b = ok("STOP", 20.0, "LONG", 7850.0)
     kraev(not g and "points i stedet for en pris" in b,
           f"⚠ 20 paa en long -> fanget som points: {b[:52]}")
-    # ⚠ Og paa en TPROF, hvor side-kontrollen ellers vinder foerst og siger
+    # ⚠ Og paa en TARGET, hvor side-kontrollen ellers vinder foerst og siger
     # "skal ligge over aktuel kurs" — sandt, og ubrugeligt.
-    g, b = ok("TPROF", 20.0, "LONG", 7850.0)
+    g, b = ok("TARGET", 20.0, "LONG", 7850.0)
     kraev(not g and "points i stedet for en pris" in b,
-          f"⚠ …og paa en TPROF vinder STOERRELSEN over siden: {b[:40]}")
-    g, b = ok("TPROF", 20.0, "SHORT", 7850.0)
+          f"⚠ …og paa en TARGET vinder STOERRELSEN over siden: {b[:40]}")
+    g, b = ok("TARGET", 20.0, "SHORT", 7850.0)
     kraev(not g and "points i stedet for en pris" in b,
           "…og det samme paa en short")
 
     # Lige inden for og lige uden for graensen.
     graense = 7850.0 * EX.FORNUFT_PCT          # 235,5 points
-    g, _ = ok("SLOSS", 7850.0 - 235.5, "LONG", 7850.0)
+    g, _ = ok("STOP", 7850.0 - 235.5, "LONG", 7850.0)
     kraev(g, f"praecis {EX._dk(graense)} points under godkendes")
-    g, b = ok("SLOSS", 7850.0 - 236.0, "LONG", 7850.0)
+    g, b = ok("STOP", 7850.0 - 236.0, "LONG", 7850.0)
     kraev(not g, "en halv point laengere ude afvises")
 
     # ⚠ En NORMAL stop maa ikke rammes af graensen. 5 points paa MES er en
     # helt saedvanlig stop, og en vagt der spaerrer det daglige arbejde, bliver
     # slaaet fra.
     for afst in (1.0, 5.0, 20.0, 100.0):
-        g, b = ok("SLOSS", 7850.0 - afst, "LONG", 7850.0)
+        g, b = ok("STOP", 7850.0 - afst, "LONG", 7850.0)
         kraev(g, f"…og en stop {EX._dk(afst)} points under er fin")
 
     # Graensen maa ikke afhaenge af kursens stoerrelse i absolutte points:
     # paa en billig kurs er 236 points helt urimeligt, paa en dyr er det ikke.
-    g, _ = ok("SLOSS", 19400.0, "LONG", 19600.0)   # 200 points, 1,0 %
+    g, _ = ok("STOP", 19400.0, "LONG", 19600.0)   # 200 points, 1,0 %
     kraev(g, "⚠ 200 points paa en kurs i 19.600 er under 3 % og godkendes")
-    g, b = ok("SLOSS", 1900.0, "LONG", 2000.0)     # 100 points, 5,0 %
+    g, b = ok("STOP", 1900.0, "LONG", 2000.0)     # 100 points, 5,0 %
     kraev(not g, "⚠ …men 100 points paa en kurs i 2.000 er 5 % og afvises")
 
 
@@ -552,7 +565,7 @@ def test_lukketid() -> None:
 
 async def test_overvaagning() -> None:
     print("\n  ── overvågningen: de to regler der koster penge ──")
-    EXIT = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "SLOSS",
+    EXIT = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "STOP",
             "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
             "shares": 1, "action": "SELL", "trigger_pris": 6800.0,
             "ticker": "MES"}
@@ -654,25 +667,25 @@ async def test_opret() -> None:
         return 6820.0
 
     # ⚠ Dobbelt-oprettelse af samme type afvises.
-    aktiv = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "SLOSS",
+    aktiv = {"order_id": "NTX1", "source": "manual_exit", "ordre_type": "STOP",
              "parent_order_id": "NTM1", "status": "Working", "oco_id": "TDOCO1"}
     tr, jo = FalskTracker([PARENT, aktiv]), FalskJournal()
     _, orig = mock_nt()
     try:
         try:
-            await EX.opret_exit(tr, jo, parent_order_id="NTM1", type_="SLOSS",
+            await EX.opret_exit(tr, jo, parent_order_id="NTM1", type_="STOP",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
-            kraev(False, "dobbelt SLOSS burde afvises")
+            kraev(False, "dobbelt STOP burde afvises")
         except EX.ExitFejl as e:
-            kraev("allerede" in str(e), f"dobbelt SLOSS afvises: {str(e)[:44]}")
+            kraev("allerede" in str(e), f"dobbelt STOP afvises: {str(e)[:44]}")
 
         # ⚠ Position None -> ingen ordre.
         gendan(orig)
         _, orig = mock_nt(position={"netto": None})
         tr2 = FalskTracker([PARENT])
         try:
-            await EX.opret_exit(tr2, jo, parent_order_id="NTM1", type_="SLOSS",
+            await EX.opret_exit(tr2, jo, parent_order_id="NTM1", type_="STOP",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "ukendt position burde afvises")
@@ -685,7 +698,7 @@ async def test_opret() -> None:
         _, orig = mock_nt(position={"netto": -1})
         try:
             await EX.opret_exit(FalskTracker([PARENT]), jo,
-                                parent_order_id="NTM1", type_="SLOSS",
+                                parent_order_id="NTM1", type_="STOP",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "modsat position burde afvises")
@@ -700,7 +713,7 @@ async def test_opret() -> None:
         jo2 = FalskJournal()
         try:
             await EX.opret_exit(FalskTracker([PARENT]), jo2,
-                                parent_order_id="NTM1", type_="SLOSS",
+                                parent_order_id="NTM1", type_="STOP",
                                 pris=6800.0, instrument="MES 12-26",
                                 hent_kurs=kurs)
             kraev(False, "Rejected burde kaste")
@@ -1100,8 +1113,8 @@ async def test_fyldt_exit_bogfoeres() -> None:
                          "aarsag": aarsag})
 
     for navn, type_, aktion in [("TRAIL paa short", "TRAIL", "BUY"),
-                                ("SLOSS paa long", "SLOSS", "SELL"),
-                                ("TPROF paa long", "TPROF", "SELL")]:
+                                ("STOP paa long", "STOP", "SELL"),
+                                ("TARGET paa long", "TARGET", "SELL")]:
         bogfoert.clear()
         e = {"order_id": "NTX_F", "source": "manual_exit", "ordre_type": type_,
              "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
@@ -1134,7 +1147,7 @@ async def test_fyldt_exit_bogfoeres() -> None:
     # ⚠ Og det modsatte skal stadig virke: lukkes positionen et ANDET sted,
     # skal de tilbagevaerende exit-ordrer ryddes.
     print()
-    e = {"order_id": "NTX_R", "source": "manual_exit", "ordre_type": "SLOSS",
+    e = {"order_id": "NTX_R", "source": "manual_exit", "ordre_type": "STOP",
          "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
          "shares": 1, "action": "SELL", "trigger_pris": 7800.0, "ticker": "MES"}
     tr, jo = FalskTracker([dict(e)]), FalskJournal()

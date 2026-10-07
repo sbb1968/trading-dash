@@ -29,12 +29,12 @@ interface OrderEntry {
   note?: string | null;
 
   // ── Exit-ordrer (backend: orders_tracker + /orders/list) ──────────────
-  /** LONG | SHORT | EXIT | PLOSS | TPROF | TRAIL | UKENDT. Gamle raekker har
+  /** LONG | SHORT | EXIT | STOP | TARGET | TRAIL | UKENDT. Gamle raekker har
    *  den ikke, og viser saa `order_type` som hidtil. */
   ordre_type?:      string | null;
   parent_order_id?: string | null;
   oco_id?:          string | null;
-  /** PLOSS/TPROF: Ibens pris. TRAIL: den aktuelle stop. */
+  /** STOP/TARGET: Ibens pris. TRAIL: den aktuelle stop. */
   trigger_pris?:    number | null;
   trail_hoejeste?:  number | null;
   trail_afstand?:   number | null;
@@ -57,21 +57,25 @@ interface OrderEntry {
   trade_id?:        string | null;
 }
 
-const EXIT_TYPER = ["SLOSS", "TPROF", "TRAIL"] as const;
+const EXIT_TYPER = ["STOP", "TARGET", "TRAIL"] as const;
 type ExitType = (typeof EXIT_TYPER)[number];
 
 const EXIT_NAVN: Record<ExitType, string> = {
-  SLOSS: "Stop loss",
-  TPROF: "Target profit",
+  STOP: "Stop loss",
+  TARGET: "Target profit",
   TRAIL: "Trailing stop",
 };
 
-/** ⚠ "PLOSS" var den første stavemåde. Rækker lagt før 06-10 bærer den, og de
- *  skal stadig kunne vises og annulleres — ellers ville en levende stop loss
- *  blive usynlig i vinduet, mens den stadig lå hos NinjaTrader. */
+/** ⚠ Navnene står KUN i EXIT_TYPER her og i TYPER i exit_ordrer.py. Alt
+ *  andet sammenligner mod dem, så en omdøbning er to steder.
+ *
+ *  "PLOSS" var den allerførste stavemåde og beholdes som alias. ⚠ "SLOSS" og
+ *  "TPROF" (06-10) er bevidst IKKE aliaser: de rækker er alle annullerede og
+ *  historiske. De vises stadig med deres egen tekst, men tæller ikke som
+ *  exit-typer. Besluttet 07-10. */
 function exitType(t: string | null | undefined): ExitType | null {
   const v = (t || "").toUpperCase();
-  const n = v === "PLOSS" ? "SLOSS" : v;
+  const n = v === "PLOSS" ? "STOP" : v;
   return (EXIT_TYPER as readonly string[]).includes(n) ? (n as ExitType) : null;
 }
 
@@ -94,7 +98,7 @@ interface HandelRow {
   payload?:       { broker?: string; konto?: string } | null;
 }
 
-/** Lille modal til PLOSS/TPROF. TRAIL har ingen — afstanden kommer fra
+/** Lille modal til STOP/TARGET. TRAIL har ingen — afstanden kommer fra
  *  Konfiguratoren, og et felt man skal udfylde hver gang, bliver udfyldt
  *  forkert en travl dag. */
 function ExitPrisModal({ type, ticker, kurs, retning, cfg, fejl, travl,
@@ -157,8 +161,8 @@ function ExitPrisModal({ type, ticker, kurs, retning, cfg, fejl, travl,
   // stedet for efter et klik. Er de to uenige, vinder backenden.
   const urimelig = afstand != null && kurs != null
     && afstand > kurs * graense;
-  // Hvilken side skal prisen ligge paa? SLOSS beskytter, TPROF tager gevinst.
-  const skalOver = retning === "LONG" ? type === "TPROF" : type === "SLOSS";
+  // Hvilken side skal prisen ligge paa? STOP beskytter, TARGET tager gevinst.
+  const skalOver = retning === "LONG" ? type === "TARGET" : type === "STOP";
   const forkertSide = etTal && kurs != null && vaerdi !== kurs
     && (skalOver ? vaerdi < kurs : vaerdi > kurs);
   const gyldig = etTal && !urimelig && !forkertSide && vaerdi !== kurs;
@@ -185,7 +189,7 @@ function ExitPrisModal({ type, ticker, kurs, retning, cfg, fejl, travl,
         </div>
         <input
           ref={ref} type="text" inputMode="decimal" value={pris}
-          placeholder={type === "SLOSS" ? "Stop loss-pris" : "Target profit-pris"}
+          placeholder={type === "STOP" ? "Stop loss-pris" : "Target profit-pris"}
           onChange={e => setPris(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && gyldig && !travl) onOpret(vaerdi); }}
           style={{
@@ -896,7 +900,7 @@ export function OrdersWindow() {
                 <th style={{ textAlign: "center" }}>Type</th>
                 <th style={{ textAlign: "left" }}>Status</th>
                 <th style={{ textAlign: "right" }}>Fyldt</th>
-                {/* ⚠ "Snit pris" passede kun paa fyldte ordrer. En PLOSS har
+                {/* ⚠ "Snit pris" passede kun paa fyldte ordrer. En STOP har
                     ingen snitpris — den har en TRIGGERPRIS, og det er den
                     Iben skal kunne se. Samme kolonne, aerligt navn. */}
                 <th style={{ textAlign: "right" }}>Entry price</th>
@@ -904,7 +908,7 @@ export function OrdersWindow() {
                     aabning har ingen P/L endnu, og et nul dér ville se ud
                     som en handel der gik i nul. */}
                 <th style={{ textAlign: "right" }}>P&amp;L</th>
-                {/* Plads nok til SLOSS + TPROF + TRAIL med mellemrum. */}
+                {/* Plads nok til STOP + TARGET + TRAIL med mellemrum. */}
                 <th style={{ textAlign: "center", width: 190, minWidth: 190 }}></th>
               </tr>
             </thead>
@@ -988,7 +992,7 @@ export function OrdersWindow() {
                         : "—"}
                     </td>
                     {/* Entry price: fyldpris for LONG/SHORT/EXIT, triggerpris
-                        for PLOSS/TPROF, aktuel stop for TRAIL. */}
+                        for STOP/TARGET, aktuel stop for TRAIL. */}
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}
                         title={type === "TRAIL" && o.trail_hoejeste != null
                           ? `${o.action === "SELL" ? "Højeste" : "Laveste"} `

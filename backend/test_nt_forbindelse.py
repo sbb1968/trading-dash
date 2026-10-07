@@ -312,7 +312,7 @@ def main() -> int:
 
     # ⚠ DEN GAV SAMME ID SEKS GANGE I TRAEK (maalt 06-10). Ren millisekund-tid
     # raekker til at skille to KLIK ad — et menneske klikker ikke to gange i
-    # samme millisekund. Exit-ordrer goer: PLOSS, TPROF og TRAIL laegges af kode
+    # samme millisekund. Exit-ordrer goer: STOP, TARGET og TRAIL laegges af kode
     # i traek, et OCO-par endnu taettere.
     #
     # To ordrer med samme id er ikke kosmetik: ordre_status() kan ikke skelne

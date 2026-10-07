@@ -1,5 +1,5 @@
 """
-exit_ordrer.py — PLOSS / TPROF / TRAIL på en NT8-position
+exit_ordrer.py — STOP / TARGET / TRAIL på en NT8-position
 ════════════════════════════════════════════════════════════════════════════════
 Trin 2 i SPEC_exit_ordrer_ninjatrader.md. Al exit-logik bor her; `main.py` har
 kun endpoints og to kald.
@@ -40,11 +40,18 @@ logger = logging.getLogger(__name__)
 
 KONFIG_FIL = pathlib.Path(__file__).parent / "exit_config.json"
 TICK = 0.25
-# SLOSS = Stop Loss. ⚠ "PLOSS" er den gamle stavemaade; raekker lagt foer
-# 06-10 baerer den, og de skal stadig kunne vises og annulleres. Derfor en
-# alias frem for en omdoebning der ville goere historikken ulaeselig.
-TYPER = ("SLOSS", "TPROF", "TRAIL")
-LEGACY_TYPER = {"PLOSS": "SLOSS"}
+# Navnene Iben bruger. ⚠ De staar KUN her og i EXIT_TYPER i OrdersWindow;
+# alt andet i modulet sammenligner mod TYPER, saa en omdoebning er ét sted.
+#
+# ⚠ "STOP" er IKKE NT8's ordretype. OIF'ens ordretype er en selvstaendig
+# variabel (STOPMARKET / LIMIT), sat i opret_exit. De to navnerum maa ikke
+# blandes: en STOP laegges som STOPMARKET, en TARGET som LIMIT.
+TYPER = ("STOP", "TARGET", "TRAIL")
+# Tidligere stavemaader. ⚠ SLOSS og TPROF er BEVIDST ikke med: raekker fra
+# 06-10 med de navne er alle annullerede og historiske, og de vises stadig
+# med deres egen tekst i vinduet — de taelles blot ikke laengere som
+# exit-typer. Besluttet 07-10.
+LEGACY_TYPER = {"PLOSS": "STOP"}
 
 
 def normaliser_type(t: str) -> str:
@@ -72,7 +79,7 @@ POSITION_BLIND_SEK = 30.0
 # højt. ⚠ Den SKAL siges højt: uden fyldpris er der ingen P&L, ingen
 # entry/exit-parring og intet chart — handlen står åben i journalen.
 FYLD_FORSOEG_ALARM = 5
-# Hvor langt en SLOSS/TPROF-pris maa ligge fra kursen. ⚠ Det er IKKE en
+# Hvor langt en STOP/TARGET-pris maa ligge fra kursen. ⚠ Det er IKKE en
 # risikogrænse — det er en tastefejls-fælde. MES koster $5 pr. point, så en
 # pris på "20" (ment som 20 points) i et marked på 7850 er ikke en dårlig
 # ordre, den er en stop loss 7830 points væk = $39.150. NT8 ville tage imod
@@ -289,7 +296,7 @@ def valider_pris(type_: str, pris: Optional[float], retning: str,
         raise ValueError("Ingen aktuel kurs — prisen kan ikke kontrolleres, "
                          "og der sendes ingen ordre.")
     # ⚠ STØRRELSESORDEN FØR SIDE. En pris på "20" paa en long ligger under
-    # kursen og slipper derfor gennem SLOSS-kontrollen nedenfor; paa en TPROF
+    # kursen og slipper derfor gennem STOP-kontrollen nedenfor; paa en TARGET
     # faar man "skal ligge over aktuel kurs", hvilket er sandt og ubrugeligt.
     # Den rigtige besked er "det ser ud som et antal points".
     afstand = abs(pris - kurs)
@@ -301,17 +308,17 @@ def valider_pris(type_: str, pris: Optional[float], retning: str,
             f"stedet for en pris? Feltet vil have PRISEN ordren skal "
             f"udløses paa.")
     if retning == "LONG":
-        if type_ == "SLOSS" and pris >= kurs:
+        if type_ == "STOP" and pris >= kurs:
             raise ValueError(f"Stop loss skal ligge under aktuel kurs "
                              f"({_dk(kurs)}) for en long.")
-        if type_ == "TPROF" and pris <= kurs:
+        if type_ == "TARGET" and pris <= kurs:
             raise ValueError(f"Target profit skal ligge over aktuel kurs "
                              f"({_dk(kurs)}) for en long.")
     else:
-        if type_ == "SLOSS" and pris <= kurs:
+        if type_ == "STOP" and pris <= kurs:
             raise ValueError(f"Stop loss skal ligge over aktuel kurs "
                              f"({_dk(kurs)}) for en short.")
-        if type_ == "TPROF" and pris >= kurs:
+        if type_ == "TARGET" and pris >= kurs:
             raise ValueError(f"Target profit skal ligge under aktuel kurs "
                              f"({_dk(kurs)}) for en short.")
 
@@ -380,7 +387,7 @@ def netto_fra_raekker(raekker) -> int:
     ATI's netto er en ekstra bekraeftelse, ikke en betingelse: er ATI tavs,
     skal knapperne stadig forsvinde.
 
-    ⚠ KUN FYLDTE RAEKKER TAELLER, og kun LONG/SHORT/EXIT. En SLOSS-raekke der
+    ⚠ KUN FYLDTE RAEKKER TAELLER, og kun LONG/SHORT/EXIT. En STOP-raekke der
     fylder, faar sin egen EXIT-raekke skrevet af _exit_bogfoer; taltes begge,
     ville samme fyldning blive regnet to gange.
 
@@ -463,7 +470,7 @@ class ExitFejl(Exception):
 async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
                      pris: Optional[float], instrument: str,
                      hent_kurs) -> dict:
-    """Læg en PLOSS/TPROF/TRAIL på den position parent-rækken åbnede.
+    """Læg en STOP/TARGET/TRAIL på den position parent-rækken åbnede.
 
     `hent_kurs` er en awaitable () -> float|None. Den injiceres, så modulet
     ikke skal kende main.py.
@@ -527,7 +534,7 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
         stop = kurs - trail_afstand if retning == "LONG" else kurs + trail_afstand
         stop = round(round(stop / TICK) * TICK, 2)
         ordretype, limit = "STOPMARKET", None
-    elif type_ == "SLOSS":
+    elif type_ == "STOP":
         ordretype, limit, stop = "STOPMARKET", None, pris
     else:
         ordretype, limit, stop = "LIMIT", pris, None
@@ -569,7 +576,7 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
         maalt={"status": status, "filled": r["filled"],
                "avg_fill": r["avg_fill"]} if r["terminal"] else None,
         ordre_type=type_, parent_order_id=parent_order_id, oco_id=oco,
-        trigger_pris=(stop if type_ != "TPROF" else limit),
+        trigger_pris=(stop if type_ != "TARGET" else limit),
         trail_hoejeste=trail_hoejeste, trail_afstand=trail_afstand)
     if not r["terminal"]:
         tracker.opdater(ref, status=status or "afventer", bekraeftet=r["aktiv"])
@@ -577,7 +584,7 @@ async def opret_exit(tracker, journal, *, parent_order_id: str, type_: str,
     logger.info(f"[ExitOrdrer] {type_} {ref} oco={oco} status={status or '(ukendt)'}")
     return {"order_id": ref, "status": status or "afventer",
             "oco_id": oco, "aktiv": r["aktiv"],
-            "trigger_pris": stop if type_ != "TPROF" else limit}
+            "trigger_pris": stop if type_ != "TARGET" else limit}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -643,7 +650,7 @@ async def annuller_exit(tracker, journal, *, order_id: str,
         t = normaliser_type(e.get("ordre_type"))
         modsat = "SELL" if netto > 0 else "BUY"
         ny_ref = NT.order_ref(praefiks="NTX")
-        er_limit = t == "TPROF"
+        er_limit = t == "TARGET"
         await asyncio.to_thread(
             NT.send_ordre, konto=konto, instrument=instrument, action=modsat,
             antal=abs(netto), ordretype="LIMIT" if er_limit else "STOPMARKET",

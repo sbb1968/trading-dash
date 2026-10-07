@@ -108,13 +108,13 @@ class OrdersTracker:
         broker: str = "IBKR",
         maalt: Optional[dict] = None,
         # ── Exit-ordrer (spec 5.3). Alle valgfrie; eksisterende kald uaendrede.
-        ordre_type: Optional[str] = None,       # LONG|SHORT|EXIT|PLOSS|TPROF|TRAIL
+        ordre_type: Optional[str] = None,       # LONG|SHORT|EXIT|STOP|TARGET|TRAIL
         parent_order_id: Optional[str] = None,  # kun exit-ordrer
         oco_id: Optional[str] = None,
-        trigger_pris: Optional[float] = None,   # PLOSS/TPROF: Ibens pris
+        trigger_pris: Optional[float] = None,   # STOP/TARGET: Ibens pris
         trail_hoejeste: Optional[float] = None,
         trail_afstand: Optional[float] = None,
-        exit_aarsag: Optional[str] = None,      # PLOSS|TPROF|TRAIL|TVANGSLUK
+        exit_aarsag: Optional[str] = None,      # STOP|TARGET|TRAIL|TVANGSLUK
     ) -> None:
         """Registrer en nyplaceret ordre.
 

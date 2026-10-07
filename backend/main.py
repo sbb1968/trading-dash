@@ -6193,7 +6193,7 @@ async def account_skift(req: SkiftKontoRequest):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Exit-ordrer (PLOSS / TPROF / TRAIL) — se exit_ordrer.py og SPEC'en
+# Exit-ordrer (STOP / TARGET / TRAIL) — se exit_ordrer.py og SPEC'en
 # ═══════════════════════════════════════════════════════════════════════════
 async def _exit_kurs(symbol: str = "MES"):
     """Kurskilden exit_ordrer faar injiceret. IBKR/algoserveren, ikke NT8.
@@ -6256,7 +6256,7 @@ async def _exit_bogfoer(order_id, action, antal, pris, status, aarsag):
 
     ⚠ SAMME VEJ SOM EN EXIT FRA WATCHLIST — ingen kopi pr. sti. `broker` er et
     argument til manuel_forensik, ikke en kodesti, og det er praecis derfor en
-    PLOSS der fylder, kan ende i samme `trades`-raekke som et manuelt salg.
+    STOP der fylder, kan ende i samme `trades`-raekke som et manuelt salg.
     """
     import manuel_forensik as _mf
     profil = accounts.nt_forbindelse() or {}
