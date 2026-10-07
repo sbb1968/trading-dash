@@ -1178,8 +1178,23 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Prisen er at NT8-ordrer kraever IBKR oppe — men bars og
                     # indikatorer til forensikken kommer derfra alligevel, saa
                     # koblingen er der i forvejen.
-                    await strategy_manager.connect_ibkr(paper_trading=True)
-                    ibkr = strategy_manager.get_ibkr()
+                    # ⚠ ...og paa den forbindelse maskinen FAKTISK har, ikke
+                    # altid den delte. Ibens maskine har ingen delt forbindelse.
+                    # Hele begrundelsen staar i kontrakt_forbindelse().
+                    ibkr, _forb_fejl = await kontrakt_forbindelse()
+                    # ⚠ EGEN BESKED. Falder dette sammen med fejlen nedenfor, faar
+                    # hun "kan ikke afgoere kontraktmaaneden" naar sandheden er at
+                    # Gatewayen ikke koerer — og saa leder hun det forkerte sted.
+                    if ibkr is None:
+                        await websocket.send_text(json.dumps({
+                            "type": "ibkr_order_result", "success": False,
+                            "ticker": ticker, "action": action, "shares": shares,
+                            "error": (f"Ingen IBKR-forbindelse til at slaa "
+                                      f"kontraktmaaneden op"
+                                      + (f": {_forb_fejl}" if _forb_fejl else "")
+                                      + ". Koerer IB Gateway? Ingen ordre sendt."),
+                        }))
+                        continue
                     try:
                         _kontrakt = await ibkr.qualify_future(ticker)
                         _instrument = _nt.nt_instrument(ticker, _kontrakt)
@@ -1921,6 +1936,42 @@ async def handels_forbindelse():
             logger.warning(f"[Ordrer] ordreforbindelsen er spærret: {e}")
             return None
     return strategy_manager.get_ibkr()
+
+
+async def kontrakt_forbindelse() -> tuple:
+    """(forbindelse, fejltekst) til at slaa en futures-kontraktmaaned op.
+
+    ⚠ LAGT HER OG IKKE I ENDPOINTET. Beslutningen laa inde i
+    websocket_endpoint, og saadan en beslutning bliver aldrig proevet — det var
+    praecis fejlen i trin 6 og i test_dash_snapshot_forbindelse.
+
+    ⚠ MASKINEN HAR IKKE NOEDVENDIGVIS EN DELT FORBINDELSE. Her stod foer
+    `connect_ibkr()` + `get_ibkr()`, altsaa altid 127.0.0.1:7497. Soerens
+    maskine har den; Ibens har det IKKE — hun koerer en IB Gateway paa 4002 som
+    ordre_forbindelse og intet paa 7497 (maalt 07-10-2026). Se noten ved
+    handels_forbindelse(): "hun har slet ingen delt forbindelse".
+
+    ⚠ Afhaengigheden var NY. Hendes futures gik hidtil til IBKR gennem netop
+    Gatewayen, saa 7497 var ligegyldig. Armeringen af NT8 ville have gjort
+    hendes foerste MES-klik til "Kan ikke afgoere kontraktmaaneden" — sikkert,
+    men uhandlet.
+
+    Et kontraktopslag roerer ingen konto, saa det er harmloest at laegge paa
+    skrive-forbindelsen. tving=True fordi et MENNESKE venter paa svaret;
+    afkoelingen er til det der poller.
+
+    Fejlteksten gives tilbage saa kalderen kan sige HVAD der var galt. Falder
+    den sammen med "kan ikke afgoere kontraktmaaneden", leder man efter en
+    kontraktfejl mens Gatewayen er nede.
+    """
+    try:
+        if ordre_forbindelse.konfigureret():
+            return await ordre_forbindelse.hent(tving=True), ""
+        # Selv-helende; no-op hvis den allerede lever.
+        await strategy_manager.connect_ibkr(paper_trading=True)
+        return strategy_manager.get_ibkr(), ""
+    except Exception as e:
+        return None, str(e)
 
 
 def _berig_med_exit(ordrer: list) -> list:
