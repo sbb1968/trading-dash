@@ -97,10 +97,13 @@ interface HandelRow {
 /** Lille modal til PLOSS/TPROF. TRAIL har ingen — afstanden kommer fra
  *  Konfiguratoren, og et felt man skal udfylde hver gang, bliver udfyldt
  *  forkert en travl dag. */
-function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
+function ExitPrisModal({ type, ticker, kurs, retning, cfg, fejl, travl,
+                         onOpret, onLuk }: {
   type: ExitType;
   ticker: string;
   kurs: number | null;
+  retning: "LONG" | "SHORT";
+  cfg: {multiplikator: number | null; fornuft_pct: number} | null;
   fejl: string;
   travl: boolean;
   onOpret: (pris: number) => void;
@@ -108,6 +111,18 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
 }) {
   const [pris, setPris] = useState<string>("");
   const ref = useRef<HTMLInputElement>(null);
+  // ⚠ FORUDFYLDT MED KURSEN, markeret. Et tomt felt inviterer til at
+  // skrive "20" — et antal points — og MES koster $5 pr. point, saa det er
+  // en stop loss 7830 points vaek. Staar kursen der i forvejen, er det
+  // tydeligt at feltet vil have en PRIS, og hun retter de sidste cifre.
+  // Kursen kommer asynkront, saa den skal saettes naar den lander.
+  useEffect(() => {
+    if (kurs != null && pris === "") {
+      setPris(kurs.toLocaleString("da-DK",
+        {minimumFractionDigits: 2, maximumFractionDigits: 2}));
+      requestAnimationFrame(() => ref.current?.select());
+    }
+  }, [kurs]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     ref.current?.focus();
     const k = (e: KeyboardEvent) => { if (e.key === "Escape") onLuk(); };
@@ -120,9 +135,33 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
   // man prisgivet om browseren tilfældigvis normaliserer det. Gør den ikke
   // det, bliver knappen bare grå uden at sige hvorfor, og ordren bliver aldrig
   // lagt. Vi oversætter selv i stedet for at håbe.
-  const rent = pris.replace(/\s/g, "").replace(",", ".");
+  // ⚠ BEGGE SKRIVEMÅDER. Forudfyldningen er dansk formateret ("7.845,75"),
+  // saa punktummet dér er et TUSINDSKILLETEGN — fjernes det ikke, er feltet
+  // ugyldigt i det sekund det aabner. Men Iben kan ogsaa taste "7845.75", og
+  // dét punktum er et decimaltegn. Kommaet afgoer hvilket af de to det er.
+  const raat = pris.replace(/\s/g, "");
+  const rent = raat.includes(",")
+    ? raat.replace(/\./g, "").replace(",", ".")
+    : raat;
   const vaerdi = Number(rent);
-  const gyldig = rent !== "" && isFinite(vaerdi) && vaerdi > 0;
+  const etTal = rent !== "" && isFinite(vaerdi) && vaerdi > 0;
+
+  // Live afstand, saa "7845,75" ikke bare er fire cifre. Dollar kraever $
+  // pr. point, og det tal kommer fra backenden — ikke fra en konstant her.
+  const afstand = etTal && kurs != null ? Math.abs(vaerdi - kurs) : null;
+  const dollar = afstand != null && cfg?.multiplikator != null
+    ? afstand * cfg.multiplikator : null;
+  const graense = cfg?.fornuft_pct ?? 0.03;
+  // ⚠ Samme grænse som backenden, hentet FRA backenden. Den afviser
+  // alligevel — det her er bare for at hun ser det MENS hun taster, i
+  // stedet for efter et klik. Er de to uenige, vinder backenden.
+  const urimelig = afstand != null && kurs != null
+    && afstand > kurs * graense;
+  // Hvilken side skal prisen ligge paa? SLOSS beskytter, TPROF tager gevinst.
+  const skalOver = retning === "LONG" ? type === "TPROF" : type === "SLOSS";
+  const forkertSide = etTal && kurs != null && vaerdi !== kurs
+    && (skalOver ? vaerdi < kurs : vaerdi > kurs);
+  const gyldig = etTal && !urimelig && !forkertSide && vaerdi !== kurs;
 
   return (
     <div style={{
@@ -155,6 +194,35 @@ function ExitPrisModal({ type, ticker, kurs, fejl, travl, onOpret, onLuk }: {
             border: "1px solid var(--border-default)", borderRadius: 4,
             fontVariantNumeric: "tabular-nums",
           }} />
+        {/* ⚠ AFSTANDEN, LIVE. Et prisfelt alene siger ikke om 7845,75 er en
+            fornuftig stop — det goer "5,50 points = $27,50". Og det er dét
+            tal hun traeffer beslutningen paa. Dollar kommer fra backendens
+            multiplikator; mangler den, vises points alene frem for et gaet. */}
+        {afstand != null && (
+          <div style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.5,
+                        color: urimelig ? "var(--bear)"
+                             : vaerdi === kurs ? "var(--text-muted)"
+                             : forkertSide ? "var(--bear)" : "var(--text-secondary)",
+                        fontVariantNumeric: "tabular-nums" }}>
+            {vaerdi === kurs
+              ? "Det er kursen selv — flyt prisen."
+              : <>Afstand: <b>{tal(afstand)}</b> points
+                  {dollar != null && <> = <b>{usd(dollar)}</b></>}
+                  {" "}{vaerdi > (kurs ?? 0) ? "over" : "under"} kursen</>}
+            {urimelig && (
+              <div style={{ marginTop: 4, fontWeight: 600 }}>
+                ⚠ Det er mere end {tal(graense * 100, 0)} % fra kursen.
+                Har du skrevet et antal points i stedet for en pris?
+              </div>
+            )}
+            {!urimelig && forkertSide && (
+              <div style={{ marginTop: 4, fontWeight: 600 }}>
+                ⚠ {EXIT_NAVN[type]} paa en {retning.toLowerCase()} skal ligge
+                {" "}{skalOver ? "OVER" : "UNDER"} kursen.
+              </div>
+            )}
+          </div>
+        )}
         {/* ⚠ Backendens tekst, ikke vores egen gaet. Den ved hvilken side af
             kursen prisen skal ligge, og den har hentet en FRISK kurs lige foer
             afsendelse — modalen her viser den kurs der var da den blev aabnet. */}
@@ -306,10 +374,27 @@ export function OrdersWindow() {
   useEffect(() => { localStorage.setItem("orders_fane", fane); }, [fane]);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [prisModal, setPrisModal] = useState<
-    {type: ExitType; parent: string; ticker: string} | null>(null);
+    {type: ExitType; parent: string; ticker: string;
+     retning: "LONG" | "SHORT"} | null>(null);
+  // ⚠ tick, multiplikator og fornuftsgrænse kommer FRA BACKENDEN. $ pr.
+  // point maa ikke skrives op her: futures_katalog er én sandhedskilde, og
+  // en kopi i frontenden ville drive fra den uden at nogen opdagede det.
+  const [exitCfg, setExitCfg] = useState<
+    {multiplikator: number | null; fornuft_pct: number} | null>(null);
   const [modalFejl, setModalFejl] = useState("");
   const [travl, setTravl] = useState(false);
   const [kurs, setKurs] = useState<number | null>(null);
+
+  async function hentExitCfg() {
+    try {
+      const r = await fetch("http://127.0.0.1:8000/exit-config");
+      const d = await r.json();
+      setExitCfg({multiplikator: typeof d.multiplikator === "number"
+                    ? d.multiplikator : null,
+                  fornuft_pct: typeof d.fornuft_pct === "number"
+                    ? d.fornuft_pct : 0.03});
+    } catch { setExitCfg(null); }
+  }
 
   async function hentKurs(ticker: string) {
     try {
@@ -639,6 +724,7 @@ export function OrdersWindow() {
       {prisModal && (
         <ExitPrisModal
           type={prisModal.type} ticker={prisModal.ticker} kurs={kurs}
+          retning={prisModal.retning} cfg={exitCfg}
           fejl={modalFejl} travl={travl}
           onOpret={pris => opretExit(prisModal.parent, prisModal.type, pris)}
           onLuk={() => { setPrisModal(null); setModalFejl(""); }} />
@@ -962,8 +1048,11 @@ export function OrdersWindow() {
                                   } else {
                                     setModalFejl(""); setKurs(null);
                                     hentKurs(o.ticker);
+                                    hentExitCfg();
                                     setPrisModal({type: t, parent: String(o.order_id),
-                                                  ticker: o.ticker});
+                                                  ticker: o.ticker,
+                                                  retning: (o.ordre_type || "") === "SHORT"
+                                                    ? "SHORT" : "LONG"});
                                   }
                                 }}
                                 title={aktiv ? `${EXIT_NAVN[t]} er aktiv`

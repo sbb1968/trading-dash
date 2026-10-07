@@ -72,6 +72,12 @@ POSITION_BLIND_SEK = 30.0
 # højt. ⚠ Den SKAL siges højt: uden fyldpris er der ingen P&L, ingen
 # entry/exit-parring og intet chart — handlen står åben i journalen.
 FYLD_FORSOEG_ALARM = 5
+# Hvor langt en SLOSS/TPROF-pris maa ligge fra kursen. ⚠ Det er IKKE en
+# risikogrænse — det er en tastefejls-fælde. MES koster $5 pr. point, så en
+# pris på "20" (ment som 20 points) i et marked på 7850 er ikke en dårlig
+# ordre, den er en stop loss 7830 points væk = $39.150. NT8 ville tage imod
+# den uden at blinke.
+FORNUFT_PCT = 0.03
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -99,8 +105,24 @@ def _skriv_konfig(d: dict) -> None:
 
 
 def hent_config() -> dict:
+    """⚠ BÆRER OGSÅ TICK, MULTIPLIKATOR OG GRÆNSE, så frontenden ikke gaetter.
+
+    Modalen viser afstanden i points OG i dollar. Dollar kræver $ pr. point,
+    og det tal må ikke skrives op i en .tsx-fil: futures_katalog er ÉN
+    sandhedskilde (bekræftet mod reqPositions-avgCost), og en kopi i
+    frontenden ville drive fra den uden at nogen opdagede det — tallet ser
+    rigtigt ud lige indtil kontrakten skifter.
+    """
     k = _laes_konfig()
-    return {"trail_afstand": k["trail_afstand"], "enhed": "points", "tick": TICK}
+    try:
+        from futures_katalog import multiplikator as _mult
+        mult = _mult("MES")
+    except Exception as e:
+        logger.warning(f"[ExitOrdrer] multiplikator kunne ikke hentes: {e}")
+        mult = None
+    return {"trail_afstand": k["trail_afstand"], "enhed": "points",
+            "tick": TICK, "multiplikator": mult,
+            "fornuft_pct": FORNUFT_PCT}
 
 
 def saet_config(trail_afstand: float) -> dict:
@@ -192,6 +214,18 @@ def valider_pris(type_: str, pris: Optional[float], retning: str,
         # besked i vinduet hun arbejder i.
         raise ValueError("Ingen aktuel kurs — prisen kan ikke kontrolleres, "
                          "og der sendes ingen ordre.")
+    # ⚠ STØRRELSESORDEN FØR SIDE. En pris på "20" paa en long ligger under
+    # kursen og slipper derfor gennem SLOSS-kontrollen nedenfor; paa en TPROF
+    # faar man "skal ligge over aktuel kurs", hvilket er sandt og ubrugeligt.
+    # Den rigtige besked er "det ser ud som et antal points".
+    afstand = abs(pris - kurs)
+    if afstand > kurs * FORNUFT_PCT:
+        raise ValueError(
+            f"{_dk(pris)} ligger {_dk(afstand)} points fra aktuel kurs "
+            f"({_dk(kurs)}) — det er mere end "
+            f"{_dk(FORNUFT_PCT * 100)} %. Har du skrevet et antal points i "
+            f"stedet for en pris? Feltet vil have PRISEN ordren skal "
+            f"udløses paa.")
     if retning == "LONG":
         if type_ == "SLOSS" and pris >= kurs:
             raise ValueError(f"Stop loss skal ligge under aktuel kurs "
@@ -1083,8 +1117,13 @@ class Overvaagning:
                 logger.error(f"[ExitOrdrer] loekkefejl: {e}")
                 await asyncio.sleep(5)
 
-    async def _tidsstyring(self, instrument: str) -> None:
-        nu = datetime.datetime.now(DK)
+    async def _tidsstyring(self, instrument: str, nu=None) -> None:
+        """⚠ `nu` er KUN til test. Loekken kalder uden, saa produktionen
+        laeser uret ét sted. Uden den kunne hverken paamindelsen, den normale
+        tvangslukning eller overspringelsen proeves — og overspringelsen er
+        netop den gren der efterlader et menneske med en aaben position.
+        """
+        nu = nu or datetime.datetime.now(DK)
         if nu.weekday() > 4:          # weekend
             return
         if self._paamindet_dato != nu.date() and nu >= paamindelsestidspunkt(nu):
@@ -1112,10 +1151,47 @@ class Overvaagning:
                     f"[ExitOrdrer] lukketid var for {forsinkelse:.0f} min "
                     f"siden — tvangslukning springes over. Er der en aaben "
                     f"position, skal den lukkes manuelt.")
+                # ⚠ OG SAA SKAL TELEFONEN RINGE. At springe tvangslukningen
+                # over er det rigtige valg — en markedsordre i CME's pause ville
+                # ikke fylde, og "tvangsluk_udfoert" ville staa i journalen om en
+                # lukning der ikke skete. Men beslutningen efterlader et MENNESKE
+                # med arbejdet, og en haendelse i loggen er ikke en besked til
+                # nogen. Uden push ville Iben opdage den aabne position naeste
+                # morgen — efter en nat med margin paa en uafdaekket future.
+                netto = None
+                try:
+                    pr = accounts.nt_forbindelse() or {}
+                    pos = await asyncio.to_thread(NT.position, instrument,
+                                                  pr.get("konto") or "")
+                    netto = pos.get("netto")
+                except Exception as e:
+                    # ⚠ Kan positionen ikke laeses, er svaret UKENDT — ikke
+                    # "flad". Netop her maa tavshed ikke blive til et "alt er
+                    # fint", for vi har lige undladt at lukke noget.
+                    logger.error(f"[ExitOrdrer] positionen kunne ikke laeses "
+                                 f"ved oversprunget tvangslukning: {e}")
+                if netto:
+                    await _push(
+                        f"⚠ MES-position paa {netto:+d} er IKKE lukket. "
+                        f"Tvangslukningen blev sprunget over "
+                        f"({round(forsinkelse)} min efter lukketid). "
+                        f"Luk den manuelt i NinjaTrader.",
+                        prioritet=5, titel="Trading Dash — aaben position",
+                        dedup="exit_tvangsluk_sprunget")
+                elif netto is None:
+                    await _push(
+                        "⚠ Tvangslukningen blev sprunget over, og positionen "
+                        "kan ikke laeses. Tjek selv i NinjaTrader om der staar "
+                        "noget aabent.",
+                        prioritet=5, titel="Trading Dash — position ukendt",
+                        dedup="exit_tvangsluk_sprunget")
                 await self.journal.log_event(
                     source="manual_exit", event_type="tvangsluk_sprunget_over",
                     symbol=instrument.split()[0],
                     payload={"minutter_efter_lukketid": round(forsinkelse),
+                             "netto": netto,
+                             "position_ukendt": netto is None,
+                             "pushet": bool(netto) or netto is None,
                              "hvorfor": "backenden startede efter lukketid; en "
                                         "markedsordre i CME's pause ville ikke "
                                         "fylde"})

@@ -336,6 +336,45 @@ def test_validering() -> None:
     g, _ = ok("TRAIL", None, "LONG", 6820.0)
     kraev(g, "TRAIL uden pris godkendes")
 
+    # ── Fornuftsgraensen: points i stedet for en pris ──────────────
+    # ⚠ DET ER IKKE EN RISIKOGRAENSE. MES koster $5 pr. point, saa "20" ment
+    # som 20 points er i et marked paa 7850 en stop loss 7830 points vaek =
+    # $39.150. NT8 ville tage imod den uden at blinke, og den ville ligge der
+    # resten af dagen og se ud som en beskyttelse.
+    print()
+    g, b = ok("SLOSS", 20.0, "LONG", 7850.0)
+    kraev(not g and "points i stedet for en pris" in b,
+          f"⚠ 20 paa en long -> fanget som points: {b[:52]}")
+    # ⚠ Og paa en TPROF, hvor side-kontrollen ellers vinder foerst og siger
+    # "skal ligge over aktuel kurs" — sandt, og ubrugeligt.
+    g, b = ok("TPROF", 20.0, "LONG", 7850.0)
+    kraev(not g and "points i stedet for en pris" in b,
+          f"⚠ …og paa en TPROF vinder STOERRELSEN over siden: {b[:40]}")
+    g, b = ok("TPROF", 20.0, "SHORT", 7850.0)
+    kraev(not g and "points i stedet for en pris" in b,
+          "…og det samme paa en short")
+
+    # Lige inden for og lige uden for graensen.
+    graense = 7850.0 * EX.FORNUFT_PCT          # 235,5 points
+    g, _ = ok("SLOSS", 7850.0 - 235.5, "LONG", 7850.0)
+    kraev(g, f"praecis {EX._dk(graense)} points under godkendes")
+    g, b = ok("SLOSS", 7850.0 - 236.0, "LONG", 7850.0)
+    kraev(not g, "en halv point laengere ude afvises")
+
+    # ⚠ En NORMAL stop maa ikke rammes af graensen. 5 points paa MES er en
+    # helt saedvanlig stop, og en vagt der spaerrer det daglige arbejde, bliver
+    # slaaet fra.
+    for afst in (1.0, 5.0, 20.0, 100.0):
+        g, b = ok("SLOSS", 7850.0 - afst, "LONG", 7850.0)
+        kraev(g, f"…og en stop {EX._dk(afst)} points under er fin")
+
+    # Graensen maa ikke afhaenge af kursens stoerrelse i absolutte points:
+    # paa en billig kurs er 236 points helt urimeligt, paa en dyr er det ikke.
+    g, _ = ok("SLOSS", 19400.0, "LONG", 19600.0)   # 200 points, 1,0 %
+    kraev(g, "⚠ 200 points paa en kurs i 19.600 er under 3 % og godkendes")
+    g, b = ok("SLOSS", 1900.0, "LONG", 2000.0)     # 100 points, 5,0 %
+    kraev(not g, "⚠ …men 100 points paa en kurs i 2.000 er 5 % og afvises")
+
 
 def test_config() -> None:
     print("\n  ── trail-afstand ──")
@@ -685,6 +724,116 @@ async def test_genstart() -> None:
             OT.ORDERS_LOG = aegte
 
 
+async def test_tvangsluk_sprunget_over() -> None:
+    """⚠ SPRINGES TVANGSLUKNINGEN OVER, SKAL TELEFONEN RINGE.
+
+    At springe over er det RIGTIGE valg: starter backenden kl. 23:30, ville en
+    markedsordre ligge i CMEs pause (23:00-00:00 dansk) uden at fylde, og
+    "tvangsluk_udfoert" ville staa i journalen om en lukning der ikke skete.
+
+    Men beslutningen efterlader et MENNESKE med arbejdet, og en haendelse i
+    loggen er ikke en besked til nogen. Uden push opdager Iben den aabne
+    position naeste morgen — efter en nat med margin paa en uafdaekket future.
+    """
+    print()
+    print("  -- oversprunget tvangslukning --")
+    import datetime as _dt
+
+    def nu_efter(minutter):
+        """Et tidspunkt `minutter` efter dagens lukketid (en hverdag)."""
+        d = _dt.datetime(2026, 10, 6, 12, 0, tzinfo=EX.DK)   # tirsdag
+        return EX.lukketidspunkt(d) + _dt.timedelta(minutes=minutter)
+
+    async def koer(netto, minutter=90, rejser=False):
+        """Returnerer (pushkald, journaltyper, journalhaendelser, lukkekald).
+
+        ⚠ tvangsluk stubbes. Lades den koere, genforsoeger den mod en mock
+        der aldrig bliver flad — 18 forsoeg med pauser, og suiten gik fra 5
+        til 66 sekunder. En langsom suite bliver koert sjaeldnere, og dét er
+        samme fejlklasse som resten af modulet. Og det er alligevel OM den
+        kaldes der er spoergsmaalet her, ikke hvad den selv goer.
+        """
+        pushet = []
+        lukkekald = []
+
+        async def falsk_push(besked, *, prioritet=4, titel="", dedup=""):
+            pushet.append({"besked": besked, "prioritet": prioritet})
+
+        def rejs(*a, **kw):
+            raise EX.NT.NtTilstandUkendt("ATI svarede tomt")
+
+        tr, jo = FalskTracker([]), FalskJournal()
+        kald, orig = mock_nt(position={"netto": netto})
+        if rejser:
+            EX.NT.position = rejs
+        async def falsk_tvangsluk(*a, **kw):
+            lukkekald.append(kw.get("instrument"))
+            return {"flad": True, "ryddet": 0}
+
+        gl_push, gl_profil = EX._push, EX.accounts.nt_forbindelse
+        gl_luk = EX.tvangsluk
+        EX._push = falsk_push
+        EX.tvangsluk = falsk_tvangsluk
+        EX.accounts.nt_forbindelse = lambda: {"konto": "DEMO8580770"}
+        try:
+            o = EX.Overvaagning(tr, jo, hent_kurs=lambda: _ingen(),
+                                instrument_for=lambda: "MES 12-26")
+            # ⚠ Paamindelsen er en anden gren; sat som allerede sendt, saa
+            # testen maaler kun overspringelsen.
+            o._paamindet_dato = nu_efter(minutter).date()
+            await o._tidsstyring("MES 12-26", nu=nu_efter(minutter))
+            return pushet, jo.typer(), jo.events, lukkekald
+        finally:
+            EX._push, EX.accounts.nt_forbindelse = gl_push, gl_profil
+            EX.tvangsluk = gl_luk
+            gendan(orig)
+
+    # 1. Aaben position -> push med prioritet 5.
+    pu, typer, ev, luk = await koer(-4)
+    kraev("tvangsluk_sprunget_over" in typer,
+          f"overspringelsen journaliseres ({typer})")
+    kraev(len(pu) == 1, f"⚠ ...OG der pushes ({len(pu)})")
+    if pu:
+        prio = pu[0]["prioritet"]
+        besk = pu[0]["besked"]
+        kraev(prio == 5, f"⚠ ...med prioritet 5, ikke 4 ({prio})")
+        kraev("-4" in besk, f"...og beskeden siger HVOR meget: {besk[:56]}")
+    p = [e for e in ev if e.get("event_type") == "tvangsluk_sprunget_over"][0]
+    kraev(p["payload"].get("netto") == -4,
+          "...og haendelsen baerer nettoet, saa den kan laeses bagefter")
+    kraev(not luk,
+          "⚠ ...men der tvangslukkes IKKE — det var hele pointen")
+
+    # 2. Flad konto -> INGEN push. En besked hver aften hun ikke har noget
+    #    aabent, bliver slaaet fra inden den betyder noget.
+    print()
+    pu, typer, ev, _ = await koer(0)
+    kraev("tvangsluk_sprunget_over" in typer, "flad: stadig journaliseret")
+    kraev(not pu, f"⚠ flad konto -> telefonen ringer IKKE ({len(pu)})")
+
+    # 3. ⚠ ULAESELIG POSITION -> push alligevel. Netop her maa tavshed ikke
+    #    blive til "alt er fint": vi har lige undladt at lukke noget.
+    print()
+    pu, typer, ev, _ = await koer(None, rejser=True)
+    kraev(len(pu) == 1, f"⚠ ulaeselig position -> der pushes ({len(pu)})")
+    if pu:
+        kraev(pu[0]["prioritet"] == 5, "...ogsaa med prioritet 5")
+        kraev("kan ikke laeses" in pu[0]["besked"],
+              "...og beskeden siger at vi ikke VED det")
+    p = [e for e in ev if e.get("event_type") == "tvangsluk_sprunget_over"][0]
+    kraev(p["payload"].get("position_ukendt") is True,
+          "...og haendelsen skelner UKENDT fra flad")
+
+    # 4. ⚠ Og den NORMALE vej maa ikke vaere brudt: inden for vinduet skal
+    #    tvangslukningen faktisk koere.
+    print()
+    pu, typer, ev, luk = await koer(-1, minutter=5)
+    kraev("tvangsluk_sprunget_over" not in typer,
+          f"⚠ 5 min efter lukketid springes der IKKE over ({typer})")
+    kraev(luk == ["MES 12-26"],
+          f"⚠ ...der tvangslukkes i stedet ({luk})")
+    kraev(not pu, "...og der pushes ikke om en oversprunget lukning")
+
 async def test_tvangsluk_blind() -> None:
     """⚠ Ukendt position: proev igen, og alarmér kun hvis der ER handlet."""
     print("\n  ── tvangsluk med ulaeselig position ──")
@@ -937,6 +1086,7 @@ def main() -> int:
     asyncio.run(test_fyldt_uden_pris())
     asyncio.run(test_fyldt_exit_bogfoeres())
     asyncio.run(test_genstart())
+    asyncio.run(test_tvangsluk_sprunget_over())
     asyncio.run(test_tvangsluk_blind())
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
