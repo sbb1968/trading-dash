@@ -190,6 +190,80 @@ def klassificer(netto_foer: Optional[int], action: str) -> str:
     return "SHORT" if a == "SELL" else "EXIT"
 
 
+def netto_foer_fra_efter(netto_efter: Optional[int], action: str,
+                        antal) -> Optional[int]:
+    """Nettoet FØR ordren, udregnet af nettoet EFTER og hvad ordren selv gjorde.
+
+    ⚠ FORDI ATI IKKE ALTID HAR NØGLEN NÅR VI SPØRGER FØRSTE GANG. Måltes
+    07-10 på en frisk NinjaTrader: strømmen bar `Orders`, `Strategies`,
+    `BuyingPower`, `CashValue` og `RealizedPnL` — men INGEN `MarketPosition|`.
+    Den nøgle dukker først op når kontoen HAR haft en position i sessionen;
+    derefter bliver den liggende på 0. Dagen før virkede det, fordi NT8 havde
+    haft en MES-position.
+
+    Konsekvensen var tavs og alvorlig: `klassificer(None, …)` gav "UKENDT",
+    og en UKENDT-række tæller ingenting i `netto_fra_raekker` og får ingen
+    exit-knapper — uden at der står hvorfor. Den FØRSTE handel efter en frisk
+    NT8-start kunne altså ikke beskyttes, og det ville se ud som om
+    exit-ordrerne var i stykker.
+
+    Men nettoet før ordren er ikke tabt — det kan REGNES. Efter fyldningen HAR
+    ATI nøglen (der ER en position nu), og ordren ved selv hvad den gjorde:
+
+        netto_foer = netto_efter − (+antal for BUY, −antal for SELL)
+
+    ⚠ None ER STADIG None. Er nettoet ukendt OGSÅ efter fyldningen, gætter vi
+    ikke — rækken forbliver UKENDT og siger det højt i vinduet.
+    """
+    if netto_efter is None:
+        return None
+    try:
+        q = abs(int(antal))
+        n = int(netto_efter)
+    except (TypeError, ValueError):
+        return None
+    if not q:
+        # Ingen fyldning -> ordren gjorde ingenting, og nettoet efter er
+        # nettoet før. At regne videre ville være at opfinde en bevægelse.
+        return n
+    return n - (q if (action or "").upper() == "BUY" else -q)
+
+
+# Hvad der staar i Ordrer-vinduet naar typen ikke kunne afgoeres. ⚠ Raekken
+# faar ingen exit-knapper, og uden en tekst ser det ud som om funktionen er i
+# stykker i stedet for at positionen ikke kunne laeses.
+ADVARSEL_UKENDT_POSITION = ("Positionen kunne ikke læses fra NinjaTrader "
+                            "— exit-knapper utilgængelige")
+
+
+def omklassificer(netto_efter: Optional[int], action: str,
+                  antal) -> str:
+    """LONG | SHORT | EXIT | UKENDT — afgjort EFTER fyldningen.
+
+    Samme regel som `klassificer`, kun med nettoet udregnet bagud. Lagt ved
+    siden af den, saa de to aldrig kan komme til at bruge hver sin regel.
+    """
+    return klassificer(netto_foer_fra_efter(netto_efter, action, antal),
+                       action)
+
+
+def omklassificering(netto_efter: Optional[int], action: str,
+                     antal) -> tuple:
+    """(type, advarsel) — hele beslutningen, saa den kan proeves ét sted.
+
+    ⚠ LAGT HER OG IKKE I main.py. Praecis den slags sammenstilling var fejlen
+    i trin 6: `netto_fra_raekker` og `seneste_aabnende` var hver for sig
+    rigtige, men beslutningen der brugte dem laa i et endpoint og blev derfor
+    aldrig proevet. Typen og advarslen hoerer sammen — lykkes den ene ikke,
+    SKAL den anden staa der — og to steder ville kunne komme i utakt.
+
+    advarsel er None naar typen blev afgjort. Kalderen skriver begge felter,
+    saa en raekke der bliver afklaret, ogsaa faar advarslen fjernet igen.
+    """
+    t = omklassificer(netto_efter, action, antal)
+    return t, (None if t != "UKENDT" else ADVARSEL_UKENDT_POSITION)
+
+
 def valider_pris(type_: str, pris: Optional[float], retning: str,
                  kurs: Optional[float]) -> None:
     """Kaster ValueError med dansk tekst hvis prisen ikke kan bruges.

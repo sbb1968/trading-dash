@@ -292,6 +292,96 @@ def test_exit_mulig() -> None:
     kraev(EX.netto_fra_raekker([]) == 0, "tom liste -> netto 0")
 
 
+def test_omklassificering() -> None:
+    """⚠ FRISK NT8-START: ATI HAR INGEN MarketPosition-NOEGLE.
+
+    Maalt 07-10 paa en nystartet NinjaTrader med flad konto. Stroemmen bar
+    Orders, Strategies, BuyingPower, CashValue og RealizedPnL — altsaa den
+    LEVEDE — men der var ingen MarketPosition| overhovedet. Noeglen dukker
+    foerst op naar kontoen HAR haft en position i sessionen; derefter bliver
+    den liggende paa 0. Dagen foer virkede det, fordi NT8 havde haft en
+    MES-position.
+
+    Konsekvensen var TAVS: klassificer(None, ...) gav "UKENDT", og en
+    UKENDT-raekke taeller ingenting i netto_fra_raekker og faar ingen
+    exit-knapper — uden at der staar hvorfor. Den FOERSTE handel efter en
+    frisk NT8-start kunne altsaa ikke beskyttes, og det ville se ud som om
+    exit-ordrerne var i stykker.
+
+    Nettoet foer ordren er ikke tabt — det kan REGNES baglaens fra nettoet
+    efter fyldningen, fordi ordren ved hvad den selv gjorde.
+    """
+    print()
+    print("  -- omklassificering efter fyldning --")
+
+    def r(oid, type_, action, filled=1, tid="08:00"):
+        return {"order_id": oid, "placed_at": f"2026-10-07T{tid}",
+                "ordre_type": type_, "action": action, "filled": filled,
+                "status": "Filled", "ticker": "MES"}
+
+    # ── 1. Foerste BUY efter frisk start ────────────────────────
+    # Foer ordren: ingen noegle -> UKENDT. Efter fyldningen: ATI siger +1.
+    kraev(EX.klassificer(None, "BUY") == "UKENDT",
+          "⚠ uden noeglen er typen UKENDT foer ordren — som den skal vaere")
+    t, adv = EX.omklassificering(1, "BUY", 1)
+    kraev(t == "LONG", f"⚠ foerste BUY -> LONG efter fyldningen ({t})")
+    kraev(adv is None, "…og ingen advarsel, for typen BLEV afgjort")
+    # Og raekken skal nu BAERE en position og FAA knapper.
+    raekke = r("NTM_1", t, "BUY")
+    kraev(EX.netto_fra_raekker([raekke]) == 1,
+          f"…raekken taeller nu i nettoet ({EX.netto_fra_raekker([raekke])})")
+    kraev(EX.exit_mulig_for([raekke]) == "NTM_1",
+          "⚠ …OG DEN FAAR EXIT-KNAPPER — hele pointen")
+
+    # ── 2. Foerste SELL efter frisk start ──────────────────────
+    print()
+    t, adv = EX.omklassificering(-1, "SELL", 1)
+    kraev(t == "SHORT", f"⚠ foerste SELL -> SHORT ({t})")
+    kraev(adv is None, "…og ingen advarsel")
+    raekke = r("NTM_2", t, "SELL")
+    kraev(EX.netto_fra_raekker([raekke]) == -1, "…nettoet er negativt")
+    kraev(EX.exit_mulig_for([raekke]) == "NTM_2",
+          "…og shorten faar ogsaa knapper")
+
+    # ── 3. ⚠ NETTO OGSAA UKENDT EFTER FYLDNINGEN ───────────────
+    # Saa gaettes der IKKE. Raekken bliver UKENDT — men den siger det hoejt.
+    print()
+    t, adv = EX.omklassificering(None, "BUY", 1)
+    kraev(t == "UKENDT", f"⚠ ukendt netto efter fyldning -> UKENDT ({t})")
+    kraev(adv == EX.ADVARSEL_UKENDT_POSITION,
+          f"⚠ …OG DER FOELGER EN ADVARSEL MED ({adv!r})")
+    kraev("NinjaTrader" in adv and "exit-knapper" in adv,
+          "…der siger baade hvor fejlen er og hvad konsekvensen er")
+    raekke = r("NTM_3", t, "BUY")
+    kraev(EX.exit_mulig_for([raekke]) is None,
+          "…og raekken faar rigtigt nok ingen knapper")
+
+    # ── 4. Lukninger skal ogsaa kunne udledes ──────────────────
+    print()
+    for netto_efter, action, ventet in [(0, "SELL", "EXIT"),
+                                        (0, "BUY",  "EXIT"),
+                                        (2, "BUY",  "LONG"),
+                                        (-2, "SELL", "SHORT")]:
+        t, _ = EX.omklassificering(netto_efter, action, 1)
+        kraev(t == ventet,
+              f"netto efter {netto_efter:+d} + {action} -> {ventet} ({t})")
+
+    # ── 5. Regnestykket selv ────────────────────────────
+    print()
+    kraev(EX.netto_foer_fra_efter(1, "BUY", 1) == 0,
+          "netto 1 efter et koeb paa 1 -> 0 foer")
+    kraev(EX.netto_foer_fra_efter(-3, "SELL", 2) == -1,
+          "netto -3 efter et salg paa 2 -> -1 foer")
+    kraev(EX.netto_foer_fra_efter(None, "BUY", 1) is None,
+          "⚠ ukendt ind -> ukendt ud. Der gaettes ikke.")
+    # ⚠ Ingen fyldning: ordren gjorde ingenting, saa nettoet er uaendret. At
+    # regne et antal fra ville opfinde en bevaegelse der ikke skete.
+    kraev(EX.netto_foer_fra_efter(2, "BUY", 0) == 2,
+          "⚠ nul fyldt -> nettoet er uaendret, ikke forskudt")
+    kraev(EX.netto_foer_fra_efter(1, "buy", 1) == 0,
+          "action er ikke versalfoelsom")
+
+
 def test_validering() -> None:
     print("\n  ── prisvalidering (så NT8 ikke behøver afvise) ──")
 
@@ -1077,6 +1167,7 @@ def main() -> int:
     test_klassifikation()
     test_legacy_navn()
     test_exit_mulig()
+    test_omklassificering()
     test_validering()
     test_config()
     test_log_aflaesning()

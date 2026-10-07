@@ -1594,6 +1594,64 @@ async def websocket_endpoint(websocket: WebSocket):
                 # sekunder, og et klik maa ikke vente paa den.
                 filled_qty = int(result.get("filled") or 0)
                 fill_pris  = float(result.get("avg_fill") or 0.0)
+
+                # ── UKENDT -> LONG/SHORT/EXIT, udregnet bagud ────────────
+                # ⚠ ATI HAR IKKE ALTID MarketPosition NAAR VI SPOERGER FOERSTE
+                # GANG. Maalt 07-10 paa en frisk NinjaTrader: stroemmen bar
+                # Orders/Strategies/BuyingPower/CashValue/RealizedPnL — men
+                # INGEN MarketPosition|. Noeglen dukker foerst op naar kontoen
+                # HAR haft en position i sessionen.
+                #
+                # Uden det her blev den FOERSTE handel efter en frisk NT8-start
+                # klassificeret UKENDT, og en UKENDT-raekke taeller ingenting i
+                # netto_fra_raekker og faar ingen exit-knapper — tavst. Den
+                # foerste handel kunne altsaa ikke beskyttes.
+                #
+                # Efter fyldningen HAR ATI noeglen, og ordren ved selv hvad den
+                # gjorde, saa nettoet foer kan regnes: se netto_foer_fra_efter.
+                if (broker == "NT8" and order_id
+                        and _ordre_type == "UKENDT" and filled_qty > 0):
+                    _netto_efter = None
+                    try:
+                        _p2 = await asyncio.to_thread(
+                            nt_forbindelse.position, _instrument, nt_konto)
+                        _netto_efter = _p2.get("netto")
+                    except Exception as _e:
+                        # ⚠ Faes nettoet ikke, er svaret UKENDT — ikke "flad".
+                        logger.error(f"[NT8] positionen kunne ikke laeses til "
+                                     f"omklassificering af {order_id}: {_e}")
+                    # ⚠ ÉN beslutning, i exit_ordrer, hvor den kan proeves.
+                    # Typen og advarslen hoerer sammen: lykkes typen ikke, SKAL
+                    # advarslen staa der. To steder ville kunne komme i utakt.
+                    _ny, _adv = _ex.omklassificering(_netto_efter, action,
+                                                     filled_qty)
+                    get_tracker().opdater(order_id, ordre_type=_ny,
+                                          advarsel=_adv)
+                    if _ny != "UKENDT":
+                        logger.info(f"[NT8] {order_id} omklassificeret "
+                                    f"UKENDT -> {_ny} (netto efter "
+                                    f"{_netto_efter}, {action} {filled_qty})")
+                    else:
+                        # ⚠ ALDRIG TAVST. Raekken bliver staaende uden
+                        # exit-knapper, og uden en forklaring ser det ud som om
+                        # funktionen er i stykker i stedet for at positionen
+                        # ikke kunne laeses.
+                        logger.error(
+                            f"[NT8] {order_id} forbliver UKENDT — positionen "
+                            f"kunne ikke laeses efter fyldningen; der er INGEN "
+                            f"exit-knapper paa den raekke")
+                        await journal.log_event(
+                            ibkr_account=konto_brugt or None,
+                            source="manual_watchlist",
+                            event_type="ordre_type_ukendt",
+                            symbol=ticker,
+                            payload={"order_id": order_id, "action": action,
+                                     "filled": filled_qty,
+                                     "note": "ATI havde ingen MarketPosition "
+                                             "hverken foer eller efter "
+                                             "fyldningen; raekken faar ingen "
+                                             "exit-knapper"})
+
                 if filled_qty > 0 and fill_pris > 0:
                     try:
                         import manuel_forensik
