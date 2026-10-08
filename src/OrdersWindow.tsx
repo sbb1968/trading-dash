@@ -823,7 +823,11 @@ export function OrdersWindow() {
           </div>
 
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            <table className="scanner-table" style={{ width: "100%" }}>
+            {/* ⚠ minWidth som i Ordrer-tabellen. Uden den klipper den
+                sidste kolonne naar vinduet er smalt — samme fejl som da
+                TRAIL-knappen forsvandt ud over kanten. Beholderen ruller. */}
+            <table className="scanner-table"
+                   style={{ width: "100%", minWidth: 940 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: "left" }}>Ind</th>
@@ -835,7 +839,16 @@ export function OrdersWindow() {
                   <th style={{ textAlign: "right" }}>Entry</th>
                   <th style={{ textAlign: "right" }}>Exit</th>
                   <th style={{ textAlign: "right" }}>P&amp;L</th>
-                  <th style={{ textAlign: "left" }}>Konto</th>
+                  {/* ⚠ MAA IKKE KLIPPES. `.scanner-table td` saetter
+                      overflow:hidden + ellipsis globalt, og det goer cellens
+                      mindstebredde til NUL. Auto-layout klemmer derfor netop
+                      den kolonne med det laengste indhold — kontoen — mens
+                      talkolonnerne beholder deres luft. Maalt 08-10:
+                      "NT8 · DEMO85807…" med rigeligt plads i vinduet.
+                      Med clip+visible faar kolonnen sin naturlige bredde. */}
+                  <th style={{ textAlign: "left", whiteSpace: "nowrap",
+                               overflow: "visible", textOverflow: "clip" }}>
+                    Konto</th>
                 </tr>
               </thead>
               <tbody>
@@ -865,7 +878,10 @@ export function OrdersWindow() {
                         color: aaben ? "var(--text-muted)"
                              : (pnl || 0) >= 0 ? "var(--bull)" : "var(--bear)",
                       }}>{aaben ? "—" : usd(pnl)}</td>
-                      <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      <td style={{ fontSize: 10, color: "var(--text-muted)",
+                                   whiteSpace: "nowrap", overflow: "visible",
+                                   textOverflow: "clip" }}
+                          title={`${h.payload?.broker || ""} ${h.ibkr_account || ""}`.trim()}>
                         {h.payload?.broker ? `${h.payload.broker} · ` : ""}
                         {h.ibkr_account || "—"}
                       </td>
