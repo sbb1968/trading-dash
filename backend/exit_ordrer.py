@@ -63,6 +63,32 @@ def normaliser_type(t: str) -> str:
 def er_exit_type(t: str) -> bool:
     return normaliser_type(t) in TYPER
 
+
+def udestaaende(e: dict) -> bool:
+    """Har overvaagningsloekken noget med denne raekke at goere?
+
+    ⚠ ÉN DEFINITION, BRUGT BEGGE STEDER. Den stod to gange: `koer()`
+    afgjorde om `_tik` skulle kaldes, og `_tik` byggede selv sine lister. Da
+    "fyldt uden fyldpris" blev tilfoejet til `_tik`, blev porten ikke rettet
+    med — og en fyldt TARGET faldt derfor igennem begge: den taeller ikke som
+    aktiv (status Filled), og positionen er nul fordi targeten lukkede den.
+    Loekken sov, og `uafklarede` blev aldrig kigget paa.
+
+    Maalt 08-10 kl. 16:27 paa DEMO8580770: TARGET fyldte, raekken stod
+    Filled/0/0.0, og handlen blev staaende AABEN i journalen.
+    """
+    if e.get("source") != "manual_exit":
+        return False
+    if not er_exit_type(e.get("ordre_type") or ""):
+        return False
+    st = e.get("status")
+    if st not in ("Filled", "Cancelled", "Rejected"):
+        return True                      # lever — skal trailes og foelges
+    # ⚠ Fyldt UDEN tal er ikke faerdigt. ATI pusher status og fyldpris i hver
+    # sit felt, og de kommer ikke noedvendigvis i samme oplaeg.
+    return (st == "Filled" and not e.get("fyld_bogfoert")
+            and not e.get("avg_fill"))
+
 DK = zoneinfo.ZoneInfo("Europe/Copenhagen")
 ET = zoneinfo.ZoneInfo("America/New_York")
 
@@ -690,7 +716,8 @@ async def annuller_exit(tracker, journal, *, order_id: str,
 
 
 async def ryd(tracker, journal, *, parent_order_id: Optional[str] = None,
-              instrument: str = "", hvorfor: str = "") -> int:
+              instrument: str = "", hvorfor: str = "",
+              bogfoer_exit=None) -> int:
     """Annullér alle aktive exit-ordrer. Returnerer antallet.
 
     Kaldes når positionen lukkes manuelt fra Watchlist Futures, så ordrerne
@@ -711,12 +738,61 @@ async def ryd(tracker, journal, *, parent_order_id: Optional[str] = None,
             await asyncio.to_thread(NT.annuller, e["order_id"])
         except Exception as ex:
             logger.error(f"[ExitOrdrer] kunne ikke annullere {e['order_id']}: {ex}")
+    # ⚠ EN ORDRE DER NAAEDE AT FYLDE, ER IKKE RYDDET OP — DEN ER FYLDT.
+    # Maalt 08-10 kl. 16:28 paa DEMO8580770: en TARGET fyldte, men ATI havde
+    # endnu ikke pushet `OrderStatus` for ordren, mens `MarketPosition`
+    # ALLEREDE stod paa nul. _tik laeste derfor "positionen blev lukket et
+    # andet sted" og kaldte ryd(). Her ventede `afvent_ordre` — og FIK svaret
+    # Filled. Det blev skrevet som en oprydning: status Filled, men filled=0,
+    # avg_fill=0,00 og ingen bogfoering. Handlen stod aaben i journalen uden
+    # exit-pris og uden P&L.
+    #
+    # ⚠ Rekkefoelge-rettelsen fra 07-10 daekker ikke det her. Den sikrer at en
+    # MELDT fyldning laeses foer positionen. Men her meldte ATI INTET om
+    # ordren, mens positionen allerede var nul — og saa er det ryd() der
+    # opdager fyldningen. Den maa ikke sluge den.
+    fyldt = 0
     for e in aktive:
         r = await asyncio.to_thread(NT.afvent_ordre, e["order_id"], 10.0)
+        antal = int(r.get("filled") or 0)
+        pris = float(r.get("avg_fill") or 0.0)
+        if r.get("status") == "Filled" and antal and pris:
+            tracker.opdater(e["order_id"], status="Filled", bekraeftet=True,
+                            filled=antal, avg_fill=pris, remaining=0,
+                            fyld_bogfoert=True, advarsel=None)
+            fyldt += 1
+            logger.warning(
+                f"[ExitOrdrer] {e['order_id']} naaede at FYLDE foer den blev "
+                f"ryddet — {antal} @ {_dk(pris)}. Bogfoeres som en exit, "
+                f"ikke som en oprydning.")
+            await journal.log_event(
+                source="manual_exit", event_type="exit_fyldt_under_oprydning",
+                symbol=(instrument or "MES").split()[0],
+                payload={"order_id": e["order_id"], "antal": antal,
+                         "fyld": pris, "hvorfor_ryddet": hvorfor,
+                         "type": normaliser_type(e.get("ordre_type")),
+                         "note": "ATI meldte ingen OrderStatus, men "
+                                 "MarketPosition var allerede nul; "
+                                 "afvent_ordre fandt fyldningen"})
+            if bogfoer_exit:
+                try:
+                    await bogfoer_exit(e["order_id"], e.get("action"), antal,
+                                       pris, "Filled",
+                                       normaliser_type(e.get("ordre_type")))
+                except Exception as ex:
+                    logger.error(f"[ExitOrdrer] bogfoering fejlede: {ex}")
+            continue
+        # ⚠ Status uden tal skrives IKKE som Filled. Saa staar raekken som
+        # uafklaret, og loekken spoerger igen — se udestaaende().
+        if r.get("status") == "Filled":
+            tracker.opdater(e["order_id"], status="Filled", bekraeftet=True,
+                            advarsel="Fyldt — fyldprisen er ikke læst endnu")
+            continue
         tracker.opdater(e["order_id"], status=r["status"] or "UNKNOWN",
                         bekraeftet=r["terminal"])
-    logger.info(f"[ExitOrdrer] ryddede {len(aktive)} exit-ordrer ({hvorfor})")
-    return len(aktive)
+    logger.info(f"[ExitOrdrer] ryddede {len(aktive) - fyldt} exit-ordrer "
+                f"({hvorfor})" + (f", {fyldt} naaede at fylde" if fyldt else ""))
+    return len(aktive) - fyldt
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -811,7 +887,8 @@ async def tvangsluk(tracker, journal, *, instrument: str,
     konto = profil["konto"]
 
     antal_ryddet = await ryd(tracker, journal, instrument=instrument,
-                             hvorfor="tvangslukning")
+                             hvorfor="tvangslukning",
+                             bogfoer_exit=bogfoer_exit)
     # Sidste udvej hvis noget stadig lever.
     try:
         await asyncio.to_thread(NT.annuller_alt, konto)
@@ -982,10 +1059,11 @@ class Overvaagning:
 
     # ── et gennemløb ──────────────────────────────────────────────────────
     async def _tik(self, instrument: str, konto: str) -> None:
-        aktive = [e for e in self.tracker._entries
-                  if e.get("source") == "manual_exit"
-                  and er_exit_type(e.get("ordre_type") or "")
-                  and e.get("status") not in ("Filled", "Cancelled", "Rejected")]
+        # ⚠ BEGGE LISTER AF SAMME PRAEDIKAT som porten i koer(). Ellers kan de
+        # drive fra hinanden, og det var praecis fejlen 08-10.
+        relevante = [e for e in self.tracker._entries if udestaaende(e)]
+        aktive = [e for e in relevante
+                  if e.get("status") not in ("Filled", "Cancelled", "Rejected")]
 
         # ⚠ FYLDT, MEN UDEN TAL. ATI pusher status og fyldpris i hver sit felt,
         # og de kommer ikke noedvendigvis i samme oplaeg. `fyldning()` siger det
@@ -1001,12 +1079,8 @@ class Overvaagning:
         #
         # Saadanne raekker bliver spurgt igen hvert gennemloeb. De trailes IKKE
         # — ordren er fyldt, der er intet at flytte.
-        uafklarede = [e for e in self.tracker._entries
-                      if e.get("source") == "manual_exit"
-                      and er_exit_type(e.get("ordre_type") or "")
-                      and e.get("status") == "Filled"
-                      and not e.get("fyld_bogfoert")
-                      and not e.get("avg_fill")]
+        uafklarede = [e for e in relevante
+                      if e.get("status") == "Filled"]
 
         kurs = await self.hent_kurs()
         if kurs:
@@ -1152,7 +1226,8 @@ class Overvaagning:
             # ⚠ DEN VIGTIGSTE REGEL I MODULET. En efterladt stop paa en lukket
             # position aabner en NY position naar den udloeses.
             n = await ryd(self.tracker, self.journal,
-                          instrument=instrument, hvorfor="positionen er nul")
+                          instrument=instrument, hvorfor="positionen er nul",
+                          bogfoer_exit=self.bogfoer_exit)
             logger.info(f"[ExitOrdrer] position 0 -> ryddede {n} exit-ordrer")
             return
 
@@ -1180,10 +1255,8 @@ class Overvaagning:
 
                 await self._tidsstyring(instrument)
 
-                har_noget = any(
-                    e.get("source") == "manual_exit"
-                    and e.get("status") not in ("Filled", "Cancelled", "Rejected")
-                    for e in self.tracker._entries)
+                har_noget = any(udestaaende(e)
+                                for e in self.tracker._entries)
                 if not har_noget:
                     p = await asyncio.to_thread(NT.position, instrument, konto)
                     if not p.get("netto"):

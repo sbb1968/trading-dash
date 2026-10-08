@@ -985,6 +985,151 @@ async def test_tvangsluk_blind() -> None:
         gendan(orig)
 
 
+async def test_fyldt_under_oprydning() -> None:
+    """⚠ EN ORDRE DER NAAEDE AT FYLDE, ER IKKE RYDDET OP — DEN ER FYLDT.
+
+    Maalt 08-10 kl. 16:28 paa DEMO8580770, under Ibens accepttest: en TARGET
+    fyldte @ 7842, men handlen stod bagefter AABEN i journalen uden exit-pris
+    og uden P&L.
+
+    Kaploebet: ATI havde endnu ikke pushet OrderStatus for ordren, mens
+    MarketPosition ALLEREDE stod paa nul. _tik laeste derfor "positionen blev
+    lukket et andet sted" og kaldte ryd(). Dér ventede afvent_ordre — og FIK
+    svaret Filled. Det blev skrevet som en oprydning.
+
+    ⚠ Rekkefoelge-rettelsen fra 07-10 daekker ikke det her. Den sikrer at en
+    MELDT fyldning laeses foer positionen. Her meldte ATI intet om ordren.
+    """
+    print()
+    print("  -- fyldt under oprydning --")
+    bogfoert = []
+
+    async def bogfoer(oid, action, antal, pris, status, aarsag):
+        bogfoert.append({"pris": pris, "antal": antal, "aarsag": aarsag})
+
+    e = {"order_id": "NTX_R1", "source": "manual_exit", "ordre_type": "TARGET",
+         "parent_order_id": "NTM1", "status": "Working", "bekraeftet": True,
+         "shares": 1, "action": "SELL", "trigger_pris": 7842.0,
+         "ticker": "MES", "filled": 0, "remaining": 1, "avg_fill": 0.0}
+
+    # 1. ⚠ KERNEN: afvent_ordre finder en fyldning under oprydningen.
+    tr, jo = FalskTracker([dict(e)]), FalskJournal()
+    kald, orig = mock_nt(afvent_ordre={"status": "Filled", "terminal": True,
+                                       "filled": 1, "avg_fill": 7842.0})
+    try:
+        n = await EX.ryd(tr, jo, instrument="MES 12-26",
+                         hvorfor="positionen er nul", bogfoer_exit=bogfoer)
+        r = tr.find("NTX_R1")
+        kraev(len(bogfoert) == 1,
+              f"⚠ fyldningen BOGFOERES, den sluges ikke ({len(bogfoert)})")
+        if bogfoert:
+            pris = bogfoert[0]["pris"]
+            aarsag = bogfoert[0]["aarsag"]
+            kraev(pris == 7842.0, f"    ...til den rigtige pris ({pris})")
+            kraev(aarsag == "TARGET", f"    ...med typen som aarsag ({aarsag})")
+        f, a = r.get("filled"), r.get("avg_fill")
+        kraev(f == 1 and a == 7842.0, f"⚠ raekken baerer tallene ({f} @ {a})")
+        kraev(r.get("remaining") == 0, "...og remaining er nulstillet")
+        kraev(r.get("fyld_bogfoert") is True, "...og den er markeret bogfoert")
+        kraev(n == 0,
+              f"⚠ og den taelles IKKE som ryddet — den blev handlet ({n})")
+        kraev("exit_fyldt_under_oprydning" in jo.typer(),
+              f"⚠ ...og det journaliseres ({jo.typer()})")
+    finally:
+        gendan(orig)
+
+    # 2. Filled UDEN tal -> ingen nuller, raekken forbliver udestaaende.
+    print()
+    bogfoert.clear()
+    tr2, jo2 = FalskTracker([dict(e, order_id="NTX_R2")]), FalskJournal()
+    kald, orig = mock_nt(afvent_ordre={"status": "Filled", "terminal": True,
+                                       "filled": 0, "avg_fill": 0.0})
+    try:
+        await EX.ryd(tr2, jo2, instrument="MES 12-26",
+                     hvorfor="positionen er nul", bogfoer_exit=bogfoer)
+        r = tr2.find("NTX_R2")
+        adv = r.get("advarsel")
+        kraev(not bogfoert, "uden tal bogfoeres der intet")
+        kraev(bool(adv), f"⚠ ...men det kan SES ({adv!r})")
+        kraev(EX.udestaaende(r),
+              "⚠ ...og loekken spoerger igen — raekken er stadig udestaaende")
+    finally:
+        gendan(orig)
+
+    # 3. En rigtig annullering skal stadig vaere en annullering.
+    print()
+    bogfoert.clear()
+    tr3, jo3 = FalskTracker([dict(e, order_id="NTX_R3")]), FalskJournal()
+    kald, orig = mock_nt(afvent_ordre={"status": "Cancelled", "terminal": True,
+                                       "filled": 0, "avg_fill": 0.0})
+    try:
+        n = await EX.ryd(tr3, jo3, instrument="MES 12-26",
+                         hvorfor="positionen er nul", bogfoer_exit=bogfoer)
+        r = tr3.find("NTX_R3")
+        kraev(not bogfoert, "annulleret -> der bogfoeres intet")
+        kraev(r.get("status") == "Cancelled", "...og raekken staar som annulleret")
+        kraev(n == 1, f"...og den taelles som ryddet ({n})")
+        kraev(not EX.udestaaende(r), "...og er faerdig")
+    finally:
+        gendan(orig)
+
+
+def test_loekkens_port() -> None:
+    """⚠ PORTEN DER AFGOER OM _tik OVERHOVEDET KALDES.
+
+    Fundet 08-10 kl. 16:27 under Ibens accepttest, paa DEMO8580770: en TARGET
+    fyldte, raekken stod Filled/0/0.0, og handlen blev staaende AABEN i
+    journalen uden exit-pris og uden P&L.
+
+    Rettelsen fra 07-10 (fyldt uden fyldpris -> proev igen) laa i `_tik`. Men
+    `koer()` afgoer om `_tik` skal kaldes, og den spurgte stadig "findes der en
+    raekke der IKKE er Filled/Cancelled/Rejected?". En fyldt TARGET falder
+    igennem begge: den er Filled, og positionen er nul fordi targeten lukkede
+    den. Loekken sov, og `uafklarede` blev aldrig kigget paa.
+
+    ⚠ To steder svarede paa det samme spoergsmaal, og kun det ene blev rettet.
+    Derfor ÉN `udestaaende()`, brugt baade af porten og af _tik.
+    """
+    print()
+    print("  -- loekkens port --")
+
+    def r(**kw):
+        d = {"order_id": "NTX_P", "source": "manual_exit",
+             "ordre_type": "TARGET", "status": "Working", "ticker": "MES"}
+        d.update(kw)
+        return d
+
+    # ⚠ KERNEN: fyldt, men uden tal -> loekken SKAL vaagne.
+    kraev(EX.udestaaende(r(status="Filled", filled=0, avg_fill=0.0)),
+          "⚠ Filled uden fyldpris -> porten lukker op")
+    kraev(EX.udestaaende(r(status="Filled")),
+          "…ogsaa naar felterne slet ikke er sat")
+
+    # Og den skal lukke i igen naar der ER bogfoert.
+    kraev(not EX.udestaaende(r(status="Filled", filled=1, avg_fill=7831.0,
+                               fyld_bogfoert=True)),
+          "bogfoert fyldning -> intet udestaaende")
+    kraev(not EX.udestaaende(r(status="Filled", filled=1, avg_fill=7831.0)),
+          "…og en raekke med en rigtig fyldpris regnes som faerdig")
+
+    # Levende ordrer er selvfoelgelig udestaaende.
+    for st in ("Working", "Accepted", "Change submitted", "afventer"):
+        kraev(EX.udestaaende(r(status=st)), f"{st} -> udestaaende")
+
+    # Terminale uden fyldning er faerdige.
+    for st in ("Cancelled", "Rejected"):
+        kraev(not EX.udestaaende(r(status=st)), f"{st} -> faerdig")
+
+    # ⚠ Og den maa ikke vaagne paa alt muligt andet. Loekken koerer hvert
+    # sekund; taeller en LONG-raekke med, sover den aldrig.
+    kraev(not EX.udestaaende(r(ordre_type="LONG")),
+          "⚠ en LONG-raekke er ikke loekkens bord")
+    kraev(not EX.udestaaende(r(ordre_type="EXIT", status="Filled")),
+          "⚠ …og heller ikke bogfoeringsraekken EXIT")
+    kraev(not EX.udestaaende(r(source="manual_watchlist")),
+          "en raekke fra watchlisten er ikke en exit-ordre")
+
+
 async def test_fyldt_uden_pris() -> None:
     """⚠ FILLED UDEN FYLDPRIS ER IKKE FAERDIGT — det er et nyt forsoeg.
 
@@ -1187,6 +1332,8 @@ def main() -> int:
     test_lukketid()
     asyncio.run(test_overvaagning())
     asyncio.run(test_opret())
+    test_loekkens_port()
+    asyncio.run(test_fyldt_under_oprydning())
     asyncio.run(test_fyldt_uden_pris())
     asyncio.run(test_fyldt_exit_bogfoeres())
     asyncio.run(test_genstart())
