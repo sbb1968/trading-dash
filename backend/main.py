@@ -1974,7 +1974,7 @@ async def kontrakt_forbindelse() -> tuple:
         return None, str(e)
 
 
-def _berig_med_exit(ordrer: list) -> list:
+def _berig_med_exit(ordrer: list, alle: Optional[list] = None) -> list:
     """Giv parent-raekkerne knaptilstande og exit-raekkerne deres plads.
 
     ⚠ KNAPTILSTANDEN KOMMER HERFRA — ALDRIG FRA KLIKKET. Frontenden maa ikke
@@ -1992,7 +1992,19 @@ def _berig_med_exit(ordrer: list) -> list:
     # LONG-raekken derfor sine knapper paa en LUKKET position.
     # Udledes nu af trackeren alene, saa knapperne forsvinder STRAKS —
     # ogsaa naar ATI er tavs. ATI's netto er en ekstra bekraeftelse.
-    seneste = _ex.exit_mulig_for(ordrer)
+    # ⚠ POSITIONEN UDLEDES AF HELE HISTORIKKEN, IKKE AF DET VISTE UDSNIT.
+    # `ordrer` er allerede skaaret til af periodevaelgeren. Regnes nettoet paa
+    # den, afhaenger "er der en position?" af hvad brugeren har valgt at kigge
+    # paa — og det er noget vrovl: en aabnende raekke kan falde uden for
+    # vinduet mens dens lukkende raekke bliver inde.
+    #
+    # Maalt 08-10 kl. 17:24 med "Sidste time": nettoet blev −1 i stedet for 0,
+    # og den nyeste LONG stod markeret som aaben med STOP/TARGET/TRAIL paa en
+    # position der var lukket. Et klik ville have AABNET en ny.
+    #
+    # Periodevaelgeren bestemmer hvad man SER. Den maa ikke bestemme hvad
+    # systemet TROR om kontoen.
+    seneste = _ex.exit_mulig_for(ordrer if alle is None else alle)
 
     pr_parent: dict = {}
     for o in ordrer:
@@ -2042,7 +2054,11 @@ async def get_orders_list(period_hours: int = 24, fra_midnat: bool = False):
         # forskellen er hele gaarsdagens handel.
         since=(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
                if fra_midnat else None))
-    orders = _berig_med_exit(orders)
+    # ⚠ Hele historikken til positionsudregningen, det viste udsnit til
+    # visningen. Se noten i _berig_med_exit.
+    _alle = [e for e in get_tracker()._entries
+             if e.get("source") in MANUAL_ORDER_SOURCES]
+    orders = _berig_med_exit(orders, alle=_alle)
     return {"orders": orders, "ibkr_connected": ibkr is not None and ibkr.connected}
 
 

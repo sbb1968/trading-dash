@@ -27,6 +27,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
+import exit_ordrer as EX
 import main
 
 fejl: list[str] = []
@@ -119,8 +120,65 @@ def koer() -> None:
         gendan()
 
 
+def test_periodevaelger() -> None:
+    """⚠ PERIODEVAELGEREN MAA IKKE AENDRE HVAD SYSTEMET TROR OM POSITIONEN.
+
+    Maalt 08-10 kl. 17:24 paa DEMO8580770 med "Sidste time": en LONG stod
+    markeret som aaben, med STOP/TARGET/TRAIL, paa en position der var lukket
+    et kvarter foer. Et klik ville have AABNET en ny position — den foerste
+    ordre der fylder paa en flad konto, aabner.
+
+    Aarsagen: `/orders/list` skaerer listen til efter periode FOER berigelsen,
+    og nettoet blev regnet paa udsnittet. En aabnende raekke faldt uden for
+    vinduet mens dens lukkende raekke blev inde, saa nettoet blev −1.
+
+    Periodevaelgeren bestemmer hvad man SER. Ikke hvad kontoen ER.
+    """
+    print()
+    print("  -- periodevaelgeren --")
+    gendan = _med_instrument("MES 12-26")
+    try:
+        # Hele historikken: koeb, salg, koeb, salg — altsaa FLAD.
+        alle = [r("A1", "LONG", "BUY",  tid="16:00"),
+                r("A2", "EXIT", "SELL", tid="16:30"),
+                r("A3", "LONG", "BUY",  tid="17:03"),
+                r("A4", "EXIT", "SELL", tid="17:10")]
+        ud = main._berig_med_exit([dict(x) for x in alle],
+                                  alle=[dict(x) for x in alle])
+        kraev(not any(o.get("position_aaben") for o in ud),
+              "hele historikken -> flad, ingen markering")
+
+        # ⚠ KERNEN: vinduet skaerer MELLEM en aabning og dens lukning.
+        # Udsnittet starter ved A2 (et SALG hvis koeb ligger foer vinduet), saa
+        # udsnittet alene ser ud som "solgt uden at have koebt": −1 +1 −1 = −1.
+        # Det er praecis hvad der skete 17:24 — nettoet blev negativt, og den
+        # nyeste LONG stod som en aaben position der ikke fandtes.
+        udsnit = [dict(x) for x in alle[1:]]
+        kraev(EX.netto_fra_raekker(udsnit) == -1,
+              f"⚠ udsnittet ALENE giver et forkert netto "
+              f"({EX.netto_fra_raekker(udsnit)}) — det er faelden")
+        ud = main._berig_med_exit(udsnit, alle=[dict(x) for x in alle])
+        kraev(not any(o.get("position_aaben") for o in ud),
+              "⚠ afkortet visning -> STADIG flad. Vinduet aendrer ikke kontoen.")
+        kraev(not any(o.get("exit_mulig") for o in ud),
+              "⚠ …og der tilbydes INGEN exit-knapper paa en lukket position")
+
+        # Og det modsatte: er der faktisk en aaben position, skal den vises
+        # ogsaa selv om dens entry ligger foer vinduet.
+        print()
+        alle2 = [r("B1", "LONG", "BUY", tid="16:00"),
+                 r("B2", "EXIT", "SELL", tid="16:30"),
+                 r("B3", "LONG", "BUY", tid="17:03")]
+        ud = main._berig_med_exit([dict(alle2[2])], alle=[dict(x) for x in alle2])
+        kraev(ud[0].get("position_aaben") is True,
+              "aaben position markeres ogsaa i et snaevert vindue")
+    finally:
+        gendan()
+
+
 def main_() -> int:
     koer()
+    test_periodevaelger()
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
 
