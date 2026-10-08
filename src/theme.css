@@ -34,6 +34,11 @@
      den anden "det her er US-tid". Faelles variabel ville binde to
      beslutninger sammen der skal kunne aendres hver for sig. */
   --ur-us:           #d4ff00;
+  /* Raekken for den position der er AABEN lige nu. ⚠ Egen variabel og ikke
+     en hardkodet hvid: arctic er lyst, og 10 % hvid paa hvid er ingenting.
+     Den skal vaere tydelig nok til at ses paa et kig, og svag nok til at
+     tallene i raekken stadig kan laeses. */
+  --aaben-position:  rgba(255, 255, 255, 0.10);
   --bg-base:        #0a0c0f;
   --bg-surface:     #0f1217;
   --bg-elevated:    #151a21;
@@ -221,6 +226,8 @@
   --aktiv-glod:      rgba(95, 112, 0, 0.10);
   /* Kraftig gul paa hvid er ulaeselig; moerk rav baerer samme vaegt. */
   --ur-us:           #8a6d00;
+  /* Paa lyst tema markerer en svag MOERK tone — hvid ville forsvinde. */
+  --aaben-position:  rgba(15, 23, 42, 0.055);
   --bg-base:        #f0f4f8;
   --bg-surface:     #ffffff;
   --bg-elevated:    #e8eef5;

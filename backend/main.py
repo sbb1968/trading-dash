@@ -2016,7 +2016,17 @@ def _berig_med_exit(ordrer: list) -> list:
         oid = str(o.get("order_id"))
         knapper = pr_parent.get(oid, {})
         o["exit_knapper"] = {t: knapper.get(t, "ingen") for t in _ex.TYPER}
-        o["exit_mulig"] = bool(seneste and oid == seneste
+        # ⚠ TO FORSKELLIGE SPOERGSMAAL, og de maa ikke dele felt.
+        #   position_aaben: ER der en position paa denne raekke? Det er et
+        #                   faktum om kontoen, og det er det raekken farves af.
+        #   exit_mulig:     KAN vi tilbyde exit-knapper? Kraever derudover at
+        #                   kontraktmaaneden er slaaet op.
+        # Brugte markeringen `exit_mulig`, ville en aaben position se LUKKET ud
+        # fordi et kontraktopslag var nede — altsaa en maaling hvis fravaer
+        # blev vist som et faktum. Det er samme fejlklasse som resten af
+        # modulet er bygget imod.
+        o["position_aaben"] = bool(seneste and oid == seneste)
+        o["exit_mulig"] = bool(o["position_aaben"]
                                and _EXIT_INSTRUMENT.get("navn"))
     return ordrer
 

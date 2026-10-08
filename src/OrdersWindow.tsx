@@ -42,6 +42,12 @@ interface OrderEntry {
   /** ⚠ KUN PAA PARENT-RAEKKER, og KUN fra backenden. Se noten ved knapperne. */
   exit_knapper?:    Record<string, "ingen" | "afventer" | "aktiv">;
   exit_mulig?:      boolean;
+  /** Er DET HER raekkens position aaben lige nu? ⚠ Ikke det samme som
+   *  `exit_mulig`: den kraever derudover at kontraktmaaneden er slaaet op.
+   *  Markeringen skal foelge POSITIONEN, ikke om vi lige nu kan tilbyde
+   *  knapper — ellers ser en aaben position lukket ud fordi et
+   *  kontraktopslag er nede. */
+  position_aaben?:  boolean;
   /** Kort besked fra overvaagningsloekken, fx "Ingen kurs — stoppen følger
    *  ikke med". ⚠ En trailing stop der er holdt op med at foelge markedet,
    *  ser ud praecis som en der foelger med. */
@@ -937,8 +943,19 @@ export function OrdersWindow() {
                 const erExit = exitT !== null;
                 const knapper = o.exit_knapper;
                 return (
+                  // ⚠ MARKERINGEN FOELGER POSITIONEN, ikke raekkens status.
+                  // En entry staar som "Udfoert" i samme sekund den fylder, saa
+                  // status kan ikke bruges til at se hvad der er AABENT. Her
+                  // bruges `position_aaben`, som backenden udleder af nettoet
+                  // i trackeren — og som derfor slukker af sig selv i det
+                  // oejeblik en exit fylder, uden at nogen skal rydde op.
                   <tr key={o.order_id}
-                      style={barn ? {background: "var(--bg-surface)"} : undefined}>
+                      title={o.position_aaben
+                        ? "Positionen er aaben" : undefined}
+                      style={barn ? {background: "var(--bg-surface)"}
+                           : o.position_aaben
+                             ? {background: "var(--aaben-position)"}
+                             : undefined}>
                     {/* ⚠ INDRYKNINGEN MAA IKKE LIGGE HER. Den skubbede baade
                         klokkeslaet og dato til hoejre paa exit-raekker, saa
                         kolonnen stod forskudt fra raekke til raekke — og en
