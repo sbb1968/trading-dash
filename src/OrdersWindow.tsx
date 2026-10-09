@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Besked, type BeskedData } from "./Besked";
 
 // ── Typer ─────────────────────────────────────────────────────
 // ⚠ TO VISNINGER AF DE SAMME HANDLER, IKKE ÉN DER ERSTATTER DEN ANDEN.
@@ -358,10 +359,6 @@ function statusColor(group: string): string {
   }
 }
 
-function sourceLabel(source: string): string {
-  if (source === "manual_watchlist" || source === "manual") return "Manuel";
-  return source;
-}
 
 function statusText(status: string): string {
   // ⚠ ENGELSK. Ordrefanen var blandet — danske statusser ved siden af
@@ -424,6 +421,10 @@ export function OrdersWindow() {
   const [modalFejl, setModalFejl] = useState("");
   const [travl, setTravl] = useState(false);
   const [kurs, setKurs] = useState<number | null>(null);
+  /** ⚠ Erstatter alert()/confirm(). Se Besked.tsx — browserens egne
+   *  bokse er hvide uanset tema OG blokerer traaden, saa kurserne staar
+   *  stille bag dem. */
+  const [besked, setBesked] = useState<BeskedData | null>(null);
   /** Live-kurs til UREALISERET P&L. ⚠ Egen state og ikke `kurs`: den
    *  nulstilles naar prismodalen aabner, og saa ville tallene i tabellen
    *  blinke vaek hver gang man trykker paa en knap. */
@@ -496,7 +497,16 @@ export function OrdersWindow() {
     const navn = t ? EXIT_NAVN[t] : "exit-ordren";
     const pris = o.trigger_pris != null
       ? ` på ${tal(o.trigger_pris)}` : "";
-    if (!window.confirm(`Annullér ${navn.toLowerCase()}${pris}?`)) return;
+    setBesked({
+      art: "spoerg", jaTekst: "Annullér ordren",
+      titel: `Annullér ${navn.toLowerCase()}${pris}?`,
+      tekst: "Ordren fjernes hos NinjaTrader. ⚠ Er det den eneste "
+           + "beskyttelse paa positionen, staar den derefter udaekket.",
+      onJa: () => { void udfoerAnnullerExit(o); },
+    });
+  }
+
+  async function udfoerAnnullerExit(o: OrderEntry) {
     try {
       const r = await fetch("http://127.0.0.1:8000/exit-ordre/annuller", {
         method: "POST", headers: {"Content-Type": "application/json"},
@@ -606,10 +616,16 @@ export function OrdersWindow() {
     };
   }, [periodHours, fane]);
 
-  async function handleCancel(order: OrderEntry) {
-    const confirmText = `Annullér ${order.action} ${order.shares} ${order.ticker}?`;
-    if (!window.confirm(confirmText)) return;
+  function handleCancel(order: OrderEntry) {
+    setBesked({
+      art: "spoerg", jaTekst: "Annullér ordren",
+      titel: `Annullér ${order.action} ${order.shares} ${order.ticker}?`,
+      tekst: "Ordren traekkes tilbage hos brokeren.",
+      onJa: () => { void udfoerCancel(order); },
+    });
+  }
 
+  async function udfoerCancel(order: OrderEntry) {
     setCancellingId(order.order_id);
     try {
       const resp = await fetch("http://127.0.0.1:8000/orders/cancel", {
@@ -619,13 +635,15 @@ export function OrdersWindow() {
       });
       const result = await resp.json();
       if (!result.success) {
-        alert(`Kunne ikke annullere: ${result.error}`);
+        setBesked({art: "fejl", titel: "Kunne ikke annullére",
+                   tekst: String(result.error)});
       } else {
         // Refresh straks så Iben ser status ændre
         fetchOrders();
       }
     } catch (e: any) {
-      alert(`Cancel fejl: ${e.message || e}`);
+      setBesked({art: "fejl", titel: "Annullering fejlede",
+                 tekst: String(e?.message || e)});
     } finally {
       setCancellingId(null);
     }
@@ -798,6 +816,8 @@ export function OrdersWindow() {
           {lastUpdate && `Opdateret ${lastUpdate}`}
         </span>
       </div>
+
+      <Besked data={besked} onLuk={() => setBesked(null)} />
 
       {prisModal && (
         <ExitPrisModal
@@ -1036,7 +1056,6 @@ export function OrdersWindow() {
             <tbody>
               {grupper(visibleOrders).map(({o, barn}) => {
                 const isOpen = o.status_group === "open";
-                const sideColor = o.action === "BUY" ? "var(--bull)" : "var(--bear)";
                 const type = (o.ordre_type || "").toUpperCase();
                 const exitT = exitType(o.ordre_type);
                 const erExit = exitT !== null;
