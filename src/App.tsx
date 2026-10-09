@@ -21,6 +21,7 @@ import { MarketOverview } from "./MarketOverview";
 import { RegimeFingerprint } from "./RegimeFingerprint";
 import { AccountPanel } from "./AccountPanel";
 import { OrdersWindow } from "./OrdersWindow";
+import { Besked, type BeskedData } from "./Besked";
 import { SwingReport } from "./SwingReport";
 import { BuyHoldReport } from "./BuyHoldReport";
 import { DaytradingReport } from "./DaytradingReport";
@@ -132,10 +133,10 @@ function Clock() {
   return (
     <div className="status-item">
       <span className="status-label">🕐</span>
-      <span className="status-value" title="Dansk tid">
+      <span className="status-value ur" title="Dansk tid">
         <span className="ur-praefiks">DK</span>{dk}
       </span>
-      <span className="status-value ur-us"
+      <span className="status-value ur ur-us"
             title="New York (ET) — markedet aabner 09:30">
         <span className="ur-praefiks">US</span>{us}
       </span>
@@ -417,7 +418,25 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   // Er der intet gemt, vises ALT — et vindue der mangler sin konfiguration skal
   // vise for meget, ikke for lidt.
   const valgte = useKolonner("columns_watchlist", DEFAULT_WATCHLIST_COLUMNS);
-  const vist = (id: string) => (cols ?? valgte).includes(id);
+  // ⚠ FUTURES-LISTEN VISER IKKE P/L. Den hoerer i Ordrer-vinduet, hvor den
+  // regnes af positionen og af den levende kurs. I watchlisten var den en
+  // ANDEN kilde til samme tal — og paa en konto uden markedsdata-abonnement
+  // stod den som UKENDT ved siden af et rigtigt tal i Ordrer-vinduet.
+  //
+  // ⚠ Hvorfor ikke bare slaa kolonnen fra i Konfiguratoren: kolonnevalget
+  // ligger i ÉN localStorage-noegle (`columns_watchlist`) og deles af BEGGE
+  // watchlister. Det kan altsaa ikke udtrykke "kun futures", og Stocks skal
+  // beholde sin P/L.
+  /** ⚠ Erstatter alert()/confirm(). Browserens egne bokse er hvide uanset
+   *  tema OG blokerer traaden — og flere af de her beskeder staar netop i
+   *  ordrestien, hvor kursen bag dem saa staar stille. Se Besked.tsx. */
+  const [besked, setBesked] = useState<BeskedData | null>(null);
+
+  const SKJULT_PAA_FUTURES = new Set(["upl", "uplpct"]);
+  const vist = (id: string) =>
+    variant === "futures" && SKJULT_PAA_FUTURES.has(id)
+      ? false
+      : (cols ?? valgte).includes(id);
 
   // ⚠ HANDELSGENVEJENE FOELGER "HANDEL"-KOLONNEN. Er knapperne skjult, er K og S
   // ogsaa slaaet fra. Ellers kunne et enkelt tastetryk laegge en markedsordre paa
@@ -619,11 +638,16 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
   async function handleOrder(action: "BUY" | "SELL", stock: any) {
     const ts = tradeStatus(stock.ticker, mkt);
     if (!ts.canTrade) {
-      alert(`${stock.ticker} kan ikke handles nu.\n\n${ts.blockMsg}`);
+      setBesked({art: "fejl", titel: `${stock.ticker} kan ikke handles nu`,
+                 tekst: ts.blockMsg});
       return;
     }
     const shares = parseInt(getShares(stock.ticker), 10);
-    if (!shares || shares <= 0) { alert(`Angiv en gyldig mængde for ${stock.ticker}`); return; }
+    if (!shares || shares <= 0) {
+      setBesked({art: "fejl", titel: "Ugyldig mængde",
+                 tekst: `Angiv en gyldig mængde for ${stock.ticker}.`});
+      return;
+    }
 
     // ⚠ Her stod `if (!stock.price) return` med beskeden "Ingen live pris".
     //
@@ -649,9 +673,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
       } catch { /* backend nede — haandteres nedenfor */ }
     }
     if (!pris) {
-      alert(`Kan ikke prissætte ${stock.ticker} — ordren er IKKE sendt.\n\n` +
-        `Backenden svarer ikke, eller IBKR kender ikke tickeren.\n` +
-        `Futures handles med det rene symbol (MES, M2K) — ikke kontraktkoden.`);
+      setBesked({art: "fejl",
+        titel: `Kan ikke prissætte ${stock.ticker} — ordren er IKKE sendt`,
+        tekst: "Backenden svarer ikke, eller IBKR kender ikke tickeren." 
+             + "\nFutures handles med det rene symbol (MES, M2K) — ikke "
+             + "kontraktkoden."});
       return;
     }
     // ⚠ BROKEREN FØLGER LISTEN OG MASKINEN, ikke tickeren og ikke et valg.
@@ -659,10 +685,11 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     // IBKR. Kender vi ikke ruten, sendes der INTET — der gættes ikke.
     const broker = brokerFor(variant, rute ?? null);
     if (!broker) {
-      alert(`Kan ikke afgøre hvilken broker ${stock.ticker} skal handles hos.\n\n` +
-        `Backenden svarer ikke paa /ordre/rute. Ordren er IKKE sendt — der ` +
-        `gættes ikke paa broker, fordi MES kan handles hos både IBKR og ` +
-        `NinjaTrader.`);
+      setBesked({art: "fejl",
+        titel: `Kan ikke afgøre hvilken broker ${stock.ticker} handles hos`,
+        tekst: "Backenden svarer ikke paa /ordre/rute. Ordren er IKKE "
+             + "sendt — der gættes ikke paa broker, fordi MES kan handles "
+             + "hos både IBKR og NinjaTrader."});
       return;
     }
     onRequestOrder(action, stock.ticker, shares, pris, broker);
@@ -705,13 +732,21 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
     const bp = brokerPos?.[ticker.toUpperCase()];
     const pos = bp ? { qty: bp.qty } : (brokerPos ? null : meta[ticker]?.bought);
     const confirmOn = localStorage.getItem("confirm_delete_open") !== "false";   // default: bekræft
-    if (pos && confirmOn &&
-        !window.confirm(`${ticker} har en ÅBEN position (${pos.qty} stk). Fjern linjen alligevel?\n\n` +
-          `Positionen LUKKES ikke — den følger i Ordre-vinduet.`)) {
+    const fjern = () => {
+      onRemoveTicker(ticker);
+      setMeta(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+    };
+    if (pos && confirmOn) {
+      setBesked({
+        art: "spoerg", jaTekst: "Fjern linjen",
+        titel: `${ticker} har en ÅBEN position (${pos.qty} stk)`,
+        tekst: "Fjern linjen alligevel?\n\nPositionen LUKKES ikke — den "
+             + "følger i Ordre-vinduet.",
+        onJa: fjern,
+      });
       return;
     }
-    onRemoveTicker(ticker);
-    setMeta(prev => { const n = { ...prev }; delete n[ticker]; return n; });
+    fjern();
   }
 
   // ⚠ ÉN batch-forespoergsel for hele listen, ikke ét kald pr. raekke.
@@ -829,6 +864,8 @@ function WatchlistPanel({ stocks, selectedTicker, onSelectTicker, watchlist, onA
           Den navngiver ordren (retning, antal, ticker, broker), saa den ikke
           bare er en spinner: man skal kunne se AT det rigtige blev bestilt,
           ikke kun at der sker noget. */}
+      <Besked data={besked} onLuk={() => setBesked(null)} />
+
       {ordreUndervejs && (
         <div className="ordre-kvittering ordre-venter">
           ⏳ {ordreUndervejs.action === "BUY" ? "KØBER" : "SÆLGER"}{" "}

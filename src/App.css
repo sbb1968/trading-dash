@@ -119,6 +119,14 @@ button {
    med to ure ved siden af hinanden er sidelaens uro paafaldende. */
 .status-value { font-variant-numeric: tabular-nums; }
 
+/* ⚠ EGEN KLASSE, ikke .status-value. Urene skulle op i stoerrelse, men
+   .status-value deles med resten af toplinjen — en global aendring ville
+   have skubbet alt det andet med. 11 px var for lidt paa en 4K-skaerm med
+   150 % skalering, og det er netop de to tal man skal kunne aflaese paa et
+   kig for at vide hvor taet markedet er paa at aabne. */
+.ur { font-size: 15px; }
+.ur .ur-praefiks { font-size: 11px; vertical-align: 1.5px; }
+
 .ur-praefiks {
   font-size:      8.5px;
   font-weight:    700;

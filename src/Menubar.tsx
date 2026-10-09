@@ -1,3 +1,4 @@
+import { Besked, type BeskedData } from "./Besked";
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Layout, WindowId, WINDOW_LABELS } from "./layouts";
@@ -244,6 +245,17 @@ export function LayoutMenu({
   altKey?: string;
   label?: string;
 }) {
+  // ⚠ Erstatter alert()/confirm() — se Besked.tsx. Browserens egne bokse er
+  // hvide uanset tema og blokerer traaden mens de staar aabne.
+  const [besked, setBesked] = useState<BeskedData | null>(null);
+  function spoergSlet(layout: {id: string; name: string}) {
+    setBesked({
+      art: "spoerg", jaTekst: "Slet layoutet",
+      titel: `Slet layoutet "${layout.name}"?`,
+      tekst: "Dette kan ikke fortrydes.",
+      onJa: () => onDeleteLayout(layout.id),
+    });
+  }
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [newLayoutName, setNewLayoutName]   = useState("");
   function handleSave() {
@@ -269,7 +281,7 @@ export function LayoutMenu({
             {layout.name}
           </div>
           <button className="menu-layout-delete" title="Slet layout"
-            onClick={e => { e.stopPropagation(); if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id); }}>✕</button>
+            onClick={e => { e.stopPropagation(); spoergSlet(layout); }}>✕</button>
         </div>
       ))}
 
@@ -483,6 +495,10 @@ function KontoMaerke() {
   const [aaben, setAaben] = useState(false);
   const [fejl, setFejl]   = useState("");
 
+  // ⚠ Erstatter alert()/confirm() — se Besked.tsx. Browserens egne bokse er
+  // hvide uanset tema og blokerer traaden mens de staar aabne.
+  const [besked, setBesked] = useState<BeskedData | null>(null);
+
   async function hent() {
     try {
       const r = await fetch("http://127.0.0.1:8000/account/aktiv");
@@ -507,9 +523,14 @@ function KontoMaerke() {
       const d = await r.json().catch(() => ({}));
       if (r.status === 428) {
         // Inden for handelsvinduet: lovligt, men ikke noget man goer ved et uheld.
-        if (window.confirm(`${d.detail}\n\nSkift til ${id} alligevel?`)) {
-          return skift(id, true);
-        }
+        // ⚠ Var en window.confirm. Den er synkron, saa den kunne staa her
+        // midt i en handler — en modal kan ikke, og resten er flyttet til
+        // en callback. Se Besked.tsx for hvorfor de hvide bokse skulle vaek.
+        setBesked({
+          art: "spoerg", jaTekst: `Skift til ${id}`,
+          titel: "Skift layout?", tekst: String(d.detail),
+          onJa: () => { void skift(id, true); },
+        });
         return;
       }
       if (!r.ok) { setFejl(d.detail || `HTTP ${r.status}`); return; }
@@ -679,6 +700,18 @@ export function Menubar({
   const [newLayoutName, setNewLayoutName]   = useState("");
   const { theme, setTheme } = useTheme();
 
+  // ⚠ Erstatter alert()/confirm() — se Besked.tsx. Browserens egne bokse er
+  // hvide uanset tema og blokerer traaden mens de staar aabne.
+  const [besked, setBesked] = useState<BeskedData | null>(null);
+  function spoergSlet(layout: {id: string; name: string}) {
+    setBesked({
+      art: "spoerg", jaTekst: "Slet layoutet",
+      titel: `Slet layoutet "${layout.name}"?`,
+      tekst: "Dette kan ikke fortrydes.",
+      onJa: () => onDeleteLayout(layout.id),
+    });
+  }
+
   function handleSave() {
     if (!newLayoutName.trim()) return;
     onSaveLayout(newLayoutName.trim());
@@ -723,10 +756,11 @@ export function Menubar({
     try {
       await openUrl(adresse);
     } catch (err) {
-      alert(`Kunne ikke åbne ${adresse}\n\n${err}\n\n`
-          + "Adressen skal stå i src-tauri/capabilities/default.json "
-          + "(opener:allow-open-url) — og mønstrene dér matches med glob, "
-          + "så adressen skal ende på '/'.");
+      setBesked({art: "fejl", titel: `Kunne ikke åbne ${adresse}`,
+        tekst: `${err}\n\n`
+             + "Adressen skal stå i src-tauri/capabilities/default.json "
+             + "(opener:allow-open-url) — og mønstrene dér matches med "
+             + "glob, så adressen skal ende på '/'."});
     }
   }
 
@@ -739,20 +773,28 @@ export function Menubar({
       if (!s.lokal) { await aabn(s.url); return; }
       if (s.koerer) { await aabn(s.url); return; }
       if (!s.installeret) {
-        alert(`Trading Practice findes ikke på denne maskine. Forventet: ${s.sti}`);
+        setBesked({art: "fejl", titel: "Trading Practice findes ikke her",
+                   tekst: `Forventet placering: ${s.sti}`});
         return;
       }
       if (!s.har_data) {
         // ⚠ Uden bar_cache starter appen fint og viser en TOM vælger. Sig det
         // frem for at lade brugeren lede efter fejlen i programmet.
-        alert("Trading Practice kan starte, men der er ingen markedsdata på denne maskine "
-            + "(bar_cache mangler). Den vil vise en tom liste.");
+        setBesked({art: "info", titel: "Ingen markedsdata",
+          tekst: "Trading Practice kan starte, men der er ingen "
+               + "markedsdata på denne maskine (bar_cache mangler). "
+               + "Den vil vise en tom liste."});
       }
       const r = await fetch("http://127.0.0.1:8000/practice/start", { method: "POST" });
-      if (!r.ok) { alert("Kunne ikke starte Trading Practice: " + (await r.text())); return; }
+      if (!r.ok) {
+        setBesked({art: "fejl", titel: "Kunne ikke starte Trading Practice",
+                   tekst: await r.text()});
+        return;
+      }
       await aabn(s.url);
     } catch (err) {
-      alert("Kunne ikke nå backenden på 127.0.0.1:8000 — kører den? " + err);
+      setBesked({art: "fejl", titel: "Kunne ikke nå backenden",
+        tekst: `127.0.0.1:8000 svarer ikke — kører den?\n\n${err}`});
     } finally {
       setOevebaneStarter(false);
     }
@@ -802,6 +844,7 @@ export function Menubar({
 
   return (
     <div className="menubar">
+      <Besked data={besked} onLuk={() => setBesked(null)} />
 
       {/* ── Tilføj vindue — ALT+T (delt komponent, ogsaa paa skaerm 2) ── */}
       <AddWindowMenu onAddWindow={onAddWindow} activeWindowIds={activeWindowIds} />
@@ -836,7 +879,7 @@ export function Menubar({
               className="menu-layout-delete"
               onClick={e => {
                 e.stopPropagation();
-                if (window.confirm(`Slet layoutet "${layout.name}"?\n\nDette kan ikke fortrydes.`)) onDeleteLayout(layout.id);
+                spoergSlet(layout);
               }}
               title="Slet layout"
             >✕</button>
