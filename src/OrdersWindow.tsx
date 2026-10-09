@@ -275,10 +275,35 @@ function fmtTime(iso: string): string {
 }
 
 /** Hvor længe positionen var åben. "—" hvis den stadig er det. */
-function varighed(fra: string, til: string | null): string {
-  if (!til) return "—";
+/** Hvad der lukkede handlen, som det staar i ordrefanens Type-kolonne.
+ *
+ *  ⚠ `exit_reason` kommer fra journalen og har flere stavemaader: exit-
+ *  ordrerne skriver deres type (STOP/TARGET/TRAIL), mens et manuelt salg fra
+ *  watchlisten skriver `manuel_salg`. De vises ens her, saa kolonnen betyder
+ *  det samme paa alle raekker.
+ *
+ *  Ukendte vaerdier vises som de ER, ikke som "ukendt": en aarsag vi ikke
+ *  kender navnet paa, er stadig en oplysning. */
+function exitTekst(aarsag: string | null): string {
+  const a = (aarsag || "").trim();
+  if (!a) return "—";
+  const kort: Record<string, string> = {
+    manuel_salg: "MANUAL",
+    tvangsluk: "FORCED",
+    flattet_i_nt8_uden_om_journalen: "FLATTENED IN NT8",
+  };
+  return kort[a] || a.toUpperCase();
+}
+
+/** ⚠ `til = null` betyder AABEN, ikke "ukendt". Foer gav det "—", saa en
+ *  position man sad i, stod uden varighed — netop det tal man kigger paa
+ *  for at vide hvor laenge man har siddet i den. Nu regnes der mod `nu`,
+ *  som tikker hvert sekund. */
+function varighed(fra: string, til: string | null, nu?: number): string {
+  if (!til && nu == null) return "—";
   try {
-    const ms = new Date(til).getTime() - new Date(fra).getTime();
+    const slut = til ? new Date(til).getTime() : (nu as number);
+    const ms = slut - new Date(fra).getTime();
     if (!isFinite(ms) || ms < 0) return "—";
     const m = Math.floor(ms / 60000), sek = Math.floor((ms % 60000) / 1000);
     if (m >= 60) return `${Math.floor(m / 60)}t ${m % 60}m`;
@@ -339,21 +364,26 @@ function sourceLabel(source: string): string {
 }
 
 function statusText(status: string): string {
-  // Oversæt IBKR's tekniske statusser til menneskeligt sprog
+  // ⚠ ENGELSK. Ordrefanen var blandet — danske statusser ved siden af
+  //   engelske kolonnenavne — og NT8's egne statusser (Working, Accepted,
+  //   Change submitted, Rejected) kom alligevel igennem utranslaterede,
+  //   fordi de ikke staar i kortet. Nu er alt engelsk, ogsaa dem der
+  //   falder igennem.
   const map: Record<string, string> = {
-    "Filled":         "Udført",
-    "Submitted":      "Afsendt",
-    "PreSubmitted":   "Afsendt",
-    "PendingSubmit":  "Afsendt",
-    "PendingCancel":  "Annullerer...",
-    "Cancelled":      "Annulleret",
-    "ApiCancelled":   "Annulleret",
-    "Inactive":       "Inaktiv",
-    "ApiPending":     "Behandler...",
+    "Filled":         "Filled",
+    "Submitted":      "Submitted",
+    "PreSubmitted":   "Submitted",
+    "PendingSubmit":  "Submitted",
+    "PendingCancel":  "Cancelling…",
+    "Cancelled":      "Cancelled",
+    "ApiCancelled":   "Cancelled",
+    "Inactive":       "Inactive",
+    "ApiPending":     "Processing…",
+    "afventer":       "Pending",
     // ⚠ Kort med vilje. "Status ukendt" blev klippet til "Status uk…" i
     // STATUS-kolonnen, og en afklippet forklaring forklarer ingenting.
     // Begrundelsen ligger i ⓘ-tooltippet ved siden af.
-    "UNKNOWN":        "Ukendt",
+    "UNKNOWN":        "Unknown",
   };
   return map[status] || status;
 }
@@ -394,6 +424,35 @@ export function OrdersWindow() {
   const [modalFejl, setModalFejl] = useState("");
   const [travl, setTravl] = useState(false);
   const [kurs, setKurs] = useState<number | null>(null);
+  /** Live-kurs til UREALISERET P&L. ⚠ Egen state og ikke `kurs`: den
+   *  nulstilles naar prismodalen aabner, og saa ville tallene i tabellen
+   *  blinke vaek hver gang man trykker paa en knap. */
+  const [livePris, setLivePris] = useState<number | null>(null);
+  /** Tikker hvert sekund, saa VARIGHED paa en aaben handel loeber. */
+  const [nu, setNu] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNu(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  /** ⚠ UREALISERET P&L — et ANDET tal end det realiserede.
+   *
+   *  Realiseret kommer fra `trades` og er ét tal fra én kilde (se
+   *  _hent_pnl i main.py). Urealiseret findes ikke dér: handlen er ikke
+   *  lukket, saa der er intet at hente. Det regnes derfor her, af den
+   *  LEVENDE kurs — men multiplikatoren kommer stadig fra backenden, saa
+   *  de to tal ikke kan bruge hver sin.
+   *
+   *  Returnerer null naar vi mangler noget. ⚠ Ikke 0: et nul ville se ud
+   *  som en handel der staar i nul, og det er netop dét man ikke ved. */
+  function urealiseret(entry: number | null | undefined,
+                       antal: number | null | undefined,
+                       retning: "LONG" | "SHORT"): number | null {
+    const m = exitCfg?.multiplikator;
+    if (entry == null || !antal || livePris == null || m == null) return null;
+    const tegn = retning === "SHORT" ? -1 : 1;
+    return (livePris - entry) * antal * tegn * m;
+  }
 
   async function hentExitCfg() {
     try {
@@ -530,7 +589,16 @@ export function OrdersWindow() {
   // ikke en cache. Skift af fane henter med det samme, saa der ikke staar
   // forældede tal mens man venter paa naeste tik.
   useEffect(() => {
-    const hent = () => { if (fane === "ordrer") fetchOrders(); else fetchHandler(); };
+    const hent = () => {
+      if (fane === "ordrer") fetchOrders(); else fetchHandler();
+      // ⚠ Kursen hentes paa SAMME tik som listen. To utakt-loekker ville
+      // vise en P&L regnet paa en kurs der ikke hoerer til raekkerne.
+      fetch("http://127.0.0.1:8000/quote/MES")
+        .then(r => r.json())
+        .then(d => setLivePris(typeof d.price === "number" ? d.price : null))
+        .catch(() => setLivePris(null));
+    };
+    if (!exitCfg) hentExitCfg();      // multiplikatoren, én gang
     hent();
     timerRef.current = window.setInterval(hent, 2_000);
     return () => {
@@ -775,7 +843,7 @@ export function OrdersWindow() {
           color: "var(--text-muted)",
           fontStyle: "italic",
         }}>
-          Ingen ordrer i den valgte periode
+          No orders in the selected period
         </div>
       )}
 
@@ -787,7 +855,7 @@ export function OrdersWindow() {
           color: "var(--text-muted)",
           fontStyle: "italic",
         }}>
-          Ingen ordrer matcher det valgte filter — klik på et badge for at vise flere
+          No orders match the selected filter — click a badge to show more
         </div>
       )}
 
@@ -842,6 +910,11 @@ export function OrdersWindow() {
                   <th style={{ textAlign: "left" }}>Ticker</th>
                   <th style={{ textAlign: "left" }}>Retning</th>
                   <th style={{ textAlign: "right" }}>Antal</th>
+                  {/* ⚠ Samme indhold som Type i ordrefanen, saa man kan se
+                      HVAD der lukkede handlen — en TRAIL der gik, og en stop
+                      der blev ramt, er to forskellige historier om samme
+                      tabte handel. */}
+                  <th style={{ textAlign: "center" }}>Type</th>
                   <th style={{ textAlign: "right" }}>Entry</th>
                   <th style={{ textAlign: "right" }}>Exit</th>
                   <th style={{ textAlign: "right" }}>P&amp;L</th>
@@ -867,23 +940,46 @@ export function OrdersWindow() {
                       <td>{fmtTime(h.entry_time_utc)}</td>
                       <td>{h.exit_time_utc ? fmtTime(h.exit_time_utc)
                         : <span style={{ color: "#f59e0b", fontWeight: 700 }}>ÅBEN</span>}</td>
-                      <td style={{ textAlign: "right", color: "var(--text-muted)" }}>
-                        {varighed(h.entry_time_utc, h.exit_time_utc)}</td>
+                      <td style={{ textAlign: "right",
+                                   color: aaben ? "#f59e0b" : "var(--text-muted)",
+                                   fontVariantNumeric: "tabular-nums" }}>
+                        {varighed(h.entry_time_utc, h.exit_time_utc, nu)}</td>
                       <td style={{ fontWeight: 700 }}>{h.symbol}</td>
                       <td style={{
                         color: h.side === "long" ? "var(--bull)" : "var(--bear)",
                         fontWeight: 700, fontSize: 10.5,
                       }}>{h.side === "long" ? "LONG" : "SHORT"}</td>
                       <td style={{ textAlign: "right" }}>{h.shares}</td>
+                      <td style={{ textAlign: "center", fontSize: 11,
+                                   fontWeight: 700,
+                                   color: aaben ? "var(--text-muted)"
+                                        : "var(--ur-us)" }}>
+                        {aaben ? "—" : `EXIT · ${exitTekst(h.exit_reason)}`}
+                      </td>
                       <td style={{ textAlign: "right" }}>{h.entry_price}</td>
                       <td style={{ textAlign: "right" }}>{h.exit_price ?? "—"}</td>
-                      {/* ⚠ Tom for aabne handler, ikke $0,00. En urealiseret
-                          position har ikke et resultat endnu. */}
-                      <td style={{
-                        textAlign: "right", fontWeight: 700,
-                        color: aaben ? "var(--text-muted)"
-                             : (pnl || 0) >= 0 ? "var(--bull)" : "var(--bear)",
-                      }}>{aaben ? "—" : usd(pnl)}</td>
+                      {/* ⚠ Urealiseret vises i KURSIV, saa man kan se at det
+                          er et tal der stadig bevaeger sig. Realiseret staar
+                          fast og kommer fra `trades`; urealiseret regnes af
+                          den levende kurs. */}
+                      {(() => {
+                        const u = aaben
+                          ? urealiseret(h.entry_price, h.shares,
+                                        h.side === "short" ? "SHORT" : "LONG")
+                          : null;
+                        const v = aaben ? u : pnl;
+                        return (
+                          <td style={{
+                            textAlign: "right", fontWeight: 700,
+                            fontStyle: aaben ? "italic" : "normal",
+                            fontVariantNumeric: "tabular-nums",
+                            color: v == null ? "var(--text-muted)"
+                                 : v >= 0 ? "var(--bull)" : "var(--bear)",
+                          }} title={aaben ? "Urealiseret — foelger kursen"
+                                          : undefined}>
+                            {v == null ? "—" : usd(v)}</td>
+                        );
+                      })()}
                       <td style={{ fontSize: 10, color: "var(--text-muted)",
                                    whiteSpace: "nowrap", overflow: "visible",
                                    textOverflow: "clip" }}
@@ -914,18 +1010,21 @@ export function OrdersWindow() {
                  style={{ width: "100%", minWidth: 1020 }}>
             <thead style={{ position: "sticky", top: 0, background: "var(--bg-elevated)", zIndex: 1 }}>
               <tr>
-                <th style={{ textAlign: "left" }}>Tid</th>
-                <th style={{ textAlign: "left" }}>Kilde</th>
+                {/* ⚠ ALT PAA ENGELSK I DENNE FANE. Den var blandet — "Tid"
+                    ved siden af "Entry price" — og handelsbegreberne er
+                    engelske i forvejen. Kilde og Side er fjernet: kilden er
+                    altid den samme her, og siden staar allerede i Type
+                    (LONG/SHORT/EXIT). */}
+                <th style={{ textAlign: "left" }}>Time</th>
                 <th style={{ textAlign: "left" }}>Ticker</th>
-                <th style={{ textAlign: "center" }}>Side</th>
-                <th style={{ textAlign: "right" }}>Stk</th>
+                <th style={{ textAlign: "right" }}>Qty</th>
                 <th style={{ textAlign: "center" }}>Type</th>
                 <th style={{ textAlign: "left" }}>Status</th>
-                <th style={{ textAlign: "right" }}>Fyldt</th>
+                <th style={{ textAlign: "right" }}>Filled</th>
                 {/* ⚠ "Snit pris" passede kun paa fyldte ordrer. En STOP har
                     ingen snitpris — den har en TRIGGERPRIS, og det er den
                     Iben skal kunne se. Samme kolonne, aerligt navn. */}
-                <th style={{ textAlign: "right" }}>Entry price</th>
+                <th style={{ textAlign: "right" }}>Price</th>
                 {/* ⚠ Kun udfyldt paa raekker der LUKKEDE en handel. En
                     aabning har ingen P/L endnu, og et nul dér ville se ud
                     som en handel der gik i nul. */}
@@ -951,7 +1050,7 @@ export function OrdersWindow() {
                   // oejeblik en exit fylder, uden at nogen skal rydde op.
                   <tr key={o.order_id}
                       title={o.position_aaben
-                        ? "Positionen er aaben" : undefined}
+                        ? "Position is open" : undefined}
                       style={barn ? {background: "var(--bg-surface)"}
                            : o.position_aaben
                              ? {background: "var(--aaben-position)"}
@@ -965,20 +1064,16 @@ export function OrdersWindow() {
                         TICKER-cellen i stedet. */}
                     <td style={{ color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
                       <div>{fmtTime(o.placed_at)}</div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      {/* ⚠ Samme stoerrelse som klokkeslaettet. Datoen stod
+                          i 10 px og var ikke til at laese paa en 4K-skaerm. */}
+                      <div style={{ color: "var(--text-muted)" }}>
                         {fmtDate(o.placed_at)}
                       </div>
-                    </td>
-                    <td style={{ color: "var(--text-muted)", fontSize: 11 }}>
-                      {sourceLabel(o.source)}
                     </td>
                     <td style={{ paddingLeft: barn ? 16 : undefined }}>
                       {barn && <span style={{ color: "var(--text-muted)",
                                               marginRight: 4 }}>└</span>}
                       <strong>{o.ticker}</strong>
-                    </td>
-                    <td style={{ textAlign: "center", color: sideColor, fontWeight: 700 }}>
-                      {o.action}
                     </td>
                     <td style={{ textAlign: "right" }}>{o.shares.toLocaleString("da-DK")}</td>
                     {/* ⚠ ordre_type FOERST. Gamle raekker har den ikke og viser
@@ -1009,12 +1104,12 @@ export function OrdersWindow() {
                                         : statusColor(o.status_group),
                                  fontWeight: 600 }}
                         title={o.genlagt_som
-                          ? `Lagt igen som ${o.genlagt_som}. NinjaTrader `
-                            + `annullerer hele OCO-gruppen når én ordre slettes, `
-                            + `så søskende skal lægges på ny med et nyt OCO-id.`
+                          ? `Replaced by ${o.genlagt_som}. NinjaTrader `
+                            + `cancels the whole OCO group when one order is `
+                            + `deleted, so siblings are re-placed with a new OCO id.`
                           : (o.note || undefined)}>
                       {o.genlagt_som
-                        ? <>↻ Genlagt</>
+                        ? <>↻ Replaced</>
                         : <>{statusEmoji(o.status_group)} {statusText(o.status)}</>}
                       {o.note && <span style={{ marginLeft: 4, cursor: "help",
                                                 color: "var(--text-muted)" }}>ⓘ</span>}
@@ -1028,34 +1123,66 @@ export function OrdersWindow() {
                         for STOP/TARGET, aktuel stop for TRAIL. */}
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}
                         title={type === "TRAIL" && o.trail_hoejeste != null
-                          ? `${o.action === "SELL" ? "Højeste" : "Laveste"} `
+                          ? `${o.action === "SELL" ? "Highest" : "Lowest"} `
                             + `${tal(o.trail_hoejeste)}`
-                            + ` · afstand ${tal(o.trail_afstand ?? 0)}`
+                            + ` · distance ${tal(o.trail_afstand ?? 0)}`
                           : undefined}>
                       {erExit
                         ? (o.trigger_pris != null ? usd(o.trigger_pris) : "—")
                         : (o.avg_fill > 0 ? usd(o.avg_fill) : "—")}
                       {type === "TRAIL" && <span style={{ opacity: 0.6 }}> ↗</span>}
                     </td>
-                    <td style={{ textAlign: "right", fontWeight: 700,
-                                 fontVariantNumeric: "tabular-nums",
-                                 color: o.pnl == null ? "var(--text-muted)"
-                                      : o.pnl >= 0 ? "var(--bull)" : "var(--bear)" }}
-                        title={o.pnl != null && o.trade_id
-                          ? `Realiseret på handel ${o.trade_id.slice(0, 8)}`
-                          : undefined}>
-                      {o.pnl == null
-                        ? "—"
-                        : `${o.pnl >= 0 ? "+" : ""}${usd(o.pnl)}`}
-                    </td>
+                    {/* ⚠ TO FORSKELLIGE TAL I SAMME KOLONNE, og de maa kunne
+                        skelnes. Realiseret kommer fra `trades` og staar fast.
+                        Urealiseret regnes af den levende kurs og aendrer sig
+                        hvert 2. sekund — den vises i KURSIV, saa man kan se at
+                        det er et tal der stadig bevaeger sig. */}
+                    {(() => {
+                      const u = o.pnl == null && o.position_aaben
+                        ? urealiseret(o.avg_fill, o.shares,
+                                      (o.ordre_type || "").toUpperCase() === "SHORT"
+                                        ? "SHORT" : "LONG")
+                        : null;
+                      const v = o.pnl != null ? o.pnl : u;
+                      const lever = o.pnl == null && u != null;
+                      return (
+                        <td style={{ textAlign: "right", fontWeight: 700,
+                                     fontVariantNumeric: "tabular-nums",
+                                     fontStyle: lever ? "italic" : "normal",
+                                     color: v == null ? "var(--text-muted)"
+                                          : v >= 0 ? "var(--bull)" : "var(--bear)" }}
+                            title={o.pnl != null && o.trade_id
+                              ? `Realised on trade ${o.trade_id.slice(0, 8)}`
+                              : lever
+                                ? "Unrealised — follows the live price"
+                                : undefined}>
+                          {v == null ? "—" : `${v >= 0 ? "+" : ""}${usd(v)}`}
+                        </td>
+                      );
+                    })()}
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                      {/* ── Exit-raekke: et kryds, som i watchlisten ──────── */}
+                      {/* ── Exit-raekke: CANCEL ORDER ──────────────── */}
+                      {/* ⚠ VAR ET KRYDS, og det var svaert at faa oeje paa.
+                          Knappen sletter en stop loss — den maa ikke vaere
+                          svaerere at se end de tre knapper der LAEGGER en.
+                          Samme bredde som STOP+TARGET+TRAIL tilsammen, saa de
+                          to tilstande fylder det samme og raekkerne ikke
+                          hopper. */}
                       {erExit && isOpen && (
-                        <span onClick={() => annullerExit(o)}
-                          title={`Annullér ${EXIT_NAVN[exitT!]}`}
-                          style={{ cursor: "pointer", color: "var(--text-muted)",
-                                   fontSize: 14, padding: "0 6px",
-                                   userSelect: "none" }}>×</span>
+                        <button onClick={() => annullerExit(o)}
+                          disabled={travl}
+                          title={`Cancel ${EXIT_NAVN[exitT!]}`}
+                          style={{ width: 178, padding: "2px 0",
+                                   fontSize: 10, fontWeight: 700,
+                                   letterSpacing: 0.4,
+                                   borderRadius: 3, borderStyle: "solid",
+                                   borderWidth: 1,
+                                   borderColor: "var(--bear)",
+                                   background: "transparent",
+                                   color: "var(--bear)",
+                                   cursor: travl ? "wait" : "pointer" }}>
+                          CANCEL ORDER
+                        </button>
                       )}
 
                       {/* ── Parent-raekke: de tre knapper ─────────────────
@@ -1092,9 +1219,9 @@ export function OrdersWindow() {
                                                     ? "SHORT" : "LONG"});
                                   }
                                 }}
-                                title={aktiv ? `${EXIT_NAVN[t]} er aktiv`
-                                     : venter ? `${EXIT_NAVN[t]} afventer bekræftelse`
-                                     : `Opret ${EXIT_NAVN[t].toLowerCase()}`}
+                                title={aktiv ? `${EXIT_NAVN[t]} is active`
+                                     : venter ? `${EXIT_NAVN[t]} awaiting confirmation`
+                                     : `Create ${EXIT_NAVN[t].toLowerCase()}`}
                                 style={{
                                   fontSize: 10, fontWeight: 700, padding: "2px 7px",
                                   borderRadius: 3, borderStyle: "solid", borderWidth: 1,
