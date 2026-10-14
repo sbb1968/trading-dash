@@ -5,6 +5,7 @@ from typing import Optional
 # ⚠ Importeres paa modulniveau fordi exit-endpointene fanger dens
 # undtagelser. Et lokalt import inde i hver handler ville virke, men
 # except-klausulen skal kunne naevne typen uden at gaette paa den.
+import ibkr_client_ids
 import nt_forbindelse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 import futures_katalog as _fkat
@@ -153,8 +154,24 @@ def _handelskonto() -> tuple[str, bool]:
     Journalen kalder denne. Uden den ville maerket komme fra maskinens identitet
     — og naar paper og live skal koere samtidig, kan maskinen ikke afgoere hvad
     en given handel var.
+
+    ⚠ ORDRE-GATEWAYEN FOERST. Her stod `strategy_manager.get_ibkr()` — den
+    DELTE forbindelse — selv om docstringen siger "den forbindelse ordrer
+    FAKTISK gaar igennem". Paa Ibens workstation er det ordre-Gatewayen paa
+    4002; den delte findes slet ikke dér. Funktionen faldt derfor tilbage paa
+    konfigurationen og gav det RIGTIGE svar af den FORKERTE grund.
+
+    Det var hul nummer tre af samme slags (efter kontraktmaaneden 07-10 og
+    baggrundsopgaven 14-10): kode der antager den delte forbindelse. Latent i
+    dag, fordi `aktiv_konto()` tilfaeldigvis er den samme — men den dag
+    maskinen har to konti, stempler journalen den forkerte.
+
+    ⚠ SYNKRON. Journalen kalder ved hver bogfoering, saa der maa hverken
+    awaites eller forbindes. `aktuel()` laeser kun en forbindelse der allerede
+    findes; er der ingen, falder vi tilbage som foer.
     """
-    conn = strategy_manager.get_ibkr()
+    conn = (ordre_forbindelse.aktuel() if ordre_forbindelse.konfigureret()
+            else strategy_manager.get_ibkr())
     if conn is not None and getattr(conn, "connected", False):
         konto = (getattr(conn, "account", "") or "").strip()
         return (konto or aktiv_konto(), bool(getattr(conn, "paper", True)))
@@ -164,10 +181,28 @@ def _handelskonto() -> tuple[str, bool]:
 journal_mod.saet_konto_kilde(_handelskonto)
 
 
+def delt_forbindelse_tilstand() -> str:
+    """"forbundet" | "nede" | "ingen".
+
+    ⚠ TRE TILSTANDE, IKKE TO. En maskine uden delt forbindelse er ikke
+    "nede" — den er indrettet saadan. Blev de to slaaet sammen, lyste Ibens
+    brugerflade roedt hele dagen, og den dag noget FAKTISK var galt, saa det
+    ud praecis som alle de andre dage.
+    """
+    if not har_delt_forbindelse():
+        return "ingen"
+    c = strategy_manager.get_ibkr()
+    return "forbundet" if (c is not None and c.connected) else "nede"
+
+
 def ibkr_live_connected() -> bool:
     """LEVENDE IBKR-forbindelses-status. Den globale ibkr_connected sættes kun ved
     opstart/strategi-start; selv-helende connect_ibkr-kald (analyze-endpoints) opdaterer
-    den ikke. Status-visning skal derfor laese den faktiske forbindelse her."""
+    den ikke. Status-visning skal derfor laese den faktiske forbindelse her.
+
+    ⚠ Beholdt som bool for de eksisterende kaldere. Skal man SKELNE "nede"
+    fra "findes ikke", saa brug delt_forbindelse_tilstand().
+    """
     c = strategy_manager.get_ibkr()
     return bool(c is not None and c.connected)
 # ── Autonom drift: watchdog + scheduler ───────────────────────
@@ -620,6 +655,24 @@ async def startup():
     print(f"[Server] Identitet: {identity.account_display_name} ({identity.account_id})")
     print(f"[Server] Instans:   {identity.instance_display_name} ({identity.instance_role})")
     print(f"[Server] IBKR:      {aktiv_konto()} ({'paper' if identity.paper_trading else 'LIVE'})")
+
+    # ── ÉN LINJE PR. FORBINDELSE ────────────────────────────
+    # ⚠ Banneret sagde intet om HVILKE forbindelser maskinen har. Tre fejl i
+    # oktober ville vaere set her i stedet for ved foerste klik: TWS startet i
+    # stedet for Gateway (07-10), kontraktmaaneden paa en forbindelse der ikke
+    # fandtes (07-10 og 14-10). En maskine skal kunne sige hvad den har.
+    if har_delt_forbindelse():
+        print(f"[Server] Delt IBKR: 127.0.0.1:7497 clientId "
+              f"{ibkr_client_ids.BACKEND} — forbindes ved behov")
+    else:
+        print("[Server] Delt IBKR: INGEN (bevidst) — maskinen har en "
+              "ordre-Gateway; data-funktioner hentes fra algoserveren")
+    _op = accounts.ordre_forbindelse()
+    if _op:
+        print(f"[Server] Ordre-IBKR: {_op['host']}:{_op['port']} "
+              f"konto {_op['konto']} clientId {ibkr_client_ids.ORDRE}")
+    else:
+        print("[Server] Ordre-IBKR: ingen separat — ordrer gaar gennem den delte")
     # ── HVOR GAAR DE MANUELLE ORDRER HEN? ─────────────────────────────────
     # ⚠ Banneret sagde "IBKR: DUN748991" og intet om NT8, saa der var ingen
     # maade at se af loggen om futures-ordrevejen var armeret. Det er samme
@@ -693,9 +746,21 @@ async def startup():
     else:
         print("[Server] Exit-ordrer: ikke aktiv (ingen nt_forbindelse)")
 
-    tws_watchdog = TWSWatchdog()
-    await tws_watchdog.start()
-    print("[Server] TWS watchdog startet — tjekker port 7497 hvert 30. sek")
+    # ⚠ WATCHDOG'EN PROBER 7497. Paa en maskine UDEN delt forbindelse er den
+    # port tom med vilje, og saa staar watchdog'en permanent paa "TWS offline".
+    # En indikator der altid lyser roedt, er ikke en indikator — den dag noget
+    # faktisk er galt, ser det ud praecis som alle de andre dage.
+    #
+    # Maalt 14-10 paa Ibens workstation: 15 fejl i traek, alarm undertrykt af
+    # notifier.NOTIFICATIONS_ENABLED=False. Alt sammen fuldstaendig forventet.
+    if har_delt_forbindelse():
+        tws_watchdog = TWSWatchdog()
+        await tws_watchdog.start()
+        print("[Server] TWS watchdog startet — tjekker port 7497 hvert 30. sek")
+    else:
+        tws_watchdog = None
+        print("[Server] TWS watchdog: ikke relevant — maskinen har ingen delt "
+              "forbindelse (ordrer gaar gennem ordre-Gatewayen)")
 
     # ── Start autonom scheduler ───────────────────────────────
     # Scheduler hooker ind i StrategyManager via callbacks.
@@ -1905,6 +1970,28 @@ MANUAL_ORDER_SOURCES = {"manual_watchlist", "manual", "manual_exit"}
 # En MES-markedsordre fylder paa under et sekund; femten er rigelig margin uden
 # at et klik haenger. ⚠ Tallet er IKKE en garanti — se noten ved kaldet.
 MANUEL_FYLD_VENT_SEC = 15.0
+
+
+def har_delt_forbindelse() -> bool:
+    """Har DENNE maskine en delt IBKR-forbindelse paa 7497?
+
+    ⚠ MIDLERTIDIG STEDFORTRAEDER. Det rigtige svar hoerer hjemme i en
+    `delt_forbindelse`-noegle i account.yaml (udskudt: den skal rulles ud i
+    haanden paa tre maskiner, og filen er gitignoreret). Indtil da udledes
+    det af om maskinen har en SEPARAT ordreforbindelse.
+
+    ⚠ DET ER IKKE SAMME SPOERGSMAAL. "Har en ordre-Gateway" og "mangler en
+    delt forbindelse" falder sammen paa alle tre maskiner 14-10 (maalt via
+    /account/dash-snapshot: algoserver "delt", Soeren "delt", Iben "ordre"),
+    men en maskine kunne i princippet have begge dele.
+
+    ⚠ ALGOSERVEREN SVARER ALTID JA, uanset konfiguration. Den handler
+    rigtige strategier, og dens watchdog maa ikke kunne slukkes af en
+    udledning. Belt and braces indtil noeglen findes.
+    """
+    if accounts.identity.instance_role == "algoserver":
+        return True
+    return not ordre_forbindelse.konfigureret()
 
 
 async def handels_forbindelse():
@@ -5652,7 +5739,12 @@ async def status():
             "connected": ibkr_live_connected(),
         },
 
-        "tws_watchdog": tws_watchdog.status_dict if tws_watchdog else {"running": False},
+        # ⚠ "ikke relevant" er ikke det samme som "nede". Paa en maskine uden
+        # delt forbindelse er 7497 tom med vilje, og {"running": False} alene
+        # ville laese som en fejl.
+        "tws_watchdog": (tws_watchdog.status_dict if tws_watchdog else
+                         {"running": False, "ikke_relevant": True,
+                          "hvorfor": "maskinen har ingen delt forbindelse"}),
 
         "scheduler": algo_scheduler.status_dict if algo_scheduler else {"running": False},
 

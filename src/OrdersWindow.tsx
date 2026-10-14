@@ -291,7 +291,8 @@ function exitTekst(aarsag: string | null): string {
   const kort: Record<string, string> = {
     manuel_salg: "MANUAL",
     tvangsluk: "FORCED",
-    flattet_i_nt8_uden_om_journalen: "FLATTENED IN NT8",
+    // ⚠ Kort med vilje. Den fulde tekst gav "EXIT · FLATTE…" i kolonnen.
+    flattet_i_nt8_uden_om_journalen: "FLATTENED",
   };
   return kort[a] || a.toUpperCase();
 }
@@ -921,7 +922,7 @@ export function OrdersWindow() {
                 sidste kolonne naar vinduet er smalt — samme fejl som da
                 TRAIL-knappen forsvandt ud over kanten. Beholderen ruller. */}
             <table className="scanner-table"
-                   style={{ width: "100%", minWidth: 940 }}>
+                   style={{ width: "100%", minWidth: 1040 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: "left" }}>Ind</th>
@@ -957,9 +958,30 @@ export function OrdersWindow() {
                   return (
                     <tr key={h.trade_id}
                         title={h.exit_reason ? `Exit: ${h.exit_reason}` : "Stadig åben"}>
-                      <td>{fmtTime(h.entry_time_utc)}</td>
-                      <td>{h.exit_time_utc ? fmtTime(h.exit_time_utc)
-                        : <span style={{ color: "#f59e0b", fontWeight: 700 }}>ÅBEN</span>}</td>
+                      {/* ⚠ DATO UNDER KLOKKESLAETTET, som i ordrefanen.
+                          Uden den ser en handel fra i forgaars ud som om den
+                          er fra i dag — kun varigheden afsloerede det, og en
+                          varighed paa "128t 37m" er ikke noget man laeser som
+                          en dato. Maalt 14-10: en raekke med IND 10.02.15 var
+                          fra den 9. */}
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <div>{fmtTime(h.entry_time_utc)}</div>
+                        <div style={{ color: "var(--text-muted)" }}>
+                          {fmtDate(h.entry_time_utc)}
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {h.exit_time_utc ? (
+                          <>
+                            <div>{fmtTime(h.exit_time_utc)}</div>
+                            <div style={{ color: "var(--text-muted)" }}>
+                              {fmtDate(h.exit_time_utc)}
+                            </div>
+                          </>
+                        ) : (
+                          <span style={{ color: "#f59e0b", fontWeight: 700 }}>ÅBEN</span>
+                        )}
+                      </td>
                       <td style={{ textAlign: "right",
                                    color: aaben ? "#f59e0b" : "var(--text-muted)",
                                    fontVariantNumeric: "tabular-nums" }}>
@@ -970,8 +992,14 @@ export function OrdersWindow() {
                         fontWeight: 700, fontSize: 10.5,
                       }}>{h.side === "long" ? "LONG" : "SHORT"}</td>
                       <td style={{ textAlign: "right" }}>{h.shares}</td>
+                      {/* ⚠ MAA IKKE KLIPPES. `.scanner-table td` saetter
+                          overflow:hidden + ellipsis globalt, og "EXIT ·
+                          FLATTENED IN NT8" blev til "EXIT · FLATTE…". En
+                          exit-aarsag man ikke kan laese, er ingen aarsag.
+                          Samme greb som KONTO-kolonnen. */}
                       <td style={{ textAlign: "center", fontSize: 11,
-                                   fontWeight: 700,
+                                   fontWeight: 700, whiteSpace: "nowrap",
+                                   overflow: "visible", textOverflow: "clip",
                                    color: aaben ? "var(--text-muted)"
                                         : "var(--ur-us)" }}>
                         {aaben ? "—" : `EXIT · ${exitTekst(h.exit_reason)}`}

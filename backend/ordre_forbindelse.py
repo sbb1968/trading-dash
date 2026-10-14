@@ -120,6 +120,22 @@ def konfigureret() -> bool:
     return accounts.ordre_forbindelse() is not None
 
 
+def aktuel() -> Optional[IBKRConnection]:
+    """Den LEVENDE ordreforbindelse, eller None. Opretter ALDRIG en ny.
+
+    ⚠ SYNKRON MED VILJE. `hent()` er async og kan forbinde; den hører til
+    ordrestien, hvor et menneske venter. Her er behovet et andet: et opslag
+    der blot vil vide HVILKEN konto en allerede etableret forbindelse styrer.
+    `_handelskonto()` kaldes af journalen ved hver bogføring og er synkron —
+    den kan hverken awaite eller tåle at der åbnes en socket undervejs.
+
+    Er der ingen levende forbindelse, er svaret None, og kalderen falder
+    tilbage på konfigurationen. Det er ærligt: vi ved det ikke lige nu.
+    """
+    c = _forbindelse
+    return c if (c is not None and getattr(c, "connected", False)) else None
+
+
 def verificer_profil(profil: dict) -> None:
     """V2 på konfigurationen — FØR der forbindes.
 
