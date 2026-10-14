@@ -109,6 +109,23 @@ async def koer() -> None:
     finally:
         gendan()
 
+    # ── 1b. Baggrundsopgaven venter ingen paa ───────────────────
+    # ⚠ Kontraktmaaneden opdateres hvert minut af en baggrundsopgave. Den maa
+    # IKKE springe afkoelingen over: gjorde den det, bankede den paa en Gateway
+    # der lige har svaret nej, tres gange i timen. tving er til ordreklik, hvor
+    # et menneske sidder og venter.
+    print()
+    print("  -- baggrundsopgaven respekterer afkoelingen --")
+    gw2 = FalskConn("gateway-4002")
+    sm, hent, gendan = _opsaet(via_ordre=True, ordre_conn=gw2, delt_conn=None)
+    try:
+        conn, _ = await main.kontrakt_forbindelse(tving=False)
+        kraev(conn is gw2, "ogsaa baggrundsopgaven faar ORDRE-Gatewayen")
+        kraev(hent.tving_set == [False],
+              f"⚠ …men UDEN tving — afkoelingen respekteres ({hent.tving_set})")
+    finally:
+        gendan()
+
     # ── 2. Soerens maskine: ingen ordre_forbindelse, delt forbindelse ────
     print("\n  -- Soerens maskine: delt forbindelse paa 7497 --")
     delt = FalskConn("delt-7497")
@@ -156,9 +173,84 @@ async def koer() -> None:
         gendan()
 
 
+async def test_kontraktmaaned() -> None:
+    """⚠ KONTRAKTMAANEDEN SKAL KUNNE SLAAS OP UDEN EN DELT FORBINDELSE.
+
+    Maalt 14-10 paa Ibens workstation: STOP/TARGET/TRAIL dukkede aldrig op i
+    ordrefanen, mens de virkede fint hos Soeren. Begge koerte samme exe og
+    samme kode.
+
+    `exit_mulig` kraever at kontraktmaaneden er slaaet op, og opslaget brugte
+    `strategy_manager.get_ibkr()` — den DELTE forbindelse. Hos hende er den
+    aldrig forbundet (Gateway paa 4002, intet paa 7497), saa navnet forblev
+    None og knapperne kunne ALDRIG vises. Hos Soeren er der TWS paa 7497.
+
+    ⚠ Samme fejl som 07-10, det andet sted: dengang blev ORDRESTIEN lagt om
+    til kontrakt_forbindelse(), men baggrundsopgaven blev glemt.
+    """
+    print()
+    print("  -- kontraktmaaneden uden delt forbindelse --")
+
+    class Kontrakt:
+        pass
+
+    gl_inst = dict(main._EXIT_INSTRUMENT)
+    gl_nt = main.nt_forbindelse.nt_instrument
+    main.nt_forbindelse.nt_instrument = lambda sym, k: "MES 12-26"  # type: ignore
+    try:
+        # ⚠ KERNEN: Ibens opsaetning — ordre-Gateway, INGEN delt forbindelse.
+        gw = FalskConn("gateway-4002")
+        gw.qualify_future = lambda sym: _svar(Kontrakt())   # type: ignore
+        sm, hent, gendan = _opsaet(via_ordre=True, ordre_conn=gw, delt_conn=None)
+        try:
+            main._EXIT_INSTRUMENT["navn"] = None
+            navn = await main.opdater_kontraktmaaned()
+            kraev(navn == "MES 12-26",
+                  f"⚠ maaneden slaas op paa ORDRE-Gatewayen ({navn})")
+            kraev(main._EXIT_INSTRUMENT["navn"] == "MES 12-26",
+                  "⚠ …og gemmes, saa exit_mulig kan blive sand")
+            kraev(sm.connect_kald == 0,
+                  "⚠ …og den delte forbindelse roeres ikke")
+        finally:
+            gendan()
+
+        # Soerens opsaetning: ingen ordre_forbindelse, delt forbindelse oppe.
+        print()
+        delt = FalskConn("delt-7497")
+        delt.qualify_future = lambda sym: _svar(Kontrakt())  # type: ignore
+        sm, hent, gendan = _opsaet(via_ordre=False, delt_conn=delt)
+        try:
+            main._EXIT_INSTRUMENT["navn"] = None
+            navn = await main.opdater_kontraktmaaned()
+            kraev(navn == "MES 12-26", f"uaendret paa den delte ({navn})")
+        finally:
+            gendan()
+
+        # ⚠ Og et fejlet opslag maa ikke SLUKKE knapperne. En maaned fra for et
+        # minut siden er stadig rigtig; kontrakten skifter fire gange om aaret.
+        print()
+        sm, hent, gendan = _opsaet(via_ordre=True, ordre_conn=None,
+                                   ordre_fejl=RuntimeError("Gateway nede"))
+        try:
+            main._EXIT_INSTRUMENT["navn"] = "MES 12-26"
+            navn = await main.opdater_kontraktmaaned()
+            kraev(navn == "MES 12-26",
+                  "⚠ Gateway nede -> maaneden BEHOLDES, knapperne slukker ikke")
+        finally:
+            gendan()
+    finally:
+        main.nt_forbindelse.nt_instrument = gl_nt           # type: ignore
+        main._EXIT_INSTRUMENT.clear(); main._EXIT_INSTRUMENT.update(gl_inst)
+
+
+async def _svar(v):
+    return v
+
+
 def main_() -> int:
     print("  ── kontraktopslagets forbindelse ──")
     asyncio.run(koer())
+    asyncio.run(test_kontraktmaaned())
     print(f"\n  {'ALLE BESTAAET' if not fejl else f'⚠ {len(fejl)} FEJLEDE'}")
     return 1 if fejl else 0
 

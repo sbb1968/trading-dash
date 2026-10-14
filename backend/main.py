@@ -677,14 +677,7 @@ async def startup():
             # Kontraktmaaneden gaettes ikke — den hentes, og den skiftes kun
             # fire gange om aaret. Derfor én gang i minuttet, ikke pr. ordre.
             while True:
-                try:
-                    ib = strategy_manager.get_ibkr()
-                    if ib is not None and getattr(ib, "connected", False):
-                        k = await ib.qualify_future("MES")
-                        if k:
-                            _EXIT_INSTRUMENT["navn"] = nt_forbindelse.nt_instrument("MES", k)
-                except Exception as e:
-                    logger.warning(f"[ExitOrdrer] kontraktopslag fejlede: {e}")
+                await opdater_kontraktmaaned()
                 await asyncio.sleep(60)
 
         import exit_ordrer as _exmod
@@ -1938,7 +1931,46 @@ async def handels_forbindelse():
     return strategy_manager.get_ibkr()
 
 
-async def kontrakt_forbindelse() -> tuple:
+async def opdater_kontraktmaaned() -> Optional[str]:
+    """Ét gennemloeb: slaa MES-kontraktmaaneden op og gem den. Returnerer den.
+
+    ⚠ TRUKKET UD AF OPSTARTSFUNKTIONEN. Den laa som en lukning inde i en
+    `while True` i startup og kunne derfor ikke proeves. Det var ikke en
+    detalje: netop dér sad fejlen nedenfor i en uge uden at nogen test kunne
+    se den. Samme lektie som trin 6 og som test_dash_snapshot_forbindelse —
+    en beslutning i et endpoint eller en opstartsklump bliver aldrig proevet.
+
+    ⚠ MASKINENS EGEN FORBINDELSE, ikke altid den delte. Her stod
+    `strategy_manager.get_ibkr()`, og paa Ibens workstation er den ALDRIG
+    forbundet: hendes IBKR gaar gennem en Gateway paa 4002, og intet lytter
+    paa 7497. `_EXIT_INSTRUMENT["navn"]` forblev derfor None — og `exit_mulig`
+    er bygget paa den, saa STOP/TARGET/TRAIL kunne ALDRIG dukke op hos hende.
+    Paa Soerens maskine virkede det, fordi han har TWS paa 7497, og derfor saa
+    det ud som et problem paa HENDES maskine.
+
+    ⚠ SAMME FEJL SOM 07-10, DET ANDET STED. Dengang blev ordrestien lagt om
+    til kontrakt_forbindelse(); denne baggrundsopgave blev glemt. Ét af to
+    huller lukket er ikke et hul lukket.
+
+    ⚠ Den rydder ikke navnet naar opslaget fejler. En kontraktmaaned fra for
+    et minut siden er stadig rigtig; at nulstille den ville slukke
+    exit-knapperne hver gang Gatewayen hikker.
+    """
+    try:
+        ib, fejl = await kontrakt_forbindelse(tving=False)
+        if ib is None or not getattr(ib, "connected", False):
+            logger.debug(f"[ExitOrdrer] ingen forbindelse til kontraktopslag"
+                         f"{(': ' + fejl) if fejl else ''}")
+            return _EXIT_INSTRUMENT.get("navn")
+        k = await ib.qualify_future("MES")
+        if k:
+            _EXIT_INSTRUMENT["navn"] = nt_forbindelse.nt_instrument("MES", k)
+    except Exception as e:
+        logger.warning(f"[ExitOrdrer] kontraktopslag fejlede: {e}")
+    return _EXIT_INSTRUMENT.get("navn")
+
+
+async def kontrakt_forbindelse(tving: bool = True) -> tuple:
     """(forbindelse, fejltekst) til at slaa en futures-kontraktmaaned op.
 
     ⚠ LAGT HER OG IKKE I ENDPOINTET. Beslutningen laa inde i
@@ -1957,8 +1989,11 @@ async def kontrakt_forbindelse() -> tuple:
     men uhandlet.
 
     Et kontraktopslag roerer ingen konto, saa det er harmloest at laegge paa
-    skrive-forbindelsen. tving=True fordi et MENNESKE venter paa svaret;
-    afkoelingen er til det der poller.
+    skrive-forbindelsen. ⚠ `tving` springer afkoelingen over og bruges naar
+    et MENNESKE venter paa svaret (et ordreklik). Baggrundsopgaven der
+    opdaterer kontraktmaaneden hvert minut, venter ingen paa — den skal
+    respektere afkoelingen, ellers banker den paa en Gateway der lige har
+    svaret nej, tres gange i timen.
 
     Fejlteksten gives tilbage saa kalderen kan sige HVAD der var galt. Falder
     den sammen med "kan ikke afgoere kontraktmaaneden", leder man efter en
@@ -1966,7 +2001,7 @@ async def kontrakt_forbindelse() -> tuple:
     """
     try:
         if ordre_forbindelse.konfigureret():
-            return await ordre_forbindelse.hent(tving=True), ""
+            return await ordre_forbindelse.hent(tving=tving), ""
         # Selv-helende; no-op hvis den allerede lever.
         await strategy_manager.connect_ibkr(paper_trading=True)
         return strategy_manager.get_ibkr(), ""
