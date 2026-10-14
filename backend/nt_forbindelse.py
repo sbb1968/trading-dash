@@ -233,7 +233,23 @@ def tilstand(sekunder: float = LYT_SEK) -> dict:
     Den hurtige vej er kun en genvej NÅR svaret allerede er der.
     """
     raa = _laes_raat(min(LYT_HURTIG, sekunder))
-    if not raa.strip() or not re.search(r"CashValue\|\S+\s", raa):
+    # ⚠ "ATI True" HOERER MED I TVIVLEN. Reglen ovenfor blev anvendt paa
+    # kontiene, men ikke paa ATI-flaget — og saa kunne en kort aflaesning der
+    # naaede CashValue| men ikke "ATI True" spaerre en gyldig ordre med
+    # begrundelsen "Automated Trading Interface er ikke aktiv". Det er netop
+    # den fejlklasse docstringen ovenfor advarer imod, bare paa det andet felt.
+    #
+    # Maalt 14-10 paa Ibens workstation: salget blev afvist med "ATI melder
+    # ikke 'ATI True'", MENS socket'en forbandt og streamede — var ATI slaaet
+    # fra, havde der ikke vaeret nogen lytter paa 36973 at forbinde til, og
+    # fejlen var kommet fra _laes_raat i stedet.
+    #
+    # ⚠ Eskaleringen kan ikke skjule en aegte fejl: er ATI virkelig slaaet
+    # fra, mangler "ATI True" ogsaa i det fulde vindue, og vagten spaerrer
+    # som den skal — bare paa et ordentligt grundlag.
+    if (not raa.strip()
+            or not re.search(r"CashValue\|\S+\s", raa)
+            or "ATI True" not in raa):
         # Tvivl — brug det fulde vindue, som før.
         raa = _laes_raat(sekunder)
     if not raa.strip():

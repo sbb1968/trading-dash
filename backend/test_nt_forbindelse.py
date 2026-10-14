@@ -108,6 +108,59 @@ def main() -> int:
     finally:
         NT._laes_raat = aegte                                   # type: ignore
 
+    # ── Eskalering: en KORT aflaesning maa ikke kunne spaerre ───────
+    print()
+    print("  -- en kort aflaesning maa ikke blive til et fund --")
+    # ⚠ Maalt 14-10 paa Ibens workstation: et MES-salg blev afvist med "ATI
+    # melder ikke 'ATI True'", MENS socket'en forbandt og streamede. Var ATI
+    # slaaet fra, havde der ikke vaeret nogen lytter paa 36973, og fejlen var
+    # kommet fra _laes_raat i stedet.
+    #
+    # tilstand() laeser 0,6 s foerst og eskalerer kun ved tvivl. Tvivlen
+    # daekkede tom stroem og manglende konti — men ikke et manglende ATI-flag.
+    # Naaede det hurtige vindue CashValue| men ikke "ATI True", blev en gyldig
+    # ordre spaerret med en forkert begrundelse. Funktionens EGEN docstring
+    # siger at det ikke maa ske; reglen var bare kun anvendt paa det ene felt.
+    aegte = NT._laes_raat
+    try:
+        kald: list[float] = []
+        UDEN = "2 CashValue|Sim101 100000 "        # konti, men intet ATI-flag
+        MED  = UDEN + "2 ATI True "                # flaget er med
+
+        def svar(*stroemme):
+            """Giver stroemmene i raekkefoelge og taeller aflaesningerne."""
+            kald.clear()
+            def f(sekunder=NT.LYT_SEK):
+                kald.append(sekunder)
+                i = min(len(kald) - 1, len(stroemme) - 1)
+                return stroemme[i]
+            NT._laes_raat = f                                   # type: ignore
+
+        # 1. ⚠ KERNEN: flaget mangler i det hurtige vindue, men er der i det fulde.
+        svar(UDEN, MED)
+        st = NT.tilstand()
+        kraev(len(kald) == 2,
+              f"⚠ manglende 'ATI True' udloeser en FULD aflaesning ({len(kald)})")
+        kraev(kald[1] == NT.LYT_SEK,
+              f"    …og det er det lange vindue ({kald[1]} s)")
+        kraev(st["ati_aktiv"],
+              "⚠ …og saa er ATI aktiv, som den var hele tiden")
+
+        # 2. ⚠ Eskaleringen maa ikke kunne skjule en AEGTE fejl.
+        svar(UDEN, UDEN)
+        st = NT.tilstand()
+        kraev(len(kald) == 2, "ATI virkelig slaaet fra -> der laeses ogsaa fuldt")
+        kraev(not st["ati_aktiv"],
+              "⚠ …og den spaerrer stadig. Eskalering er ikke eftergivenhed.")
+
+        # 3. Er svaret der straks, skal der ikke laeses to gange.
+        svar(MED)
+        NT.tilstand()
+        kraev(len(kald) == 1,
+              f"svaret er der straks -> én aflaesning, ikke to ({len(kald)})")
+    finally:
+        NT._laes_raat = aegte                                   # type: ignore
+
     # ── V3/V4 mod en opdigtet stroem ──────────────────────────────────────
     print("\n  ── V3 · kontoen skal findes i virkeligheden ──")
     STROEM_SIM = ("2 Orders|Sim101  2 CashValue|Sim101 100000 "
