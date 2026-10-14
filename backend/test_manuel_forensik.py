@@ -256,6 +256,62 @@ async def koer():
             ordre_id=6002, ordre_status="Filled", et_tz=ET)
         paastand(lukket == a, "den AELDSTE blev lukket foerst (FIFO), ikke den nyeste")
 
+        print()
+        print("[10] ⚠ ÉT SALG DER DAEKKER FLERE RAEKKER lukker dem ALLE")
+        # Maalt 14-10 paa DEMO8580770: ét salg paa 2 MES-kontrakter (NT8-ordre
+        # 602502520506, Sell 2 @ 7775) mens der stod TO aabne raekker. Den ene
+        # blev lukket, den anden blev staaende. NT8 var flad; journalen troede
+        # andet.
+        #
+        # ⚠ Det er netop den tilstand der foerte til faseforskydningen paa
+        # DUN748991, hvor ét ubogfoert salg gjorde fire raekker forkerte. En
+        # journal der kommer ud af trit med brokeren, retter sig ikke selv.
+        c1 = await manuel_forensik.registrer_entry(
+            j, ibkr, symbol="TSLA", side="LONG", shares=1, fill_pris=200.0,
+            ordre_id=7000, ordre_status="Filled", et_tz=ET)
+        await asyncio.sleep(1.1)
+        c2 = await manuel_forensik.registrer_entry(
+            j, ibkr, symbol="TSLA", side="LONG", shares=1, fill_pris=210.0,
+            ordre_id=7001, ordre_status="Filled", et_tz=ET)
+
+        alle: list = []
+        foerste = await manuel_forensik.registrer_exit(
+            j, ibkr, symbol="TSLA", shares=2, fill_pris=220.0,
+            ordre_id=7002, ordre_status="Filled", et_tz=ET, lukkede=alle)
+
+        paastand(foerste == c1,
+                 "returnerer stadig den FOERSTE raekke (uaendret signatur)")
+        paastand(alle == [c1, c2],
+                 f"⚠ BEGGE raekker lukket, i FIFO-raekkefoelge ({len(alle)})")
+
+        async with j.db.execute(
+            "SELECT COUNT(*) FROM trades WHERE symbol='TSLA' "
+            "AND exit_price IS NULL") as c:
+            aabne = (await c.fetchone())[0]
+        paastand(aabne == 0, f"⚠ ingen TSLA-raekke staar tilbage ({aabne})")
+
+        async with j.db.execute(
+            "SELECT trade_id, pnl FROM trades WHERE symbol='TSLA' "
+            "ORDER BY entry_time_utc") as c:
+            raekker = await c.fetchall()
+        pnl = {r[0]: r[1] for r in raekker}
+        paastand(abs(pnl[c1] - 20.0) < 1e-6, f"P&L paa den foerste: {pnl[c1]} (220-200)")
+        paastand(abs(pnl[c2] - 10.0) < 1e-6, f"P&L paa den anden:   {pnl[c2]} (220-210)")
+        paastand(abs(sum(pnl.values()) - 30.0) < 1e-6,
+                 "⚠ …og summen er hele handlens resultat, ikke halvdelen")
+
+        print()
+        print("[11] Et salg der er MINDRE end raekken lukker stadig kun én")
+        d1 = await manuel_forensik.registrer_entry(
+            j, ibkr, symbol="AMD", side="LONG", shares=10, fill_pris=100.0,
+            ordre_id=7100, ordre_status="Filled", et_tz=ET)
+        kun: list = []
+        await manuel_forensik.registrer_exit(
+            j, ibkr, symbol="AMD", shares=4, fill_pris=110.0,
+            ordre_id=7101, ordre_status="Filled", et_tz=ET, lukkede=kun)
+        paastand(kun == [d1],
+                 f"⚠ ingen rekursion naar ordren er mindre end raekken ({len(kun)})")
+
     finally:
         await j.close()
         shutil.rmtree(tmp, ignore_errors=True)

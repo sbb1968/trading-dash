@@ -699,7 +699,8 @@ async def kontroller_ordre_journal(journal, symbol: str, action: str,
 async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
                          fill_pris: float, ordre_id: Any, ordre_status: str,
                          et_tz, broker: str = "IBKR",
-                         konto: str = "") -> Optional[str]:
+                         konto: str = "",
+                         lukkede: Optional[list] = None) -> Optional[str]:
     """Luk den aabne manuelle handel og skriv exit-forensikken.
 
     Returnerer trade_id, eller None hvis der ikke var en aaben manuel handel —
@@ -780,13 +781,15 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
         "stop_trajectory": [],       # manuel har ingen stop — se modulets docstring
     }
     if shares != entry_antal:
-        # Delvis luk eller for stort salg. Vi lukker raekken helt, men tallene skal
-        # staa der, saa en senere analyse kan se at de ikke stemte.
+        # Raekken daekker ikke ordren alene. Tallene skal staa der, saa en
+        # senere analyse kan se hvad der blev regnet paa hvad.
         payload["antal_uoverensstemmelse"] = {
             "entry_shares": entry_antal, "exit_shares": shares,
             "pnl_beregnet_paa": lukket,
-            "note": "raekken lukkes helt; delvise lukninger foeres ikke som "
-                    "separate raekker",
+            "note": ("ordren var stoerre end raekken; resten lukker naeste "
+                     "aabne raekke (FIFO)") if shares > entry_antal else
+                    ("ordren var mindre end raekken; raekken lukkes helt og "
+                     "P&L regnes paa det faktisk lukkede antal"),
         }
 
     # ── Bars + exit-snapshot, samme buildere som algoerne ─────────────────────
@@ -827,6 +830,38 @@ async def registrer_exit(journal, ibkr, *, symbol: str, shares: int,
             source=KILDE, event_type="forensik_fejl", symbol=symbol,
             payload={"fase": "exit", "trade_id": trade_id, "fejl": str(e)},
         )
+    if lukkede is not None:
+        lukkede.append(trade_id)
+
+    # ── ⚠ ÉT SALG KAN DAEKKE FLERE JOURNALRAEKKER ────────────────
+    # Her sluttede funktionen foer, efter ÉN raekke — uanset hvor stor ordren
+    # var. Uoverensstemmelsen blev noteret i payload og derefter sluppet.
+    #
+    # Maalt 14-10 paa DEMO8580770: ét salg paa 2 kontrakter (NT8-ordre
+    # 602502520506, Sell 2 @ 7775) mens der stod TO aabne raekker. Den ene
+    # blev lukket, den anden blev staaende. NT8 var flad, journalen troede
+    # andet — og det er netop den tilstand der foerte til
+    # faseforskydningen paa DUN748991, hvor fire raekker endte forkerte.
+    #
+    # Rekursion frem for en loekke, fordi alt det oevrige — salgsvagten,
+    # bars, exit-snapshot, konto-noeglen — saa genbruges uaendret i stedet
+    # for at blive skrevet to gange.
+    #
+    # ⚠ Terminerer altid: `lukket` er mindst 1 naar entry_antal > 0, og
+    # ellers er `rest` nul. Hvert kald mindsker altsaa `shares` strengt.
+    rest = int(shares) - int(lukket)
+    if rest > 0:
+        logger.info(f"[ManuelForensik] {symbol}: ordren daekkede mere end "
+                    f"raekken — {rest} tilbage, soeger naeste aabne (FIFO)")
+        await registrer_exit(
+            journal, ibkr, symbol=symbol, shares=rest,
+            fill_pris=fill_pris, ordre_id=ordre_id,
+            ordre_status=ordre_status, et_tz=et_tz, broker=broker,
+            konto=konto, lukkede=lukkede)
+
+    # ⚠ Returnerer stadig den FOERSTE raekke. Ti kaldesteder i fire
+    # testfiler bygger paa det, og signaturen skal ikke aendres for det her.
+    # Hele saettet faas via `lukkede`.
     return trade_id
 
 

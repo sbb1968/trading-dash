@@ -1686,13 +1686,17 @@ async def websocket_endpoint(websocket: WebSocket):
                                    ((_side == "long" and action == "SELL") or
                                     (_side == "short" and action == "BUY")))
                         if _lukker:
+                            # ⚠ `_alle` samler ALLE raekker ordren lukkede.
+                            # Ét salg kan daekke flere — se _hent_pnl_sum.
+                            _alle: list = []
                             _tid = await manuel_forensik.registrer_exit(
                                 journal, ibkr, symbol=ticker,
                                 shares=filled_qty, fill_pris=fill_pris,
                                 ordre_id=order_id, ordre_status=result.get("status"),
-                                et_tz=ET_TZ, broker=broker, konto=konto_brugt)
-                            # ⚠ Samme tal som forensikken regnede.
-                            _p = await _hent_pnl(_tid)
+                                et_tz=ET_TZ, broker=broker, konto=konto_brugt,
+                                lukkede=_alle)
+                            # ⚠ Samme tal som forensikken regnede, lagt sammen.
+                            _p = await _hent_pnl_sum(_alle)
                             if _p is not None and order_id:
                                 get_tracker().opdater(order_id, pnl=_p,
                                                       trade_id=_tid)
@@ -6326,6 +6330,28 @@ def _exit_instrument():
 
 
 _EXIT_INSTRUMENT: dict = {"navn": None}
+
+
+async def _hent_pnl_sum(trade_ids) -> Optional[float]:
+    """Samlet realiseret P/L for en ordre der lukkede FLERE handler.
+
+    ⚠ ÉT SALG KAN DAEKKE FLERE JOURNALRAEKKER. Maalt 14-10: ét salg paa 2
+    MES-kontrakter lukkede to raekker. Viste ordrevinduet kun den foerste,
+    ville P&L-kolonnen staa med halvdelen af handlens resultat — et tal der
+    ser ud som et svar, og som ikke stemmer med kontoudtoget.
+
+    Tallene kommer stadig fra `trades`, én ad gangen. Der regnes ikke noget
+    nyt her; der laegges sammen.
+    """
+    if not trade_ids:
+        return None
+    i_alt, fundet = 0.0, False
+    for t in trade_ids:
+        v = await _hent_pnl(t)
+        if v is not None:
+            i_alt += v
+            fundet = True
+    return i_alt if fundet else None
 
 
 async def _hent_pnl(trade_id):
