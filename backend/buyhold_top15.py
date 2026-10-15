@@ -239,7 +239,13 @@ async def score_universe(api_key: str, max_per_run: int, fresh: bool):
     conn = None
     try:
         from ibkr_connect import IBKRConnection
-        conn = IBKRConnection(paper_trading=True)
+        import ibkr_client_ids
+        # ⚠ EGET CLIENT-ID. Uden det falder IBKRConnection tilbage paa
+        # BACKEND=200 — samme id som den backend der startede denne
+        # subprocess. Se ibkr_client_ids.py for hvorfor det blev latent 10-08.
+        conn = IBKRConnection(
+            paper_trading=True,
+            client_id=ibkr_client_ids.for_script("buyhold_top15.py"))
         ib = conn.ib if await conn.connect() else None
         if ib is None:
             print("[bh-top15] ADVARSEL: IBKR ikke forbundet - trend-laget (15%) udelades.")
@@ -261,12 +267,41 @@ async def score_universe(api_key: str, max_per_run: int, fresh: bool):
     finally:
         if conn is not None:
             conn.disconnect()
-    emit_top(uni, cache)
+    emit_top(uni, cache, ib is not None)
     return True
 
 
+def _kilde(rows: list[dict], ib_ok: bool) -> str:
+    """Hvilke lag bidrog FAKTISK? Udledt af raekkerne, ikke paastaaet.
+
+    ⚠ FELTET VAR EN HAARDKODET STRENG "FMP+IBKR". Maalt 15-10 stod listen fra
+    07-07 med kval=0, vaekst=0, vaerdi=0 paa ALLE 15 navne — altsaa en ren
+    6-maaneders trend-rangering — mens feltet stadig sagde "FMP+IBKR" og alle
+    femten baered "EGNET (langsigtet)". FMP-noeglen var doed (401), og de tre
+    fundamentale lag bidrog nul. compute_buyhold's hul-vagt griber kun naar
+    BEGGE sider mangler, saa fundamentals alene kan falde ud i tavshed.
+
+    En koeb-og-hold-liste uden fundamentals er ikke en gammel liste. Den er en
+    anden liste med et forkert navn paa. Feltet skal kunne sige det.
+    """
+    def tal(r, k):
+        try:
+            return abs(float(r.get(k) or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    fund_ok = any(tal(r, "quality") or tal(r, "growth") or tal(r, "valuation")
+                  for r in rows)
+    if fund_ok and ib_ok:
+        return "FMP+IBKR"
+    if fund_ok:
+        return "FMP (UDEN IBKR-trend)"
+    if ib_ok:
+        return "⚠ KUN IBKR-trend — ingen FMP-fundamentals"
+    return "⚠ hverken FMP-fundamentals eller IBKR-trend"
+
 # === Trin 3: top-15 af cachen (kun navne i NUVAERENDE univers) ================
-def emit_top(uni: list[dict], cache: dict):
+def emit_top(uni: list[dict], cache: dict, ib_ok: bool = True):
     info = {u["ticker"]: u for u in uni}
     rows = []
     for t in info:
@@ -284,7 +319,7 @@ def emit_top(uni: list[dict], cache: dict):
     gen_local, gen_utc = _now_pair()
     payload = {
         "generated_local": gen_local, "generated_utc": gen_utc,
-        "source": "FMP+IBKR", "universe_size": len(uni),
+        "source": _kilde(rows, ib_ok), "universe_size": len(uni),
         "scored_cached": len(rows), "count": len(top),
         "rows": [{
             "rank": i, "ticker": r["ticker"],

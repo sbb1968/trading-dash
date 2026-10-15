@@ -92,6 +92,16 @@ SCRIPTS: dict[str, int] = {
     "fx_probe.py":                   22,
     # Maaler kurtage pr. kontrakt ud af avgCost-differensen. Read-only.
     "maal_futures_kurtage.py":       23,
+    # Buy-and-hold Top-15 ## EGET ID, IKKE BACKENDENS.
+    # Scriptet startes som subprocess af /buyhold/top15/run og lavede sin egen
+    # IBKRConnection UDEN client_id -> den faldt tilbage paa BACKEND=200, altsaa
+    # SAMME id som den backend der lige havde startet den.
+    #
+    # Kollisionen blev latent 10-08 (538d465), da backendens id gik fra
+    # tilfaeldigt 10-99 til fast 200; foer da slap subprocessen igennem.
+    # Udfaldet er TAVST: connect() returnerer False, trend-laget (15 %) falder
+    # ud, og listen skrives alligevel -- med "FMP+IBKR" som kilde.
+    "buyhold_top15.py":              30,
 }
 
 
