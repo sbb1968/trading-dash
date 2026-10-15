@@ -283,6 +283,13 @@ def _kilde(rows: list[dict], ib_ok: bool) -> str:
 
     En koeb-og-hold-liste uden fundamentals er ikke en gammel liste. Den er en
     anden liste med et forkert navn paa. Feltet skal kunne sige det.
+
+    ⚠ OG DER STAAR IKKE ET LEVERANDOERNAVN. Foerste udgave af denne funktion
+    skrev "FMP+IBKR" naar der var tal -- men fundamentals har en fallback-kaede
+    (FMP primaert, ellers TradingView + Finnhub; buyhold_fundamental.py:856).
+    Raekkerne baerer kun lag-scorerne, ikke hvem der leverede dem, saa et
+    leverandoernavn her ville vaere praecis den samme ubegrundede paastand som
+    den haardkodede streng var. Lagene kan vi SE. Kilderne kan vi ikke.
     """
     def tal(r, k):
         try:
@@ -293,12 +300,12 @@ def _kilde(rows: list[dict], ib_ok: bool) -> str:
     fund_ok = any(tal(r, "quality") or tal(r, "growth") or tal(r, "valuation")
                   for r in rows)
     if fund_ok and ib_ok:
-        return "FMP+IBKR"
+        return "fundamentals+trend"
     if fund_ok:
-        return "FMP (UDEN IBKR-trend)"
+        return "fundamentals (UDEN trend)"
     if ib_ok:
-        return "⚠ KUN IBKR-trend — ingen FMP-fundamentals"
-    return "⚠ hverken FMP-fundamentals eller IBKR-trend"
+        return "⚠ KUN trend — ingen fundamentals"
+    return "⚠ hverken fundamentals eller trend"
 
 # === Trin 3: top-15 af cachen (kun navne i NUVAERENDE univers) ================
 def emit_top(uni: list[dict], cache: dict, ib_ok: bool = True):
